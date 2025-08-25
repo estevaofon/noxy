@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://seu-usuario.github.io/noxy/sitemap.xml

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Página não encontrada | Noxy</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .error-page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+        
+        .error-content {
+            max-width: 600px;
+            padding: 2rem;
+        }
+        
+        .error-code {
+            font-size: 8rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+        }
+        
+        .error-title {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        .error-description {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+        
+        .owl-animation {
+            font-size: 4rem;
+            animation: owlFloat 3s ease-in-out infinite;
+            margin-bottom: 1rem;
+        }
+        
+        @keyframes owlFloat {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="error-page">
+        <div class="error-content">
+            <div class="owl-animation">🦉</div>
+            <div class="error-code">404</div>
+            <h1 class="error-title">Página não encontrada</h1>
+            <p class="error-description">
+                Ops! Parece que nossa coruja roxa não conseguiu encontrar esta página. 
+                Talvez ela tenha voado para outro lugar?
+            </p>
+            <a href="/" class="btn btn-primary">
+                <i class="fas fa-home"></i>
+                Voltar ao início
+            </a>
+        </div>
+    </div>
+</body>
+</html>
