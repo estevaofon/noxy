@@ -1,0 +1,205 @@
+// Teste de if-else-then aninhados em Noxy
+// Com e sem return no corpo. Não usar função "main".
+
+// Função que testa if-else-then com returns
+func teste_com_returns(x: int, y: int) -> int
+    if x > 10 then
+        if y > 5 then
+            return x + y
+        else
+            return x - y
+        end
+    else
+        if y < 0 then
+            return x * y
+        else
+            return x / (y + 1)
+        end
+    end
+end
+
+// Função que testa if-else-then sem returns diretos (usa variável acumuladora)
+func teste_sem_returns(a: int, b: int) -> int
+    let resultado: int = 0
+
+    if a > 0 then
+        if b > 0 then
+            resultado = a + b
+        else
+            resultado = a - b
+        end
+    else
+        if b != 0 then
+            resultado = a * b
+        else
+            resultado = 0
+        end
+    end
+
+    return resultado
+end
+
+// Função com if-else-then aninhados mais complexos
+func teste_aninhado_complexo(valor: int) -> string
+    let desc: string = ""
+
+    if valor > 100 then
+        if valor > 500 then
+            if valor > 1000 then
+                desc = "muito alto"
+            else
+                desc = "alto"
+            end
+        else
+            if valor > 200 then
+                desc = "médio-alto"
+            else
+                desc = "médio"
+            end
+        end
+    else
+        if valor > 0 then
+            if valor > 50 then
+                desc = "baixo-médio"
+            else
+                desc = "baixo"
+            end
+        else
+            if valor < -50 then
+                desc = "muito negativo"
+            else
+                desc = "negativo"
+            end
+        end
+    end
+
+    return desc
+end
+
+// Função que mistura returns diretos e cálculo em variável
+func teste_misto(x: int, y: int, z: int) -> int
+    if x > y then
+        if y > z then
+            return x + y + z
+        else
+            return x + z
+        end
+    else
+        if z > 0 then
+            let temp: int = 0
+            if y > 0 then
+                temp = y * 2
+            else
+                temp = y / 2
+            end
+            return x + temp
+        else
+            if x == y then
+                return 0
+            else
+                return x - y
+            end
+        end
+    end
+end
+
+// Função que testa condições booleanas complexas
+func teste_condicoes_booleanas(a: int, b: int, c: int) -> bool
+    if (a > 0) & (b > 0) then
+        if c > 0 then
+            if (a + b) > c then
+                return true
+            else
+                return false
+            end
+        else
+            if (a * b) > (-c) then
+                return true
+            else
+                return false
+            end
+        end
+    else
+        if (a == 0) | (b == 0) then
+            if c != 0 then
+                return a != b
+            else
+                return true
+            end
+        else
+            return false
+        end
+    end
+end
+
+// Roteiro de testes no topo do arquivo (sem função main)
+print("=== Teste de if-else-then aninhados ===")
+print("")
+
+// Testando função com returns
+print(">>> Teste com returns:")
+let result1: int = teste_com_returns(15, 8)
+print(f"teste_com_returns(15, 8) = {result1}")
+
+let result2: int = teste_com_returns(5, -3)
+print(f"teste_com_returns(5, -3) = {result2}")
+
+print("")
+// Testando função sem returns
+print(">>> Teste sem returns:")
+let result3: int = teste_sem_returns(10, 5)
+print(f"teste_sem_returns(10, 5) = {result3}")
+
+let result4: int = teste_sem_returns(-2, 0)
+print(f"teste_sem_returns(-2, 0) = {result4}")
+
+print("")
+// Testando aninhamento complexo
+print(">>> Teste aninhado complexo:")
+let msg1: string = teste_aninhado_complexo(1500)
+print(f"teste_aninhado_complexo(1500) = {msg1}")
+
+let msg2: string = teste_aninhado_complexo(75)
+print(f"teste_aninhado_complexo(75) = {msg2}")
+
+let msg3: string = teste_aninhado_complexo(-100)
+print(f"teste_aninhado_complexo(-100) = {msg3}")
+
+print("")
+// Testando função mista
+print(">>> Teste misto:")
+let result5: int = teste_misto(10, 5, 3)
+print(f"teste_misto(10, 5, 3) = {result5}")
+
+let result6: int = teste_misto(2, 8, -1)
+print(f"teste_misto(2, 8, -1) = {result6}")
+
+print("")
+// Testando condições booleanas
+print(">>> Teste condições booleanas:")
+let bool1: bool = teste_condicoes_booleanas(3, 4, 5)
+print(f"teste_condicoes_booleanas(3, 4, 5) = {bool1}")
+
+let bool2: bool = teste_condicoes_booleanas(0, 5, 0)
+print(f"teste_condicoes_booleanas(0, 5, 0) = {bool2}")
+
+print("")
+// Exemplo de categorização com if-else aninhado sem usar if-expr
+let x: int = 42
+let categoria: string = ""
+if x > 50 then
+    if x > 100 then
+        categoria = "grande"
+    else
+        categoria = "médio"
+    end
+else
+    if x > 20 then
+        categoria = "pequeno-médio"
+    else
+        categoria = "pequeno"
+    end
+end
+print(f"x = {x}, categoria = {categoria}")
+
+print("=== Todos os testes concluídos ===")
