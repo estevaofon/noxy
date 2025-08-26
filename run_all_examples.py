@@ -111,20 +111,25 @@ def main():
     # Executar cada arquivo
     successful = 0
     failed = 0
+    successful_files = []
+    failed_files = []
     
     start_time = time.time()
     
     for i, file_path in enumerate(nx_files, 1):
         print(f"\n📊 Progresso: {i}/{len(nx_files)}")
+        file_name = file_path.name
         
         if run_noxy_file(file_path):
             successful += 1
+            successful_files.append(file_name)
         else:
             failed += 1
+            failed_files.append(file_name)
         
-        # Aguardar 3 segundos antes do próximo arquivo (exceto no último)
+        # Aguardar 1 segundo antes do próximo arquivo (exceto no último)
         if i < len(nx_files):
-            print(f"\n⏳ Aguardando 1 segundos antes do próximo arquivo...")
+            print(f"\n⏳ Aguardando 1 segundo antes do próximo arquivo...")
             time.sleep(1)
     
     # Relatório final
@@ -140,8 +145,21 @@ def main():
     print(f"⏱️  Tempo total de execução: {total_time:.2f} segundos")
     print(f"📈 Taxa de sucesso: {(successful/len(nx_files)*100):.1f}%")
     
-    if failed > 0:
+    # Mostrar arquivos bem-sucedidos
+    if successful_files:
+        print(f"\n✅ ARQUIVOS EXECUTADOS COM SUCESSO ({successful}):")
+        for i, file in enumerate(successful_files, 1):
+            print(f"   {i:2d}. {file}")
+    
+    # Mostrar arquivos que falharam
+    if failed_files:
+        print(f"\n❌ ARQUIVOS COM ERRO ({failed}):")
+        for i, file in enumerate(failed_files, 1):
+            print(f"   {i:2d}. {file}")
         print(f"\n⚠️  {failed} arquivo(s) falharam na execução")
+        print(f"💡 Dica: Execute individualmente os arquivos com erro para ver detalhes:")
+        for file in failed_files:
+            print(f"   uv run python compiler.py --compile \".\\noxy_examples\\{file}\"")
         sys.exit(1)
     else:
         print(f"\n🎉 Todos os arquivos foram executados com sucesso!")

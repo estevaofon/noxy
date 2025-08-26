@@ -1,0 +1,83 @@
+// Exemplos de F-strings na linguagem Noxy
+// Demonstra o uso de strings formatadas similares ao Python
+
+// Variáveis básicas para demonstração
+let nome: string = "João"
+let sobrenome: string = "Silva"
+let idade: int = 28
+let altura: float = 1.75
+let ativo: bool = true
+let pontos: int = 1250
+
+// 1. F-string simples com variável
+print(f"Olá, {nome}!")
+
+// 2. F-string com múltiplas variáveis
+print(f"Meu nome completo é {nome} {sobrenome}")
+
+// 3. F-string com diferentes tipos de dados
+print(f"Nome: {nome}, Idade: {idade}, Altura: {altura}m")
+
+// 4. F-string com valores booleanos
+print(f"Status ativo: {ativo}")
+
+// 5. F-string com expressões matemáticas
+print(f"Idade em 10 anos: {idade + 10}")
+print(f"Pontos dobrados: {pontos * 2}")
+
+// 6. F-string com operações mais complexas
+print(f"IMC aproximado: {altura * altura}")
+
+// 7. F-string apenas com texto (sem expressões)
+print(f"Esta é uma f-string sem variáveis")
+
+// 8. F-string vazia
+print(f"")
+
+// 9. F-string com escape sequences
+print(f"Nome:\t{nome}\nIdade:\t{idade}")
+
+// 10. F-string aninhada em estruturas de controle
+if ativo then
+    print(f"Usuário {nome} está ativo com {pontos} pontos")
+else
+    print(f"Usuário {nome} está inativo")
+end
+
+// 11. F-string em loop
+let contador: int = 0
+while contador < 3 do
+    print(f"Iteração número {contador + 1}")
+    contador = contador + 1
+end
+
+// 12. Exemplo de f-string em função simples
+func criar_mensagem(usuario: string, nivel: int) -> string
+    return f"Bem-vindo, {usuario}! Você está no nível {nivel}."
+end
+
+// Testando a função
+let mensagem: string = criar_mensagem("Ana", 5)
+print(mensagem)
+
+// 13. Exemplos de formatação com especificadores
+let numero: int = 42
+let preco: float = 19.99
+let percentual: float = 0.8523
+
+// Formatação de inteiros
+print(f"Número padrão: {numero}")
+print(f"Número com largura: {numero:5}")
+print(f"Número com zeros: {numero:05}")
+print(f"Hexadecimal: {numero:x}")
+print(f"Hexadecimal maiúsculo: {numero:X}")
+
+// Formatação de floats
+print(f"Preço padrão: {preco}")
+print(f"Preço com 2 decimais: {preco:.2f}")
+print(f"Percentual com 1 decimal: {percentual:.1f}")
+print(f"Notação científica: {preco:.2e}")
+print(f"Formato geral: {preco:.3g}")
+
+// Exemplos combinados
+print(f"Produto #{numero:03}: R$ {preco:.2f}")

@@ -52,6 +52,7 @@ class TokenType(Enum):
     NUMBER = "NUMBER"
     FLOAT = "FLOAT"
     STRING = "STRING"
+    FSTRING = "FSTRING"
     IDENTIFIER = "IDENTIFIER"
     TRUE = "TRUE"
     FALSE = "FALSE"
@@ -196,8 +197,10 @@ class Lexer:
             if self.position >= len(self.source):
                 break
                 
-            # Strings
-            if self._current_char() == '"':
+            # F-strings e strings
+            if self._current_char() == 'f' and self._peek_char() == '"':
+                self._read_fstring()
+            elif self._current_char() == '"':
                 self._read_string()
             # Números
             elif self._current_char().isdigit():
@@ -279,6 +282,96 @@ class Lexer:
             )
             
         self.tokens.append(Token(TokenType.STRING, string_value, self.line, start_column))
+    
+    def _read_fstring(self):
+        start_column = self.column
+        self._advance()  # Pular 'f'
+        self._advance()  # Pular aspas inicial
+        
+        parts = []
+        current_text = ""
+        
+        while self.position < len(self.source) and self._current_char() != '"':
+            if self._current_char() == '{':
+                # Se há texto acumulado, adicionar como string literal
+                if current_text:
+                    parts.append(current_text)
+                    current_text = ""
+                
+                # Ler expressão dentro das chaves
+                self._advance()  # Pular '{'
+                expr_text = ""
+                brace_count = 1
+                
+                while self.position < len(self.source) and brace_count > 0:
+                    if self._current_char() == '{':
+                        brace_count += 1
+                    elif self._current_char() == '}':
+                        brace_count -= 1
+                    
+                    if brace_count > 0:
+                        expr_text += self._current_char()
+                    
+                    self._advance()
+                
+                if brace_count > 0:
+                    source_line = self.source_lines[self.line - 1] if self.line <= len(self.source_lines) else ""
+                    raise NoxySyntaxError(
+                        "F-string não terminada - esperado '}'",
+                        self.line, self.column, source_line
+                    )
+                
+                # Verificar se há especificador de formato (ex: variable:.2f)
+                expr_content = expr_text.strip()
+                format_spec = None
+                
+                if ':' in expr_content:
+                    expr_part, format_part = expr_content.split(':', 1)
+                    expr_content = expr_part.strip()
+                    format_spec = format_part.strip()
+                
+                # Adicionar expressão como token especial
+                if format_spec:
+                    parts.append(('EXPR_FORMAT', expr_content, format_spec))
+                else:
+                    parts.append(('EXPR', expr_content))
+                
+            elif self._current_char() == '\\':
+                # Processar escape sequences
+                self._advance()
+                if self.position < len(self.source):
+                    escape_char = self._current_char()
+                    if escape_char == 'n':
+                        current_text += '\n'
+                    elif escape_char == 't':
+                        current_text += '\t'
+                    elif escape_char == '"':
+                        current_text += '"'
+                    elif escape_char == '\\':
+                        current_text += '\\'
+                    elif escape_char == '0':
+                        current_text += '\0'
+                    else:
+                        current_text += escape_char
+                    self._advance()
+            else:
+                current_text += self._current_char()
+                self._advance()
+        
+        # Adicionar texto restante se houver
+        if current_text:
+            parts.append(current_text)
+        
+        if self.position < len(self.source):
+            self._advance()  # Pular aspas final
+        else:
+            source_line = self.source_lines[self.line - 1] if self.line <= len(self.source_lines) else ""
+            raise NoxySyntaxError(
+                "F-string não terminada - esperado '\"'",
+                self.line, self.column, source_line
+            )
+        
+        self.tokens.append(Token(TokenType.FSTRING, parts, self.line, start_column))
     
     def _read_number(self):
         start_column = self.column
@@ -432,6 +525,10 @@ class FloatNode(ASTNode):
 @dataclass
 class StringNode(ASTNode):
     value: str
+
+@dataclass
+class FStringNode(ASTNode):
+    parts: List[Union[str, ASTNode]]  # Mistura de strings literais e expressões
     
     def __post_init__(self):
         super().__init__()
@@ -652,13 +749,13 @@ class Parser:
         """Lança um erro de sintaxe com informações de linha e coluna"""
         token = self._current_token()
         source_line = self._get_source_line(token.line)
-        raise NoxSyntaxError(message, token.line, token.column, source_line)
+        raise NoxySyntaxError(message, token.line, token.column, source_line)
     
     def _error_at_current(self, message: str) -> None:
         """Lança um erro de sintaxe para o token atual"""
         token = self._current_token()
         source_line = self._get_source_line(token.line)
-        raise NoxSyntaxError(message, token.line, token.column, source_line)
+        raise NoxySyntaxError(message, token.line, token.column, source_line)
     
     def _error_at_previous(self, message: str) -> None:
         """Lança um erro de sintaxe para o token anterior"""
@@ -1221,6 +1318,69 @@ class Parser:
                 
         return expr
     
+    def _parse_fstring(self) -> FStringNode:
+        """Parse uma f-string e suas expressões embutidas"""
+        token = self._current_token()
+        parts_data = self._advance().value  # Lista de partes da f-string
+        
+        parsed_parts = []
+        
+        for part in parts_data:
+            if isinstance(part, str):
+                # Parte de string literal
+                parsed_parts.append(part)
+            elif isinstance(part, tuple) and part[0] == 'EXPR':
+                # Parte de expressão - fazer parse da expressão
+                expr_text = part[1]
+                
+                # Criar um lexer temporário para a expressão
+                temp_lexer = Lexer(expr_text)
+                try:
+                    expr_tokens = temp_lexer.tokenize()
+                    # Remover token EOF
+                    expr_tokens = [t for t in expr_tokens if t.type != TokenType.EOF]
+                    
+                    if expr_tokens:
+                        # Criar parser temporário para a expressão
+                        temp_parser = Parser(expr_tokens + [Token(TokenType.EOF, "", 1, 1)], self.source_lines)
+                        expr_node = temp_parser._parse_expression()
+                        parsed_parts.append(expr_node)
+                    else:
+                        # Expressão vazia - erro
+                        self._error_at_current("Expressão vazia em f-string")
+                        
+                except Exception as e:
+                    self._error_at_current(f"Erro ao parsear expressão em f-string: {str(e)}")
+            
+            elif isinstance(part, tuple) and part[0] == 'EXPR_FORMAT':
+                # Parte de expressão com formato - fazer parse da expressão
+                expr_text = part[1]
+                format_spec = part[2]
+                
+                # Criar um lexer temporário para a expressão
+                temp_lexer = Lexer(expr_text)
+                try:
+                    expr_tokens = temp_lexer.tokenize()
+                    # Remover token EOF
+                    expr_tokens = [t for t in expr_tokens if t.type != TokenType.EOF]
+                    
+                    if expr_tokens:
+                        # Criar parser temporário para a expressão
+                        temp_parser = Parser(expr_tokens + [Token(TokenType.EOF, "", 1, 1)], self.source_lines)
+                        expr_node = temp_parser._parse_expression()
+                        # Adicionar informação de formato ao nó
+                        expr_node.format_spec = format_spec
+                        parsed_parts.append(expr_node)
+                    else:
+                        # Expressão vazia - erro
+                        self._error_at_current("Expressão vazia em f-string")
+                        
+                except Exception as e:
+                    self._error_at_current(f"Erro ao parsear expressão formatada em f-string: {str(e)}")
+        
+        node = FStringNode(parsed_parts)
+        return self._add_location_info(node, token)
+    
     def _parse_primary(self) -> ASTNode:
         if self._current_token().type == TokenType.NUMBER:
             return NumberNode(self._advance().value)
@@ -1230,6 +1390,9 @@ class Parser:
             
         if self._current_token().type == TokenType.STRING:
             return StringNode(self._advance().value)
+            
+        if self._current_token().type == TokenType.FSTRING:
+            return self._parse_fstring()
             
         if self._current_token().type == TokenType.TRUE:
             self._advance()
@@ -1464,7 +1627,7 @@ class LLVMCodeGenerator:
             if node.line <= len(self.source_lines):
                 source_line = self.source_lines[node.line - 1]
                 raise NoxySemanticError(message, node.line, node.column, source_line)
-        raise NoxSemanticError(message)
+        raise NoxySemanticError(message)
     
     def _with_context(self, node: ASTNode = None):
         """Retorna context manager para geração de código com localização"""
@@ -2967,6 +3130,224 @@ class LLVMCodeGenerator:
                 converted_args.append(arg)
         return converted_args
 
+    def _generate_fstring(self, node: FStringNode) -> ir.Value:
+        """Gera código LLVM para uma f-string, concatenando todas as partes"""
+        if not node.parts:
+            # F-string vazia - retornar string vazia
+            return self._create_string_constant("")
+        
+        # Primeiro, gerar código para todas as partes
+        part_values = []
+        
+        for part in node.parts:
+            if isinstance(part, str):
+                # Parte literal - criar string constante
+                part_values.append(self._create_string_constant(part))
+            else:
+                # Parte de expressão - gerar e converter para string
+                expr_value = self._generate_expression(part)
+                # Verificar se há especificador de formato
+                format_spec = getattr(part, 'format_spec', None)
+                string_value = self._convert_to_string(expr_value, format_spec)
+                part_values.append(string_value)
+        
+        # Se há apenas uma parte, retornar diretamente
+        if len(part_values) == 1:
+            return part_values[0]
+        
+        # Concatenar todas as partes usando strcat
+        result = part_values[0]
+        for i in range(1, len(part_values)):
+            result = self._concatenate_strings(result, part_values[i])
+        
+        return result
+    
+    def _create_string_constant(self, value: str) -> ir.Value:
+        """Cria uma string constante"""
+        string_value = value + '\0'  # Adicionar null terminator
+        string_bytes = string_value.encode('utf8')
+        str_type = ir.ArrayType(self.char_type, len(string_bytes))
+        str_name = f"str_{len(self.module.globals)}"
+        
+        str_global = ir.GlobalVariable(self.module, str_type, name=str_name)
+        str_global.linkage = 'internal'
+        str_global.global_constant = True
+        str_global.initializer = ir.Constant(str_type, bytearray(string_bytes))
+        
+        # Retornar ponteiro para a string
+        zero = ir.Constant(ir.IntType(32), 0)
+        return self.builder.gep(str_global, [zero, zero], inbounds=True)
+    
+    def _convert_to_string(self, value: ir.Value, format_spec: str = None) -> ir.Value:
+        """Converte um valor para string com especificador de formato opcional"""
+        if value.type == self.char_type.as_pointer():
+            # Já é uma string
+            return value
+        elif value.type == self.int_type:
+            # Converter int para string usando sprintf
+            return self._int_to_string(value, format_spec)
+        elif value.type == self.float_type:
+            # Converter float para string usando sprintf
+            return self._float_to_string(value, format_spec)
+        elif value.type == self.bool_type:
+            # Converter bool para string
+            return self._bool_to_string(value)
+        else:
+            # Tipo não suportado - retornar string vazia
+            return self._create_string_constant("")
+    
+    def _int_to_string(self, value: ir.Value, format_spec: str = None) -> ir.Value:
+        """Converte um inteiro para string usando sprintf"""
+        # Alocar buffer para a string (32 bytes devem ser suficientes para int)
+        buffer_size = 32
+        buffer_type = ir.ArrayType(self.char_type, buffer_size)
+        buffer = self.builder.alloca(buffer_type)
+        
+        # Determinar format string baseado no especificador
+        if format_spec:
+            if format_spec.startswith('0') and format_spec[1:].isdigit():
+                # Formato com zeros à esquerda: {num:05d} -> "%05d"
+                format_string = f"%{format_spec}d"
+            elif format_spec.isdigit():
+                # Formato com largura mínima: {num:5d} -> "%5d"
+                format_string = f"%{format_spec}d"
+            elif format_spec in ['x', 'X']:
+                # Formato hexadecimal: {num:x} -> "%x"
+                format_string = f"%{format_spec}"
+            elif format_spec == 'o':
+                # Formato octal: {num:o} -> "%o"
+                format_string = "%o"
+            else:
+                # Formato desconhecido, usar padrão
+                format_string = "%d"
+        else:
+            format_string = "%d"
+        
+        format_str = self._create_string_constant(format_string)
+        
+        # Chamar sprintf
+        zero = ir.Constant(ir.IntType(32), 0)
+        buffer_ptr = self.builder.gep(buffer, [zero, zero], inbounds=True)
+        
+        # Verificar se sprintf existe, se não, criar declaração
+        if 'sprintf' not in self.module.globals:
+            sprintf_type = ir.FunctionType(self.int_type, [self.char_type.as_pointer(), self.char_type.as_pointer()], var_arg=True)
+            sprintf_func = ir.Function(self.module, sprintf_type, name='sprintf')
+        else:
+            sprintf_func = self.module.globals['sprintf']
+        
+        self.builder.call(sprintf_func, [buffer_ptr, format_str, value])
+        return buffer_ptr
+    
+    def _float_to_string(self, value: ir.Value, format_spec: str = None) -> ir.Value:
+        """Converte um float para string usando sprintf"""
+        # Alocar buffer para a string (32 bytes devem ser suficientes para float)
+        buffer_size = 32
+        buffer_type = ir.ArrayType(self.char_type, buffer_size)
+        buffer = self.builder.alloca(buffer_type)
+        
+        # Determinar format string baseado no especificador
+        if format_spec:
+            if format_spec.endswith('f') and '.' in format_spec:
+                # Formato com precisão decimal: {num:.2f} -> "%.2f"
+                format_string = f"%{format_spec}"
+            elif format_spec.endswith('f'):
+                # Formato float simples: {num:f} -> "%f"
+                format_string = "%f"
+            elif format_spec.endswith('e') or format_spec.endswith('E'):
+                # Formato científico: {num:.2e} -> "%.2e"
+                if '.' in format_spec:
+                    format_string = f"%{format_spec}"
+                else:
+                    format_string = f"%{format_spec}"
+            elif format_spec.endswith('g') or format_spec.endswith('G'):
+                # Formato geral: {num:.2g} -> "%.2g"
+                if '.' in format_spec:
+                    format_string = f"%{format_spec}"
+                else:
+                    format_string = f"%{format_spec}"
+            elif format_spec.startswith('.') and format_spec[1:].replace('f', '').isdigit():
+                # Apenas precisão: {num:.2f} -> "%.2f"
+                format_string = f"%{format_spec}"
+            else:
+                # Formato desconhecido, usar padrão
+                format_string = "%.6f"
+        else:
+            format_string = "%.6f"
+        
+        format_str = self._create_string_constant(format_string)
+        
+        # Chamar sprintf
+        zero = ir.Constant(ir.IntType(32), 0)
+        buffer_ptr = self.builder.gep(buffer, [zero, zero], inbounds=True)
+        
+        # Verificar se sprintf existe, se não, criar declaração
+        if 'sprintf' not in self.module.globals:
+            sprintf_type = ir.FunctionType(self.int_type, [self.char_type.as_pointer(), self.char_type.as_pointer()], var_arg=True)
+            sprintf_func = ir.Function(self.module, sprintf_type, name='sprintf')
+        else:
+            sprintf_func = self.module.globals['sprintf']
+        
+        self.builder.call(sprintf_func, [buffer_ptr, format_str, value])
+        return buffer_ptr
+    
+    def _bool_to_string(self, value: ir.Value) -> ir.Value:
+        """Converte um bool para string"""
+        # Usar um if para retornar "true" ou "false"
+        true_str = self._create_string_constant("true")
+        false_str = self._create_string_constant("false")
+        
+        # Comparar com true
+        cond = self.builder.icmp_signed('==', value, ir.Constant(self.bool_type, True))
+        
+        # Usar select para escolher a string
+        return self.builder.select(cond, true_str, false_str)
+    
+    def _concatenate_strings(self, str1: ir.Value, str2: ir.Value) -> ir.Value:
+        """Concatena duas strings usando malloc + strcpy + strcat"""
+        # Obter tamanhos das strings usando strlen
+        if 'strlen' not in self.module.globals:
+            strlen_type = ir.FunctionType(ir.IntType(64), [self.char_type.as_pointer()])
+            strlen_func = ir.Function(self.module, strlen_type, name='strlen')
+        else:
+            strlen_func = self.module.globals['strlen']
+        
+        len1 = self.builder.call(strlen_func, [str1])
+        len2 = self.builder.call(strlen_func, [str2])
+        
+        # Calcular tamanho total (len1 + len2 + 1 para null terminator)
+        one = ir.Constant(ir.IntType(64), 1)
+        total_len = self.builder.add(self.builder.add(len1, len2), one)
+        
+        # Alocar memória para a nova string
+        if 'malloc' not in self.module.globals:
+            malloc_type = ir.FunctionType(self.char_type.as_pointer(), [ir.IntType(64)])
+            malloc_func = ir.Function(self.module, malloc_type, name='malloc')
+        else:
+            malloc_func = self.module.globals['malloc']
+        
+        result_ptr = self.builder.call(malloc_func, [total_len])
+        
+        # Copiar primeira string usando strcpy
+        if 'strcpy' not in self.module.globals:
+            strcpy_type = ir.FunctionType(self.char_type.as_pointer(), [self.char_type.as_pointer(), self.char_type.as_pointer()])
+            strcpy_func = ir.Function(self.module, strcpy_type, name='strcpy')
+        else:
+            strcpy_func = self.module.globals['strcpy']
+        
+        self.builder.call(strcpy_func, [result_ptr, str1])
+        
+        # Concatenar segunda string usando strcat
+        if 'strcat' not in self.module.globals:
+            strcat_type = ir.FunctionType(self.char_type.as_pointer(), [self.char_type.as_pointer(), self.char_type.as_pointer()])
+            strcat_func = ir.Function(self.module, strcat_type, name='strcat')
+        else:
+            strcat_func = self.module.globals['strcat']
+        
+        self.builder.call(strcat_func, [result_ptr, str2])
+        
+        return result_ptr
+
     def _generate_expression(self, node: ASTNode, expected_type: ir.Type = None) -> ir.Value:
         if node is None:
             raise ValueError("Tentativa de gerar código para nó None")
@@ -2993,6 +3374,9 @@ class LLVMCodeGenerator:
             # Retornar ponteiro para a string
             zero = ir.Constant(ir.IntType(32), 0)
             return self.builder.gep(str_global, [zero, zero], inbounds=True)
+            
+        elif isinstance(node, FStringNode):
+            return self._generate_fstring(node)
             
         elif isinstance(node, BooleanNode):
             return ir.Constant(self.bool_type, node.value)
@@ -4761,6 +5145,7 @@ class NoxyCompiler:
     def _perform_semantic_analysis(self, ast: ProgramNode):
         """Realiza análise semântica para detectar erros de tipo antes da geração de código"""
         self._check_function_return_types(ast)
+        self._check_fstring_expressions(ast)
     
     def _check_function_return_types(self, ast: ProgramNode):
         """Verifica se os tipos de retorno das funções estão corretos"""
@@ -4925,6 +5310,62 @@ class NoxyCompiler:
             return f"{self._type_to_string(type_obj.element_type)}[{type_obj.size or ''}]"
         else:
             return "unknown"
+    
+    def _check_fstring_expressions(self, ast: ProgramNode):
+        """Verifica se as expressões dentro das f-strings são válidas"""
+        self._traverse_and_check_fstrings(ast)
+    
+    def _traverse_and_check_fstrings(self, node):
+        """Percorre recursivamente o AST procurando por f-strings"""
+        if isinstance(node, FStringNode):
+            self._validate_fstring_parts(node)
+        elif isinstance(node, ProgramNode):
+            for stmt in node.statements:
+                self._traverse_and_check_fstrings(stmt)
+        elif isinstance(node, FunctionNode):
+            for stmt in node.body:
+                self._traverse_and_check_fstrings(stmt)
+        elif isinstance(node, IfNode):
+            self._traverse_and_check_fstrings(node.condition)
+            for stmt in node.then_branch:
+                self._traverse_and_check_fstrings(stmt)
+            if node.else_branch:
+                for stmt in node.else_branch:
+                    self._traverse_and_check_fstrings(stmt)
+        elif isinstance(node, WhileNode):
+            self._traverse_and_check_fstrings(node.condition)
+            for stmt in node.body:
+                self._traverse_and_check_fstrings(stmt)
+        elif isinstance(node, BinaryOpNode):
+            self._traverse_and_check_fstrings(node.left)
+            self._traverse_and_check_fstrings(node.right)
+        elif isinstance(node, UnaryOpNode):
+            self._traverse_and_check_fstrings(node.operand)
+        elif isinstance(node, AssignmentNode):
+            self._traverse_and_check_fstrings(node.value)
+        elif isinstance(node, PrintNode):
+            self._traverse_and_check_fstrings(node.expression)
+        elif isinstance(node, ReturnNode) and node.value:
+            self._traverse_and_check_fstrings(node.value)
+        elif isinstance(node, CallNode):
+            for arg in node.arguments:
+                self._traverse_and_check_fstrings(arg)
+        # Adicionar outros tipos de nós conforme necessário
+    
+    def _validate_fstring_parts(self, fstring_node: FStringNode):
+        """Valida as partes de uma f-string"""
+        for part in fstring_node.parts:
+            if not isinstance(part, str):
+                # É uma expressão - verificar se é válida
+                # Para agora, apenas verificamos se não é None
+                if part is None:
+                    if hasattr(fstring_node, 'line') and hasattr(fstring_node, 'column'):
+                        source_line = None
+                        if self.lexer and hasattr(self.lexer, 'source_lines') and fstring_node.line <= len(self.lexer.source_lines):
+                            source_line = self.lexer.source_lines[fstring_node.line - 1]
+                        raise NoxySemanticError("Expressão inválida em f-string", fstring_node.line, fstring_node.column, source_line)
+                    else:
+                        raise NoxySemanticError("Expressão inválida em f-string")
     
     def _semantic_error_for_return(self, message: str, node: ASTNode):
         """Lança erro semântico específico para problemas de return com informações de contexto"""
