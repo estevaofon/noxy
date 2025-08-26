@@ -1,6 +1,6 @@
 # Noxy
 
-A statically-typed programming language with LLVM backend compilation, featuring advanced data structures and algorithms. ** [Visit the Official Website](https://estevaofon.github.io/noxy/)**
+A statically-typed programming language with LLVM backend compilation, featuring advanced data structures and algorithms. [Visit the Official Website](https://estevaofon.github.io/noxy/)
 
 <p align="center">
   <img width="300" height="300" alt="ChatGPT Image 24 de ago  de 2025, 10_52_55" src="https://github.com/user-attachments/assets/8af825b7-fc42-4e0b-8aab-da9bba99b6e0" />
