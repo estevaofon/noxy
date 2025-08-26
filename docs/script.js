@@ -33,10 +33,10 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
 window.addEventListener('scroll', () => {
     const navbar = document.querySelector('.navbar');
     if (window.scrollY > 50) {
-        navbar.style.background = 'rgba(255, 255, 255, 0.98)';
-        navbar.style.boxShadow = '0 2px 20px rgba(0, 0, 0, 0.1)';
+        navbar.style.background = 'rgba(0, 0, 0, 0.98)';
+        navbar.style.boxShadow = '0 2px 20px rgba(0, 0, 0, 0.5)';
     } else {
-        navbar.style.background = 'rgba(255, 255, 255, 0.95)';
+        navbar.style.background = 'rgba(0, 0, 0, 0.95)';
         navbar.style.boxShadow = 'none';
     }
 });
@@ -76,7 +76,7 @@ const observer = new IntersectionObserver((entries) => {
 
 // Observe elements for animation
 document.addEventListener('DOMContentLoaded', () => {
-    const animateElements = document.querySelectorAll('.feature-card, .syntax-card, .installation-card, .doc-card');
+    const animateElements = document.querySelectorAll('.feature-card, .syntax-card, .installation-card');
     
     animateElements.forEach(el => {
         el.style.opacity = '0';
@@ -274,10 +274,209 @@ function initializeThemeToggle() {
     }
 }
 
+// Owl flying animation when clicked
+function initializeOwlAnimation() {
+    const owlImages = document.querySelectorAll('img[src*="8af825b7-fc42-4e0b-8aab-da9bba99b6e0"]');
+    
+    owlImages.forEach(owl => {
+        owl.style.cursor = 'pointer';
+        owl.style.transition = 'all 0.3s ease';
+        
+        owl.addEventListener('click', (e) => {
+            e.preventDefault();
+            flyOwl(owl);
+        });
+        
+        // Add hover effect
+        owl.addEventListener('mouseenter', () => {
+            owl.style.transform = 'scale(1.05) rotate(2deg)';
+        });
+        
+        owl.addEventListener('mouseleave', () => {
+            owl.style.transform = 'scale(1) rotate(0deg)';
+        });
+    });
+}
+
+function flyOwl(owlElement) {
+    // Create flying owl clone
+    const flyingOwl = owlElement.cloneNode(true);
+    flyingOwl.style.cssText = `
+        position: fixed;
+        z-index: 9999;
+        pointer-events: none;
+        width: 80px;
+        height: 80px;
+        transition: none;
+    `;
+    
+    // Get starting position
+    const rect = owlElement.getBoundingClientRect();
+    flyingOwl.style.left = rect.left + 'px';
+    flyingOwl.style.top = rect.top + 'px';
+    
+    document.body.appendChild(flyingOwl);
+    
+    // Original owl animation
+    owlElement.style.transform = 'scale(0.8) rotate(10deg)';
+    owlElement.style.opacity = '0.7';
+    
+    setTimeout(() => {
+        owlElement.style.transform = 'scale(1) rotate(0deg)';
+        owlElement.style.opacity = '1';
+    }, 300);
+    
+    // Flying animation
+    const startX = rect.left;
+    const startY = rect.top;
+    const endX = Math.random() * (window.innerWidth - 100);
+    const endY = Math.random() * (window.innerHeight - 100);
+    
+    // Calculate curve control points
+    const controlX1 = startX + (endX - startX) * 0.3 + (Math.random() - 0.5) * 200;
+    const controlY1 = startY - 150 - Math.random() * 100;
+    const controlX2 = startX + (endX - startX) * 0.7 + (Math.random() - 0.5) * 200;
+    const controlY2 = startY - 100 - Math.random() * 150;
+    
+    // Create curved path animation
+    let progress = 0;
+    const duration = 2000 + Math.random() * 1000; // 2-3 seconds
+    const startTime = performance.now();
+    
+    function animateOwl(currentTime) {
+        progress = (currentTime - startTime) / duration;
+        
+        if (progress <= 1) {
+            // Cubic bezier curve calculation
+            const t = progress;
+            const invT = 1 - t;
+            
+            const x = invT * invT * invT * startX +
+                     3 * invT * invT * t * controlX1 +
+                     3 * invT * t * t * controlX2 +
+                     t * t * t * endX;
+                     
+            const y = invT * invT * invT * startY +
+                     3 * invT * invT * t * controlY1 +
+                     3 * invT * t * t * controlY2 +
+                     t * t * t * endY;
+            
+            flyingOwl.style.left = x + 'px';
+            flyingOwl.style.top = y + 'px';
+            
+            // Rotation and scale effects
+            const rotation = Math.sin(progress * Math.PI * 4) * 20; // Wing flapping effect
+            const scale = 0.8 + Math.sin(progress * Math.PI * 2) * 0.2; // Size pulsing
+            flyingOwl.style.transform = `rotate(${rotation}deg) scale(${scale})`;
+            
+            // Fade out at the end
+            if (progress > 0.8) {
+                flyingOwl.style.opacity = (1 - progress) * 5;
+            }
+            
+            requestAnimationFrame(animateOwl);
+        } else {
+            // Remove flying owl and create landing effect
+            flyingOwl.remove();
+            createOwlLandingEffect(endX, endY);
+        }
+    }
+    
+    requestAnimationFrame(animateOwl);
+    
+    // Add sound effect (optional - using Web Audio API)
+    playOwlSound();
+}
+
+function createOwlLandingEffect(x, y) {
+    // Create sparkle effect where owl lands
+    for (let i = 0; i < 8; i++) {
+        const sparkle = document.createElement('div');
+        sparkle.style.cssText = `
+            position: fixed;
+            left: ${x + 40}px;
+            top: ${y + 40}px;
+            width: 4px;
+            height: 4px;
+            background: #a855f7;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 9999;
+        `;
+        
+        document.body.appendChild(sparkle);
+        
+        // Animate sparkles
+        const angle = (i / 8) * Math.PI * 2;
+        const distance = 30 + Math.random() * 20;
+        const endX = x + 40 + Math.cos(angle) * distance;
+        const endY = y + 40 + Math.sin(angle) * distance;
+        
+        sparkle.animate([
+            { transform: 'scale(0)', opacity: 1 },
+            { transform: 'scale(1)', opacity: 1, offset: 0.3 },
+            { transform: `translate(${endX - (x + 40)}px, ${endY - (y + 40)}px) scale(0)`, opacity: 0 }
+        ], {
+            duration: 800,
+            easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+        }).onfinish = () => sparkle.remove();
+    }
+    
+    // Create a small owl emoji that fades away
+    const landingOwl = document.createElement('div');
+    landingOwl.textContent = '🦉';
+    landingOwl.style.cssText = `
+        position: fixed;
+        left: ${x + 25}px;
+        top: ${y + 25}px;
+        font-size: 2rem;
+        pointer-events: none;
+        z-index: 9999;
+    `;
+    
+    document.body.appendChild(landingOwl);
+    
+    landingOwl.animate([
+        { transform: 'scale(0) rotate(0deg)', opacity: 1 },
+        { transform: 'scale(1.2) rotate(5deg)', opacity: 1, offset: 0.5 },
+        { transform: 'scale(0) rotate(10deg)', opacity: 0 }
+    ], {
+        duration: 1500,
+        easing: 'ease-out'
+    }).onfinish = () => landingOwl.remove();
+}
+
+function playOwlSound() {
+    // Create a simple "whoosh" sound using Web Audio API
+    try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        // Create a "whoosh" sound effect
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.5);
+        
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+        gainNode.gain.linearRampToValueAtTime(0.1, audioContext.currentTime + 0.1);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (e) {
+        // Fallback: no sound if Web Audio API is not supported
+        console.log('Audio not supported');
+    }
+}
+
 // Initialize all features when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     initializeSearch();
     initializeThemeToggle();
+    initializeOwlAnimation();
     
     // Add loading animation
     document.body.classList.add('loaded');

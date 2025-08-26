@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://seu-usuario.github.io/noxy/sitemap.xml
+Sitemap: https://estevaofon.github.io/noxy/sitemap.xml

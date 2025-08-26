@@ -3,7 +3,7 @@
 # Site settings
 title: "Noxy - Linguagem de Programação"
 description: "Linguagem de programação estaticamente tipada com backend LLVM. Mascote: coruja roxa que simboliza sabedoria e elegância."
-url: "https://seu-usuario.github.io"
+url: "https://estevaofon.github.io"
 baseurl: "/noxy"
 
 # Build settings

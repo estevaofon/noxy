@@ -5,12 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Noxy - Linguagem de Programação Estaticamente Tipada</title>
     <meta name="description" content="Noxy é uma linguagem de programação estaticamente tipada com backend LLVM, projetada para fins educacionais e aplicações práticas. Mascote: uma coruja roxa que simboliza sabedoria e elegância no código.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="https://github.com/user-attachments/assets/8af825b7-fc42-4e0b-8aab-da9bba99b6e0" type="image/png">
-    <meta name="theme-color" content="#6366f1">
+    <meta name="theme-color" content="#a855f7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Noxy">
@@ -30,7 +33,7 @@
                 <a href="#syntax" class="nav-link">Sintaxe</a>
                 <a href="#examples" class="nav-link">Exemplos</a>
                 <a href="#installation" class="nav-link">Instalação</a>
-                <a href="#docs" class="nav-link">Documentação</a>
+
             </div>
             <div class="hamburger" id="hamburger">
                 <span class="bar"></span>
@@ -75,7 +78,7 @@
                         </div>
                         <span class="window-title">hello.nx</span>
                     </div>
-                    <pre><code class="language-noxy">print("Hello from Noxy!")
+                    <pre><code class="language-go">print("Hello from Noxy!")
 
 // Operações básicas
 let x: int = 10
@@ -154,20 +157,20 @@ print("Product: " + produto.nome)</code></pre>
             <div class="syntax-grid">
                 <div class="syntax-card">
                     <h3>Declaração de Variáveis</h3>
-                    <pre><code class="language-noxy">let x: int = 42
+                    <pre><code class="language-go">let x: int = 42
 let y: float = 3.14
 let texto: string = "Hello, World!"
 let ativo: bool = true</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Arrays</h3>
-                    <pre><code class="language-noxy">let numeros: int[5] = [1, 2, 3, 4, 5]
+                    <pre><code class="language-go">let numeros: int[5] = [1, 2, 3, 4, 5]
 let matriz: float[3] = [1.1, 2.2, 3.3]
 let tamanho: int = length(numeros)</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Estruturas</h3>
-                    <pre><code class="language-noxy">struct Pessoa
+                    <pre><code class="language-go">struct Pessoa
     nome: string,
     idade: int,
     ativo: bool
@@ -178,7 +181,7 @@ pessoa.idade = 26</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Funções</h3>
-                    <pre><code class="language-noxy">func add(a: int, b: int) -> int
+                    <pre><code class="language-go">func add(a: int, b: int) -> int
     return a + b
 end
 
@@ -188,7 +191,7 @@ end</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Estruturas de Controle</h3>
-                    <pre><code class="language-noxy">if x > 10 then
+                    <pre><code class="language-go">if x > 10 then
     print("x é maior que 10")
 else
     print("x é 10 ou menor")
@@ -201,7 +204,7 @@ end</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Auto-Referenciamento</h3>
-                    <pre><code class="language-noxy">struct TreeNode
+                    <pre><code class="language-go">struct TreeNode
     valor: int,
     esquerda: ref TreeNode,
     direita: ref TreeNode
@@ -229,7 +232,7 @@ raiz.esquerda = ref TreeNode(25, null, null)</code></pre>
                 <div class="example-tab active" id="hello">
                     <h3>Hello World</h3>
                     <p>Um exemplo básico mostrando a sintaxe fundamental da linguagem Noxy.</p>
-                    <pre><code class="language-noxy">print("Hello from Noxy!")
+                    <pre><code class="language-go">print("Hello from Noxy!")
 
 // Operações básicas
 let x: int = 10
@@ -251,7 +254,7 @@ print(produto.nome)</code></pre>
                 <div class="example-tab" id="binary-tree">
                     <h3>Árvore Binária</h3>
                     <p>Implementação de uma árvore binária com travessia pre-order.</p>
-                    <pre><code class="language-noxy">struct Node
+                    <pre><code class="language-go">struct Node
   data: int,
   left: ref Node,
   right: ref Node
@@ -277,7 +280,7 @@ pre_order(root)</code></pre>
                 <div class="example-tab" id="linked-list">
                     <h3>Lista Ligada</h3>
                     <p>Implementação de uma lista ligada com operações de inserção e remoção.</p>
-                    <pre><code class="language-noxy">struct Node
+                    <pre><code class="language-go">struct Node
     valor: int,
     proximo: ref Node
 end
@@ -305,7 +308,7 @@ print_list(lista)</code></pre>
                 <div class="example-tab" id="hashmap">
                     <h3>HashMap</h3>
                     <p>Implementação de um hashmap com chaves string usando função hash polinomial.</p>
-                    <pre><code class="language-noxy">struct Node
+                    <pre><code class="language-go">struct Node
     key: string,
     value: string,
     next: ref Node
@@ -340,7 +343,7 @@ end</code></pre>
                 <div class="example-tab" id="safe-division">
                     <h3>Divisão Segura</h3>
                     <p>Padrão Result para tratamento seguro de erros em operações que podem falhar.</p>
-                    <pre><code class="language-noxy">struct Result
+                    <pre><code class="language-go">struct Result
     is_ok: bool,
     value: int,
     error: string
@@ -416,34 +419,7 @@ gcc -o testes.exe output.obj casting_functions.c
         </div>
     </section>
 
-    <!-- Documentation Section -->
-    <section id="docs" class="docs">
-        <div class="container">
-            <h2 class="section-title">Documentação</h2>
-            <div class="docs-grid">
-                <div class="doc-card">
-                    <h3><i class="fas fa-book"></i> Guia da Linguagem</h3>
-                    <p>Documentação completa da sintaxe, tipos de dados e operadores suportados pela linguagem Noxy.</p>
-                    <a href="#" class="doc-link">Ler mais <i class="fas fa-arrow-right"></i></a>
-                </div>
-                <div class="doc-card">
-                    <h3><i class="fas fa-tools"></i> API Reference</h3>
-                    <p>Referência detalhada de todas as funções built-in e bibliotecas disponíveis.</p>
-                    <a href="#" class="doc-link">Ler mais <i class="fas fa-arrow-right"></i></a>
-                </div>
-                <div class="doc-card">
-                    <h3><i class="fas fa-graduation-cap"></i> Tutoriais</h3>
-                    <p>Tutoriais passo a passo para aprender a programar em Noxy, desde o básico até conceitos avançados.</p>
-                    <a href="#" class="doc-link">Ler mais <i class="fas fa-arrow-right"></i></a>
-                </div>
-                <div class="doc-card">
-                    <h3><i class="fas fa-code-branch"></i> Contribuindo</h3>
-                    <p>Guia para contribuir com o projeto Noxy, incluindo guidelines de desenvolvimento e submissão de PRs.</p>
-                    <a href="#" class="doc-link">Ler mais <i class="fas fa-arrow-right"></i></a>
-                </div>
-            </div>
-        </div>
-    </section>
+
 
     <!-- Footer -->
     <footer class="footer">
@@ -470,7 +446,7 @@ gcc -o testes.exe output.obj casting_functions.c
                     <h4>Desenvolvimento</h4>
                     <ul>
                         <li><a href="#installation">Instalação</a></li>
-                        <li><a href="#docs">Documentação</a></li>
+                        <li><a href="#examples">Exemplos</a></li>
                         <li><a href="#">GitHub</a></li>
                         <li><a href="#">Issues</a></li>
                     </ul>

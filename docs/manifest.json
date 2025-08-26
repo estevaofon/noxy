@@ -4,8 +4,8 @@
     "description": "Linguagem de programação estaticamente tipada com backend LLVM. Mascote: coruja roxa.",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#ffffff",
-    "theme_color": "#6366f1",
+    "background_color": "#000000",
+    "theme_color": "#a855f7",
     "orientation": "portrait-primary",
     "icons": [
         {
