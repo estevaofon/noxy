@@ -1948,16 +1948,33 @@ class LLVMCodeGenerator:
         self.local_vars = {}
         self.in_top_level = True
         
-        # Criar array de alocações no início da função para garantir dominância
+        # Criar variáveis globais para rastreamento de memória se necessário
         if self.memory_tracking:
-            self.allocation_array = self.builder.alloca(
-                ir.ArrayType(self.char_type.as_pointer(), 100), 
-                name="allocation_array"
-            )
-            self.allocation_count = self.builder.alloca(
-                self.int_type, 
-                name="allocation_count"
-            )
+            # Verificar se já existem as variáveis globais
+            if "allocation_array" not in self.module.globals:
+                self.allocation_array = ir.GlobalVariable(
+                    self.module,
+                    ir.ArrayType(self.char_type.as_pointer(), 100),
+                    name="allocation_array"
+                )
+                self.allocation_array.linkage = 'internal'
+                self.allocation_array.initializer = ir.Constant(
+                    ir.ArrayType(self.char_type.as_pointer(), 100),
+                    None
+                )
+            else:
+                self.allocation_array = self.module.globals["allocation_array"]
+                
+            if "allocation_count" not in self.module.globals:
+                self.allocation_count = ir.GlobalVariable(
+                    self.module,
+                    self.int_type,
+                    name="allocation_count"
+                )
+                self.allocation_count.linkage = 'internal'
+                self.allocation_count.initializer = ir.Constant(self.int_type, 0)
+            else:
+                self.allocation_count = self.module.globals["allocation_count"]
             # Inicializar contador
             self.builder.store(ir.Constant(self.int_type, 0), self.allocation_count)
         
@@ -5167,10 +5184,20 @@ class LLVMCodeGenerator:
         self._track_allocation(size)
         struct_ptr = self.builder.bitcast(size, struct_type.as_pointer())
         struct_info = None
+        # First, check local struct definitions
         for stmt in self.global_ast.statements:
             if isinstance(stmt, StructDefinitionNode) and stmt.name == struct_name:
                 struct_info = stmt
                 break
+        
+        # If not found locally, check imported structs
+        if not struct_info:
+            for symbol_name, symbol_info in self.imported_symbols.items():
+                if (symbol_info['type'] == 'struct' and 
+                    symbol_name.split('.')[-1] == struct_name):  # Handle namespaced imports
+                    struct_info = symbol_info['node']
+                    break
+        
         if not struct_info:
             raise NameError(f"Definição do struct '{struct_name}' não encontrada")
         for i, (field_name, field_type) in enumerate(struct_info.fields):
