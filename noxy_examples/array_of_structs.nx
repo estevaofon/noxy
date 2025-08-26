@@ -23,4 +23,13 @@ pessoas[2] = p3
 // Verifica atualização
 print(pessoas[2].nome)
 
+// função para iterar a array de structs
+func iterar_array_structs(array: Pessoa[], tamanho: int)
+    let i: int = 0
+    while i < tamanho do
+        print(array[i].nome)
+        i = i + 1
+    end
+end
 
+iterar_array_structs(pessoas, 2)

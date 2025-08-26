@@ -3126,6 +3126,22 @@ class LLVMCodeGenerator:
                   arg.type.pointee == param_type.type.pointee):
                 # Já é o tipo correto, usar diretamente
                 converted_args.append(arg)
+            # Tratamento especial para arrays de structs: ponteiro para array de ponteiros -> ponteiro para ponteiro
+            elif (isinstance(arg.type, ir.PointerType) and
+                  isinstance(arg.type.pointee, ir.ArrayType) and
+                  isinstance(arg.type.pointee.element, ir.PointerType) and
+                  isinstance(param_type.type, ir.PointerType)):
+                # Array de structs: obter ponteiro para o primeiro elemento do array
+                zero = ir.Constant(ir.IntType(32), 0)
+                array_ptr = self.builder.gep(arg, [zero, zero], inbounds=True)
+                converted_args.append(array_ptr)
+            # Caso específico para arrays de structs que foram declarados sem tamanho
+            elif (isinstance(arg.type, ir.PointerType) and
+                  isinstance(arg.type.pointee, ir.PointerType) and
+                  isinstance(param_type.type, ir.PointerType) and
+                  arg.type == param_type.type):
+                # Já é o tipo correto (ponteiro para ponteiro), usar diretamente  
+                converted_args.append(arg)
             else:
                 converted_args.append(arg)
         return converted_args
@@ -4385,19 +4401,10 @@ class LLVMCodeGenerator:
                     
                     # Gerar o argumento
                     arg_value = self._generate_expression(arg_node, expected_type)
-                    
-                    # Verificar se precisa dereferenciar (ponteiro para ponteiro)
-                    if (isinstance(arg_value.type, ir.PointerType) and 
-                        isinstance(arg_value.type.pointee, ir.PointerType)):
-                        # É um ponteiro para ponteiro, precisamos dereferenciar
-                        arg_value = self.builder.load(arg_value)
-                    
-
-                    
                     args.append(arg_value)
                 else:
                     # Sem informação de tipo, gerar normalmente
-                    args.append(self._generate_expression(arg_node, expected_type))
+                    args.append(self._generate_expression(arg_node))
             
             # Verificar se há arrays estáticos sendo passados para funções que esperam ponteiros
             args = self._convert_array_args_for_function_call(func, args)

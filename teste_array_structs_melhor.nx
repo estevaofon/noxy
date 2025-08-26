@@ -1,0 +1,119 @@
+// Teste abrangente: Array de structs em Noxy
+// Este exemplo testa várias funcionalidades de arrays de structs
+
+print("=== TESTE DE ARRAYS DE STRUCTS ===")
+print("")
+
+// Definindo uma struct simples
+struct Pessoa
+    id: int,
+    nome: string,
+    idade: int
+end
+
+print("1. Criando pessoas individuais...")
+
+// Criando pessoas individuais
+let p1: Pessoa = Pessoa(1, "Ana", 25)
+let p2: Pessoa = Pessoa(2, "Bruno", 30)
+let p3: Pessoa = Pessoa(3, "Carla", 28)
+
+print("Pessoa 1: " + p1.nome + " (ID: " + to_str(p1.id) + ", Idade: " + to_str(p1.idade) + ")")
+print("Pessoa 2: " + p2.nome + " (ID: " + to_str(p2.id) + ", Idade: " + to_str(p2.idade) + ")")
+print("Pessoa 3: " + p3.nome + " (ID: " + to_str(p3.id) + ", Idade: " + to_str(p3.idade) + ")")
+print("")
+
+print("2. Criando array de pessoas...")
+
+// Criando array de pessoas
+let pessoas: Pessoa[3] = [p1, p2, p3]
+
+print("Array criado com 3 pessoas")
+print("")
+
+print("3. Acessando elementos do array...")
+
+// Acessando elementos via índice
+print("pessoas[0].nome: " + pessoas[0].nome)
+print("pessoas[1].nome: " + pessoas[1].nome)
+print("pessoas[2].nome: " + pessoas[2].nome)
+print("")
+
+print("4. Modificando elementos do array...")
+
+// Modificando um elemento
+pessoas[1].idade = 31
+print("Idade de Bruno modificada para: " + to_str(pessoas[1].idade))
+print("")
+
+print("5. Iterando pelo array (simulado)...")
+
+// Como não temos loops for, vamos simular iteração
+let i: int = 0
+print("Pessoa " + to_str(i) + ": " + pessoas[0].nome + " - " + to_str(pessoas[0].idade) + " anos")
+
+i = 1
+print("Pessoa " + to_str(i) + ": " + pessoas[1].nome + " - " + to_str(pessoas[1].idade) + " anos")
+
+i = 2
+print("Pessoa " + to_str(i) + ": " + pessoas[2].nome + " - " + to_str(pessoas[2].idade) + " anos")
+print("")
+
+print("6. Testando array com struct mais complexa...")
+
+// Struct mais complexa
+struct Produto
+    codigo: int,
+    nome: string,
+    preco: float,
+    disponivel: bool
+end
+
+let prod1: Produto = Produto(100, "Notebook", 2500.99, true)
+let prod2: Produto = Produto(101, "Mouse", 59.90, true)
+let prod3: Produto = Produto(102, "Teclado", 149.50, false)
+
+// Array de produtos
+let produtos: Produto[3] = [prod1, prod2, prod3]
+
+print("Produtos no array:")
+print("- " + produtos[0].nome + ": R$ " + to_str(produtos[0].preco))
+print("- " + produtos[1].nome + ": R$ " + to_str(produtos[1].preco))
+print("- " + produtos[2].nome + ": R$ " + to_str(produtos[2].preco))
+print("")
+
+print("7. Testando modificação de campos...")
+
+// Modificando campos
+produtos[2].disponivel = true
+produtos[0].preco = 2399.99
+
+print("Após modificações:")
+print("- " + produtos[0].nome + ": R$ " + to_str(produtos[0].preco))
+print("- Teclado disponível: " + to_str(produtos[2].disponivel))
+print("")
+
+print("8. Testando array com null...")
+
+// Array com elementos null
+let pessoas_opcionales: Pessoa[4] = [p1, p2, null, p3]
+
+print("Array com null criado")
+print("Pessoa na posição 0: " + pessoas_opcionales[0].nome)
+print("Pessoa na posição 1: " + pessoas_opcionales[1].nome)
+// Não acessamos posição 2 pois é null
+print("Pessoa na posição 3: " + pessoas_opcionales[3].nome)
+print("")
+
+print("=== TODOS OS TESTES CONCLUÍDOS COM SUCESSO ===")
+
+// função para iterar a array de structs
+func iterar_array_structs(array: Pessoa[], tamanho: int)
+    let i: int = 0
+    while i < tamanho do
+        print(array[i].nome)
+        i = i + 1
+    end
+end
+
+iterar_array_structs(pessoas, 3)
