@@ -1,6 +1,6 @@
 # Noxy
 
-A statically-typed programming language with LLVM backend compilation, featuring advanced data structures and algorithms. [Official Website](https://estevaofon.github.io/noxy/)
+A statically-typed programming language with LLVM backend compilation, featuring advanced data structures and algorithms. [Official Website.](https://estevaofon.github.io/noxy/)
 
 
 
