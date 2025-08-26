@@ -1,0 +1,9 @@
+// Teste de import completo do módulo
+
+use test_math
+
+let sum_result: int = test_math.add(10, 20)
+print(sum_result)
+
+let power_result: int = test_math.power(3, 2)
+print(power_result)

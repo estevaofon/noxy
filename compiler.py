@@ -3,9 +3,11 @@
 
 import re
 import sys
+import os
+import importlib.util
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Dict, Tuple
+from typing import List, Optional, Union, Dict, Tuple, Any
 import llvmlite.ir as ir
 import llvmlite.binding as llvm
 
@@ -73,6 +75,8 @@ class TokenType(Enum):
     STRUCT = "STRUCT"
     REF = "REF"  # Nova palavra-chave para referências
     BREAK = "BREAK"  # Nova palavra-chave para interromper loops
+    USE = "USE"  # Nova palavra-chave para importar módulos
+    SELECT = "SELECT"  # Nova palavra-chave para selecionar símbolos específicos
     
     # Tipos
     INT = "INT"
@@ -426,7 +430,9 @@ class Lexer:
             'struct': TokenType.STRUCT,
             'ref': TokenType.REF,
             'zeros': TokenType.ZEROS,
-            'break': TokenType.BREAK
+            'break': TokenType.BREAK,
+            'use': TokenType.USE,
+            'select': TokenType.SELECT
         }
         
         token_type = keywords.get(identifier, TokenType.IDENTIFIER)
@@ -699,6 +705,18 @@ class StringCharAccessNode(ASTNode):
     string: str
     index: ASTNode
 
+@dataclass
+class UseNode(ASTNode):
+    """
+    Representa uma instrução de importação.
+    module_name: nome do módulo a ser importado
+    selected_symbols: lista de símbolos específicos ou None para importar tudo
+    import_all: True se usar 'use module select *'
+    """
+    module_name: str
+    selected_symbols: Optional[List[str]] = None
+    import_all: bool = False
+
 # Parser
 class ErrorContext:
     """Context manager para capturar e propagar erros com localização"""
@@ -904,6 +922,8 @@ class Parser:
             return self._parse_struct_definition()
         elif self._match(TokenType.BREAK):
             return self._parse_break()
+        elif self._match(TokenType.USE):
+            return self._parse_use()
         elif self._check(TokenType.IDENTIFIER):
             # Pode ser uma atribuição de array, reatribuição simples, acesso a struct ou chamada de função
             if self.position + 1 < len(self.tokens):
@@ -1142,6 +1162,43 @@ class Parser:
         node = BreakNode()
         return self._add_location_info(node, token)
     
+    def _parse_use(self) -> UseNode:
+        """Parse uma instrução use: use module [select symbol1, symbol2, ...] ou use module select *"""
+        use_token = self.tokens[self.position - 1]  # Token 'use' já foi consumido
+        
+        # Espera o nome do módulo
+        if not self._check(TokenType.IDENTIFIER):
+            self._error("Nome do módulo esperado após 'use'")
+        
+        module_name = self._advance().value
+        
+        # Verifica se há uma cláusula 'select'
+        if self._match(TokenType.SELECT):
+            if self._match(TokenType.MULTIPLY):  # *
+                # Import all: use module select *
+                node = UseNode(module_name=module_name, import_all=True)
+            else:
+                # Import specific symbols: use module select symbol1, symbol2, ...
+                selected_symbols = []
+                
+                # Primeiro símbolo
+                if not self._check(TokenType.IDENTIFIER):
+                    self._error("Nome do símbolo esperado após 'select'")
+                selected_symbols.append(self._advance().value)
+                
+                # Símbolos adicionais separados por vírgula
+                while self._match(TokenType.COMMA):
+                    if not self._check(TokenType.IDENTIFIER):
+                        self._error("Nome do símbolo esperado após ','")
+                    selected_symbols.append(self._advance().value)
+                
+                node = UseNode(module_name=module_name, selected_symbols=selected_symbols)
+        else:
+            # Import whole module: use module
+            node = UseNode(module_name=module_name)
+        
+        return self._add_location_info(node, use_token)
+    
     def _parse_expression(self) -> ASTNode:
         return self._parse_or()
     
@@ -1235,12 +1292,31 @@ class Parser:
                 else:
                     self._error_at_current("Acesso de array inválido")
             elif self._match(TokenType.DOT):
-                # Acesso a campo de struct
+                # Acesso a campo de struct ou chamada de função de módulo
                 field_name = self._advance()
                 if field_name.type != TokenType.IDENTIFIER:
                     self._error_at_previous("Esperado nome do campo após '.'")
 
-                if isinstance(expr, IdentifierNode):
+                # Verificar se é uma chamada de função (module.function())
+                if self._check(TokenType.LPAREN) and isinstance(expr, IdentifierNode):
+                    # É uma chamada de função de módulo: module.function(args)
+                    self._advance()  # Consumir LPAREN
+                    args = []
+                    if not self._check(TokenType.RPAREN):
+                        args.append(self._parse_expression())
+                        while self._match(TokenType.COMMA):
+                            args.append(self._parse_expression())
+                    
+                    if not self._match(TokenType.RPAREN):
+                        self._error_at_current("Esperado ')' após argumentos da função")
+                    
+                    # Criar CallNode com nome composto
+                    function_name = f"{expr.name}.{field_name.value}"
+                    call_node = CallNode(function_name, args)
+                    call_node.line = field_name.line
+                    call_node.column = field_name.column
+                    expr = call_node
+                elif isinstance(expr, IdentifierNode):
                     # Acesso direto a campo: pessoa.campo
                     struct_access = StructAccessNode(expr.name, field_name.value)
                     struct_access.line = field_name.line
@@ -1562,7 +1638,7 @@ class CodeGenContext:
         return False
 
 class LLVMCodeGenerator:
-    def __init__(self, source_lines: List[str] = None):
+    def __init__(self, source_lines: List[str] = None, imported_symbols: Dict[str, Any] = None):
         # Inicializar LLVM
         llvm.initialize()
         llvm.initialize_native_target()
@@ -1571,6 +1647,8 @@ class LLVMCodeGenerator:
         # Manter linhas de código fonte para contexto de erro
         self.source_lines = source_lines or []
         self._current_node = None  # Nó atual sendo processado
+        self.imported_symbols = imported_symbols or {}  # Símbolos importados
+        self.imported_functions_to_generate = set()  # Funções importadas que precisam ter corpo gerado
         
         # Obter o triple da plataforma atual; ajustar para MinGW/GCC quando necessário
         default_triple = llvm.get_default_triple()
@@ -1824,6 +1902,12 @@ class LLVMCodeGenerator:
             if isinstance(stmt, StructDefinitionNode):
                 self._process_struct_definition(stmt)
         
+        # Processar structs importados
+        for symbol_name, symbol_info in self.imported_symbols.items():
+            if symbol_info['type'] == 'struct':
+                struct_node = symbol_info['node']
+                self._process_struct_definition(struct_node)
+        
         # Segunda passada: atualizar tipos de referência com os tipos corretos dos structs
         self._update_reference_types()
         
@@ -1837,6 +1921,21 @@ class LLVMCodeGenerator:
                 self._declare_global_variable(stmt)
             elif isinstance(stmt, FunctionNode):
                 self._declare_function(stmt)
+        
+        # Declarar variáveis globais e funções importadas
+        for symbol_name, symbol_info in self.imported_symbols.items():
+            if symbol_info['type'] == 'variable':
+                # Para variáveis, usar o nome simples
+                simple_name = symbol_name.split('.')[-1] if '.' in symbol_name else symbol_name
+                if simple_name not in self.global_vars:
+                    var_node = symbol_info['node']
+                    self._declare_global_variable(var_node)
+            elif symbol_info['type'] == 'function':
+                # Para funções, usar o nome simples para declaração
+                simple_name = symbol_name.split('.')[-1] if '.' in symbol_name else symbol_name
+                if simple_name not in self.functions:
+                    func_node = symbol_info['node']
+                    self._declare_function(func_node)
         
         # Criar função main
         main_ty = ir.FunctionType(ir.IntType(32), [])
@@ -1865,6 +1964,23 @@ class LLVMCodeGenerator:
         # No Windows, configurar UTF-8 no início do programa
         if sys.platform == "win32":
             self._setup_windows_utf8()
+        
+        # Primeiro, gerar as variáveis globais importadas
+        for symbol_name, symbol_info in self.imported_symbols.items():
+            if symbol_info['type'] == 'variable' and symbol_name in self.global_vars:
+                # Gerar a inicialização da variável global importada
+                var_node = symbol_info['node']
+                if var_node.value is not None:
+                    self._generate_statement(var_node)
+        
+        # Em seguida, gerar as funções importadas
+        for symbol_name, symbol_info in self.imported_symbols.items():
+            if symbol_info['type'] == 'function':
+                # Para funções, usar o nome simples para verificar se foi declarada
+                simple_name = symbol_name.split('.')[-1] if '.' in symbol_name else symbol_name
+                if simple_name in self.functions:
+                    func_node = symbol_info['node']
+                    self._generate_function(func_node)
         
         # Processar todos os statements (exceto definições de função) na ordem original
         for stmt in ast.statements:
@@ -2314,6 +2430,9 @@ class LLVMCodeGenerator:
             self._generate_nested_struct_assignment(node)
         elif isinstance(node, StructConstructorNode):
             self._generate_struct_constructor(node)
+        elif isinstance(node, UseNode):
+            # UseNode é processado durante a análise semântica, não gera código
+            pass
         else:
             # Expressão simples
             self._generate_expression(node)
@@ -4157,6 +4276,23 @@ class LLVMCodeGenerator:
                     return self.builder.load(var, name=node.name)
                 # Senão, carregar o valor
                 return self.builder.load(var, name=node.name)
+            elif node.name in self.imported_symbols:
+                # Variável importada
+                symbol_info = self.imported_symbols[node.name]
+                if symbol_info['type'] == 'variable':
+                    # Gerar declaração da variável importada se ainda não existir
+                    if node.name not in self.global_vars:
+                        var_node = symbol_info['node']
+                        self._declare_global_variable(var_node)
+                    var = self.global_vars[node.name]
+                    # Se é um array global, retornar ponteiro para o início
+                    if isinstance(var.type.pointee, ir.ArrayType):
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        return self.builder.gep(var, [zero, zero], inbounds=True)
+                    # Senão, carregar o valor
+                    return self.builder.load(var, name=node.name)
+                else:
+                    self._semantic_error(f"'{node.name}' foi importado mas não é uma variável", node)
             else:
                 self._semantic_error(f"Variável '{node.name}' não foi declarada", node)
             
@@ -4390,6 +4526,16 @@ class LLVMCodeGenerator:
                     return ir.Constant(self.int_type, 0)
             elif node.function_name in self.functions:
                 func = self.functions[node.function_name]
+            elif node.function_name in self.imported_symbols:
+                # Função importada (já foi declarada durante a inicialização)
+                # Para funções com namespace (module.function), usar apenas o nome da função
+                symbol_info = self.imported_symbols[node.function_name]
+                if symbol_info['type'] == 'function':
+                    # Extrair o nome simples da função para buscar na lista de funções declaradas
+                    simple_function_name = node.function_name.split('.')[-1]
+                    func = self.functions[simple_function_name]
+                else:
+                    self._semantic_error(f"'{node.function_name}' foi importado mas não é uma função", node)
             else:
                 self._semantic_error(f"Função '{node.function_name}' não foi declarada", node)
             args = []
@@ -4999,7 +5145,17 @@ class LLVMCodeGenerator:
     def _generate_struct_constructor(self, node: StructConstructorNode, expected_type: ir.Type = None) -> ir.Value:
         struct_name = node.struct_name
         if struct_name not in self.struct_types:
-            raise NameError(f"Struct '{struct_name}' não definido")
+            # Verificar se é um struct importado
+            if struct_name in self.imported_symbols:
+                symbol_info = self.imported_symbols[struct_name]
+                if symbol_info['type'] == 'struct':
+                    # Gerar definição do struct importado se ainda não existir
+                    struct_node = symbol_info['node']
+                    self._process_struct_definition(struct_node)
+                else:
+                    raise NameError(f"'{struct_name}' foi importado mas não é um struct")
+            else:
+                raise NameError(f"Struct '{struct_name}' não definido")
         struct_type = self.struct_types[struct_name]
         
         # Calcular tamanho via GEP(null, 1) e ptrtoint para respeitar layout do LLVM
@@ -5142,15 +5298,123 @@ def execute_ir(llvm_ir: str):
     result = main_func()
     return result
 
+# Sistema de módulos
+class ModuleManager:
+    def __init__(self):
+        self.loaded_modules: Dict[str, Dict[str, Any]] = {}
+        self.module_paths: List[str] = [".", "noxy_examples"]  # Diretórios de busca
+    
+    def load_module(self, module_name: str) -> Dict[str, Any]:
+        """Carrega um módulo e retorna suas funções e variáveis exportadas"""
+        if module_name in self.loaded_modules:
+            return self.loaded_modules[module_name]
+        
+        # Buscar arquivo do módulo
+        module_file = self._find_module_file(module_name)
+        if not module_file:
+            raise NoxyError(f"Módulo '{module_name}' não encontrado")
+        
+        # Parsear o módulo
+        try:
+            with open(module_file, 'r', encoding='utf-8') as f:
+                source = f.read()
+            
+            # Parsear o módulo sem criar um novo compilador (evitar circular import)
+            lexer = Lexer(source)
+            tokens = lexer.tokenize()
+            parser = Parser(tokens)
+            ast = parser.parse()
+            
+            # Extrair funções e variáveis globais
+            exported_symbols = self._extract_exported_symbols(ast)
+            self.loaded_modules[module_name] = exported_symbols
+            
+            return exported_symbols
+            
+        except Exception as e:
+            raise NoxyError(f"Erro ao carregar módulo '{module_name}': {str(e)}")
+    
+    def _find_module_file(self, module_name: str) -> Optional[str]:
+        """Encontra o arquivo do módulo nos diretórios de busca"""
+        for path in self.module_paths:
+            module_file = os.path.join(path, f"{module_name}.nx")
+            if os.path.exists(module_file):
+                return module_file
+        return None
+    
+    def _extract_exported_symbols(self, ast: ProgramNode) -> Dict[str, Any]:
+        """Extrai símbolos exportáveis de um AST (funções e variáveis globais)"""
+        symbols = {}
+        
+        for stmt in ast.statements:
+            if isinstance(stmt, FunctionNode):
+                symbols[stmt.name] = {
+                    'type': 'function',
+                    'node': stmt,
+                    'params': stmt.params,
+                    'return_type': stmt.return_type
+                }
+            elif isinstance(stmt, AssignmentNode) and stmt.is_global:
+                symbols[stmt.identifier] = {
+                    'type': 'variable',
+                    'node': stmt,
+                    'var_type': stmt.var_type
+                }
+            elif isinstance(stmt, StructDefinitionNode):
+                symbols[stmt.name] = {
+                    'type': 'struct',
+                    'node': stmt,
+                    'fields': stmt.fields
+                }
+        
+        return symbols
+
 # Compilador principal
 class NoxyCompiler:
     def __init__(self):
         self.lexer = None
         self.parser = None
         self.codegen = None
+        self.module_manager = ModuleManager()
+        self.imported_symbols = {}  # Cache de símbolos importados
     
+    def _process_imports(self, ast: ProgramNode):
+        """Processa todas as instruções de import antes da análise semântica"""
+        for stmt in ast.statements:
+            if isinstance(stmt, UseNode):
+                self._handle_use_statement(stmt)
+    
+    def _handle_use_statement(self, use_node: UseNode):
+        """Processa uma instrução use específica"""
+        try:
+            # Carregar o módulo
+            module_symbols = self.module_manager.load_module(use_node.module_name)
+
+            
+            if use_node.import_all:
+                # Import all: use module select *
+                for symbol_name, symbol_info in module_symbols.items():
+                    self.imported_symbols[symbol_name] = symbol_info
+            elif use_node.selected_symbols:
+                # Import specific: use module select symbol1, symbol2
+                for symbol_name in use_node.selected_symbols:
+                    if symbol_name in module_symbols:
+                        self.imported_symbols[symbol_name] = module_symbols[symbol_name]
+                    else:
+                        raise NoxyError(f"Símbolo '{symbol_name}' não encontrado no módulo '{use_node.module_name}'")
+            else:
+                # Import whole module: use module
+                # Criar namespace - apenas permitir acesso via module.symbol
+                for symbol_name, symbol_info in module_symbols.items():
+                    prefixed_name = f"{use_node.module_name}.{symbol_name}"
+                    self.imported_symbols[prefixed_name] = symbol_info
+                        
+        except Exception as e:
+            raise NoxyError(f"Erro ao processar import: {str(e)}")
+
     def _perform_semantic_analysis(self, ast: ProgramNode):
         """Realiza análise semântica para detectar erros de tipo antes da geração de código"""
+        self._process_imports(ast)  # Processar imports primeiro
         self._check_function_return_types(ast)
         self._check_fstring_expressions(ast)
     
@@ -5398,7 +5662,7 @@ class NoxyCompiler:
             self._perform_semantic_analysis(ast)
             
             # Geração de código
-            self.codegen = LLVMCodeGenerator(self.lexer.source_lines)
+            self.codegen = LLVMCodeGenerator(self.lexer.source_lines, self.imported_symbols)
             llvm_module = self.codegen.generate(ast)
             
             return str(llvm_module)

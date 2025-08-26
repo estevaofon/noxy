@@ -1,0 +1,18 @@
+// Teste do sistema de imports
+
+// Test 1: Import specific functions
+use test_math select add, power
+
+let sum_result: int = add(5, 3)
+print(sum_result)
+
+let power_result: int = power(2, 3)
+print(power_result)
+
+// Test 2: Import all symbols
+use test_math select *
+
+let mult_result: int = multiply(4, 5)
+print(mult_result)
+
+print(pi)

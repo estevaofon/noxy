@@ -1,0 +1,17 @@
+// Comprehensive test of all import syntaxes
+
+// Test 1: Namespace import (like Python's import module)
+use test_math
+let ns_sum: int = test_math.add(10, 5)
+let ns_power: int = test_math.power(2, 4)
+print(ns_sum)    // Should print 15
+print(ns_power)  // Should print 16
+
+// Test 2: Specific imports (like Python's from module import symbol)
+use test_math select multiply
+let mult_result: int = multiply(6, 7)
+print(mult_result)  // Should print 42
+
+// Test 3: Import all (like Python's from module import *)
+use test_math select *
+print(pi)  // Should print 3.141590
