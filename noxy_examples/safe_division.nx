@@ -28,9 +28,9 @@ end
 func test_division(a: int, b: int)
     let result: Result = safe_divide(a, b)
     if is_ok(result) then
-        print(to_str(a) + " / " + to_str(b) + " = " + to_str(result.value))
+        print(f"{a} / {b}" + " = " + to_str(result.value))
     else
-        print(to_str(a) + " / " + to_str(b) + " = Erro: " + result.error)
+        print(f"{a} / {b}" + " = Erro: " + result.error)
     end
 end
 
