@@ -16,7 +16,7 @@ print(f"Olá, {nome}!")
 print(f"Meu nome completo é {nome} {sobrenome}")
 
 // 3. F-string com diferentes tipos de dados
-print(f"Nome: {nome}, Idade: {idade}, Altura: {altura}m")
+print(f"Nome: {nome}, Idade: {idade}, Altura: {altura:.2f}m")
 
 // 4. F-string com valores booleanos
 print(f"Status ativo: {ativo}")
