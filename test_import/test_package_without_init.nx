@@ -1,0 +1,6 @@
+// Test package without __init__.nx
+
+use test_no_init.simple_module
+
+print("Simple function: " + test_no_init.simple_module.simple_function())
+print("Simple variable: " + test_no_init.simple_module.simple_var)

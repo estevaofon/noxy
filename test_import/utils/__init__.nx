@@ -1,0 +1,10 @@
+// Package initialization file for utils
+// This file makes 'utils' a package
+
+// Define some package-level variables and functions
+global package_version: string = "1.0.0"
+global package_name: string = "utils"
+
+func get_package_info() -> string
+    return "Utils Package v" + package_version
+end

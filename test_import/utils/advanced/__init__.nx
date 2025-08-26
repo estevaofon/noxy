@@ -1,0 +1,8 @@
+// Advanced utilities package initialization
+// This is a nested package: utils.advanced
+
+global advanced_version: string = "2.0.0"
+
+func get_advanced_info() -> string
+    return "Advanced Utils v" + advanced_version
+end

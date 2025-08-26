@@ -1166,11 +1166,17 @@ class Parser:
         """Parse uma instrução use: use module [select symbol1, symbol2, ...] ou use module select *"""
         use_token = self.tokens[self.position - 1]  # Token 'use' já foi consumido
         
-        # Espera o nome do módulo
+        # Parse o nome do módulo (suporta pacotes aninhados: utils.math)
         if not self._check(TokenType.IDENTIFIER):
             self._error("Nome do módulo esperado após 'use'")
         
         module_name = self._advance().value
+        
+        # Suporte para pacotes aninhados (utils.math.advanced)
+        while self._match(TokenType.DOT):
+            if not self._check(TokenType.IDENTIFIER):
+                self._error("Nome do módulo esperado após '.'")
+            module_name += "." + self._advance().value
         
         # Verifica se há uma cláusula 'select'
         if self._match(TokenType.SELECT):
@@ -1297,9 +1303,15 @@ class Parser:
                 if field_name.type != TokenType.IDENTIFIER:
                     self._error_at_previous("Esperado nome do campo após '.'")
 
-                # Verificar se é uma chamada de função (module.function())
-                if self._check(TokenType.LPAREN) and isinstance(expr, IdentifierNode):
-                    # É uma chamada de função de módulo: module.function(args)
+                # Verificar se é uma chamada de função primeiro
+                if self._check(TokenType.LPAREN):
+                    # Construir nome da função baseado no tipo de expr
+                    if isinstance(expr, IdentifierNode):
+                        function_name = f"{expr.name}.{field_name.value}"
+                    else:
+                        function_name = field_name.value
+                    
+                    # É uma chamada de função: module.function(args) ou struct.method(args)
                     self._advance()  # Consumir LPAREN
                     args = []
                     if not self._check(TokenType.RPAREN):
@@ -1311,24 +1323,61 @@ class Parser:
                         self._error_at_current("Esperado ')' após argumentos da função")
                     
                     # Criar CallNode com nome composto
-                    function_name = f"{expr.name}.{field_name.value}"
                     call_node = CallNode(function_name, args)
                     call_node.line = field_name.line
                     call_node.column = field_name.column
                     expr = call_node
+                
+                # Se não é função, então é acesso a variável/propriedade
                 elif isinstance(expr, IdentifierNode):
-                    # Acesso direto a campo: pessoa.campo
-                    struct_access = StructAccessNode(expr.name, field_name.value)
-                    struct_access.line = field_name.line
-                    struct_access.column = field_name.column
-                    expr = struct_access
+                    # Verificar se é acesso simples (struct) ou composto (module)
+                    if '.' in expr.name:
+                        # Acesso de módulo/variável composto: utils.math.pi
+                        dotted_name = f"{expr.name}.{field_name.value}"
+                        temp_identifier = IdentifierNode(dotted_name)
+                        temp_identifier.line = field_name.line
+                        temp_identifier.column = field_name.column
+                        expr = temp_identifier
+                    else:
+                        # Verificar se é um namespace importado ou struct access
+                        dotted_name = f"{expr.name}.{field_name.value}"
+                        
+                        # Para diferenciar entre namespace e struct, usar heurística:
+                        # se nome do módulo é comum (utils, math, etc) ou já é composto, tratar como namespace
+                        if (expr.name in ['utils', 'math', 'advanced', 'algorithms'] or 
+                            '.' in expr.name):  # Já é um nome composto
+                            # Provavelmente um namespace/módulo
+                            temp_identifier = IdentifierNode(dotted_name)
+                            temp_identifier.line = field_name.line
+                            temp_identifier.column = field_name.column
+                            expr = temp_identifier
+                        else:
+                            # Provavelmente um struct regular
+                            struct_access = StructAccessNode(expr.name, field_name.value)
+                            struct_access.line = field_name.line
+                            struct_access.column = field_name.column
+                            expr = struct_access
                 elif isinstance(expr, StructAccessNode):
-                    # Acesso aninhado: pessoa.endereco.rua
-                    full_path = f"{expr.field_name}.{field_name.value}"
-                    struct_access = StructAccessNode(expr.struct_name, full_path)
-                    struct_access.line = field_name.line
-                    struct_access.column = field_name.column
-                    expr = struct_access
+                    # Decidir se é namespace ou struct aninhado baseado no struct_name
+                    if (expr.struct_name in ['utils', 'math', 'advanced', 'algorithms'] or
+                        hasattr(expr, 'dotted_name')):
+                        # É um namespace/módulo - criar IdentifierNode composto
+                        if hasattr(expr, 'dotted_name'):
+                            full_name = f"{expr.dotted_name}.{field_name.value}"
+                        else:
+                            full_name = f"{expr.struct_name}.{expr.field_name}.{field_name.value}"
+                        
+                        temp_identifier = IdentifierNode(full_name)
+                        temp_identifier.line = field_name.line
+                        temp_identifier.column = field_name.column
+                        expr = temp_identifier
+                    else:
+                        # É um struct aninhado regular - manter como StructAccessNode
+                        full_path = f"{expr.field_name}.{field_name.value}"
+                        struct_access = StructAccessNode(expr.struct_name, full_path)
+                        struct_access.line = field_name.line
+                        struct_access.column = field_name.column
+                        expr = struct_access
                 elif isinstance(expr, ArrayAccessNode):
                     # Acesso: pessoas[i].campo (armazenar caminho como string)
                     expr = StructAccessFromArrayNode(expr, field_name.value)
@@ -1954,9 +2003,9 @@ class LLVMCodeGenerator:
             if "allocation_array" not in self.module.globals:
                 self.allocation_array = ir.GlobalVariable(
                     self.module,
-                    ir.ArrayType(self.char_type.as_pointer(), 100),
-                    name="allocation_array"
-                )
+                ir.ArrayType(self.char_type.as_pointer(), 100), 
+                name="allocation_array"
+            )
                 self.allocation_array.linkage = 'internal'
                 self.allocation_array.initializer = ir.Constant(
                     ir.ArrayType(self.char_type.as_pointer(), 100),
@@ -1968,9 +2017,9 @@ class LLVMCodeGenerator:
             if "allocation_count" not in self.module.globals:
                 self.allocation_count = ir.GlobalVariable(
                     self.module,
-                    self.int_type,
-                    name="allocation_count"
-                )
+                self.int_type, 
+                name="allocation_count"
+            )
                 self.allocation_count.linkage = 'internal'
                 self.allocation_count.initializer = ir.Constant(self.int_type, 0)
             else:
@@ -1984,11 +2033,14 @@ class LLVMCodeGenerator:
         
         # Primeiro, gerar as variáveis globais importadas
         for symbol_name, symbol_info in self.imported_symbols.items():
-            if symbol_info['type'] == 'variable' and symbol_name in self.global_vars:
-                # Gerar a inicialização da variável global importada
-                var_node = symbol_info['node']
-                if var_node.value is not None:
-                    self._generate_statement(var_node)
+            if symbol_info['type'] == 'variable':
+                # Para variáveis, usar o nome simples para verificar
+                simple_name = symbol_name.split('.')[-1] if '.' in symbol_name else symbol_name
+                if simple_name in self.global_vars:
+                    # Gerar a inicialização da variável global importada
+                    var_node = symbol_info['node']
+                    if var_node.value is not None:
+                        self._generate_statement(var_node)
         
         # Em seguida, gerar as funções importadas
         for symbol_name, symbol_info in self.imported_symbols.items():
@@ -4268,8 +4320,28 @@ class LLVMCodeGenerator:
                     return self.builder.load(field_ptr)
 
         elif isinstance(node, IdentifierNode):
+            # Verificar se é um nome com ponto (acesso multi-nível como utils.math.pi)
+            if '.' in node.name and node.name in self.imported_symbols:
+                # É uma variável importada com nome completo
+                symbol_info = self.imported_symbols[node.name]
+                if symbol_info['type'] == 'variable':
+                    # Extrair o nome simples da variável
+                    simple_name = node.name.split('.')[-1]
+                    # Gerar declaração da variável importada se ainda não existir
+                    if simple_name not in self.global_vars:
+                        var_node = symbol_info['node']
+                        self._declare_global_variable(var_node)
+                    var = self.global_vars[simple_name]
+                    # Se é um array global, retornar ponteiro para o início
+                    if isinstance(var.type.pointee, ir.ArrayType):
+                        zero = ir.Constant(ir.IntType(32), 0)
+                        return self.builder.gep(var, [zero, zero], inbounds=True)
+                    # Senão, carregar o valor
+                    return self.builder.load(var, name=simple_name)
+                else:
+                    self._semantic_error(f"'{node.name}' foi importado mas não é uma variável", node)
             # Procurar variável primeiro localmente, depois globalmente
-            if node.name in self.local_vars:
+            elif node.name in self.local_vars:
                 var = self.local_vars[node.name]
                 # Se é um parâmetro de função que é array, retornar diretamente
                 if isinstance(var, ir.Argument) and isinstance(var.type, ir.PointerType):
@@ -4310,6 +4382,24 @@ class LLVMCodeGenerator:
                     return self.builder.load(var, name=node.name)
                 else:
                     self._semantic_error(f"'{node.name}' foi importado mas não é uma variável", node)
+            # Verificar se é um namespace (tem símbolos importados com este prefixo)
+            elif any(symbol_name.startswith(f"{node.name}.") for symbol_name in self.imported_symbols.keys()):
+                # É um namespace, mas não deveria ser resolvido isoladamente
+                # Isso indica um erro no parser - namespace deveria fazer parte de uma expressão maior
+                self._semantic_error(f"Namespace '{node.name}' não pode ser usado como variável. Use '{node.name}.simbolo' para acessar símbolos do namespace.", node)
+            # Se contém pontos, pode ser acesso a struct que não foi encontrado como import
+            elif '.' in node.name:
+                # Tentar como struct access: converter IdentifierNode de volta para StructAccessNode
+                parts = node.name.split('.')
+                if len(parts) == 2:
+                    # Simples: struct.field
+                    return self._generate_expression(StructAccessNode(parts[0], parts[1]))
+                elif len(parts) == 3:
+                    # Complexo: struct.field.subfield - criar StructAccessNode aninhado
+                    return self._generate_expression(StructAccessNode(parts[0], f"{parts[1]}.{parts[2]}"))
+                else:
+                    # Muito complexo - não suportado por enquanto
+                    self._semantic_error(f"Acesso muito complexo a struct '{node.name}' não suportado", node)
             else:
                 self._semantic_error(f"Variável '{node.name}' não foi declarada", node)
             
@@ -5362,11 +5452,36 @@ class ModuleManager:
             raise NoxyError(f"Erro ao carregar módulo '{module_name}': {str(e)}")
     
     def _find_module_file(self, module_name: str) -> Optional[str]:
-        """Encontra o arquivo do módulo nos diretórios de busca"""
+        """Encontra o arquivo do módulo nos diretórios de busca (suporta packages)"""
+        # Suporte para packages aninhados (ex: utils.math -> utils/math.nx)
+        module_parts = module_name.split('.')
+        
         for path in self.module_paths:
-            module_file = os.path.join(path, f"{module_name}.nx")
+            # Caso 1: Arquivo direto (module.nx)
+            if len(module_parts) == 1:
+                module_file = os.path.join(path, f"{module_name}.nx")
+                if os.path.exists(module_file):
+                    return module_file
+            
+            # Caso 2: Package aninhado (utils.math -> utils/math.nx)
+            package_path = os.path.join(path, *module_parts[:-1])
+            module_file = os.path.join(package_path, f"{module_parts[-1]}.nx")
             if os.path.exists(module_file):
                 return module_file
+            
+            # Caso 3: Package com __init__.nx (utils -> utils/__init__.nx)
+            if len(module_parts) == 1:
+                package_dir = os.path.join(path, module_name)
+                init_file = os.path.join(package_dir, "__init__.nx")
+                if os.path.exists(init_file):
+                    return init_file
+            
+            # Caso 4: Subpackage com __init__.nx (utils.math -> utils/math/__init__.nx)
+            package_path = os.path.join(path, *module_parts)
+            init_file = os.path.join(package_path, "__init__.nx")
+            if os.path.exists(init_file):
+                return init_file
+        
         return None
     
     def _extract_exported_symbols(self, ast: ProgramNode) -> Dict[str, Any]:
@@ -5438,7 +5553,7 @@ class NoxyCompiler:
                         
         except Exception as e:
             raise NoxyError(f"Erro ao processar import: {str(e)}")
-
+    
     def _perform_semantic_analysis(self, ast: ProgramNode):
         """Realiza análise semântica para detectar erros de tipo antes da geração de código"""
         self._process_imports(ast)  # Processar imports primeiro

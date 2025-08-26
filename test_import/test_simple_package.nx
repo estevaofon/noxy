@@ -1,0 +1,7 @@
+// Simple package test to debug the issue
+
+// Test 1: Import from simple package
+use utils
+
+// Test package-level imports
+print("Package info: " + utils.get_package_info())

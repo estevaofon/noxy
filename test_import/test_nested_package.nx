@@ -1,0 +1,13 @@
+// Test nested package access
+
+// Test 1: Import from simple package (works)
+use utils
+
+// Test 2: Import from nested module  
+use utils.math
+
+// Test simple access first
+print("Package info: " + utils.get_package_info())
+
+// Test nested module access
+print("5 squared: " + to_str(utils.math.square(5)))

@@ -1,0 +1,7 @@
+// Módulo simples sem __init__.nx no diretório
+
+func simple_function() -> string
+    return "Hello from simple module!"
+end
+
+global simple_var: string = "Simple variable"

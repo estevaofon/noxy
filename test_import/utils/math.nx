@@ -1,0 +1,21 @@
+// Math utilities module
+// Part of the utils package
+
+func square(x: int) -> int
+    return x * x
+end
+
+func cube(x: int) -> int
+    return x * x * x
+end
+
+func factorial(n: int) -> int
+    if n <= 1 then
+        return 1
+    else
+        return n * factorial(n - 1)
+    end
+end
+
+global pi: float = 3.14159
+global e: float = 2.71828

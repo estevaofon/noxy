@@ -1,0 +1,6 @@
+// Test three-level package access
+
+use utils.advanced.algorithms
+
+// Test deeply nested function access
+print("Fibonacci(10): " + to_str(utils.advanced.algorithms.fibonacci(10)))

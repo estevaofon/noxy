@@ -1,0 +1,30 @@
+// Advanced algorithms module
+// Part of utils.advanced package
+
+func binary_search(arr: int[], target: int, size: int) -> int
+    global left: int = 0
+    global right: int = size - 1
+    
+    while left <= right do
+        global mid: int = (left + right) / 2
+        if arr[mid] == target then
+            return mid
+        end
+        
+        if arr[mid] < target then
+            left = mid + 1
+        else
+            right = mid - 1
+        end
+    end
+    
+    return -1  // Not found
+end
+
+func fibonacci(n: int) -> int
+    if n <= 1 then
+        return n
+    else
+        return fibonacci(n - 1) + fibonacci(n - 2)
+    end
+end

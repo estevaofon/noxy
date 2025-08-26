@@ -1,0 +1,67 @@
+// Teste abrangente de f-strings em Noxy
+
+// Variáveis para testes
+global nome: string = "João"
+global idade: int = 25
+global altura: float = 1.75
+global ativo: bool = true
+global array_nums: int[3] = [10, 20, 30]
+
+// Teste 1: F-string básica com string
+print(f"Olá, {nome}!")
+
+// Teste 2: F-string com inteiro
+print(f"Idade: {idade} anos")
+
+// Teste 3: F-string com float
+print(f"Altura: {altura}m")
+
+// Teste 4: F-string com boolean
+print(f"Ativo: {ativo}")
+
+// Teste 5: F-string com múltiplas variáveis
+print(f"Nome: {nome}, Idade: {idade}, Altura: {altura:.2f}")
+
+// Teste 6: F-string com expressões aritméticas
+print(f"Em 10 anos terá {idade + 10} anos")
+print(f"Área aproximada: {altura * altura}")
+
+// Teste 7: F-string com array (se suportado)
+print(f"Primeiro número: {array_nums[0]}")
+
+// Teste 8: F-string aninhada em operações
+global saudacao: string = f"Olá, {nome}"
+print("Saudação completa: " + saudacao)
+
+// Teste 9: F-string com chamada de função
+func obter_sobrenome() -> string
+    return "Silva"
+end
+
+print(f"Nome completo: {nome} {obter_sobrenome()}")
+
+// Teste 10: F-string em contexto condicional
+if ativo then
+    print(f"Usuário {nome} está ativo!")
+else
+    print(f"Usuário {nome} está inativo!")
+end
+
+// Teste 11: F-string com estruturas mais complexas
+struct Pessoa
+    nome: string,
+    idade: int
+end
+
+global pessoa: Pessoa = Pessoa("Maria", 30)
+print(f"Pessoa: {pessoa.nome}, {pessoa.idade} anos")
+
+// Teste 12: F-string vazia e casos edge
+print(f"Texto sem variáveis")
+print(f"")
+
+// Teste 13: F-string com escape (se suportado)
+global valor: int = 42
+print(f"O valor é: {valor}")
+
+print("=== Testes de F-string concluídos ===")

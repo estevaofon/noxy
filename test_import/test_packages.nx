@@ -1,0 +1,34 @@
+// Test Python-like package system
+
+// Test 1: Import from simple package
+use utils
+
+// Test 2: Import from nested module in package  
+use utils.math
+
+// Test 3: Import from nested package
+use utils.advanced
+
+// Test 4: Import from module in nested package
+use utils.advanced.algorithms
+
+// Test 5: Import specific functions from nested module
+use utils.math select square, factorial
+
+// Test package-level imports
+print("Package info: " + utils.get_package_info())
+
+// Test nested module imports
+print("Math functions:")
+print("5 squared: " + to_str(utils.math.square(5)))
+print("Pi value: " + to_str(utils.math.pi))
+
+// Test nested package imports  
+print("Advanced info: " + utils.advanced.get_advanced_info())
+
+// Test deeply nested module imports
+print("Fibonacci(10): " + to_str(utils.advanced.algorithms.fibonacci(10)))
+
+// Test specific imports (should work without prefix)
+print("4 squared (specific import): " + to_str(square(4)))
+print("5! = " + to_str(factorial(5)))
