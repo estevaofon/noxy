@@ -5419,7 +5419,7 @@ def execute_ir(llvm_ir: str):
 class ModuleManager:
     def __init__(self):
         self.loaded_modules: Dict[str, Dict[str, Any]] = {}
-        self.module_paths: List[str] = [".", "noxy_examples"]  # Diretórios de busca
+        self.module_paths: List[str] = [".", "std", "noxy_examples"]  # Diretórios de busca
     
     def load_module(self, module_name: str) -> Dict[str, Any]:
         """Carrega um módulo e retorna suas funções e variáveis exportadas"""
@@ -5539,11 +5539,21 @@ class NoxyCompiler:
                     self.imported_symbols[symbol_name] = symbol_info
             elif use_node.selected_symbols:
                 # Import specific: use module select symbol1, symbol2
+                # Primeiro, coletar todos os símbolos solicitados e suas dependências
+                symbols_to_import = set()
                 for symbol_name in use_node.selected_symbols:
                     if symbol_name in module_symbols:
-                        self.imported_symbols[symbol_name] = module_symbols[symbol_name]
+                        # Não adicionar ainda - deixar _collect_dependencies fazer isso
+                        # Adicionar dependências recursivamente
+                        self._collect_dependencies(symbol_name, module_symbols, symbols_to_import)
                     else:
                         raise NoxyError(f"Símbolo '{symbol_name}' não encontrado no módulo '{use_node.module_name}'")
+                
+
+                
+                # Importar todos os símbolos necessários (explícitos + dependências)
+                for symbol_name in symbols_to_import:
+                    self.imported_symbols[symbol_name] = module_symbols[symbol_name]
             else:
                 # Import whole module: use module
                 # Criar namespace - apenas permitir acesso via module.symbol
@@ -5553,6 +5563,107 @@ class NoxyCompiler:
                         
         except Exception as e:
             raise NoxyError(f"Erro ao processar import: {str(e)}")
+
+    def _collect_dependencies(self, symbol_name: str, module_symbols: Dict[str, Any], collected: set):
+        """Coleta recursivamente todas as dependências de um símbolo"""
+        if symbol_name in collected or symbol_name not in module_symbols:
+            return
+        
+        collected.add(symbol_name)
+        symbol_info = module_symbols[symbol_name]
+        
+        if symbol_info['type'] == 'function':
+            # Analisar o corpo da função para encontrar dependências
+            func_node = symbol_info['node']
+            dependencies = self._analyze_function_dependencies(func_node)
+            
+            for dep in dependencies:
+                if dep in module_symbols and dep not in collected:
+                    self._collect_dependencies(dep, module_symbols, collected)
+        elif symbol_info['type'] == 'struct':
+            # Para structs, não há dependências internas para analisar
+            # mas ainda precisamos garantir que seja adicionado ao conjunto
+            pass
+    
+    def _analyze_function_dependencies(self, func_node) -> set:
+        """Analisa uma função para encontrar todas as funções e variáveis que ela usa"""
+        dependencies = set()
+        
+        def visit_node(node):
+            if node is None:
+                return
+            
+            if hasattr(node, '__class__'):
+                class_name = node.__class__.__name__
+                
+                if class_name == 'IdentifierNode':
+                    # Adicionar identificadores que podem ser dependências
+                    dependencies.add(node.name)
+                elif class_name == 'CallNode':
+                    # Adicionar chamadas de função
+                    dependencies.add(node.function_name)
+                    # Visitar argumentos
+                    for arg in node.arguments:
+                        visit_node(arg)
+                elif class_name == 'StructConstructorNode':
+                    # Adicionar construtor de struct
+                    dependencies.add(node.struct_name)
+                    # Visitar argumentos
+                    for arg in node.arguments:
+                        visit_node(arg)
+                elif class_name == 'AssignmentNode':
+                    # Visitar valor da atribuição
+                    if hasattr(node, 'value') and node.value:
+                        visit_node(node.value)
+                elif class_name == 'BinaryOpNode':
+                    # Visitar operandos
+                    visit_node(node.left)
+                    visit_node(node.right)
+                elif class_name == 'ArrayAccessNode':
+                    # Adicionar nome do array e visitar índice
+                    dependencies.add(node.array_name)
+                    visit_node(node.index)
+                elif class_name == 'IfNode':
+                    # Visitar condição e blocos
+                    visit_node(node.condition)
+                    for stmt in node.then_branch:
+                        visit_node(stmt)
+                    if hasattr(node, 'else_branch') and node.else_branch:
+                        for stmt in node.else_branch:
+                            visit_node(stmt)
+                elif class_name == 'WhileNode':
+                    # Visitar condição e corpo
+                    visit_node(node.condition)
+                    for stmt in node.body:
+                        visit_node(stmt)
+                elif class_name == 'ReturnNode':
+                    # Visitar valor de retorno
+                    if node.value:
+                        visit_node(node.value)
+                elif hasattr(node, '__dict__'):
+                    # Visitar todos os atributos do nó recursivamente
+                    for attr_name, attr_value in node.__dict__.items():
+                        if isinstance(attr_value, list):
+                            for item in attr_value:
+                                visit_node(item)
+                        elif attr_value is not None and attr_name not in ['line', 'column']:
+                            visit_node(attr_value)
+        
+        # Visitar o corpo da função
+        for stmt in func_node.body:
+            visit_node(stmt)
+        
+        # Filtrar built-ins e identificadores que claramente não são funções
+        filtered_dependencies = set()
+        builtin_functions = {'printf', 'malloc', 'free', 'strlen', 'strcpy', 'strcat', 'to_str', 'array_to_str', 'to_int', 'to_float', 'ord', 'length', 'print', 'to_str'}
+        
+        for dep in dependencies:
+            # Não incluir built-ins nem parâmetros da função
+            param_names = {param[0] for param in func_node.params} if hasattr(func_node, 'params') else set()
+            if dep not in builtin_functions and dep not in param_names:
+                filtered_dependencies.add(dep)
+        
+        return filtered_dependencies
     
     def _perform_semantic_analysis(self, ast: ProgramNode):
         """Realiza análise semântica para detectar erros de tipo antes da geração de código"""

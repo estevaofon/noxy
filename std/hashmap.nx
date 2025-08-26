@@ -1,0 +1,116 @@
+// Standard Library - Hashmap Implementation
+// Implements a hash table with string keys and string values using chaining for collision resolution
+
+struct Node
+    key: string,
+    value: string,
+    next: ref Node
+end
+
+struct OptionalString
+    has_value: bool,
+    value: string
+end
+
+func append(node: ref Node,  key: string, value: string)
+    if node.next == null then
+        node.next = ref Node(key, value, null)
+    else
+        append(node.next, key, value)
+    end
+end
+
+func is_key_in_node(node: ref Node, key: string) -> bool
+    while node != null do
+        if (node.key == key) then
+            return true
+        end
+        node = node.next
+    end
+    return false
+end
+
+func update_key(node: ref Node, key: string, value: string)
+    while node != null do
+        if (node.key == key) then
+            node.value = value
+            return
+        end
+        node = node.next
+    end
+end
+
+func get_key_in_node(node: ref Node, key: string) -> OptionalString
+    while node != null do
+        if (node.key == key) then
+            return OptionalString(true, node.value)
+        end
+        node = node.next
+    end
+    return OptionalString(false, "")
+end
+
+let capacity: int = 16
+
+let buckets: Node[16] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+
+// Função hash polonomial
+func hash(chave: string, tamanho_da_tabela: int) -> int
+    //Função hash para uso em tabelas hash.
+    //Retorna um índice entre 0 e tamanho_tabela-1.
+    let hash_value: int = 0
+    let string_size: int = strlen(chave)
+    let i: int = 0
+    while string_size - i > 0 do
+        hash_value = (hash_value * 31 + ord(chave[i])) % tamanho_da_tabela
+        i = i + 1
+    end
+    return hash_value
+end
+
+func push(key: string, value: string) -> void
+    let local_hash: int = hash(key, capacity)
+    print("Imprimindo a hash local")
+    print("hash:"+ to_str(local_hash))
+    if buckets[local_hash] == null then
+        print("Adicionando registro pela primeira vez nesta hash")
+        buckets[local_hash] = Node(key, value, null)
+        return
+    end
+    let node: Node = buckets[local_hash]
+    let key_present: bool = is_key_in_node(buckets[local_hash], key)
+    if key_present then
+        print("Registro já encontrado atualizando valor")
+        update_key(node, key, value)
+        return
+    end
+    print("Novo registro para essa hash")
+    append(node, key, value)
+end
+
+func get(key: string) -> OptionalString
+    let local_hash: int = hash(key, capacity)
+    if buckets[local_hash] != null then
+        let node: Node = buckets[local_hash]
+        let key_present: bool = is_key_in_node(buckets[local_hash], key)
+        if key_present then
+            return get_key_in_node(node, key)
+        end
+    end
+    return OptionalString(false, "")
+end
+
+// Função auxiliar para verificar se um OptionalString tem valor
+func has_value(opt: OptionalString) -> bool
+    return opt.has_value
+end
+
+// Função auxiliar para imprimir o resultado do get
+func print_get_result(key: string, result: OptionalString)
+    print("get(" + key + "): ")
+    if has_value(result) then
+        print(result.value)
+    else
+        print("null (chave não encontrada)")
+    end
+end

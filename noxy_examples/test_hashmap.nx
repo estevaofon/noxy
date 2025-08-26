@@ -1,4 +1,4 @@
-use hashmap_with_null select *
+use std.hashmap select OptionalString, push, get, has_value, print_get_result
 
 // Testando o hashmap com valores null
 push("celular", "android")
