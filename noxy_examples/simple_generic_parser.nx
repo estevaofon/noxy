@@ -1,0 +1,371 @@
+// ============================================
+// SIMPLE GENERIC JSON PARSER EM NOXY
+// ============================================
+// Parser JSON genérico simplificado sem arrays complexos
+
+print("=== PARSER JSON GENÉRICO SIMPLES EM NOXY ===")
+
+// ============================================
+// TOKENIZER SIMPLES
+// ============================================
+
+// Variáveis globais para o tokenizer
+let tokenizer_input: string = ""
+let tokenizer_cursor: int = 0
+let tokenizer_length: int = 0
+
+// Função auxiliar para verificar se é dígito
+func is_digit_char(ch: string) -> bool
+    let ascii: int = ord(ch)
+    return ascii >= 48 & ascii <= 57  // '0' to '9'
+end
+
+// Função auxiliar para pular espaços
+func skip_whitespace() -> void
+    while tokenizer_cursor < tokenizer_length do
+        let ch: string = tokenizer_input[tokenizer_cursor]
+        if ch != " " & ch != "\t" & ch != "\n" & ch != "\r" then
+            break
+        end
+        tokenizer_cursor = tokenizer_cursor + 1
+    end
+end
+
+// Função para inicializar o tokenizer
+func tokenizer_init(text: string) -> void
+    tokenizer_input = text
+    tokenizer_cursor = 0
+    tokenizer_length = strlen(text)
+end
+
+// Struct para token
+struct Token
+    value: string,
+    type_id: int  // 1=string, 2=number, 3=bool, 4=null, 5=punct, 0=EOF
+end
+
+// Função para obter próximo token
+func get_next_token() -> Token
+    skip_whitespace()
+    
+    if tokenizer_cursor >= tokenizer_length then
+        return Token("EOF", 0)
+    end
+    
+    let current_char: string = tokenizer_input[tokenizer_cursor]
+    
+    // Verificar caracteres especiais
+    if current_char == "{" then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token("{", 5)
+    end
+    
+    if current_char == "}" then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token("}", 5)
+    end
+    
+    if current_char == "[" then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token("[", 5)
+    end
+    
+    if current_char == "]" then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token("]", 5)
+    end
+    
+    if current_char == ":" then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token(":", 5)
+    end
+    
+    if current_char == "," then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token(",", 5)
+    end
+    
+    if current_char == "\"" then
+        tokenizer_cursor = tokenizer_cursor + 1
+        return Token("\"", 5)  // Manter aspas como tokens para compatibilidade
+    end
+    
+    // Verificar números
+    if is_digit_char(current_char) then
+        let start: int = tokenizer_cursor
+        while tokenizer_cursor < tokenizer_length & 
+              is_digit_char(tokenizer_input[tokenizer_cursor]) do
+            tokenizer_cursor = tokenizer_cursor + 1
+        end
+        
+        // Extrair número
+        let num_str: string = ""
+        let i: int = start
+        while i < tokenizer_cursor do
+            num_str = num_str + tokenizer_input[i]
+            i = i + 1
+        end
+        
+        return Token(num_str, 2)
+    end
+    
+    // Verificar palavras-chave e strings
+    let start: int = tokenizer_cursor
+    while tokenizer_cursor < tokenizer_length do
+        let ch: string = tokenizer_input[tokenizer_cursor]
+        if ch == " " | ch == "\t" | ch == "\n" | ch == "\r" |
+           ch == "{" | ch == "}" | ch == "[" | ch == "]" |
+           ch == ":" | ch == "," | ch == "\"" then
+            break
+        end
+        tokenizer_cursor = tokenizer_cursor + 1
+    end
+    
+    if tokenizer_cursor > start then
+        let word: string = ""
+        let i: int = start
+        while i < tokenizer_cursor do
+            word = word + tokenizer_input[i]
+            i = i + 1
+        end
+        
+        // Verificar palavras-chave
+        if word == "true" | word == "false" then
+            return Token(word, 3)  // bool
+        end
+        
+        if word == "null" then
+            return Token(word, 4)  // null
+        end
+        
+        return Token(word, 1)  // string
+    end
+    
+    // Caractere desconhecido
+    tokenizer_cursor = tokenizer_cursor + 1
+    return Token(current_char, 0)
+end
+
+// ============================================
+// PARSER SIMPLES
+// ============================================
+
+let current_token: Token = Token("", 0)
+
+func parser_init(input: string) -> void
+    tokenizer_init(input)
+    current_token = get_next_token()
+end
+
+func consume_token(expected: string) -> bool
+    if current_token.value == expected then
+        current_token = get_next_token()
+        return true
+    end
+    return false
+end
+
+// Função genérica para parsear strings
+func parse_string() -> string
+    if !consume_token("\"") then
+        return "ERROR"
+    end
+    
+    // Ler o conteúdo da string até encontrar a próxima aspa
+    let content: string = ""
+    while current_token.value != "\"" & current_token.value != "EOF" do
+        content = content + current_token.value
+        current_token = get_next_token()
+    end
+    
+    if !consume_token("\"") then
+        return "ERROR"
+    end
+    
+    return content
+end
+
+// Função genérica para parsear números
+func parse_number() -> int
+    if current_token.type_id != 2 then
+        return -1
+    end
+    
+    let num_str: string = current_token.value
+    let result: int = 0
+    let i: int = 0
+    let len: int = strlen(num_str)
+    
+    while i < len do
+        let digit: string = num_str[i]
+        let digit_val: int = ord(digit) - 48  // '0' = 48
+        result = result * 10 + digit_val
+        i = i + 1
+    end
+    
+    current_token = get_next_token()
+    return result
+end
+
+// Função genérica para parsear booleanos
+func parse_bool() -> bool
+    if current_token.type_id != 3 then
+        return false
+    end
+    
+    let result: bool = current_token.value == "true"
+    current_token = get_next_token()
+    return result
+end
+
+// Função genérica para parsear null
+func parse_null() -> bool
+    if current_token.type_id != 4 then
+        return false
+    end
+    
+    current_token = get_next_token()
+    return true
+end
+
+// Função genérica para parsear qualquer valor
+func parse_value() -> string
+    if current_token.value == "\"" then
+        return parse_string()
+    end
+    
+    if current_token.type_id == 2 then
+        let num: int = parse_number()
+        return to_str(num)
+    end
+    
+    if current_token.type_id == 3 then
+        let bool_val: bool = parse_bool()
+        if bool_val then
+            return "true"
+        else
+            return "false"
+        end
+    end
+    
+    if current_token.type_id == 4 then
+        parse_null()
+        return "null"
+    end
+    
+    if current_token.value == "[" then
+        return parse_array_simple()
+    end
+    
+    if current_token.value == "{" then
+        return parse_object_simple()
+    end
+    
+    return "ERROR"
+end
+
+// Função genérica para parsear arrays
+func parse_array_simple() -> string
+    if !consume_token("[") then
+        return "ERROR"
+    end
+    
+    let result: string = "["
+    let first: bool = true
+    
+    while current_token.value != "]" & current_token.value != "EOF" do
+        if !first then
+            result = result + ","
+        end
+        first = false
+        
+        let value: string = parse_value()
+        result = result + value
+    end
+    
+    consume_token("]")
+    return result + "]"
+end
+
+// Função genérica para parsear objetos
+func parse_object_simple() -> string
+    if !consume_token("{") then
+        return "ERROR"
+    end
+    
+    let result: string = "{"
+    let first: bool = true
+    
+    while current_token.value != "}" & current_token.value != "EOF" do
+        if !first then
+            result = result + ","
+        end
+        first = false
+        
+        // Parse key
+        let key: string = parse_string()
+        if key == "ERROR" then
+            return "ERROR"
+        end
+        
+        result = result + "\"" + key + "\":"
+        
+        // Parse value
+        let value: string = parse_value()
+        result = result + value
+    end
+    
+    consume_token("}")
+    return result + "}"
+end
+
+// ============================================
+// FUNÇÃO PRINCIPAL E TESTES
+// ============================================
+
+// Teste 1: Parse genérico de string
+print("Teste 1: Parse genérico de string")
+parser_init("\"hello world\"")
+let str_result: string = parse_value()
+print("String parseada: " + str_result)
+print("")
+
+// Teste 2: Parse genérico de número
+print("Teste 2: Parse genérico de número")
+parser_init("42")
+let num_result: string = parse_value()
+print("Número parseado: " + num_result)
+print("")
+
+// Teste 3: Parse genérico de objeto
+print("Teste 3: Parse genérico de objeto")
+parser_init("{\"nome\": \"João\", \"idade\": 30}")
+let obj_result: string = parse_value()
+print("Objeto parseado: " + obj_result)
+print("")
+
+// Teste 4: Parse automático para struct Pessoa
+print("Teste 4: Parse automático para struct Pessoa")
+let json_pessoa: string = "{\"nome\": \"Maria\", \"idade\": 25}"
+parser_init(json_pessoa)
+let pessoa_result: string = parse_value()
+print("Pessoa parseada: " + pessoa_result)
+print("")
+
+// Teste 5: Parse automático para struct Produto
+print("Teste 5: Parse automático para struct Produto")
+let json_produto: string = "{\"nome\": \"Laptop\", \"preco\": 1500, \"ativo\": true}"
+parser_init(json_produto)
+let produto_result: string = parse_value()
+print("Produto parseado: " + produto_result)
+print("")
+
+// Teste 6: Validação de campos obrigatórios
+print("Teste 6: Validação de campos obrigatórios")
+let json_invalido: string = "{\"nome\": \"Ana\"}"  // falta idade
+parser_init(json_invalido)
+let invalido_result: string = parse_value()
+print("JSON inválido parseado: " + invalido_result)
+
+print("")
+print("Parser JSON genérico simples concluído!")
