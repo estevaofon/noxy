@@ -175,10 +175,10 @@ func parse_string() -> string
         return "ERROR"
     end
     
-    // Ler o conteúdo da string até encontrar a próxima aspa
-    let content: string = ""
-    while current_token.value != "\"" & current_token.value != "EOF" do
-        content = content + current_token.value
+    let content: string = current_token.value
+    if current_token.type_id != 1 then
+        content = "empty"
+    else
         current_token = get_next_token()
     end
     

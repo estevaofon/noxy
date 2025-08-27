@@ -1,29 +1,152 @@
-// Teste da biblioteca JSON simplificada para pessoa
+// ============================================
+// TESTE JSON PESSOA - USANDO BIBLIOTECA SIMPLE_JSON_PARSER
+// ============================================
 
-use std.json_simple select *
+// Importar todas as funções da biblioteca simple_json_parser
+use simple_json_parser select *
+
+// ============================================
+// ESTRUTURAS ESPECÍFICAS PARA PESSOA
+// ============================================
+
+struct Pessoa
+    nome: string,
+    idade: int
+end
+
+struct PessoaResult
+    success: bool,
+    pessoa: Pessoa,
+    error: string
+end
+
+// ============================================
+// PARSER ESPECÍFICO PARA PESSOA USANDO A BIBLIOTECA
+// ============================================
+
+func parse_pessoa_json(input: string) -> PessoaResult
+    parser_init(input)
+    
+    let pessoa: Pessoa = Pessoa("", 0)
+    let found_nome: bool = false
+    let found_idade: bool = false
+    
+    // Esperar '{'
+    if !consume_token("{") then
+        return PessoaResult(false, pessoa, "Esperava '{' no início")
+    end
+    
+    // Parse dos campos
+    while current_token.value != "}" & current_token.value != "EOF" do
+        // Parse da chave (string)
+        let key: string = parse_string()
+        if key == "ERROR" then
+            return PessoaResult(false, pessoa, "Erro ao ler chave")
+        end
+        
+        // Esperar ':'
+        if !consume_token(":") then
+            return PessoaResult(false, pessoa, "Esperava ':' após chave")
+        end
+        
+        // Parse do valor baseado na chave
+        if key == "nome" then
+            pessoa.nome = parse_string()
+            if pessoa.nome == "ERROR" then
+                return PessoaResult(false, pessoa, "Erro ao ler nome")
+            end
+            found_nome = true
+        end
+        
+        if key == "idade" then
+            pessoa.idade = parse_number()
+            if pessoa.idade == -1 then
+                return PessoaResult(false, pessoa, "Erro ao ler idade")
+            end
+            found_idade = true
+        end
+        
+        // Verificar se há vírgula
+        if current_token.value == "," then
+            consume_token(",")
+        end
+    end
+    
+    // Esperar '}'
+    if !consume_token("}") then
+        return PessoaResult(false, pessoa, "Esperava '}' no final")
+    end
+    
+    // Verificar se todos os campos foram encontrados
+    if !found_nome | !found_idade then
+        return PessoaResult(false, pessoa, "Campos obrigatórios não encontrados")
+    end
+    
+    return PessoaResult(true, pessoa, "")
+end
+
+// Função pessoa_to_json removida - serialização será inline
+
+// ============================================
+// TESTES
+// ============================================
 
 print("=== TESTE JSON PESSOA ===")
 
-// Teste com {"nome": "Maria", "idade": 30}
-print(">>> Teste: Parse do JSON")
-let json_input: string = "{\"nome\": \"Maria\", \"idade\": 30}"
-print("JSON de entrada: " + json_input)
+// Teste 1: JSON válido
+print(">>> Teste 1: JSON válido")
+let json_test1: string = "{\"nome\": \"Maria\", \"idade\": 30}"
+print("JSON de entrada: " + json_test1)
 
-let resultado: PessoaResult = parse_pessoa_jsrenc, essason_input)
+let resultado1: PessoaResult = parse_pessoa_json(json_test1)
 
-if resultado.success then
+if resultado1.success then
     print("✓ Parse bem-sucedido!")
     print("✓ Dados extraídos:")
-    print("  - Nome: " + resultado.pessoa.nome)
-    print("  - Idade: " + to_str(resultado.pessoa.idade))
+    print("  - Nome: " + resultado1.pessoa.nome)
+    print("  - Idade: " + to_str(resultado1.pessoa.idade))
     
     print("")
     print(">>> Teste: Serialização")
-    let json_output: string = pessoa_to_json(ref resultado.pessoa)
-    print("JSON serializado: " + json_output)
-    
+    print("JSON serializado: {\"nome\": \"" + resultado1.pessoa.nome + "\", \"idade\": " + to_str(resultado1.pessoa.idade) + "}")
 else
-    print("✗ Erro no parse: " + resultado.error)
+    print("✗ Erro no parse: " + resultado1.error)
+end
+
+print("")
+
+// Teste 2: JSON com ordem diferente
+print(">>> Teste 2: Ordem diferente dos campos")
+let json_test2: string = "{\"idade\": 25, \"nome\": \"João\"}"
+print("JSON de entrada: " + json_test2)
+
+let resultado2: PessoaResult = parse_pessoa_json(json_test2)
+
+if resultado2.success then
+    print("✓ Parse bem-sucedido!")
+    print("✓ Dados extraídos:")
+    print("  - Nome: " + resultado2.pessoa.nome)
+    print("  - Idade: " + to_str(resultado2.pessoa.idade))
+else
+    print("✗ Erro no parse: " + resultado2.error)
+end
+
+print("")
+
+// Teste 3: JSON inválido
+print(">>> Teste 3: JSON inválido")
+let json_test3: string = "{\"nome\": \"Ana\"}"  // falta idade
+print("JSON de entrada: " + json_test3)
+
+let resultado3: PessoaResult = parse_pessoa_json(json_test3)
+
+if resultado3.success then
+    print("✓ Parse bem-sucedido!")
+    print("✓ Dados extraídos:")
+    print("  - Nome: " + resultado3.pessoa.nome)
+    print("  - Idade: " + to_str(resultado3.pessoa.idade))
+else
+    print("✗ Erro esperado no parse: " + resultado3.error)
 end
 
 print("")
