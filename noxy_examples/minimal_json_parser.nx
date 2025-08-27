@@ -1,0 +1,238 @@
+// ============================================
+// MINIMAL JSON PARSER EM NOXY
+// ============================================
+// Versão muito simplificada para demonstrar conceitos básicos
+
+print("=== PARSER JSON MINIMAL EM NOXY ===")
+
+// Struct simples para token
+struct Token
+    value: string,
+    is_string: bool,
+    is_number: bool,
+    is_bool: bool,
+    is_null: bool,
+    is_punct: bool
+end
+
+// Função auxiliar para verificar se é dígito
+func is_digit(ch: string) -> bool
+    let ascii: int = ord(ch)
+    return ascii >= 48 & ascii <= 57
+end
+
+// Função auxiliar para verificar se é espaço
+func is_space(ch: string) -> bool
+    return ch == " " | ch == "\t" | ch == "\n" | ch == "\r"
+end
+
+// Função para extrair próximo token de uma string JSON
+func extract_token(json: string, start_pos: int) -> Token
+    let len: int = strlen(json)
+    let pos: int = start_pos
+    
+    // Pular espaços em branco
+    while pos < len & is_space(json[pos]) do
+        pos = pos + 1
+    end
+    
+    if pos >= len then
+        return Token("EOF", false, false, false, false, false)
+    end
+    
+    let ch: string = json[pos]
+    
+    // Verificar caracteres especiais
+    if ch == "{" | ch == "}" | ch == "[" | ch == "]" | ch == ":" | ch == "," | ch == "\"" then
+        return Token(ch, false, false, false, false, true)
+    end
+    
+    // Verificar números
+    if is_digit(ch) then
+        let num_start: int = pos
+        while pos < len & is_digit(json[pos]) do
+            pos = pos + 1
+        end
+        // Extrair substring do número
+        let num_str: string = ""
+        let i: int = num_start
+        while i < pos do
+            num_str = num_str + json[i]
+            i = i + 1
+        end
+        return Token(num_str, false, true, false, false, false)
+    end
+    
+    // Verificar palavras (true, false, null, strings)
+    let word_start: int = pos
+    while pos < len & !is_space(json[pos]) & 
+          json[pos] != "{" & json[pos] != "}" & 
+          json[pos] != "[" & json[pos] != "]" &
+          json[pos] != ":" & json[pos] != "," & json[pos] != "\"" do
+        pos = pos + 1
+    end
+    
+    if pos > word_start then
+        let word: string = ""
+        let i: int = word_start
+        while i < pos do
+            word = word + json[i]
+            i = i + 1
+        end
+        
+        if word == "true" | word == "false" then
+            return Token(word, false, false, true, false, false)
+        end
+        
+        if word == "null" then
+            return Token(word, false, false, false, true, false)
+        end
+        
+        return Token(word, true, false, false, false, false)
+    end
+    
+    return Token("UNKNOWN", false, false, false, false, false)
+end
+
+// Função para imprimir resultado do parsing
+func print_parse_result(token: Token) -> void
+    print("Token: ")
+    print(token.value)
+    
+    if token.is_string then
+        print(" (STRING)")
+    end
+    
+    if token.is_number then
+        print(" (NUMBER)")
+    end
+    
+    if token.is_bool then
+        print(" (BOOLEAN)")
+    end
+    
+    if token.is_null then
+        print(" (NULL)")
+    end
+    
+    if token.is_punct then
+        print(" (PUNCTUATION)")
+    end
+    
+    print("")
+end
+
+// Função simples para parser valores JSON básicos
+func parse_simple_json(json: string) -> void
+    print("Parsing JSON: ")
+    print(json)
+    print("")
+    
+    let len: int = strlen(json)
+    let pos: int = 0
+    
+    while pos < len do
+        let token: Token = extract_token(json, pos)
+        
+        if token.value == "EOF" then
+            break
+        end
+        
+        print_parse_result(token)
+        
+        // Avançar posição baseado no tamanho do token
+        pos = pos + strlen(token.value)
+        
+        // Pular espaços adicionais
+        while pos < len & is_space(json[pos]) do
+            pos = pos + 1
+        end
+        
+        // Para pontuação, avançar apenas 1 caractere
+        if token.is_punct then
+            pos = pos - strlen(token.value) + 1
+        end
+    end
+    
+    print("Parse concluído!")
+    print("")
+end
+
+// ============================================
+// TESTES
+// ============================================
+
+// Teste 1: String simples
+print("=== TESTE 1: STRING ===")
+parse_simple_json("\"hello\"")
+
+// Teste 2: Número
+print("=== TESTE 2: NÚMERO ===")
+parse_simple_json("42")
+
+// Teste 3: Boolean
+print("=== TESTE 3: BOOLEAN ===")
+parse_simple_json("true")
+
+// Teste 4: Null
+print("=== TESTE 4: NULL ===")
+parse_simple_json("null")
+
+// Teste 5: Array simples (apenas tokenização)
+print("=== TESTE 5: ARRAY ===")
+parse_simple_json("[1, 2, 3]")
+
+// Teste 6: Objeto simples (apenas tokenização)
+print("=== TESTE 6: OBJETO ===")
+parse_simple_json("{\"name\": \"John\"}")
+
+// Teste 7: Objeto aninhado
+print("=== TESTE 7: OBJETO ANINHADO ===")
+parse_simple_json("{\"name\": \"John\", \"age\": 30, \"address\": {\"street\": \"123 Main St\", \"city\": \"Anytown\"}}")
+
+// ============================================
+// PARSER DE ESTRUTURA BÁSICA
+// ============================================
+
+// Função para detectar tipo de JSON
+func detect_json_type(json: string) -> void
+    let first_token: Token = extract_token(json, 0)
+    
+    print("Tipo detectado: ")
+    
+    if first_token.value == "{" then
+        print("OBJETO JSON")
+    end
+    
+    if first_token.value == "[" then
+        print("ARRAY JSON")
+    end
+    
+    if first_token.is_string then
+        print("STRING JSON")
+    end
+    
+    if first_token.is_number then
+        print("NÚMERO JSON")
+    end
+    
+    if first_token.is_bool then
+        print("BOOLEAN JSON")
+    end
+    
+    if first_token.is_null then
+        print("NULL JSON")
+    end
+    
+    print("")
+end
+
+print("=== DETECÇÃO DE TIPOS ===")
+detect_json_type("{\"key\": \"value\"}")
+detect_json_type("[1, 2, 3]")
+detect_json_type("\"string\"")
+detect_json_type("123")
+detect_json_type("true")
+detect_json_type("null")
+
+print("Parser JSON minimal concluído!")

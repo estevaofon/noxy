@@ -1,0 +1,402 @@
+// ============================================
+// SIMPLE JSON PARSER EM NOXY
+// ============================================
+// Versão simplificada para evitar problemas de compilação
+
+print("=== PARSER JSON SIMPLES EM NOXY ===")
+
+// ============================================
+// TOKENIZER SIMPLES
+// ============================================
+
+struct SimpleToken
+    value: string,
+    token_type: int  // 1=string, 2=number, 3=bool, 4=null, 5=punct
+end
+
+struct SimpleTokenizer
+    input: string,
+    cursor: int,
+    length: int
+end
+
+func create_simple_tokenizer() -> SimpleTokenizer
+    return SimpleTokenizer("", 0, 0)
+end
+
+func tokenizer_init(tokenizer: ref SimpleTokenizer, text: string) -> void
+    tokenizer.input = text
+    tokenizer.cursor = 0
+    tokenizer.length = strlen(text)
+end
+
+// Função auxiliar para pular espaços
+func skip_whitespace(tokenizer: ref SimpleTokenizer) -> void
+    while tokenizer.cursor < tokenizer.length do
+        let ch: string = tokenizer.input[tokenizer.cursor]
+        if ch != " " & ch != "\t" & ch != "\n" & ch != "\r" then
+            break
+        end
+        tokenizer.cursor = tokenizer.cursor + 1
+    end
+end
+
+// Função auxiliar para verificar se é dígito
+func is_digit_char(ch: string) -> bool
+    let ascii: int = ord(ch)
+    return ascii >= 48 & ascii <= 57  // '0' to '9'
+end
+
+// Função para obter próximo token
+func get_next_token(tokenizer: ref SimpleTokenizer) -> SimpleToken
+    skip_whitespace(tokenizer)
+    
+    if tokenizer.cursor >= tokenizer.length then
+        return SimpleToken("EOF", 0)
+    end
+    
+    let current_char: string = tokenizer.input[tokenizer.cursor]
+    
+    // Verificar caracteres especiais
+    if current_char == "{" then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken("{", 5)
+    end
+    
+    if current_char == "}" then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken("}", 5)
+    end
+    
+    if current_char == "[" then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken("[", 5)
+    end
+    
+    if current_char == "]" then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken("]", 5)
+    end
+    
+    if current_char == ":" then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken(":", 5)
+    end
+    
+    if current_char == "," then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken(",", 5)
+    end
+    
+    if current_char == "\"" then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return SimpleToken("\"", 5)
+    end
+    
+    // Verificar números
+    if is_digit_char(current_char) then
+        let start: int = tokenizer.cursor
+        while tokenizer.cursor < tokenizer.length & 
+              is_digit_char(tokenizer.input[tokenizer.cursor]) do
+            tokenizer.cursor = tokenizer.cursor + 1
+        end
+        
+        // Extrair número (simplificado)
+        let num_str: string = ""
+        let i: int = start
+        while i < tokenizer.cursor do
+            num_str = num_str + tokenizer.input[i]
+            i = i + 1
+        end
+        
+        return SimpleToken(num_str, 2)
+    end
+    
+    // Verificar palavras-chave e strings
+    let start: int = tokenizer.cursor
+    while tokenizer.cursor < tokenizer.length do
+        let ch: string = tokenizer.input[tokenizer.cursor]
+        if ch == " " | ch == "\t" | ch == "\n" | ch == "\r" |
+           ch == "{" | ch == "}" | ch == "[" | ch == "]" |
+           ch == ":" | ch == "," | ch == "\"" then
+            break
+        end
+        tokenizer.cursor = tokenizer.cursor + 1
+    end
+    
+    if tokenizer.cursor > start then
+        let word: string = ""
+        let i: int = start
+        while i < tokenizer.cursor do
+            word = word + tokenizer.input[i]
+            i = i + 1
+        end
+        
+        // Verificar palavras-chave
+        if word == "true" | word == "false" then
+            return SimpleToken(word, 3)  // bool
+        end
+        
+        if word == "null" then
+            return SimpleToken(word, 4)  // null
+        end
+        
+        return SimpleToken(word, 1)  // string
+    end
+    
+    // Caractere desconhecido
+    tokenizer.cursor = tokenizer.cursor + 1
+    return SimpleToken(current_char, 0)
+end
+
+// ============================================
+// PARSER SIMPLES
+// ============================================
+
+struct SimpleParser
+    tokenizer: SimpleTokenizer,
+    current_token: SimpleToken
+end
+
+func create_simple_parser() -> SimpleParser
+    let tokenizer: SimpleTokenizer = create_simple_tokenizer()
+    let empty_token: SimpleToken = SimpleToken("", 0)
+    return SimpleParser(tokenizer, empty_token)
+end
+
+func parser_init(parser: ref SimpleParser, input: string) -> void
+    tokenizer_init(parser.tokenizer, input)
+    parser.current_token = get_next_token(parser.tokenizer)
+end
+
+func consume_token(parser: ref SimpleParser, expected: string) -> bool
+    if parser.current_token.value == expected then
+        parser.current_token = get_next_token(parser.tokenizer)
+        return true
+    end
+    print("Erro: esperava ")
+    print(expected)
+    print(" mas encontrou ")
+    print(parser.current_token.value)
+    return false
+end
+
+// Funções de parsing simplificadas
+func parse_string(parser: ref SimpleParser) -> string
+    if !consume_token(parser, "\"") then
+        return "ERROR"
+    end
+    
+    let content: string = parser.current_token.value
+    if parser.current_token.token_type != 1 then
+        content = "empty"
+    else
+        parser.current_token = get_next_token(parser.tokenizer)
+    end
+    
+    if !consume_token(parser, "\"") then
+        return "ERROR"
+    end
+    
+    return content
+end
+
+func parse_number(parser: ref SimpleParser) -> int
+    if parser.current_token.token_type != 2 then
+        print("Erro: esperava número")
+        return -1
+    end
+    
+    // Converter string para int
+    let num_str: string = parser.current_token.value
+    let result: int = 0
+    let i: int = 0
+    let len: int = strlen(num_str)
+    
+    while i < len do
+        let digit: string = num_str[i]
+        let digit_val: int = ord(digit) - 48  // '0' = 48
+        result = result * 10 + digit_val
+        i = i + 1
+    end
+    
+    parser.current_token = get_next_token(parser.tokenizer)
+    return result
+end
+
+func parse_bool(parser: ref SimpleParser) -> bool
+    if parser.current_token.token_type != 3 then
+        print("Erro: esperava boolean")
+        return false
+    end
+    
+    let result: bool = parser.current_token.value == "true"
+    parser.current_token = get_next_token(parser.tokenizer)
+    return result
+end
+
+func parse_null(parser: ref SimpleParser) -> bool
+    if parser.current_token.token_type != 4 then
+        print("Erro: esperava null")
+        return false
+    end
+    
+    parser.current_token = get_next_token(parser.tokenizer)
+    return true
+end
+
+func parse_array(parser: ref SimpleParser) -> int
+    if !consume_token(parser, "[") then
+        return -1
+    end
+    
+    let count: int = 0
+    
+    while parser.current_token.value != "]" & parser.current_token.value != "EOF" do
+        // Recursão simplificada - apenas conta elementos
+        let parsed: bool = parse_value(parser)
+        if parsed then
+            count = count + 1
+        end
+        
+        if parser.current_token.value == "," then
+            consume_token(parser, ",")
+        end
+    end
+    
+    consume_token(parser, "]")
+    return count
+end
+
+func parse_object(parser: ref SimpleParser) -> int
+    if !consume_token(parser, "{") then
+        return -1
+    end
+    
+    let pairs: int = 0
+    
+    while parser.current_token.value != "}" & parser.current_token.value != "EOF" do
+        // Parse key
+        let key: string = parse_string(parser)
+        if key == "ERROR" then
+            return -1
+        end
+        
+        if !consume_token(parser, ":") then
+            return -1
+        end
+        
+        // Parse value
+        let parsed: bool = parse_value(parser)
+        if parsed then
+            pairs = pairs + 1
+        end
+        
+        if parser.current_token.value == "," then
+            consume_token(parser, ",")
+        end
+    end
+    
+    consume_token(parser, "}")
+    return pairs
+end
+
+func parse_value(parser: ref SimpleParser) -> bool
+    if parser.current_token.value == "\"" then
+        let str_val: string = parse_string(parser)
+        print("Parsed string: ")
+        print(str_val)
+        return true
+    end
+    
+    if parser.current_token.token_type == 2 then
+        let num_val: int = parse_number(parser)
+        print("Parsed number: ")
+        print(to_str(num_val))
+        return true
+    end
+    
+    if parser.current_token.token_type == 3 then
+        let bool_val: bool = parse_bool(parser)
+        print("Parsed bool: ")
+        if bool_val then
+            print("true")
+        else
+            print("false")
+        end
+        return true
+    end
+    
+    if parser.current_token.token_type == 4 then
+        let null_parsed: bool = parse_null(parser)
+        print("Parsed null")
+        return null_parsed
+    end
+    
+    if parser.current_token.value == "[" then
+        let array_size: int = parse_array(parser)
+        print("Parsed array with ")
+        print(to_str(array_size))
+        print(" elements")
+        return array_size >= 0
+    end
+    
+    if parser.current_token.value == "{" then
+        let object_pairs: int = parse_object(parser)
+        print("Parsed object with ")
+        print(to_str(object_pairs))
+        print(" pairs")
+        return object_pairs >= 0
+    end
+    
+    print("Erro: valor JSON inválido")
+    return false
+end
+
+// ============================================
+// FUNÇÃO PRINCIPAL E TESTES
+// ============================================
+
+// Teste 1: String simples
+print("Teste 1: String simples")
+let parser1: SimpleParser = create_simple_parser()
+parser_init(parser1, "\"hello\"")
+parse_value(parser1)
+print("")
+
+// Teste 2: Número
+print("Teste 2: Número")
+let parser2: SimpleParser = create_simple_parser()
+parser_init(parser2, "42")
+parse_value(parser2)
+print("")
+
+// Teste 3: Boolean
+print("Teste 3: Boolean")
+let parser3: SimpleParser = create_simple_parser()
+parser_init(parser3, "true")
+parse_value(parser3)
+print("")
+
+// Teste 4: Null
+print("Teste 4: Null")
+let parser4: SimpleParser = create_simple_parser()
+parser_init(parser4, "null")
+parse_value(parser4)
+print("")
+
+// Teste 5: Array simples
+print("Teste 5: Array simples")
+let parser5: SimpleParser = create_simple_parser()
+parser_init(parser5, "[1, 2, 3]")
+parse_value(parser5)
+print("")
+
+// Teste 6: Objeto simples
+print("Teste 6: Objeto simples")
+let parser6: SimpleParser = create_simple_parser()
+parser_init(parser6, "{\"nome\": \"João\", \"idade\": 30}")
+parse_value(parser6)
+print("")
+
+print("Parser JSON simples concluído!")

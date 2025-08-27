@@ -1,0 +1,30 @@
+// Teste da biblioteca JSON simplificada para pessoa
+
+use std.json_simple select *
+
+print("=== TESTE JSON PESSOA ===")
+
+// Teste com {"nome": "Maria", "idade": 30}
+print(">>> Teste: Parse do JSON")
+let json_input: string = "{\"nome\": \"Maria\", \"idade\": 30}"
+print("JSON de entrada: " + json_input)
+
+let resultado: PessoaResult = parse_pessoa_jsrenc, essason_input)
+
+if resultado.success then
+    print("✓ Parse bem-sucedido!")
+    print("✓ Dados extraídos:")
+    print("  - Nome: " + resultado.pessoa.nome)
+    print("  - Idade: " + to_str(resultado.pessoa.idade))
+    
+    print("")
+    print(">>> Teste: Serialização")
+    let json_output: string = pessoa_to_json(ref resultado.pessoa)
+    print("JSON serializado: " + json_output)
+    
+else
+    print("✗ Erro no parse: " + resultado.error)
+end
+
+print("")
+print("=== TESTE CONCLUÍDO ===") 

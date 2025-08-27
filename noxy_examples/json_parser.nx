@@ -1,0 +1,586 @@
+// ============================================
+// JSON PARSER AST EM NOXY
+// ============================================
+// Implementação de um parser JSON que gera AST
+// Baseado no código Python fornecido
+
+// Struct para representar um token
+struct Token
+    value: string,
+    type_name: string
+end
+
+// Struct para representar padrões de token
+struct TokenPattern
+    pattern: string,
+    type_name: string
+end
+
+// ============================================
+// TOKENIZER - ANALISADOR LÉXICO
+// ============================================
+
+struct Tokenizer
+    patterns: TokenPattern[13],
+    cursor: int,
+    input_string: string,
+    input_length: int
+end
+
+// Função para criar um novo tokenizer
+func create_tokenizer() -> Tokenizer
+    let patterns: TokenPattern[13] = [
+        TokenPattern("\\s+", "whitespace"),           // Espaços em branco (ignorar)
+        TokenPattern("\\[", "["),                     // Colchete esquerdo
+        TokenPattern("\\]", "]"),                     // Colchete direito
+        TokenPattern("\\{", "{"),                     // Chave esquerda
+        TokenPattern("\\}", "}"),                     // Chave direita
+        TokenPattern(":", ":"),                       // Dois pontos
+        TokenPattern(",", ","),                       // Vírgula
+        TokenPattern("\"", "\""),                     // Aspas
+        TokenPattern("\\d+", "number"),               // Números
+        TokenPattern("null", "null"),                 // null
+        TokenPattern("true", "true"),                 // true
+        TokenPattern("false", "false"),               // false
+        TokenPattern("[^\"]*", "string")              // String (qualquer coisa que não seja aspas)
+    ]
+    
+    return Tokenizer(patterns, 0, "", 0)
+end
+
+// Função para configurar string de entrada
+func tokenizer_read(tokenizer: ref Tokenizer, input: string) -> void
+    tokenizer.cursor = 0
+    tokenizer.input_string = input
+    tokenizer.input_length = strlen(input)
+end
+
+// Função auxiliar para verificar se string começa com padrão
+func starts_with(text: string, pattern: string) -> bool
+    let pattern_len: int = strlen(pattern)
+    let text_len: int = strlen(text)
+    
+    if pattern_len > text_len then
+        return false
+    end
+    
+    let i: int = 0
+    while i < pattern_len do
+        if text[i] != pattern[i] then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+// Função auxiliar para extrair substring
+func substring(text: string, start: int, length: int) -> string
+    let result: string = ""
+    let i: int = 0
+    while i < length do
+        if start + i < strlen(text) then
+            result = result + text[start + i]
+        end
+        i = i + 1
+    end
+    return result
+end
+
+// Função auxiliar para verificar se caractere é dígito
+func is_digit(c: string) -> bool
+    let ascii_val: int = ord(c)
+    return ascii_val >= 48 & ascii_val <= 57  // '0' a '9'
+end
+
+// Função auxiliar para verificar se caractere é espaço
+func is_whitespace(c: string) -> bool
+    return c == " " | c == "\t" | c == "\n" | c == "\r"
+end
+
+// Função para obter próximo token
+func tokenizer_next(tokenizer: ref Tokenizer) -> Token
+    if tokenizer.cursor >= tokenizer.input_length then
+        return Token("", "EOF")
+    end
+    
+    let remaining: string = substring(tokenizer.input_string, tokenizer.cursor, 
+                                      tokenizer.input_length - tokenizer.cursor)
+    
+    // Pular espaços em branco
+    while tokenizer.cursor < tokenizer.input_length do
+        let current_char: string = tokenizer.input_string[tokenizer.cursor]
+        if !is_whitespace(current_char) then
+            break
+        end
+        tokenizer.cursor = tokenizer.cursor + 1
+    end
+    
+    if tokenizer.cursor >= tokenizer.input_length then
+        return Token("", "EOF")
+    end
+    
+    remaining = substring(tokenizer.input_string, tokenizer.cursor, 
+                         tokenizer.input_length - tokenizer.cursor)
+    
+    // Verificar tokens específicos em ordem
+    
+    // Verificar colchetes e chaves
+    if starts_with(remaining, "[") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token("[", "[")
+    end
+    
+    if starts_with(remaining, "]") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token("]", "]")
+    end
+    
+    if starts_with(remaining, "{") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token("{", "{")
+    end
+    
+    if starts_with(remaining, "}") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token("}", "}")
+    end
+    
+    if starts_with(remaining, ":") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token(":", ":")
+    end
+    
+    if starts_with(remaining, ",") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token(",", ",")
+    end
+    
+    if starts_with(remaining, "\"") then
+        tokenizer.cursor = tokenizer.cursor + 1
+        return Token("\"", "\"")
+    end
+    
+    // Verificar palavras-chave
+    if starts_with(remaining, "null") then
+        tokenizer.cursor = tokenizer.cursor + 4
+        return Token("null", "null")
+    end
+    
+    if starts_with(remaining, "true") then
+        tokenizer.cursor = tokenizer.cursor + 4
+        return Token("true", "true")
+    end
+    
+    if starts_with(remaining, "false") then
+        tokenizer.cursor = tokenizer.cursor + 5
+        return Token("false", "false")
+    end
+    
+    // Verificar números
+    let current_char: string = tokenizer.input_string[tokenizer.cursor]
+    if is_digit(current_char) then
+        let num_start: int = tokenizer.cursor
+        while tokenizer.cursor < tokenizer.input_length & 
+              is_digit(tokenizer.input_string[tokenizer.cursor]) do
+            tokenizer.cursor = tokenizer.cursor + 1
+        end
+        let number: string = substring(tokenizer.input_string, num_start, 
+                                      tokenizer.cursor - num_start)
+        return Token(number, "number")
+    end
+    
+    // Para strings, capturar até a próxima aspa ou caractere especial
+    if current_char != "\"" then
+        let str_start: int = tokenizer.cursor
+        while tokenizer.cursor < tokenizer.input_length do
+            let ch: string = tokenizer.input_string[tokenizer.cursor]
+            if ch == "\"" | ch == "{" | ch == "}" | ch == "[" | ch == "]" | 
+               ch == ":" | ch == "," | is_whitespace(ch) then
+                break
+            end
+            tokenizer.cursor = tokenizer.cursor + 1
+        end
+        
+        if tokenizer.cursor > str_start then
+            let str_value: string = substring(tokenizer.input_string, str_start, 
+                                             tokenizer.cursor - str_start)
+            return Token(str_value, "string")
+        end
+    end
+    
+    // Caractere não reconhecido
+    let error_char: string = tokenizer.input_string[tokenizer.cursor]
+    print("Erro: caractere não reconhecido: " + error_char)
+    tokenizer.cursor = tokenizer.cursor + 1
+    return Token(error_char, "ERROR")
+end
+
+// ============================================
+// ESTRUTURAS AST (ABSTRACT SYNTAX TREE)
+// ============================================
+
+struct JSONString
+    type_name: string,
+    value: string
+end
+
+struct JSONNumber
+    type_name: string,
+    value: int
+end
+
+struct JSONBool
+    type_name: string,
+    value: bool
+end
+
+struct JSONNull
+    type_name: string
+end
+
+// Para arrays e objetos, usaremos uma representação simplificada
+struct JSONArray
+    type_name: string,
+    size: int
+    // Note: Noxy não tem arrays dinâmicos fáceis, então limitaremos o tamanho
+end
+
+struct JSONObject
+    type_name: string,
+    size: int
+    // Note: Representação simplificada para demo
+end
+
+// ============================================
+// AST FACTORY
+// ============================================
+
+struct ASTFactory
+    dummy: int  // Noxy precisa de pelo menos um campo
+end
+
+func create_ast_factory() -> ASTFactory
+    return ASTFactory(0)
+end
+
+func ast_create_string(factory: ASTFactory, token: Token) -> JSONString
+    return JSONString("JSON_STRING", token.value)
+end
+
+func ast_create_number(factory: ASTFactory, token: Token) -> JSONNumber
+    // Converter string para int - função auxiliar simples
+    let num_value: int = 0
+    let str_len: int = strlen(token.value)
+    let i: int = 0
+    
+    while i < str_len do
+        let digit_char: string = token.value[i]
+        let digit_val: int = ord(digit_char) - 48  // '0' = 48
+        num_value = num_value * 10 + digit_val
+        i = i + 1
+    end
+    
+    return JSONNumber("JSON_NUMBER", num_value)
+end
+
+func ast_create_bool(factory: ASTFactory, token: Token) -> JSONBool
+    let bool_val: bool = token.value == "true"
+    return JSONBool("JSON_BOOL", bool_val)
+end
+
+func ast_create_null(factory: ASTFactory) -> JSONNull
+    return JSONNull("JSON_NULL")
+end
+
+func ast_create_array(factory: ASTFactory, size: int) -> JSONArray
+    return JSONArray("JSON_ARRAY", size)
+end
+
+func ast_create_object(factory: ASTFactory, size: int) -> JSONObject
+    return JSONObject("JSON_OBJECT", size)
+end
+
+// ============================================
+// JS FACTORY (VALORES NATIVOS)
+// ============================================
+
+struct JSFactory
+    dummy: int
+end
+
+func create_js_factory() -> JSFactory
+    return JSFactory(0)
+end
+
+// Para o JS Factory, retornaremos strings que representam os valores
+func js_create_string(factory: JSFactory, token: Token) -> string
+    return token.value
+end
+
+func js_create_number(factory: JSFactory, token: Token) -> int
+    let num_value: int = 0
+    let str_len: int = strlen(token.value)
+    let i: int = 0
+    
+    while i < str_len do
+        let digit_char: string = token.value[i]
+        let digit_val: int = ord(digit_char) - 48
+        num_value = num_value * 10 + digit_val
+        i = i + 1
+    end
+    
+    return num_value
+end
+
+func js_create_bool(factory: JSFactory, token: Token) -> bool
+    return token.value == "true"
+end
+
+// ============================================
+// ANALYZER - PARSER PRINCIPAL
+// ============================================
+
+struct Analyzer
+    tokenizer: Tokenizer,
+    ast_factory: ASTFactory,
+    js_factory: JSFactory,
+    lookahead: Token,
+    use_ast: bool  // true para AST, false para valores nativos
+end
+
+func create_analyzer(use_ast: bool) -> Analyzer
+    let tokenizer: Tokenizer = create_tokenizer()
+    let ast_factory: ASTFactory = create_ast_factory()
+    let js_factory: JSFactory = create_js_factory()
+    let empty_token: Token = Token("", "")
+    
+    return Analyzer(tokenizer, ast_factory, js_factory, empty_token, use_ast)
+end
+
+func analyzer_read(analyzer: ref Analyzer, input: string) -> void
+    tokenizer_read(analyzer.tokenizer, input)
+    analyzer.lookahead = tokenizer_next(analyzer.tokenizer)
+end
+
+func analyzer_eat(analyzer: ref Analyzer, expected_type: string) -> Token
+    let token: Token = analyzer.lookahead
+    
+    if token.type_name == "EOF" then
+        print("Erro: fim inesperado da entrada; esperava " + expected_type)
+        return token
+    end
+    
+    if token.type_name != expected_type then
+        print("Erro: esperava " + expected_type + " mas encontrou " + token.type_name)
+        return token
+    end
+    
+    analyzer.lookahead = tokenizer_next(analyzer.tokenizer)
+    return token
+end
+
+// Função principal de parsing - versão simplificada
+func analyzer_parse_json(analyzer: ref Analyzer) -> string
+    let token_type: string = analyzer.lookahead.type_name
+    
+    if token_type == "\"" then
+        return analyzer_parse_string(analyzer)
+    end
+    
+    if token_type == "number" then
+        return analyzer_parse_number(analyzer)
+    end
+    
+    if token_type == "true" | token_type == "false" then
+        return analyzer_parse_bool(analyzer)
+    end
+    
+    if token_type == "null" then
+        return analyzer_parse_null(analyzer)
+    end
+    
+    if token_type == "[" then
+        return analyzer_parse_array(analyzer)
+    end
+    
+    if token_type == "{" then
+        return analyzer_parse_object(analyzer)
+    end
+    
+    print("Erro: token inválido para JSON: " + token_type)
+    return "ERROR"
+end
+
+func analyzer_parse_string(analyzer: ref Analyzer) -> string
+    analyzer_eat(analyzer, "\"")
+    let string_token: Token = analyzer_eat(analyzer, "string")
+    analyzer_eat(analyzer, "\"")
+    
+    if analyzer.use_ast then
+        let ast_node: JSONString = ast_create_string(analyzer.ast_factory, string_token)
+        return "JSON_STRING(" + ast_node.value + ")"
+    else
+        return string_token.value
+    end
+end
+
+func analyzer_parse_number(analyzer: ref Analyzer) -> string
+    let number_token: Token = analyzer_eat(analyzer, "number")
+    
+    if analyzer.use_ast then
+        let ast_node: JSONNumber = ast_create_number(analyzer.ast_factory, number_token)
+        return "JSON_NUMBER(" + to_str(ast_node.value) + ")"
+    else
+        let js_value: int = js_create_number(analyzer.js_factory, number_token)
+        return to_str(js_value)
+    end
+end
+
+func analyzer_parse_bool(analyzer: ref Analyzer) -> string
+    let bool_token: Token = analyzer.lookahead
+    analyzer_eat(analyzer, bool_token.type_name)
+    
+    if analyzer.use_ast then
+        let ast_node: JSONBool = ast_create_bool(analyzer.ast_factory, bool_token)
+        if ast_node.value then
+            return "JSON_BOOL(true)"
+        else
+            return "JSON_BOOL(false)"
+        end
+    else
+        let js_value: bool = js_create_bool(analyzer.js_factory, bool_token)
+        if js_value then
+            return "true"
+        else
+            return "false"
+        end
+    end
+end
+
+func analyzer_parse_null(analyzer: ref Analyzer) -> string
+    analyzer_eat(analyzer, "null")
+    
+    if analyzer.use_ast then
+        return "JSON_NULL"
+    else
+        return "null"
+    end
+end
+
+func analyzer_parse_array(analyzer: ref Analyzer) -> string
+    analyzer_eat(analyzer, "[")
+    
+    // Versão simplificada - apenas conta elementos
+    let element_count: int = 0
+    
+    while analyzer.lookahead.type_name != "]" & analyzer.lookahead.type_name != "EOF" do
+        let element_result: string = analyzer_parse_json(analyzer)
+        element_count = element_count + 1
+        
+        if analyzer.lookahead.type_name == "," then
+            analyzer_eat(analyzer, ",")
+        end
+    end
+    
+    analyzer_eat(analyzer, "]")
+    
+    if analyzer.use_ast then
+        return "JSON_ARRAY(elementos: " + to_str(element_count) + ")"
+    else
+        return "[array com " + to_str(element_count) + " elementos]"
+    end
+end
+
+func analyzer_parse_object(analyzer: ref Analyzer) -> string
+    analyzer_eat(analyzer, "{")
+    
+    let pair_count: int = 0
+    
+    while analyzer.lookahead.type_name != "}" & analyzer.lookahead.type_name != "EOF" do
+        // Parse key-value pair
+        analyzer_eat(analyzer, "\"")
+        let key_token: Token = analyzer_eat(analyzer, "string")
+        analyzer_eat(analyzer, "\"")
+        analyzer_eat(analyzer, ":")
+        let value_result: string = analyzer_parse_json(analyzer)
+        
+        pair_count = pair_count + 1
+        
+        if analyzer.lookahead.type_name == "," then
+            analyzer_eat(analyzer, ",")
+        end
+    end
+    
+    analyzer_eat(analyzer, "}")
+    
+    if analyzer.use_ast then
+        return "JSON_OBJECT(pares: " + to_str(pair_count) + ")"
+    else
+        return "{objeto com " + to_str(pair_count) + " pares}"
+    end
+end
+
+// ============================================
+// FUNÇÃO PRINCIPAL E TESTES
+// ============================================
+
+print("=== JSON PARSER EM NOXY ===")
+print("")
+
+// Exemplo de entrada JSON
+let json_input: string = "{\"nome\": \"Estevao\", \"idade\": 30, \"ativo\": true}"
+
+print("JSON de entrada:")
+print(json_input)
+print("")
+
+// Parse com AST
+print("=== RESULTADO AST ===")
+let analyzer_ast: Analyzer = create_analyzer(true)
+analyzer_read(analyzer_ast, json_input)
+let ast_result: string = analyzer_parse_json(analyzer_ast)
+print(ast_result)
+print("")
+
+// Parse com valores nativos
+print("=== RESULTADO NATIVO ===")
+let analyzer_native: Analyzer = create_analyzer(false)
+analyzer_read(analyzer_native, json_input)
+let native_result: string = analyzer_parse_json(analyzer_native)
+print(native_result)
+print("")
+
+print("=== TESTES ADICIONAIS ===")
+
+// Teste com array
+let json_array: string = "[1, 2, 3, true, null]"
+print("Array JSON: " + json_array)
+
+let analyzer_array: Analyzer = create_analyzer(true)
+analyzer_read(analyzer_array, json_array)
+let array_result: string = analyzer_parse_json(analyzer_array)
+print("Resultado: " + array_result)
+print("")
+
+// Teste com string simples
+let json_string: string = "\"hello\""
+print("String JSON: " + json_string)
+
+let analyzer_string: Analyzer = create_analyzer(false)
+analyzer_read(analyzer_string, json_string)
+let string_result: string = analyzer_parse_json(analyzer_string)
+print("Resultado: " + string_result)
+print("")
+
+// Teste com número
+let json_number: string = "42"
+print("Número JSON: " + json_number)
+
+let analyzer_number: Analyzer = create_analyzer(false)
+analyzer_read(analyzer_number, json_number)
+let number_result: string = analyzer_parse_json(analyzer_number)
+print("Resultado: " + number_result)
+
+print("")
+print("Parser JSON em Noxy concluído!")
