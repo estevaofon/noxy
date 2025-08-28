@@ -1,0 +1,234 @@
+// Representação genérica de um valor JSON
+struct JSONValue
+    tipo: int,               // 1=string, 2=number, 3=bool, 4=null, 5=array, 6=object
+    str_value: string,
+    num_value: float,
+    bool_value: bool,
+    filhos: JSONValue[100],  // filhos em arrays/objetos
+    chaves: string[100],     // chaves no caso de objetos
+end
+
+// Funções auxiliares para identificar caracteres
+func is_digit(c: char) -> bool
+    return ord(c) >= ord("0") and ord(c) <= ord("9")
+end
+
+// Função auxiliar para converter char array para string
+func char_array_to_string(arr: char[64]) -> string
+    let result: string = ""
+    let i: int = 0
+    while i < 64 & arr[i] != "\0" do
+        result = result + arr[i]
+        i = i + 1
+    end
+    return result
+end
+
+// Função auxiliar para converter string para float
+func string_to_float(s: string) -> float
+    // Implementação simples - em um caso real seria mais robusta
+    let result: float = 0.0
+    let i: int = 0
+    let decimal: bool = false
+    let divisor: float = 1.0
+    
+    while i < strlen(s) do
+        if s[i] == "." then
+            decimal = true
+        else if is_digit(s[i]) then
+            if decimal then
+                divisor = divisor * 10.0
+                result = result + (ord(s[i]) - ord("0")) / divisor
+            else
+                result = result * 10.0 + (ord(s[i]) - ord("0"))
+            end
+        end
+        i = i + 1
+    end
+    return result
+end
+
+// --- Parser JSON ---
+let input: string = ""
+let pos: int = 0
+
+func peek() -> char
+    if pos >= strlen(input) then
+        return "\0"
+    end
+    return input[pos]
+end
+
+func advance() -> char
+    let c: char = peek()
+    pos = pos + 1
+    return c
+end
+
+func skip_ws() -> void
+    while peek() == " " | peek() == "\n" | peek() == "\r" | peek() == "\t" do
+        advance()
+    end
+end
+
+// --- parse string ---
+func parse_string() -> string
+    advance() // pula aspas "
+    let buf: string = ""
+    while peek() != "\"" & peek() != "\0" do
+        buf = buf + peek()
+        advance()
+    end
+    advance() // fecha "
+    return buf
+end
+
+// --- parse number ---
+func parse_number() -> float
+    let buf: char[64]
+    let i: int = 0
+    while is_digit(peek()) | peek() == "." | peek() == "-" do
+        buf[i] = peek()
+        advance()
+        i = i + 1
+    end
+    buf[i] = "\0"
+    return string_to_float(char_array_to_string(buf))
+end
+
+// --- parse literal (true/false/null) ---
+func parse_literal() -> JSONValue
+    let v: JSONValue
+    if peek() == "t" then
+        advance(); advance(); advance(); advance() // true
+        v.tipo = 3
+        v.bool_value = true
+    else if peek() == "f" then
+        advance(); advance(); advance(); advance(); advance() // false
+        v.tipo = 3
+        v.bool_value = false
+    else
+        advance(); advance(); advance(); advance() // null
+        v.tipo = 4
+    end
+    return v
+end
+
+// --- parse array ---
+func parse_array() -> JSONValue
+    let v: JSONValue
+    v.tipo = 5
+    advance() // [
+    skip_ws()
+    let i: int = 0
+    while peek() != "]" and peek() != "\0" do
+        v.filhos[i] = parse_value()
+        i = i + 1
+        skip_ws()
+        if peek() == "," then
+            advance()
+            skip_ws()
+        end
+    end
+    advance() // ]
+    return v
+end
+
+// --- parse object ---
+func parse_object() -> JSONValue
+    let v: JSONValue
+    v.tipo = 6
+    advance() // {
+    skip_ws()
+    let i: int = 0
+    while peek() != "}" and peek() != "\0" do
+        let key: string = parse_string()
+        skip_ws()
+        advance() // :
+        skip_ws()
+        v.chaves[i] = key
+        v.filhos[i] = parse_value()
+        i = i + 1
+        skip_ws()
+        if peek() == "," then
+            advance()
+            skip_ws()
+        end
+    end
+    advance() // }
+    return v
+end
+
+// --- parse value genérico ---
+func parse_value() -> JSONValue
+    skip_ws()
+    if peek() == "\"" then
+        let v: JSONValue
+        v.tipo = 1
+        v.str_value = parse_string()
+        return v
+    else if peek() == "-" | is_digit(peek()) then
+        let v: JSONValue
+        v.tipo = 2
+        v.num_value = parse_number()
+        return v
+    else if peek() == "t" | peek() == "f" | peek() == "n" then
+        return parse_literal()
+    else if peek() == "[" then
+        return parse_array()
+    else if peek() == "{" then
+        return parse_object()
+    else
+        let v: JSONValue
+        v.tipo = 4
+        return v
+    end
+end
+
+// --- função de entrada ---
+func parse_json(s: string) -> JSONValue
+    input = s
+    pos = 0
+    return parse_value()
+end
+
+// --- impressor (debug) ---
+func print_json(v: JSONValue, indent: int) -> void
+    let i: int = 0
+    if v.tipo == 1 then
+        print("\"" + v.str_value + "\"")
+    else if v.tipo == 2 then
+        print(string_to_float(v.str_value))
+    else if v.tipo == 3 then
+        if v.bool_value then
+            print("true")
+        else
+            print("false")
+        end
+    else if v.tipo == 4 then
+        print("null")
+    else if v.tipo == 5 then
+        print("[")
+        while v.filhos[i].tipo != 0 & i < 100 do
+            print_json(v.filhos[i], indent + 2)
+            i = i + 1
+        end
+        print("]")
+    else if v.tipo == 6 then
+        print("{")
+        while v.chaves[i] != "" & i < 100 do
+            print("\"" + v.chaves[i] + "\": ")
+            print_json(v.filhos[i], indent + 2)
+            i = i + 1
+        end
+        print("}")
+    end
+end
+
+// --- Demonstração ---
+let exemplo: string = "{\"nome\": \"Estevao\", \"idade\": 30, \"ativo\": true, \"tags\": [\"python\", \"noxy\"]}"
+
+let raiz: JSONValue = parse_json(exemplo)
+
+print("JSON parseado:")
+print_json(raiz, 0)

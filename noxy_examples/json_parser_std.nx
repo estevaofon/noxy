@@ -1,0 +1,44 @@
+// ============================================
+// JSON LEXER EM NOXY
+// ============================================
+
+// Inicializar constantes dos tipos de tokens
+let TOKEN_LBRACKET: int = 1 // [
+let TOKEN_RBRACKET: int = 2 // ]
+let TOKEN_LBRACE: int = 3 // {
+let TOKEN_RBRACE: int = 4 // }
+let TOKEN_COLON: int = 5 // :
+let TOKEN_COMMA: int = 6 // ,
+let TOKEN_STRING: int = 7 // "string"
+let TOKEN_NUMBER: int = 8 // 123 ou 123.456
+let TOKEN_TRUE: int = 9 // true
+let TOKEN_FALSE: int = 10 // false
+let TOKEN_NULL: int = 11 // null
+let TOKEN_EOF: int = 12 // EOF
+
+// Estrutura do token
+struct Token
+    type: int,
+    value: string,
+    position: int
+end
+
+struct OptionalString
+    value: string,
+    is_some: bool
+end
+
+let tokens: Token[16] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+
+struct Lexer
+    source: string,
+    position: int,
+    tokens: Token[16]
+end
+
+func current_char(lexer: Lexer) -> OptionalString
+    if lexer.position >= length(lexer.source) then
+        return OptionalString("", false)
+    end
+    return OptionalString(lexer.source[lexer.position], true)
+end
