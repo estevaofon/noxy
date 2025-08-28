@@ -1,0 +1,356 @@
+// ============================================
+// JSON LEXER EM NOXY (COM FUNÇÕES)
+// ============================================
+
+// Inicializar constantes dos tipos de tokens
+let TOKEN_LBRACKET: int = 1
+let TOKEN_RBRACKET: int = 2
+let TOKEN_LBRACE: int = 3
+let TOKEN_RBRACE: int = 4
+let TOKEN_COLON: int = 5
+let TOKEN_COMMA: int = 6
+let TOKEN_STRING: int = 7
+let TOKEN_NUMBER: int = 8
+let TOKEN_TRUE: int = 9
+let TOKEN_FALSE: int = 10
+let TOKEN_NULL: int = 11
+let TOKEN_EOF: int = 12
+
+// Estrutura do token
+struct Token
+    type: int,
+    value: string,
+    position: int
+end
+
+// Estrutura do Lexer
+struct Lexer
+    source: string,
+    position: int,
+    length: int
+end
+
+// Array global de tokens
+let tokens: Token[32] = [Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0)]
+
+// Função para obter o comprimento de uma string
+func string_length(text: string) -> int
+    let len: int = 0
+    while text[len] != 0 do
+        len = len + 1
+    end
+    return len
+end
+
+// Função para obter o caractere atual
+func get_char(lexer: Lexer) -> string
+    if lexer.position >= lexer.length then
+        return ""
+    end
+    let source: string = lexer.source
+    let pos: int = lexer.position
+    let ch: string = ""
+    ch = ch + source[pos]
+    return ch
+end
+
+// Função para obter caractere em uma posição específica
+func get_char_at(source: string, pos: int) -> string
+    let ch: string = ""
+    ch = ch + source[pos]
+    return ch
+end
+
+// Função para avançar a posição do lexer
+func advance(lexer: Lexer) -> Lexer
+    lexer.position = lexer.position + 1
+    return lexer
+end
+
+// Função para pular espaços em branco
+func skip_whitespace(lexer: Lexer) -> Lexer
+    let ch: string = get_char(lexer)
+    while (ch == " " | ch == "\t" | ch == "\n" | ch == "\r") & lexer.position < lexer.length do
+        lexer = advance(lexer)
+        ch = get_char(lexer)
+    end
+    return lexer
+end
+
+// Função para verificar se é letra
+func is_letter(ch: string) -> bool
+    if ch >= "a" & ch <= "z" then
+        return true
+    end
+    if ch >= "A" & ch <= "Z" then
+        return true
+    end
+    return false
+end
+
+// Função para verificar se é dígito
+func is_digit(ch: string) -> bool
+    if ch >= "0" & ch <= "9" then
+        return true
+    end
+    return false
+end
+
+// Função para ler uma string entre aspas
+func read_string(lexer: Lexer) -> string
+    let result: string = ""
+    let source: string = lexer.source
+    let pos: int = lexer.position + 1  // Pular aspa inicial
+    
+    while pos < lexer.length do
+        let ch: string = get_char_at(source, pos)
+        if ch == "\"" then
+            break
+        end
+        result = result + ch
+        pos = pos + 1
+    end
+    
+    return result
+end
+
+// Função para calcular quantos caracteres a string ocupa (incluindo aspas)
+func string_token_length(lexer: Lexer) -> int
+    let count: int = 1  // Aspa inicial
+    let source: string = lexer.source
+    let pos: int = lexer.position + 1
+    
+    while pos < lexer.length do
+        let ch: string = get_char_at(source, pos)
+        count = count + 1
+        if ch == "\"" then
+            break
+        end
+        pos = pos + 1
+    end
+    
+    return count
+end
+
+// Função para ler um número
+func read_number(lexer: Lexer) -> string
+    let result: string = ""
+    let source: string = lexer.source
+    let pos: int = lexer.position
+    
+    while pos < lexer.length do
+        let ch: string = get_char_at(source, pos)
+        if is_digit(ch) | ch == "." | ch == "-" then
+            result = result + ch
+            pos = pos + 1
+        else
+            break
+        end
+    end
+    
+    return result
+end
+
+// Função para calcular quantos caracteres o número ocupa
+func number_token_length(lexer: Lexer) -> int
+    let count: int = 0
+    let source: string = lexer.source
+    let pos: int = lexer.position
+    
+    while pos < lexer.length do
+        let ch: string = get_char_at(source, pos)
+        if is_digit(ch) | ch == "." | ch == "-" then
+            count = count + 1
+            pos = pos + 1
+        else
+            break
+        end
+    end
+    
+    return count
+end
+
+// Função para verificar se uma palavra é igual a outra
+func word_equals(word: string, expected: string) -> bool
+    let i: int = 0
+    while word[i] != 0 & expected[i] != 0 do
+        if word[i] != expected[i] then
+            return false
+        end
+        i = i + 1
+    end
+    if word[i] != expected[i] then
+        return false
+    end
+    return true
+end
+
+// Função para ler uma palavra (true, false, null)
+func read_word(lexer: Lexer, length: int) -> string
+    let result: string = ""
+    let source: string = lexer.source
+    let pos: int = lexer.position
+    let i: int = 0
+    
+    while i < length & pos + i < lexer.length do
+        let ch: string = get_char_at(source, pos + i)
+        result = result + ch
+        i = i + 1
+    end
+    
+    return result
+end
+
+// Função principal de tokenização
+func tokenize(lexer: Lexer) -> int
+    let token_count: int = 0
+    
+    while lexer.position < lexer.length do
+        // Pular espaços
+        lexer = skip_whitespace(lexer)
+        
+        if lexer.position >= lexer.length then
+            break
+        end
+        
+        let ch: string = get_char(lexer)
+        let processed: bool = false
+        
+        // Tokens de um caractere
+        if !processed & ch == "{" then
+            tokens[token_count] = Token(TOKEN_LBRACE, "{", lexer.position)
+            print("[LBRACE] {")
+            lexer = advance(lexer)
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        if !processed & ch == "}" then
+            tokens[token_count] = Token(TOKEN_RBRACE, "}", lexer.position)
+            print("[RBRACE] }")
+            lexer = advance(lexer)
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        if !processed & ch == "[" then
+            tokens[token_count] = Token(TOKEN_LBRACKET, "[", lexer.position)
+            print("[LBRACKET] [")
+            lexer = advance(lexer)
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        if !processed & ch == "]" then
+            tokens[token_count] = Token(TOKEN_RBRACKET, "]", lexer.position)
+            print("[RBRACKET] ]")
+            lexer = advance(lexer)
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        if !processed & ch == ":" then
+            tokens[token_count] = Token(TOKEN_COLON, ":", lexer.position)
+            print("[COLON] :")
+            lexer = advance(lexer)
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        if !processed & ch == "," then
+            tokens[token_count] = Token(TOKEN_COMMA, ",", lexer.position)
+            print("[COMMA] ,")
+            lexer = advance(lexer)
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        // String
+        if !processed & ch == "\"" then
+            let str_value: string = read_string(lexer)
+            let str_len: int = string_token_length(lexer)
+            tokens[token_count] = Token(TOKEN_STRING, str_value, lexer.position)
+            print("[STRING] \"" + str_value + "\"")
+            lexer.position = lexer.position + str_len
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        // Palavras-chave e identificadores
+        if !processed & ch == "t" then
+            let word: string = read_word(lexer, 4)
+            if word_equals(word, "true") then
+                tokens[token_count] = Token(TOKEN_TRUE, "true", lexer.position)
+                print("[TRUE] true")
+                lexer.position = lexer.position + 4
+                token_count = token_count + 1
+                processed = true
+            end
+        end
+        
+        if !processed & ch == "f" then
+            let word: string = read_word(lexer, 5)
+            if word_equals(word, "false") then
+                tokens[token_count] = Token(TOKEN_FALSE, "false", lexer.position)
+                print("[FALSE] false")
+                lexer.position = lexer.position + 5
+                token_count = token_count + 1
+                processed = true
+            end
+        end
+        
+        if !processed & ch == "n" then
+            let word: string = read_word(lexer, 4)
+            if word_equals(word, "null") then
+                tokens[token_count] = Token(TOKEN_NULL, "null", lexer.position)
+                print("[NULL] null")
+                lexer.position = lexer.position + 4
+                token_count = token_count + 1
+                processed = true
+            end
+        end
+        
+        // Números
+        if !processed & is_digit(ch) then
+            let num_value: string = read_number(lexer)
+            let num_len: int = number_token_length(lexer)
+            tokens[token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
+            print("[NUMBER] " + num_value)
+            lexer.position = lexer.position + num_len
+            token_count = token_count + 1
+            processed = true
+        end
+        
+        // Se não processou nada, avançar
+        if !processed then
+            lexer = advance(lexer)
+        end
+    end
+    
+    // Adicionar EOF
+    if token_count < 32 then
+        tokens[token_count] = Token(TOKEN_EOF, "", lexer.position)
+        print("[EOF]")
+        token_count = token_count + 1
+    end
+    
+    return token_count
+end
+
+// ===== PROGRAMA PRINCIPAL =====
+let json_input: string = "{\"active\": true, \"deleted\": false, \"count\": null}"
+let input_len: int = string_length(json_input)
+
+// Criar e inicializar o lexer
+let lexer: Lexer = Lexer(json_input, 0, input_len)
+
+print("=== INICIANDO LEXER ===")
+print("Entrada: " + json_input)
+print("")
+
+// Tokenizar
+let total_tokens: int = tokenize(lexer)
+
+print("")
+print("=== LEXER FINALIZADO ===")
+print("Todos os tokens foram processados com sucesso!")
