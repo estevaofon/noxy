@@ -28,7 +28,8 @@ struct OptionalString
     is_some: bool
 end
 
-let tokens: Token[16] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
+// Inicializar array de tokens com tokens vazios em vez de null
+let tokens: Token[16] = [Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0)]
 
 struct Lexer
     source: string,
@@ -42,3 +43,107 @@ func current_char(lexer: Lexer) -> OptionalString
     end
     return OptionalString(lexer.source[lexer.position], true)
 end
+
+func advance(lexer: Lexer) 
+    lexer.position = lexer.position + 1
+end 
+
+func skip_whitespace(lexer: Lexer)
+    let char: OptionalString = current_char(lexer)
+    let is_true: bool = char.is_some & (char.value == " " | char.value == "\t" | char.value == "\n" | char.value == "\r")
+    while is_true do
+        char = current_char(lexer)
+        is_true = char.is_some & (char.value == " " | char.value == "\t" | char.value == "\n" | char.value == "\r")
+        advance(lexer)
+    end
+end
+
+func isalnum(ch: string) -> bool
+    return (ch >= "a" & ch <= "z") | (ch >= "A" & ch <= "Z") | (ch >= "0" & ch <= "9")
+end
+
+
+func read_identifier(lexer: Lexer) -> string
+    let start_position: int = lexer.position
+    let char: OptionalString = current_char(lexer)
+    let is_true: bool = char.is_some & isalnum(char.value)
+    let identifier: string = ""
+    while is_true do
+        identifier = identifier + char.value
+        advance(lexer)
+        char = current_char(lexer)
+        is_true = char.is_some & isalnum(char.value)
+    end
+    return identifier
+end
+
+func tokenize(lexer: Lexer) -> Token[]
+    let i: int = 0
+    while lexer.position < length(lexer.source) do
+        skip_whitespace(lexer)
+        let char: OptionalString = current_char(lexer)
+        if char.is_some & char.value == "{" then
+            tokens[i] = Token(TOKEN_LBRACE, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "}" then
+            tokens[i] = Token(TOKEN_RBRACE, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "[" then
+            tokens[i] = Token(TOKEN_LBRACKET, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "]" then
+            tokens[i] = Token(TOKEN_RBRACKET, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == ":" then
+            tokens[i] = Token(TOKEN_COLON, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "," then
+            tokens[i] = Token(TOKEN_COMMA, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "\"" then
+            tokens[i] = Token(TOKEN_STRING, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "-" | char.value == "0" | char.value == "1" | char.value == "2" | char.value == "3" | char.value == "4" | char.value == "5" | char.value == "6" | char.value == "7" | char.value == "8" | char.value == "9" then
+            tokens[i] = Token(TOKEN_NUMBER, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "t"  | char.value == "n" then
+            tokens[i] = Token(TOKEN_TRUE, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "f" then
+            tokens[i] = Token(TOKEN_FALSE, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "n" then
+            tokens[i] = Token(TOKEN_NULL, "", lexer.position)
+            advance(lexer)
+        end
+        if char.is_some & char.value == "e" then
+            tokens[i] = Token(TOKEN_EOF, "", lexer.position)
+            advance(lexer)
+        end
+        i = i + 1
+    end
+    return tokens
+end
+
+let json_string: string = "{\"name\": \"John\", \"city\": \"New York\"}"
+let lexer: Lexer = Lexer(json_string, 0, tokens)
+let tokens_result: Token[16] = tokenize(lexer)
+
+// print tokens
+let i: int = 0
+while i < 16 do
+    print(tokens_result[i].type)
+    i = i + 1
+end
+
+
