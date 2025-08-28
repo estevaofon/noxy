@@ -30,6 +30,16 @@ struct Lexer
     length: int
 end
 
+// Estrutura para retornar tokens
+struct TokenResult
+    tokens: Token[32],
+    count: int
+end
+
+// Variáveis globais para os tokens (workaround para limitação do compilador)
+let global_tokens: Token[32] = [Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0)]
+let global_token_count: int = 0
+
 // Array global de tokens
 let tokens: Token[32] = [Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0)]
 
@@ -231,7 +241,7 @@ end
 
 // Função principal de tokenização
 func tokenize(lexer: Lexer) -> int
-    let token_count: int = 0
+    global_token_count = 0
     
     while lexer.position < lexer.length do
         // Pular espaços
@@ -246,50 +256,50 @@ func tokenize(lexer: Lexer) -> int
         
         // Tokens de um caractere
         if !processed & ch == "{" then
-            tokens[token_count] = Token(TOKEN_LBRACE, "{", lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_LBRACE, "{", lexer.position)
             print("[LBRACE] {")
             lexer = advance(lexer)
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
         if !processed & ch == "}" then
-            tokens[token_count] = Token(TOKEN_RBRACE, "}", lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_RBRACE, "}", lexer.position)
             print("[RBRACE] }")
             lexer = advance(lexer)
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
         if !processed & ch == "[" then
-            tokens[token_count] = Token(TOKEN_LBRACKET, "[", lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_LBRACKET, "[", lexer.position)
             print("[LBRACKET] [")
             lexer = advance(lexer)
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
         if !processed & ch == "]" then
-            tokens[token_count] = Token(TOKEN_RBRACKET, "]", lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_RBRACKET, "]", lexer.position)
             print("[RBRACKET] ]")
             lexer = advance(lexer)
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
         if !processed & ch == ":" then
-            tokens[token_count] = Token(TOKEN_COLON, ":", lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_COLON, ":", lexer.position)
             print("[COLON] :")
             lexer = advance(lexer)
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
         if !processed & ch == "," then
-            tokens[token_count] = Token(TOKEN_COMMA, ",", lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_COMMA, ",", lexer.position)
             print("[COMMA] ,")
             lexer = advance(lexer)
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
@@ -297,10 +307,10 @@ func tokenize(lexer: Lexer) -> int
         if !processed & ch == "\"" then
             let str_value: string = read_string(lexer)
             let str_len: int = string_token_length(lexer)
-            tokens[token_count] = Token(TOKEN_STRING, str_value, lexer.position)
+            global_tokens[global_token_count] = Token(TOKEN_STRING, str_value, lexer.position)
             print("[STRING] \"" + str_value + "\"")
             lexer.position = lexer.position + str_len
-            token_count = token_count + 1
+            global_token_count = global_token_count + 1
             processed = true
         end
         
@@ -308,10 +318,10 @@ func tokenize(lexer: Lexer) -> int
         if !processed & ch == "t" then
             let word: string = read_word(lexer, 4)
             if word_equals(word, "true") then
-                tokens[token_count] = Token(TOKEN_TRUE, "true", lexer.position)
+                global_tokens[global_token_count] = Token(TOKEN_TRUE, "true", lexer.position)
                 print("[TRUE] true")
                 lexer.position = lexer.position + 4
-                token_count = token_count + 1
+                global_token_count = global_token_count + 1
                 processed = true
             end
         end
@@ -319,10 +329,10 @@ func tokenize(lexer: Lexer) -> int
         if !processed & ch == "f" then
             let word: string = read_word(lexer, 5)
             if word_equals(word, "false") then
-                tokens[token_count] = Token(TOKEN_FALSE, "false", lexer.position)
+                global_tokens[global_token_count] = Token(TOKEN_FALSE, "false", lexer.position)
                 print("[FALSE] false")
                 lexer.position = lexer.position + 5
-                token_count = token_count + 1
+                global_token_count = global_token_count + 1
                 processed = true
             end
         end
@@ -330,10 +340,10 @@ func tokenize(lexer: Lexer) -> int
         if !processed & ch == "n" then
             let word: string = read_word(lexer, 4)
             if word_equals(word, "null") then
-                tokens[token_count] = Token(TOKEN_NULL, "null", lexer.position)
+                global_tokens[global_token_count] = Token(TOKEN_NULL, "null", lexer.position)
                 print("[NULL] null")
                 lexer.position = lexer.position + 4
-                token_count = token_count + 1
+                global_token_count = global_token_count + 1
                 processed = true
             end
         end
@@ -343,19 +353,19 @@ func tokenize(lexer: Lexer) -> int
             if is_digit(ch) then
                 let num_value: string = read_number(lexer)
                 let num_len: int = number_token_length(lexer)
-                tokens[token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
+                global_tokens[global_token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
                 print("[NUMBER] " + num_value)
                 lexer.position = lexer.position + num_len
-                token_count = token_count + 1
+                global_token_count = global_token_count + 1
                 processed = true
             end
             if ch == "-" then
                 let num_value: string = read_number(lexer)
                 let num_len: int = number_token_length(lexer)
-                tokens[token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
+                global_tokens[global_token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
                 print("[NUMBER] " + num_value)
                 lexer.position = lexer.position + num_len
-                token_count = token_count + 1
+                global_token_count = global_token_count + 1
                 processed = true
             end
         end
@@ -367,17 +377,17 @@ func tokenize(lexer: Lexer) -> int
     end
     
     // Adicionar EOF
-    if token_count < 32 then
-        tokens[token_count] = Token(TOKEN_EOF, "", lexer.position)
+    if global_token_count < 32 then
+        global_tokens[global_token_count] = Token(TOKEN_EOF, "", lexer.position)
         print("[EOF]")
-        token_count = token_count + 1
+        global_token_count = global_token_count + 1
     end
     
-    return token_count
+    return global_token_count
 end
 
 // ===== PROGRAMA PRINCIPAL =====
-let json_input: string = "{\"active\": true, \"deleted\": false, \"count\": null, \"quantidade\": 10}"
+let json_input: string = "{\"active\": true, \"deleted\": false, \"count\": null, \"quantidade\": 10, \"endereco\": {\"rua\": \"Rua das Flores\", \"numero\": 123}}"
 let input_len: int = string_length(json_input)
 
 // Criar e inicializar o lexer
@@ -388,8 +398,19 @@ print("Entrada: " + json_input)
 print("")
 
 // Tokenizar
-let total_tokens: int = tokenize(lexer)
+let token_count: int = tokenize(lexer)
 
 print("")
 print("=== LEXER FINALIZADO ===")
-print("Todos os tokens foram processados com sucesso!")
+print("Total de tokens: " + to_str(token_count))
+print("Tokens processados com sucesso!")
+
+// Exemplo de como usar os tokens no parser:
+print("")
+print("=== DEMONSTRAÇÃO DOS TOKENS ===")
+let i: int = 0
+while i < token_count do
+    let token: Token = global_tokens[i]
+    print("Token " + to_str(i) + ": tipo=" + to_str(token.type) + ", valor='" + token.value + "', pos=" + to_str(token.position))
+    i = i + 1
+end
