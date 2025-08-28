@@ -1,5 +1,5 @@
 // ============================================
-// JSON LEXER EM NOXY (COM FUNÇÕES)
+// JSON LEXER EM NOXY (COM FUNÇÕES) - CORRIGIDO
 // ============================================
 
 // Inicializar constantes dos tipos de tokens
@@ -88,9 +88,9 @@ func is_letter(ch: string) -> bool
     return false
 end
 
-// Função para verificar se é dígito
+// Função para verificar se é dígito - VERSÃO EXPANDIDA PARA DEBUG
 func is_digit(ch: string) -> bool
-    if ch >= "0" & ch <= "9" then
+    if ch == "0" | ch == "1" | ch == "2" | ch == "3" | ch == "4" | ch == "5" | ch == "6" | ch == "7" | ch == "8" | ch == "9" then
         return true
     end
     return false
@@ -132,38 +132,66 @@ func string_token_length(lexer: Lexer) -> int
     return count
 end
 
-// Função para ler um número
+// Função CORRIGIDA para ler um número
 func read_number(lexer: Lexer) -> string
     let result: string = ""
     let source: string = lexer.source
     let pos: int = lexer.position
+    let first_char: bool = true
     
     while pos < lexer.length do
         let ch: string = get_char_at(source, pos)
-        if is_digit(ch) | ch == "." | ch == "-" then
-            result = result + ch
-            pos = pos + 1
+        
+        // Se é o primeiro caractere, pode ser dígito ou sinal negativo
+        if first_char then
+            if is_digit(ch) | ch == "-" then
+                result = result + ch
+                pos = pos + 1
+                first_char = false
+            else
+                break
+            end
         else
-            break
+            // Caracteres subsequentes: apenas dígitos ou ponto decimal
+            if is_digit(ch) | ch == "." then
+                result = result + ch
+                pos = pos + 1
+            else
+                break
+            end
         end
     end
     
     return result
 end
 
-// Função para calcular quantos caracteres o número ocupa
+// Função CORRIGIDA para calcular quantos caracteres o número ocupa
 func number_token_length(lexer: Lexer) -> int
     let count: int = 0
     let source: string = lexer.source
     let pos: int = lexer.position
+    let first_char: bool = true
     
     while pos < lexer.length do
         let ch: string = get_char_at(source, pos)
-        if is_digit(ch) | ch == "." | ch == "-" then
-            count = count + 1
-            pos = pos + 1
+        
+        // Se é o primeiro caractere, pode ser dígito ou sinal negativo
+        if first_char then
+            if is_digit(ch) | ch == "-" then
+                count = count + 1
+                pos = pos + 1
+                first_char = false
+            else
+                break
+            end
         else
-            break
+            // Caracteres subsequentes: apenas dígitos ou ponto decimal
+            if is_digit(ch) | ch == "." then
+                count = count + 1
+                pos = pos + 1
+            else
+                break
+            end
         end
     end
     
@@ -310,15 +338,26 @@ func tokenize(lexer: Lexer) -> int
             end
         end
         
-        // Números
-        if !processed & is_digit(ch) then
-            let num_value: string = read_number(lexer)
-            let num_len: int = number_token_length(lexer)
-            tokens[token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
-            print("[NUMBER] " + num_value)
-            lexer.position = lexer.position + num_len
-            token_count = token_count + 1
-            processed = true
+        // Números (incluindo negativos)
+        if !processed then
+            if is_digit(ch) then
+                let num_value: string = read_number(lexer)
+                let num_len: int = number_token_length(lexer)
+                tokens[token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
+                print("[NUMBER] " + num_value)
+                lexer.position = lexer.position + num_len
+                token_count = token_count + 1
+                processed = true
+            end
+            if ch == "-" then
+                let num_value: string = read_number(lexer)
+                let num_len: int = number_token_length(lexer)
+                tokens[token_count] = Token(TOKEN_NUMBER, num_value, lexer.position)
+                print("[NUMBER] " + num_value)
+                lexer.position = lexer.position + num_len
+                token_count = token_count + 1
+                processed = true
+            end
         end
         
         // Se não processou nada, avançar
@@ -338,7 +377,7 @@ func tokenize(lexer: Lexer) -> int
 end
 
 // ===== PROGRAMA PRINCIPAL =====
-let json_input: string = "{\"active\": true, \"deleted\": false, \"count\": null}"
+let json_input: string = "{\"active\": true, \"deleted\": false, \"count\": null, \"quantidade\": 10}"
 let input_len: int = string_length(json_input)
 
 // Criar e inicializar o lexer

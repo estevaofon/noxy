@@ -29,12 +29,13 @@ struct OptionalString
 end
 
 // Inicializar array de tokens com tokens vazios em vez de null
-let tokens: Token[16] = [Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0)]
+let tokens: Token[64] = [Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0), Token(0, "", 0)]
+
 
 struct Lexer
     source: string,
     position: int,
-    tokens: Token[16]
+    tokens: Token[64]
 end
 
 func source_length(lexer: Lexer) -> int
@@ -172,13 +173,13 @@ func token_type_name(t: int) -> string
     return "UNKNOWN"
 end
 
-let json_string: string = "{\"name\": \"John\", \"city\": \"New York\"}"
+let json_string: string = "{\"name\": \"John\", \"city\": \"New York\", \"endereco\": {\"rua\": \"Rua das Flores\", \"complemento\": \"Apto 101\"}}"
 let lexer: Lexer = Lexer(json_string, 0, tokens)
-let tokens_result: Token[16] = tokenize(lexer)
+let tokens_result: Token[64] = tokenize(lexer)
 
 // print tokens de forma legível
 let i: int = 0
-while i < 16 do
+while i < 64 do
     if tokens_result[i].type != 0 then
         print("[" + token_type_name(tokens_result[i].type) + "] " + tokens_result[i].value)
     end
