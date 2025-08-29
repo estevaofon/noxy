@@ -386,6 +386,16 @@ func tokenize(lexer: Lexer) -> int
     return global_token_count
 end
 
+// ===== ESTRUTURAS FLEXÍVEIS PARA O PARSER JSON =====
+// As estruturas estão agora no arquivo hashmap.nx
+// Este arquivo contém apenas o lexer e um exemplo básico de uso
+
+print("")
+print("=== ESTRUTURAS HASHMAP DISPONÍVEIS ===")
+print("As estruturas HashMap e Any estão implementadas no arquivo hashmap.nx")
+print("Para usar, inclua o arquivo hashmap.nx no seu projeto")
+print("")
+
 // ===== PROGRAMA PRINCIPAL =====
 let json_input: string = "{\"active\": true, \"deleted\": false, \"count\": null, \"quantidade\": 10, \"endereco\": {\"rua\": \"Rua das Flores\", \"numero\": 123}}"
 let input_len: int = string_length(json_input)

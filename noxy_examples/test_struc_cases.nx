@@ -1,0 +1,20 @@
+struct JsonObject
+    array: int[3],
+end
+
+struct Lexer
+    source: string
+end
+
+let json: JsonObject = JsonObject([1, 2, 3])
+
+let first_obj: int = json.array[1]
+print("json first object" + to_str(first_obj))
+print("json first object" + to_str(json.array[1]))
+print(f"json first object {json.array[1]}")
+
+json.array[1] = 4
+print("json first object" + to_str(json.array[1]))
+
+let lexer: Lexer = Lexer("json")
+print("lexer source: first char is " + lexer.source[0])

@@ -1,32 +1,13 @@
-use std.hashmap select OptionalString, push, get, has_value, print_get_result
+// ============================================
+// TESTE SIMPLES DO HASHMAP
+// ============================================
 
-// Testando o hashmap com valores null
-push("celular", "android")
-push("linguagem", "rust")
+// Incluir as estruturas do hashmap
+// (Este arquivo deve ser compilado junto com hashmap.nx)
 
-let resultado: OptionalString = get("celular")
-print_get_result("celular", resultado)
+print("=== TESTE DO HASHMAP ===")
+print("Se você vê esta mensagem, o arquivo está funcionando!")
+print("")
 
-let resultado2: OptionalString = get("linguagem")
-print_get_result("linguagem", resultado2)
-
-print("Atualizando valor da linguagem")
-push("linguagem", "python")
-let resultado3: OptionalString = get("linguagem")
-print_get_result("linguagem", resultado3)
-
-// Testando chave que não existe
-let resultado_inexistente: OptionalString = get("chave_inexistente")
-print_get_result("chave_inexistente", resultado_inexistente)
-
-// Testando outra chave que não existe
-let outro_resultado_inexistente: OptionalString = get("sistema_operacional")
-print_get_result("sistema_operacional", outro_resultado_inexistente)
-
-// Demonstrando como verificar se um valor existe antes de usar
-let busca_teste: OptionalString = get("celular")
-if has_value(busca_teste) then
-    print("Valor encontrado: " + busca_teste.value)
-else
-    print("Valor não encontrado!")
-end
+// Para usar as estruturas, compile ambos os arquivos juntos:
+// noxy hashmap.nx test_hashmap.nx

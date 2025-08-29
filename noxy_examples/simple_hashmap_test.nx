@@ -1,0 +1,38 @@
+// ============================================
+// TESTE SIMPLES DO HASHMAP - VERSÃO MÍNIMA
+// ============================================
+
+// Estrutura básica para teste
+struct SimpleAny
+    type: int,
+    string_value: string,
+    number_value: float
+end
+
+// Estrutura básica para teste
+struct SimpleKeyValue
+    key: string,
+    value: SimpleAny
+end
+
+// Estrutura básica para teste
+struct SimpleHashMap
+    pairs: SimpleKeyValue[2],
+    size: int
+end
+
+// Função simples para teste
+func create_simple_hashmap() -> SimpleHashMap
+    let empty_pairs: SimpleKeyValue[2] = []
+    let hm: SimpleHashMap = SimpleHashMap(empty_pairs, 0)
+    return hm
+end
+
+// Programa principal
+print("=== TESTE SIMPLES DO HASHMAP ===")
+print("Se você vê esta mensagem, a estrutura básica está funcionando!")
+print("")
+
+let hm: SimpleHashMap = create_simple_hashmap()
+print("HashMap criado com sucesso!")
+print("Tamanho: " + to_str(hm.size))

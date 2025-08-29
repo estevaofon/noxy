@@ -1,0 +1,47 @@
+// ============================================
+// TESTE ISOLADO DO PROBLEMA p.val
+// ============================================
+
+// Estrutura básica para valores
+struct Value
+    type: int,
+    string_val: string,
+    number_val: float
+end
+
+// Estrutura para par chave-valor
+struct Pair
+    key: string,
+    val: Value
+end
+
+// Array simples para teste
+let test_array: Pair[2] = [Pair("chave1", Value(1, "valor1", 0.0)), Pair("chave2", Value(2, "valor2", 42.0))]
+
+// Função que acessa p.val (PROBLEMA AQUI)
+func test_access() -> void
+    let p: Pair = test_array[0]
+    print("Chave: " + p.key)
+    print("Tipo: " + to_str(p.val.type))
+    print("String: " + p.val.string_val)
+    print("Number: " + to_str(p.val.number_val))
+end
+
+// Programa principal
+print("=== TESTE ISOLADO DO PROBLEMA p.val ===")
+print("")
+
+// Testar acesso direto aos campos
+print("Acesso direto aos campos:")
+print("Chave 0: " + test_array[0].key)
+print("Tipo 0: " + to_str(test_array[0].val.type))
+print("String 0: " + test_array[0].val.string_val)
+print("Number 0: " + to_str(test_array[0].val.number_val))
+print("")
+
+// Testar acesso via variável intermediária
+print("Acesso via variável intermediária:")
+test_access()
+print("")
+
+print("=== TESTE CONCLUÍDO ===")

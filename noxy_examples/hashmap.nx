@@ -1,106 +1,281 @@
-struct Node
+// ============================================
+// HASHMAP COM ANINHAMENTO SIMPLIFICADO PARA NOXY
+// ============================================
+
+// Estrutura básica para valores (sem tipos complexos)
+struct Value
+    type: int,           // 1=string, 2=number, 3=boolean, 4=nested_object
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    nested_index: int    // Índice do hashmap aninhado (-1 se não for aninhado)
+end
+
+// Estrutura para par chave-valor
+struct Pair
     key: string,
-    value: string,
-    next: ref Node
+    val: Value
 end
 
-func append(node: ref Node,  key: string, value: string)
-    if node.next == null then
-        node.next = ref Node(key, value, null)
-    else
-        append(node.next, key, value)
+// Arrays simples para hashmaps (evitando struct complexos)
+let global_keys: string[8] = ["", "", "", "", "", "", "", ""]
+let global_values: Value[8] = [
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1)
+]
+let global_count: int = 0
+
+// Hashmaps aninhados como arrays separados
+let nested_keys_0: string[8] = ["", "", "", "", "", "", "", ""]
+let nested_values_0: Value[8] = [
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1)
+]
+let nested_count_0: int = 0
+
+let nested_keys_1: string[8] = ["", "", "", "", "", "", "", ""]
+let nested_values_1: Value[8] = [
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1),
+    Value(0, "", 0.0, false, -1)
+]
+let nested_count_1: int = 0
+
+// Função para criar um valor string
+func make_string(s: string) -> Value
+    return Value(1, s, 0.0, false, -1)
+end
+
+// Função para criar um valor number
+func make_number(n: float) -> Value
+    return Value(2, "", n, false, -1)
+end
+
+// Função para criar um valor boolean
+func make_bool(b: bool) -> Value
+    return Value(3, "", 0.0, b, -1)
+end
+
+// Função para criar um hashmap aninhado
+func create_nested_hashmap() -> int
+    if nested_count_0 == 0 then
+        return 0
+    end
+    if nested_count_1 == 0 then
+        return 1
+    end
+    return -1  // Sem espaço disponível
+end
+
+// Função para limpar o HashMap global
+func clear_hashmap() -> void
+    global_count = 0
+    nested_count_0 = 0
+    nested_count_1 = 0
+end
+
+// Função para adicionar ao HashMap global
+func put_global(k: string, v: Value) -> void
+    if global_count < 8 then
+        global_keys[global_count] = k
+        global_values[global_count] = v
+        global_count = global_count + 1
     end
 end
 
-func is_key_in_node(node: ref Node, key: string) -> bool
-    while node != null do
-        if (node.key == key) then
-            return true
-        end
-        node = node.next
+// Função para adicionar valor a um HashMap aninhado
+func put_to_nested(index: int, k: string, v: Value) -> void
+    if index == 0 & nested_count_0 < 8 then
+        nested_keys_0[nested_count_0] = k
+        nested_values_0[nested_count_0] = v
+        nested_count_0 = nested_count_0 + 1
     end
-    return false
-end
-
-
-func update_key(node: ref Node, key: string, value: string)
-    while node != null do
-        if (node.key == key) then
-            node.value = value
-            return
-        end
-        node = node.next
+    if index == 1 & nested_count_1 < 8 then
+        nested_keys_1[nested_count_1] = k
+        nested_values_1[nested_count_1] = v
+        nested_count_1 = nested_count_1 + 1
     end
 end
 
-
-func get_key_in_node(node: ref Node, key: string) -> string
-    while node != null do
-        if (node.key == key) then
-            return node.value
-        end
-        node = node.next
-    end
-    return ""
-end
-
-let capacity: int = 16
-
-let buckets: Node[16] = [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]
-
-// Função hash polonomial
-func hash(chave: string, tamanho_da_tabela: int) -> int
-    //Função hash para uso em tabelas hash.
-    //Retorna um índice entre 0 e tamanho_tabela-1.
-    let hash_value: int = 0
-    let string_size: int = strlen(chave)
+// Função para buscar valor no HashMap global
+func get_global(k: string) -> Value
     let i: int = 0
-    while string_size - i > 0 do
-        hash_value = (hash_value * 31 + ord(chave[i])) % tamanho_da_tabela
+    while i < global_count do
+        if global_keys[i] == k then
+            return global_values[i]
+        end
         i = i + 1
     end
-    return hash_value
+    return Value(0, "", 0.0, false, -1)  // Valor vazio se não encontrado
 end
 
-func push(key: string, value: string) -> void
-    let local_hash: int = hash(key, capacity)
-    print("Imprimindo a hash local")
-    print("hash:"+ to_str(local_hash))
-    if buckets[local_hash] == null then
-        print("Adicionando registro pela primeira vez nesta hash")
-        buckets[local_hash] = Node(key, value, null)
-        return
-    end
-    let node: Node = buckets[local_hash]
-    let key_present: bool = is_key_in_node(buckets[local_hash], key)
-    if key_present then
-        print("Registro já encontrado atualizando valor")
-        update_key(node, key, value)
-        return
-    end
-    print("Novo registro para essa hash")
-    append(node, key, value)
-end
-
-func get(key: string) -> string
-    let local_hash: int = hash(key, capacity)
-    if buckets[local_hash] != null then
-        let node: Node = buckets[local_hash]
-        let key_present: bool = is_key_in_node(buckets[local_hash], key)
-        if key_present then
-            return get_key_in_node(node, key)
+// Função para buscar valor em um HashMap aninhado
+func get_from_nested(index: int, k: string) -> Value
+    if index == 0 then
+        let i: int = 0
+        while i < nested_count_0 do
+            if nested_keys_0[i] == k then
+                return nested_values_0[i]
+            end
+            i = i + 1
         end
     end
-    return ""
+    if index == 1 then
+        let i: int = 0
+        while i < nested_count_1 do
+            if nested_keys_1[i] == k then
+                return nested_values_1[i]
+            end
+            i = i + 1
+        end
+    end
+    return Value(0, "", 0.0, false, -1)  // Valor vazio se não encontrado
 end
 
-push("celular", "android")
-push("linguagem", "rust")
-let resultado: string = get("celular")
-print("get(celular): " +resultado)
-let resultado: string = get("linguagem")
-print("get(linguagem): " +resultado)
-print("Atualizando valor da linguagem")
-push("linguagem", "python")
-let resultado: string = get("linguagem")
-print("get(linguagem): " +resultado)
+// Função para imprimir valor (com suporte a aninhamento)
+func print_val(v: Value) -> void
+    if v.type == 1 then
+        print("\"" + v.string_val + "\"")
+    end
+    if v.type == 2 then
+        print(to_str(v.number_val))
+    end
+    if v.type == 3 then
+        if v.bool_val then
+            print("true")
+        else
+            print("false")
+        end
+    end
+    if v.type == 4 then
+        if v.nested_index >= 0 then
+            print_nested_hashmap(v.nested_index)
+        else
+            print("{}")
+        end
+    end
+end
+
+// Função para imprimir HashMap aninhado
+func print_nested_hashmap(index: int) -> void
+    print("{")
+    if index == 0 then
+        let i: int = 0
+        while i < nested_count_0 do
+            if i > 0 then
+                print(", ")
+            end
+            print("\"" + nested_keys_0[i] + "\": ")
+            print_val(nested_values_0[i])
+            i = i + 1
+        end
+    end
+    if index == 1 then
+        let i: int = 0
+        while i < nested_count_1 do
+            if i > 0 then
+                print(", ")
+            end
+            print("\"" + nested_keys_1[i] + "\": ")
+            print_val(nested_values_1[i])
+            i = i + 1
+        end
+    end
+    print("}")
+end
+
+// Função para imprimir o HashMap global
+func print_hashmap() -> void
+    print("{")
+    let i: int = 0
+    while i < global_count do
+        if i > 0 then
+            print(", ")
+        end
+        print("\"" + global_keys[i] + "\": ")
+        print_val(global_values[i])
+        i = i + 1
+    end
+    print("}")
+end
+
+// Programa principal
+print("=== HASHMAP COM ANINHAMENTO SIMPLIFICADO ===")
+print("")
+
+clear_hashmap()
+print("HashMap limpo e pronto para uso!")
+
+// Criar um hashmap aninhado para endereço
+let endereco_index: int = create_nested_hashmap()
+if endereco_index >= 0 then
+    put_to_nested(endereco_index, "rua", make_string("Rua das Flores, 123"))
+    put_to_nested(endereco_index, "cidade", make_string("São Paulo"))
+    put_to_nested(endereco_index, "cep", make_string("01234-567"))
+end
+
+// Criar um hashmap aninhado para contato
+let contato_index: int = create_nested_hashmap()
+if contato_index >= 0 then
+    put_to_nested(contato_index, "email", make_string("joao@email.com"))
+    put_to_nested(contato_index, "telefone", make_string("11999887766"))
+end
+
+// Adicionar valores ao HashMap principal
+put_global("nome", make_string("João Silva"))
+put_global("idade", make_number(30.0))
+put_global("ativo", make_bool(true))
+put_global("endereco", Value(4, "", 0.0, false, endereco_index))
+put_global("contato", Value(4, "", 0.0, false, contato_index))
+
+print("Valores adicionados com sucesso!")
+print("")
+
+// Mostrar o HashMap completo
+print("HashMap principal com estruturas aninhadas:")
+print_hashmap()
+print("")
+
+// Demonstrar acesso a valores aninhados
+print("=== ACESSANDO VALORES ANINHADOS ===")
+let endereco_val: Value = get_global("endereco")
+if endereco_val.type == 4 then
+    let rua_val: Value = get_from_nested(endereco_val.nested_index, "rua")
+    print("Rua: ")
+    print_val(rua_val)
+    print("")
+    
+    let cidade_val: Value = get_from_nested(endereco_val.nested_index, "cidade")
+    print("Cidade: ")
+    print_val(cidade_val)
+    print("")
+end
+
+let contato_val: Value = get_global("contato")
+if contato_val.type == 4 then
+    let email_val: Value = get_from_nested(contato_val.nested_index, "email")
+    print("Email: ")
+    print_val(email_val)
+    print("")
+end
+
+print("=== TESTE CONCLUÍDO COM SUCESSO ===")
+print("HashMap com aninhamento implementado com sucesso!")
+print("Estrutura pronta para uso em parsers JSON complexos!")

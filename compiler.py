@@ -2743,6 +2743,11 @@ class LLVMCodeGenerator:
                     struct_ptr = self.builder.load(struct_ptr)
             elif struct_name in self.global_vars:
                 struct_ptr = self.global_vars[struct_name]
+                # Se for uma GlobalVariable cujo pointee é ponteiro (ex.: Bag**), carregar para obter Bag*
+                from llvmlite import ir as _ir
+                if isinstance(struct_ptr, _ir.GlobalVariable):
+                    if isinstance(struct_ptr.type, _ir.PointerType) and isinstance(struct_ptr.type.pointee, _ir.PointerType):
+                        struct_ptr = self.builder.load(struct_ptr)
             else:
                 self._semantic_error(f"Variável '{struct_name}' não encontrada", node)
             
@@ -2897,7 +2902,10 @@ class LLVMCodeGenerator:
         if value.type == self.bool_type:
             fmt_str = "%s\n\0"  # Usar %s para "true"/"false"
         elif isinstance(value.type, ir.IntType):
-            fmt_str = "%lld\n\0"
+            if value.type.width == 8:  # i8 (char)
+                fmt_str = "%c\n\0"
+            else:
+                fmt_str = "%lld\n\0"
         elif isinstance(value.type, ir.DoubleType):
             fmt_str = "%f\n\0"
         elif isinstance(value.type, ir.PointerType) and value.type.pointee == self.char_type:
@@ -4105,6 +4113,11 @@ class LLVMCodeGenerator:
                         struct_ptr = self.builder.load(struct_ptr)
                 elif struct_name in self.global_vars:
                     struct_ptr = self.global_vars[struct_name]
+                    # Se for uma GlobalVariable cujo pointee é ponteiro (ex.: JsonObject**), carregar para obter JsonObject*
+                    from llvmlite import ir as _ir
+                    if isinstance(struct_ptr, _ir.GlobalVariable):
+                        if isinstance(struct_ptr.type, _ir.PointerType) and isinstance(struct_ptr.type.pointee, _ir.PointerType):
+                            struct_ptr = self.builder.load(struct_ptr)
                 else:
                     raise NameError(f"Variável '{struct_name}' não encontrada")
                 
@@ -4139,6 +4152,9 @@ class LLVMCodeGenerator:
                 if isinstance(field_ptr.type, ir.PointerType) and isinstance(field_ptr.type.pointee, ir.ArrayType):
                     zero = ir.Constant(ir.IntType(32), 0)
                     array_ptr = self.builder.gep(field_ptr, [zero, zero], inbounds=True)
+                elif isinstance(field_ptr.type, ir.PointerType) and isinstance(field_ptr.type.pointee, ir.PointerType) and field_ptr.type.pointee.pointee == self.char_type:
+                    # É um campo string (i8**), carregar o ponteiro da string primeiro
+                    array_ptr = self.builder.load(field_ptr)
                 else:
                     array_ptr = field_ptr
                 
@@ -4154,7 +4170,9 @@ class LLVMCodeGenerator:
                     if index.type != ir.IntType(32):
                         index = self.builder.sext(index, ir.IntType(32)) if index.type.width < 32 else self.builder.trunc(index, ir.IntType(32))
                     elem_ptr = self.builder.gep(array_ptr, [index], inbounds=True)
-                    return self.builder.load(elem_ptr)
+                    char_value = self.builder.load(elem_ptr)
+                    # Converter automaticamente char para string em Noxy
+                    return self.builder.call(self.char_to_str, [char_value])
                 
                 # Caso contrário, array normal
                 # Se for um array local (alocado com alloca), usar GEP [0, index]
