@@ -1,0 +1,19 @@
+// TEST 02: Struct com string - deve funcionar
+print("=== TEST 02: Struct com string ===")
+
+struct Person
+    name: string,
+    age: int
+end
+
+let person: Person = Person("João", 30)
+print("Name: " + person.name)
+print("Age: " + to_str(person.age))
+
+// Modificação
+person.name = "Maria"
+person.age = 25
+print("Modified name: " + person.name)
+print("Modified age: " + to_str(person.age))
+
+print("✓ Test 02 passed")

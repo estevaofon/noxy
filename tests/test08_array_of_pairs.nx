@@ -1,0 +1,22 @@
+// TEST 08: Array de Pairs - problema crítico conhecido
+print("=== TEST 08: Array de Pairs ===")
+
+struct Any
+    type: int,
+    string_val: string
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+// Array de pairs - aqui é onde o erro acontece
+let pairs: Pair[2] = [Pair("name", Any(1, "João")), Pair("age", Any(2, "30"))]
+
+print("Pair 0 key: " + pairs[0].key)
+print("Pair 0 value: " + pairs[0].value.string_val)
+print("Pair 1 key: " + pairs[1].key)
+print("Pair 1 value: " + pairs[1].value.string_val)
+
+print("✓ Test 08 passed")

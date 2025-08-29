@@ -1,0 +1,11 @@
+// Debug: teste básico de struct Any
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool
+end
+
+let test_any: Any = Any(1, "test", 0.0, false)
+print("Type: " + to_str(test_any.type))
+print("String: " + test_any.string_val)

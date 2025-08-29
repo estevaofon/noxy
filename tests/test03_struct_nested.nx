@@ -1,0 +1,24 @@
+// TEST 03: Structs aninhados - pode causar problema
+print("=== TEST 03: Structs aninhados ===")
+
+struct Point
+    x: int,
+    y: int
+end
+
+struct Rectangle
+    top_left: Point,
+    bottom_right: Point
+end
+
+let rect: Rectangle = Rectangle(Point(10, 20), Point(30, 40))
+print("Top-left x: " + to_str(rect.top_left.x))
+print("Top-left y: " + to_str(rect.top_left.y))
+print("Bottom-right x: " + to_str(rect.bottom_right.x))
+print("Bottom-right y: " + to_str(rect.bottom_right.y))
+
+// Tentativa de modificação de struct aninhado
+rect.top_left.x = 15
+print("Modified top-left x: " + to_str(rect.top_left.x))
+
+print("✓ Test 03 passed")

@@ -1,0 +1,30 @@
+// Debug: teste HashMap sem inicialização inline
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct HashMap
+    pairs: Pair[2],
+    count: int
+end
+
+// Criar elementos separadamente
+let any1: Any = Any(1, "João", 0.0, false, -1, -1)
+let any2: Any = Any(2, "", 30.0, false, -1, -1)
+let pair1: Pair = Pair("name", any1)
+let pair2: Pair = Pair("age", any2)
+let pairs_array: Pair[2] = [pair1, pair2]
+let test_hashmap: HashMap = HashMap(pairs_array, 2)
+
+print("HashMap created successfully")
+print("First pair key: " + test_hashmap.pairs[0].key)

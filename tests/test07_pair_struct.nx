@@ -1,0 +1,22 @@
+// TEST 07: Struct Pair simples (do nosso hashmap) - problema conhecido
+print("=== TEST 07: Struct Pair simples ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+let any_val: Any = Any(1, "test", 0.0)
+let pair: Pair = Pair("name", any_val)
+
+print("Pair key: " + pair.key)
+print("Pair value type: " + to_str(pair.value.type))
+print("Pair value string: " + pair.value.string_val)
+
+print("✓ Test 07 passed")

@@ -1,0 +1,14 @@
+// TEST 04D: Caso mínimo - atribuição a campo de array
+print("=== TEST 04D: Atribuição mínima a campo ===")
+
+struct Point
+    x: int
+end
+
+let points: Point[1] = [Point(10)]
+print("Before: " + to_str(points[0].x))
+
+// Esta é a linha problemática - o caso mais simples possível
+points[0].x = 50
+
+print("✓ Test 04D passed")

@@ -1,0 +1,27 @@
+// Debug: teste HashMap com array de structs simples
+struct Any
+    type: int,
+    string_val: string
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct HashMap
+    pairs: Pair[2],
+    count: int
+end
+
+// Criar array de pares primeiro
+let pair1: Pair = Pair("name", Any(1, "João"))
+let pair2: Pair = Pair("age", Any(2, "30"))
+let pairs_array: Pair[2] = [pair1, pair2]
+
+// Criar HashMap
+let test_hashmap: HashMap = HashMap(pairs_array, 2)
+
+print("HashMap created successfully")
+print("First pair key: " + test_hashmap.pairs[0].key)
+print("Second pair key: " + test_hashmap.pairs[1].key)

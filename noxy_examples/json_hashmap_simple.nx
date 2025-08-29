@@ -1,0 +1,335 @@
+// ============================================
+// HASHMAP SIMPLES PARA JSON PARSER EM NOXY
+// ============================================
+
+// Constantes para tipos de valores
+let TYPE_NULL: int = 0
+let TYPE_STRING: int = 1
+let TYPE_NUMBER: int = 2
+let TYPE_BOOLEAN: int = 3
+let TYPE_OBJECT: int = 4
+let TYPE_ARRAY: int = 5
+
+// Estrutura Any que pode conter qualquer tipo de valor JSON
+struct Any
+    type: int,              // Tipo do valor
+    string_val: string,     // Para strings
+    number_val: float,      // Para números
+    bool_val: bool,         // Para booleanos
+    object_index: int,      // Índice do HashMap aninhado (-1 se não for objeto)
+    array_index: int        // Índice do array aninhado (-1 se não for array)
+end
+
+// Estrutura para par chave-valor
+struct Pair
+    key: string,
+    value: Any
+end
+
+// Estrutura HashMap simples
+struct HashMap
+    pairs: Pair[8],         // Array de pares chave-valor (máximo 8 propriedades)
+    count: int              // Número de pares no hashmap
+end
+
+// Estrutura para arrays JSON
+struct JsonArray
+    values: Any[8],         // Array de valores Any (máximo 8 elementos)
+    count: int              // Número de elementos no array
+end
+
+// Arrays globais simples para gerenciar pools
+let global_hashmap_pool: HashMap[4] = [
+    HashMap([Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 0),
+    HashMap([Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 0),
+    HashMap([Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 0),
+    HashMap([Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 0)
+]
+
+let global_array_pool: JsonArray[4] = [
+    JsonArray([Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 0),
+    JsonArray([Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 0),
+    JsonArray([Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 0),
+    JsonArray([Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 0)
+]
+
+// Contadores para os pools
+let hashmap_count: int = 0
+let array_count: int = 0
+
+// ============================================
+// FUNÇÕES PARA CRIAR VALORES ANY
+// ============================================
+
+func make_null() -> Any
+    return Any(TYPE_NULL, "", 0.0, false, -1, -1)
+end
+
+func make_string(s: string) -> Any
+    return Any(TYPE_STRING, s, 0.0, false, -1, -1)
+end
+
+func make_number(n: float) -> Any
+    return Any(TYPE_NUMBER, "", n, false, -1, -1)
+end
+
+func make_boolean(b: bool) -> Any
+    return Any(TYPE_BOOLEAN, "", 0.0, b, -1, -1)
+end
+
+func make_object(obj_index: int) -> Any
+    return Any(TYPE_OBJECT, "", 0.0, false, obj_index, -1)
+end
+
+func make_array(arr_index: int) -> Any
+    return Any(TYPE_ARRAY, "", 0.0, false, -1, arr_index)
+end
+
+// ============================================
+// FUNÇÕES DE GESTÃO SIMPLES
+// ============================================
+
+func new_hashmap() -> int
+    if hashmap_count < 4 then
+        let index: int = hashmap_count
+        hashmap_count = hashmap_count + 1
+        return index
+    end
+    return -1
+end
+
+func new_array() -> int
+    if array_count < 4 then
+        let index: int = array_count
+        array_count = array_count + 1
+        return index
+    end
+    return -1
+end
+
+// ============================================
+// FUNÇÕES DE MANIPULAÇÃO DE HASHMAP
+// ============================================
+
+func hashmap_put_0(key: string, value: Any) -> void
+    let hashmap: HashMap = global_hashmap_pool[0]
+    if hashmap.count < 8 then
+        let new_pair: Pair = Pair(key, value)
+        // Recriar o hashmap com o novo par adicionado
+        if hashmap.count == 0 then
+            global_hashmap_pool[0] = HashMap([new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 1)
+        end
+        if hashmap.count == 1 then
+            global_hashmap_pool[0] = HashMap([hashmap.pairs[0], new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 2)
+        end
+        if hashmap.count == 2 then
+            global_hashmap_pool[0] = HashMap([hashmap.pairs[0], hashmap.pairs[1], new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 3)
+        end
+        if hashmap.count == 3 then
+            global_hashmap_pool[0] = HashMap([hashmap.pairs[0], hashmap.pairs[1], hashmap.pairs[2], new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 4)
+        end
+    end
+end
+
+func hashmap_put_1(key: string, value: Any) -> void
+    let hashmap: HashMap = global_hashmap_pool[1]
+    if hashmap.count < 8 then
+        let new_pair: Pair = Pair(key, value)
+        if hashmap.count == 0 then
+            global_hashmap_pool[1] = HashMap([new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 1)
+        end
+        if hashmap.count == 1 then
+            global_hashmap_pool[1] = HashMap([hashmap.pairs[0], new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 2)
+        end
+        if hashmap.count == 2 then
+            global_hashmap_pool[1] = HashMap([hashmap.pairs[0], hashmap.pairs[1], new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 3)
+        end
+        if hashmap.count == 3 then
+            global_hashmap_pool[1] = HashMap([hashmap.pairs[0], hashmap.pairs[1], hashmap.pairs[2], new_pair, Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))], 4)
+        end
+    end
+end
+
+func array_push_0(value: Any) -> void
+    let array: JsonArray = global_array_pool[0]
+    if array.count < 8 then
+        if array.count == 0 then
+            global_array_pool[0] = JsonArray([value, Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 1)
+        end
+        if array.count == 1 then
+            global_array_pool[0] = JsonArray([array.values[0], value, Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 2)
+        end
+        if array.count == 2 then
+            global_array_pool[0] = JsonArray([array.values[0], array.values[1], value, Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1)], 3)
+        end
+    end
+end
+
+// ============================================
+// FUNÇÕES DE ACESSO
+// ============================================
+
+func hashmap_get(hashmap_index: int, key: string) -> Any
+    if hashmap_index >= 0 & hashmap_index < 4 then
+        let hashmap: HashMap = global_hashmap_pool[hashmap_index]
+        let i: int = 0
+        while i < hashmap.count do
+            let pair: Pair = hashmap.pairs[i]
+            if string_equals(pair.key, key) then
+                return pair.value
+            end
+            i = i + 1
+        end
+    end
+    return make_null()
+end
+
+func array_get(array_index: int, index: int) -> Any
+    if array_index >= 0 & array_index < 4 then
+        let array: JsonArray = global_array_pool[array_index]
+        if index >= 0 & index < array.count then
+            return array.values[index]
+        end
+    end
+    return make_null()
+end
+
+// ============================================
+// FUNÇÕES AUXILIARES
+// ============================================
+
+func string_equals(s1: string, s2: string) -> bool
+    let i: int = 0
+    while s1[i] != 0 & s2[i] != 0 do
+        if s1[i] != s2[i] then
+            return false
+        end
+        i = i + 1
+    end
+    return s1[i] == s2[i]
+end
+
+// ============================================
+// FUNÇÕES DE IMPRESSÃO
+// ============================================
+
+func print_any(value: Any) -> void
+    if value.type == TYPE_NULL then
+        print("null")
+    end
+    if value.type == TYPE_STRING then
+        print("\"" + value.string_val + "\"")
+    end
+    if value.type == TYPE_NUMBER then
+        print(to_str(value.number_val))
+    end
+    if value.type == TYPE_BOOLEAN then
+        if value.bool_val then
+            print("true")
+        else
+            print("false")
+        end
+    end
+    if value.type == TYPE_OBJECT then
+        print_hashmap(value.object_index)
+    end
+    if value.type == TYPE_ARRAY then
+        print_array(value.array_index)
+    end
+end
+
+func print_hashmap(hashmap_index: int) -> void
+    if hashmap_index >= 0 & hashmap_index < 4 then
+        print("{")
+        let hashmap: HashMap = global_hashmap_pool[hashmap_index]
+        let i: int = 0
+        while i < hashmap.count do
+            if i > 0 then
+                print(", ")
+            end
+            let pair: Pair = hashmap.pairs[i]
+            print("\"" + pair.key + "\": ")
+            print_any(pair.value)
+            i = i + 1
+        end
+        print("}")
+    end
+end
+
+func print_array(array_index: int) -> void
+    if array_index >= 0 & array_index < 4 then
+        print("[")
+        let array: JsonArray = global_array_pool[array_index]
+        let i: int = 0
+        while i < array.count do
+            if i > 0 then
+                print(", ")
+            end
+            print_any(array.values[i])
+            i = i + 1
+        end
+        print("]")
+    end
+end
+
+// ============================================
+// PROGRAMA DE DEMONSTRAÇÃO
+// ============================================
+
+print("=== HASHMAP SIMPLES PARA JSON PARSER ===")
+print("")
+
+// Limpar contadores
+hashmap_count = 0
+array_count = 0
+
+// Criar estrutura: {"user": {"name": "João", "age": 30}, "items": [1, 2, 3]}
+
+// 1. Criar objeto principal (índice 0)
+let main_obj: int = new_hashmap()
+
+// 2. Criar sub-objeto user (índice 1)
+let user_obj: int = new_hashmap()
+hashmap_put_1("name", make_string("João"))
+hashmap_put_1("age", make_number(30.0))
+
+// 3. Criar array items (índice 0)
+let items_arr: int = new_array()
+array_push_0(make_number(1.0))
+array_push_0(make_number(2.0))
+array_push_0(make_number(3.0))
+
+// 4. Adicionar ao objeto principal
+hashmap_put_0("user", make_object(user_obj))
+hashmap_put_0("items", make_array(items_arr))
+
+// 5. Imprimir resultado
+print("Objeto JSON criado:")
+print_hashmap(main_obj)
+print("")
+
+// 6. Testar acesso aos dados
+print("=== TESTE DE ACESSO AOS DADOS ===")
+let user_data: Any = hashmap_get(main_obj, "user")
+if user_data.type == TYPE_OBJECT then
+    let user_name: Any = hashmap_get(user_data.object_index, "name")
+    if user_name.type == TYPE_STRING then
+        print("Nome do usuário: " + user_name.string_val)
+    end
+end
+
+let items_data: Any = hashmap_get(main_obj, "items")
+if items_data.type == TYPE_ARRAY then
+    print("Primeiro item do array: ")
+    let first_item: Any = array_get(items_data.array_index, 0)
+    print_any(first_item)
+    print("")
+end
+
+print("")
+print("=== ESTRUTURA PRONTA PARA JSON PARSER ===")
+print("✓ Struct Any implementada")
+print("✓ HashMap com aninhamento")
+print("✓ Arrays JSON")
+print("✓ Funções de acesso")
+print("✓ Sistema de impressão")

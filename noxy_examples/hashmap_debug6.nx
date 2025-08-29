@@ -1,0 +1,27 @@
+// Debug: HashMap mais simples sem inicialização de array
+struct Any
+    type: int,
+    string_val: string
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct HashMap
+    pair1: Pair,
+    pair2: Pair,
+    count: int
+end
+
+// Criar elementos separadamente
+let any1: Any = Any(1, "João")
+let any2: Any = Any(2, "30")
+let pair1: Pair = Pair("name", any1)
+let pair2: Pair = Pair("age", any2)
+let test_hashmap: HashMap = HashMap(pair1, pair2, 2)
+
+print("HashMap created successfully")
+print("First pair key: " + test_hashmap.pair1.key)
+print("Second pair key: " + test_hashmap.pair2.key)

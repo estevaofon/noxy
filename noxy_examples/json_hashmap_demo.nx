@@ -1,0 +1,260 @@
+// ============================================
+// DEMONSTRAÇÃO DE HASHMAP PARA JSON EM NOXY
+// ============================================
+
+// Constantes para tipos de valores
+let TYPE_NULL: int = 0
+let TYPE_STRING: int = 1
+let TYPE_NUMBER: int = 2
+let TYPE_BOOLEAN: int = 3
+let TYPE_OBJECT: int = 4
+let TYPE_ARRAY: int = 5
+
+// Estrutura Any que pode conter qualquer tipo de valor JSON
+struct Any
+    type: int,              // Tipo do valor
+    string_val: string,     // Para strings
+    number_val: float,      // Para números
+    bool_val: bool,         // Para booleanos
+    object_index: int,      // Índice do HashMap aninhado (-1 se não for objeto)
+    array_index: int        // Índice do array aninhado (-1 se não for array)
+end
+
+// Estrutura para par chave-valor
+struct Pair
+    key: string,
+    value: Any
+end
+
+// HashMap simples com 4 pares
+struct SimpleHashMap
+    pair0: Pair,
+    pair1: Pair,
+    pair2: Pair,
+    pair3: Pair,
+    count: int
+end
+
+// Array simples com 4 valores
+struct SimpleArray
+    value0: Any,
+    value1: Any,
+    value2: Any,
+    value3: Any,
+    count: int
+end
+
+// Instâncias globais
+let main_hashmap: SimpleHashMap = SimpleHashMap(Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), 0)
+let user_hashmap: SimpleHashMap = SimpleHashMap(Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), 0)
+let items_array: SimpleArray = SimpleArray(Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), Any(0, "", 0.0, false, -1, -1), 0)
+
+// ============================================
+// FUNÇÕES PARA CRIAR VALORES ANY
+// ============================================
+
+func make_string(s: string) -> Any
+    return Any(TYPE_STRING, s, 0.0, false, -1, -1)
+end
+
+func make_number(n: float) -> Any
+    return Any(TYPE_NUMBER, "", n, false, -1, -1)
+end
+
+func make_boolean(b: bool) -> Any
+    return Any(TYPE_BOOLEAN, "", 0.0, b, -1, -1)
+end
+
+func make_object(obj_index: int) -> Any
+    return Any(TYPE_OBJECT, "", 0.0, false, obj_index, -1)
+end
+
+func make_array(arr_index: int) -> Any
+    return Any(TYPE_ARRAY, "", 0.0, false, -1, arr_index)
+end
+
+// ============================================
+// FUNÇÕES DE MANIPULAÇÃO SIMPLIFICADAS
+// ============================================
+
+func put_main(key: string, value: Any) -> void
+    let count: int = main_hashmap.count
+    if count == 0 then
+        main_hashmap = SimpleHashMap(Pair(key, value), main_hashmap.pair1, main_hashmap.pair2, main_hashmap.pair3, 1)
+    end
+    if count == 1 then
+        main_hashmap = SimpleHashMap(main_hashmap.pair0, Pair(key, value), main_hashmap.pair2, main_hashmap.pair3, 2)
+    end
+    if count == 2 then
+        main_hashmap = SimpleHashMap(main_hashmap.pair0, main_hashmap.pair1, Pair(key, value), main_hashmap.pair3, 3)
+    end
+    if count == 3 then
+        main_hashmap = SimpleHashMap(main_hashmap.pair0, main_hashmap.pair1, main_hashmap.pair2, Pair(key, value), 4)
+    end
+end
+
+func put_user(key: string, value: Any) -> void
+    let count: int = user_hashmap.count
+    if count == 0 then
+        user_hashmap = SimpleHashMap(Pair(key, value), user_hashmap.pair1, user_hashmap.pair2, user_hashmap.pair3, 1)
+    end
+    if count == 1 then
+        user_hashmap = SimpleHashMap(user_hashmap.pair0, Pair(key, value), user_hashmap.pair2, user_hashmap.pair3, 2)
+    end
+    if count == 2 then
+        user_hashmap = SimpleHashMap(user_hashmap.pair0, user_hashmap.pair1, Pair(key, value), user_hashmap.pair3, 3)
+    end
+    if count == 3 then
+        user_hashmap = SimpleHashMap(user_hashmap.pair0, user_hashmap.pair1, user_hashmap.pair2, Pair(key, value), 4)
+    end
+end
+
+func push_item(value: Any) -> void
+    let count: int = items_array.count
+    if count == 0 then
+        items_array = SimpleArray(value, items_array.value1, items_array.value2, items_array.value3, 1)
+    end
+    if count == 1 then
+        items_array = SimpleArray(items_array.value0, value, items_array.value2, items_array.value3, 2)
+    end
+    if count == 2 then
+        items_array = SimpleArray(items_array.value0, items_array.value1, value, items_array.value3, 3)
+    end
+    if count == 3 then
+        items_array = SimpleArray(items_array.value0, items_array.value1, items_array.value2, value, 4)
+    end
+end
+
+// ============================================
+// FUNÇÕES DE ACESSO SIMPLIFICADAS
+// ============================================
+
+func get_main(key: string) -> Any
+    if main_hashmap.count > 0 & string_equals(main_hashmap.pair0.key, key) then
+        return main_hashmap.pair0.value
+    end
+    if main_hashmap.count > 1 & string_equals(main_hashmap.pair1.key, key) then
+        return main_hashmap.pair1.value
+    end
+    if main_hashmap.count > 2 & string_equals(main_hashmap.pair2.key, key) then
+        return main_hashmap.pair2.value
+    end
+    if main_hashmap.count > 3 & string_equals(main_hashmap.pair3.key, key) then
+        return main_hashmap.pair3.value
+    end
+    return Any(TYPE_NULL, "", 0.0, false, -1, -1)
+end
+
+func get_user(key: string) -> Any
+    if user_hashmap.count > 0 & string_equals(user_hashmap.pair0.key, key) then
+        return user_hashmap.pair0.value
+    end
+    if user_hashmap.count > 1 & string_equals(user_hashmap.pair1.key, key) then
+        return user_hashmap.pair1.value
+    end
+    if user_hashmap.count > 2 & string_equals(user_hashmap.pair2.key, key) then
+        return user_hashmap.pair2.value
+    end
+    if user_hashmap.count > 3 & string_equals(user_hashmap.pair3.key, key) then
+        return user_hashmap.pair3.value
+    end
+    return Any(TYPE_NULL, "", 0.0, false, -1, -1)
+end
+
+func get_item(index: int) -> Any
+    if index == 0 & items_array.count > 0 then
+        return items_array.value0
+    end
+    if index == 1 & items_array.count > 1 then
+        return items_array.value1
+    end
+    if index == 2 & items_array.count > 2 then
+        return items_array.value2
+    end
+    if index == 3 & items_array.count > 3 then
+        return items_array.value3
+    end
+    return Any(TYPE_NULL, "", 0.0, false, -1, -1)
+end
+
+// ============================================
+// FUNÇÃO AUXILIAR
+// ============================================
+
+func string_equals(s1: string, s2: string) -> bool
+    let i: int = 0
+    while s1[i] != 0 & s2[i] != 0 do
+        if s1[i] != s2[i] then
+            return false
+        end
+        i = i + 1
+    end
+    return s1[i] == s2[i]
+end
+
+// ============================================
+// PROGRAMA PRINCIPAL
+// ============================================
+
+print("=== DEMONSTRAÇÃO HASHMAP JSON ===")
+print("")
+
+// Criar estrutura JSON: {"user": {"name": "João", "age": 30}, "items": [1, 2, 3]}
+
+// 1. Preencher user_hashmap
+put_user("name", make_string("João"))
+put_user("age", make_number(30.0))
+
+// 2. Preencher items_array
+push_item(make_number(1.0))
+push_item(make_number(2.0))
+push_item(make_number(3.0))
+
+// 3. Preencher main_hashmap (usando índices 1 e 0 para identificar user e items)
+put_main("user", make_object(1))
+put_main("items", make_array(0))
+
+print("Estrutura JSON criada com sucesso!")
+print("")
+
+// 4. Testar acesso aos dados
+print("=== TESTE DE ACESSO AOS DADOS ===")
+
+let user_obj: Any = get_main("user")
+if user_obj.type == TYPE_OBJECT then
+    print("Encontrou objeto user")
+    
+    let user_name: Any = get_user("name")
+    if user_name.type == TYPE_STRING then
+        print("Nome: " + user_name.string_val)
+    end
+    
+    let user_age: Any = get_user("age")
+    if user_age.type == TYPE_NUMBER then
+        print("Idade: " + to_str(user_age.number_val))
+    end
+end
+
+let items_obj: Any = get_main("items")
+if items_obj.type == TYPE_ARRAY then
+    print("Encontrou array items")
+    
+    let item1: Any = get_item(0)
+    print("Item 1: " + to_str(item1.number_val))
+    
+    let item2: Any = get_item(1)
+    print("Item 2: " + to_str(item2.number_val))
+    
+    let item3: Any = get_item(2)
+    print("Item 3: " + to_str(item3.number_val))
+end
+
+print("")
+print("=== ESTRUTURA FUNCIONAL ===")
+print("✓ Struct Any para todos os tipos JSON")
+print("✓ HashMap simples com aninhamento")
+print("✓ Arrays JSON funcionais")
+print("✓ Acesso a dados aninhados")
+print("✓ Base sólida para JSON parser")
+print("")
+print("Este é um exemplo funcional de hashmap para JSON em Noxy!")

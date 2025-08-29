@@ -666,6 +666,14 @@ class NestedStructAssignmentNode(ASTNode):
     value: ASTNode
 
 @dataclass
+class ArrayFieldAssignmentNode(ASTNode):
+    """Nó para atribuições de campo de struct em array: array[index].campo = valor"""
+    array_name: str
+    index: ASTNode
+    field_path: List[str]  # Lista de campos para navegar: ["campo"] ou ["campo", "subcampo"]
+    value: ASTNode
+
+@dataclass
 class StructConstructorNode(ASTNode):
     """Nó para construtores de struct: StructName(arg1, arg2, ...)"""
     struct_name: str
@@ -934,12 +942,39 @@ class Parser:
                     identifier = self._advance()
                     self._advance()  # [
                     index_expr = self._parse_expression()
-                    if self._match(TokenType.RBRACKET) and self._check(TokenType.ASSIGN):
-                        # É uma atribuição de array
-                        self.position = saved_pos
-                        return self._parse_array_assignment()
+                    if self._match(TokenType.RBRACKET):
+                        if self._check(TokenType.ASSIGN):
+                            # É uma atribuição de array simples: array[index] = value
+                            self.position = saved_pos
+                            return self._parse_array_assignment()
+                        elif self._check(TokenType.DOT):
+                            # Pode ser atribuição de campo de array: array[index].field = value
+                            # Verificar se após o campo há um '='
+                            temp_pos = self.position
+                            self._advance()  # .
+                            field_token = self._advance()
+                            if field_token.type == TokenType.IDENTIFIER:
+                                # Verificar se há mais campos (array[index].field.subfield)
+                                while self._check(TokenType.DOT):
+                                    self._advance()  # .
+                                    next_field = self._advance()
+                                    if next_field.type != TokenType.IDENTIFIER:
+                                        break
+                                
+                                if self._check(TokenType.ASSIGN):
+                                    # É uma atribuição de campo de array
+                                    self.position = saved_pos
+                                    return self._parse_array_field_assignment()
+                            
+                            # Não é atribuição, voltar e processar como expressão
+                            self.position = saved_pos
+                            return self._parse_expression()
+                        else:
+                            # É apenas um acesso de array, voltar e processar como expressão
+                            self.position = saved_pos
+                            return self._parse_expression()
                     else:
-                        # É apenas um acesso de array, voltar e processar como expressão
+                        # Erro de sintaxe - esperado ']'
                         self.position = saved_pos
                         return self._parse_expression()
                 elif next_token.type == TokenType.DOT:
@@ -1052,6 +1087,48 @@ class Parser:
             
         value = self._parse_expression()
         return ArrayAssignmentNode(array_name, index, value)
+    
+    def _parse_array_field_assignment(self) -> ArrayFieldAssignmentNode:
+        """Parse atribuição de campo de struct em array: array[index].campo = valor"""
+        # Primeiro identificador (nome do array)
+        array_token = self._advance()
+        if array_token.type != TokenType.IDENTIFIER:
+            self._error("Esperado identificador para nome do array")
+        
+        array_name = array_token.value
+        
+        if not self._match(TokenType.LBRACKET):
+            self._error("Esperado '[' para acesso ao array")
+            
+        index = self._parse_expression()
+        
+        if not self._match(TokenType.RBRACKET):
+            self._error("Esperado ']' após índice")
+        
+        if not self._match(TokenType.DOT):
+            self._error("Esperado '.' após acesso ao array")
+        
+        # Coletar todos os campos do caminho
+        field_path = []
+        
+        field_name = self._advance()
+        if field_name.type != TokenType.IDENTIFIER:
+            self._error("Esperado nome do campo após '.'")
+        field_path.append(field_name.value)
+        
+        # Verificar se há mais níveis de acesso (ex: array[0].pessoa.nome)
+        while self._match(TokenType.DOT):
+            next_field = self._advance()
+            if next_field.type != TokenType.IDENTIFIER:
+                self._error("Esperado nome do campo após '.'")
+            field_path.append(next_field.value)
+        
+        if not self._match(TokenType.ASSIGN):
+            self._error("Esperado '=' após nome do campo")
+        
+        value = self._parse_expression()
+        
+        return ArrayFieldAssignmentNode(array_name, index, field_path, value)
     
     def _parse_print(self) -> PrintNode:
         if not self._match(TokenType.LPAREN):
@@ -2543,6 +2620,8 @@ class LLVMCodeGenerator:
             self._generate_assignment(node)
         elif isinstance(node, ArrayAssignmentNode):
             self._generate_array_assignment(node)
+        elif isinstance(node, ArrayFieldAssignmentNode):
+            self._generate_array_field_assignment(node)
         elif isinstance(node, PrintNode):
             self._generate_print(node)
         elif isinstance(node, IfNode):
@@ -2909,6 +2988,87 @@ class LLVMCodeGenerator:
         
         # Armazenar valor
         self.builder.store(value, elem_ptr)
+    
+    def _generate_array_field_assignment(self, node: ArrayFieldAssignmentNode):
+        """Gera código para atribuição de campo de struct em array: array[index].campo = valor"""
+        # Primeiro, obter o ponteiro para o array
+        if node.array_name in self.local_vars:
+            array_var = self.local_vars[node.array_name]
+        elif node.array_name in self.global_vars:
+            array_var = self.global_vars[node.array_name]
+        else:
+            self._semantic_error(f"Array '{node.array_name}' não encontrado", node)
+        
+        # Gerar o índice
+        index = self._generate_expression(node.index)
+        
+        # Gerar o valor para atribuição
+        value = self._generate_expression(node.value)
+        
+        # Obter o ponteiro para o elemento do array
+        array_ptr = None
+        if isinstance(array_var, ir.Argument) and isinstance(array_var.type, ir.PointerType):
+            # Parâmetro de função
+            array_ptr = array_var
+        elif isinstance(array_var, ir.GlobalVariable) and isinstance(array_var.type.pointee, ir.ArrayType):
+            # Array global
+            zero = ir.Constant(ir.IntType(32), 0)
+            array_ptr = self.builder.gep(array_var, [zero, zero], inbounds=True)
+        elif isinstance(array_var.type, ir.PointerType) and isinstance(array_var.type.pointee, ir.ArrayType):
+            # Array local
+            zero = ir.Constant(ir.IntType(32), 0)
+            array_ptr = self.builder.gep(array_var, [zero, zero], inbounds=True)
+        else:
+            # Array de ponteiros ou outro caso
+            array_ptr = self.builder.load(array_var)
+        
+        # Calcular o ponteiro para o elemento específico do array
+        elem_ptr = self.builder.gep(array_ptr, [index], inbounds=True)
+        
+        # Se o elemento é um ponteiro para struct, fazer load para obter o struct
+        if isinstance(elem_ptr.type, ir.PointerType) and isinstance(elem_ptr.type.pointee, ir.PointerType):
+            struct_ptr = self.builder.load(elem_ptr)
+        else:
+            struct_ptr = elem_ptr
+        
+        # Determinar o tipo do struct baseado no tipo do array
+        struct_type_name = None
+        if node.array_name in self.type_map:
+            array_type = self.type_map[node.array_name]
+            if isinstance(array_type, ArrayType) and isinstance(array_type.element_type, StructType):
+                struct_type_name = array_type.element_type.name
+        
+        if not struct_type_name or struct_type_name not in self.struct_fields:
+            self._semantic_error(f"Não foi possível determinar o tipo do struct no array '{node.array_name}'", node)
+        
+        # Navegar pelos campos (pode haver aninhamento como array[0].pessoa.nome)
+        current_ptr = struct_ptr
+        current_struct_type = struct_type_name
+        
+        for i, field_name in enumerate(node.field_path):
+            if current_struct_type not in self.struct_fields:
+                self._semantic_error(f"Tipo de struct '{current_struct_type}' não encontrado", node)
+            
+            if field_name not in self.struct_fields[current_struct_type]:
+                self._semantic_error(f"Campo '{field_name}' não encontrado em struct '{current_struct_type}'", node)
+            
+            # Obter o índice do campo
+            field_index = self.struct_fields[current_struct_type][field_name]
+            
+            # Se não é o último campo, navegar para o próximo nível
+            if i < len(node.field_path) - 1:
+                # Acessar o campo e continuar navegando
+                field_ptr = self.builder.gep(current_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), field_index)])
+                
+                # Determinar o tipo do próximo struct
+                # TODO: Implementar lógica para structs aninhados
+                # Por enquanto, assumimos apenas um nível
+                current_ptr = field_ptr
+                current_struct_type = None  # Precisaria determinar o tipo do campo
+            else:
+                # É o último campo, fazer a atribuição
+                field_ptr = self.builder.gep(current_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), field_index)])
+                self.builder.store(value, field_ptr)
     
     def _generate_print(self, node: PrintNode):
         # Verificar se estamos imprimindo uma concatenação

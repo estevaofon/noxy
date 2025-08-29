@@ -1,0 +1,19 @@
+// TEST 10: Função retornando struct complexo - pode causar erro
+print("=== TEST 10: Função retornando struct ===")
+
+struct Result
+    success: bool,
+    message: string,
+    value: int
+end
+
+func create_result(msg: string, val: int) -> Result
+    return Result(true, msg, val)
+end
+
+let result: Result = create_result("Operation successful", 42)
+print("Success: " + to_str(result.success))
+print("Message: " + result.message)
+print("Value: " + to_str(result.value))
+
+print("✓ Test 10 passed")

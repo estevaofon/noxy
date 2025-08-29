@@ -1,0 +1,25 @@
+// TEST 06: Struct contendo struct que contém string - problema muito provável
+print("=== TEST 06: Struct aninhado com string ===")
+
+struct Person
+    name: string,
+    age: int
+end
+
+struct Company
+    name: string,
+    ceo: Person
+end
+
+let company: Company = Company("TechCorp", Person("João Silva", 45))
+print("Company name: " + company.name)
+print("CEO name: " + company.ceo.name)
+print("CEO age: " + to_str(company.ceo.age))
+
+// Modificação profunda
+company.ceo.name = "Maria Santos"
+company.ceo.age = 42
+print("Modified CEO name: " + company.ceo.name)
+print("Modified CEO age: " + to_str(company.ceo.age))
+
+print("✓ Test 06 passed")

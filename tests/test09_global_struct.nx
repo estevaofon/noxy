@@ -1,0 +1,21 @@
+// TEST 09: Modificação de struct global - problema conhecido
+print("=== TEST 09: Modificação de struct global ===")
+
+struct Counter
+    value: int,
+    name: string
+end
+
+let global_counter: Counter = Counter(0, "main")
+
+print("Initial counter: " + to_str(global_counter.value))
+print("Initial name: " + global_counter.name)
+
+// Tentativa de modificação direta - pode causar erro
+global_counter.value = global_counter.value + 1
+global_counter.name = "updated"
+
+print("Updated counter: " + to_str(global_counter.value))
+print("Updated name: " + global_counter.name)
+
+print("✓ Test 09 passed")

@@ -1,0 +1,19 @@
+// TEST 01: Struct básico - deve funcionar
+print("=== TEST 01: Struct básico ===")
+
+struct Point
+    x: int,
+    y: int
+end
+
+let p: Point = Point(10, 20)
+print("Point x: " + to_str(p.x))
+print("Point y: " + to_str(p.y))
+
+// Modificação de campos
+p.x = 30
+p.y = 40
+print("Modified x: " + to_str(p.x))
+print("Modified y: " + to_str(p.y))
+
+print("✓ Test 01 passed")

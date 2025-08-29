@@ -1,0 +1,20 @@
+// Debug: teste com mais campos
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+let test_any: Any = Any(1, "test", 0.0, false, -1, -1)
+let test_pair: Pair = Pair("name", test_any)
+
+print("Key: " + test_pair.key)
+print("Value type: " + to_str(test_pair.value.type))

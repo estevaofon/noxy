@@ -1,0 +1,20 @@
+// TEST 04: Array simples de structs - pode causar problema
+print("=== TEST 04: Array simples de structs ===")
+
+struct Point
+    x: int,
+    y: int
+end
+
+// Array de structs simples
+let points: Point[2] = [Point(10, 20), Point(30, 40)]
+print("Point 0 x: " + to_str(points[0].x))
+print("Point 0 y: " + to_str(points[0].y))
+print("Point 1 x: " + to_str(points[1].x))
+print("Point 1 y: " + to_str(points[1].y))
+
+// Modificação de elemento do array
+points[0].x = 50
+print("Modified point 0 x: " + to_str(points[0].x))
+
+print("✓ Test 04 passed")

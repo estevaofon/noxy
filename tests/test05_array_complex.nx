@@ -1,0 +1,22 @@
+// TEST 05: Array de structs com strings - problema provável
+print("=== TEST 05: Array de structs com strings ===")
+
+struct Person
+    name: string,
+    age: int
+end
+
+// Array de structs com strings
+let people: Person[2] = [Person("João", 30), Person("Maria", 25)]
+print("Person 0 name: " + people[0].name)
+print("Person 0 age: " + to_str(people[0].age))
+print("Person 1 name: " + people[1].name)
+print("Person 1 age: " + to_str(people[1].age))
+
+// Modificação
+people[0].name = "Carlos"
+people[0].age = 35
+print("Modified person 0 name: " + people[0].name)
+print("Modified person 0 age: " + to_str(people[0].age))
+
+print("✓ Test 05 passed")

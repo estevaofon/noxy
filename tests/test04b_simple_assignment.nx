@@ -1,0 +1,16 @@
+// TEST 04B: Atribuição simples a variável (não array)
+print("=== TEST 04B: Atribuição simples ===")
+
+struct Point
+    x: int,
+    y: int
+end
+
+let point: Point = Point(10, 20)
+print("Before: x = " + to_str(point.x))
+
+// Esta atribuição deveria funcionar
+point.x = 50
+print("After: x = " + to_str(point.x))
+
+print("✓ Test 04B passed")

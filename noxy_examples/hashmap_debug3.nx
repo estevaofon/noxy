@@ -1,0 +1,20 @@
+// Debug: teste com arrays de structs
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+// Teste simples com array de Pairs
+let pairs: Pair[2] = [Pair("name", Any(1, "João", 0.0, false, -1, -1)), Pair("age", Any(2, "", 30.0, false, -1, -1))]
+
+print("First pair key: " + pairs[0].key)
+print("Second pair key: " + pairs[1].key)
