@@ -6215,6 +6215,79 @@ class NoxyCompiler:
         except Exception as e:
             # Capturar outros erros e convertê-los em NoxyError
             raise NoxyError(f"Erro interno do compilador: {str(e)}")
+
+    def compile_with_debug_ir(self, source: str) -> tuple[str, str]:
+        """
+        Compila o código e retorna uma tupla (ir_code, error_message).
+        Tenta gerar IR mesmo quando há erros, para auxiliar no debug.
+        """
+        ir_code = None
+        error_message = None
+        
+        try:
+            # Análise léxica
+            self.lexer = Lexer(source)
+            tokens = self.lexer.tokenize()
+            
+            # Análise sintática
+            self.parser = Parser(tokens, self.lexer.source_lines)
+            ast = self.parser.parse()
+            
+            # Tentar análise semântica
+            try:
+                self._perform_semantic_analysis(ast)
+                semantic_success = True
+            except NoxyError as e:
+                # Capturar erro semântico mas continuar
+                error_message = f"ERRO SEMÂNTICO: {str(e)}"
+                semantic_success = False
+            
+            # Tentar geração de código mesmo com erros semânticos
+            try:
+                self.codegen = LLVMCodeGenerator(self.lexer.source_lines, self.imported_symbols)
+                
+                # Tentar gerar IR mesmo se houver erros durante a geração
+                try:
+                    llvm_module = self.codegen.generate(ast)
+                    ir_code = str(llvm_module)
+                except Exception as gen_error:
+                    # Se a geração falhou completamente, tentar gerar IR parcial
+                    # verificando se já foi criado algum módulo
+                    if hasattr(self.codegen, 'module') and self.codegen.module:
+                        try:
+                            ir_code = str(self.codegen.module)
+                        except:
+                            ir_code = None
+                    
+                    # Registrar o erro de geração
+                    if error_message:
+                        error_message += f"\nErro adicional na geração de código: {str(gen_error)}"
+                    else:
+                        error_message = f"ERRO DE GERAÇÃO DE CÓDIGO: {str(gen_error)}"
+                
+                # Se só houve erro semântico, retornar sucesso parcial
+                if not semantic_success and ir_code:
+                    return ir_code, error_message
+                    
+            except Exception as codegen_error:
+                # Se a criação do gerador de código falhou
+                if error_message:
+                    error_message += f"\nErro na inicialização do gerador de código: {str(codegen_error)}"
+                else:
+                    error_message = f"ERRO DE GERAÇÃO DE CÓDIGO: {str(codegen_error)}"
+            
+            # Se chegou aqui sem erro_message, compilação foi bem-sucedida
+            if not error_message:
+                return ir_code, None
+            else:
+                return ir_code, error_message
+                
+        except NoxySyntaxError as e:
+            error_message = f"ERRO DE SINTAXE: {str(e)}"
+            return ir_code, error_message
+        except Exception as e:
+            error_message = f"ERRO INTERNO DO COMPILADOR: {str(e)}"
+            return ir_code, error_message
     
     def compile_to_object(self, source: str, output_file: str):
         try:
@@ -6367,11 +6440,24 @@ if __name__ == "__main__":
     compiler = NoxyCompiler()
     
     try:
-        # Gerar IR LLVM
-        llvm_ir = compiler.compile(source_code)
-        print("=== LLVM IR Gerado ===")
-        print(llvm_ir)
+        # Tentar gerar IR LLVM com debug ativado
+        llvm_ir, error_message = compiler.compile_with_debug_ir(source_code)
         
+        # Sempre mostrar o LLVM IR se foi gerado, mesmo com erros
+        if llvm_ir:
+            print("=== LLVM IR Gerado ===")
+            print(llvm_ir)
+        
+        # Se houve erro, mostrar e parar se necessário
+        if error_message:
+            print(f"\n{error_message}")
+            if not llvm_ir:
+                print("(IR LLVM não pôde ser gerado devido aos erros)")
+            else:
+                print("(IR LLVM gerado parcialmente para debug)")
+            sys.exit(1)
+        
+        # Se chegou aqui, compilação foi bem-sucedida
         if compile_mode:
             # Modo compilação: gerar arquivo objeto
             output_file = "output.obj" if sys.platform == "win32" else "output.o"
@@ -6395,26 +6481,6 @@ if __name__ == "__main__":
                 import traceback
                 traceback.print_exc()
         
-    except NoxySyntaxError as e:
-        print(f"ERRO DE SINTAXE:")
-        print(e)
-        sys.exit(1)
-    except NoxySemanticError as e:
-        print(f"ERRO SEMÂNTICO:")
-        print(e)
-        sys.exit(1)
-    except NoxyCodeGenError as e:
-        print(f"ERRO DE GERAÇÃO DE CÓDIGO:")
-        print(e)
-        sys.exit(1)
-    except NoxyRuntimeError as e:
-        print(f"ERRO DE EXECUÇÃO:")
-        print(e)
-        sys.exit(1)
-    except NoxyError as e:
-        print(f"ERRO:")
-        print(e)
-        sys.exit(1)
     except Exception as e:
         print(f"ERRO INTERNO DO COMPILADOR:")
         print(f"{e}")
