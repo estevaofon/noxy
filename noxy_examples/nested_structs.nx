@@ -1,0 +1,26 @@
+struct NestedObject
+    pair: Pair
+end
+
+struct Value
+    type: int,           // 1=string, 2=number, 3=boolean, 4=nested_object
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    nested_index: int    // Índice do hashmap aninhado (-1 se não for aninhado)
+end
+
+// Estrutura para par chave-valor
+struct Pair
+    key: string,
+    val: Value
+end
+
+let pair: Pair = Pair("key", Value(1, "value", 0.0, false, -1))
+let nested: NestedObject = NestedObject(pair)
+
+print(nested.pair.key)
+print(nested.pair.val.string_val)
+
+nested.pair.key = "new_key"
+print(nested.pair.key)

@@ -1934,10 +1934,8 @@ class LLVMCodeGenerator:
             if ml_type.name in self.struct_types:
                 return self.struct_types[ml_type.name].as_pointer()
             else:
-                # Forward declaration: criar struct vazia e retornar ponteiro
-                struct_type = ir.LiteralStructType([])
-                self.struct_types[ml_type.name] = struct_type
-                return struct_type.as_pointer()
+                # Isso não deveria acontecer se a primeira passada foi executada corretamente
+                raise TypeError(f"Struct '{ml_type.name}' não foi registrado")
         else:
             raise TypeError(f"Tipo não suportado: {ml_type}")
     
@@ -1946,19 +1944,19 @@ class LLVMCodeGenerator:
         self.global_ast = ast
         # Geração preservará a ordem textual dos statements do topo
         
-        # Primeiro, processar definições de struct para criar os tipos LLVM
+        # Coletar todas as definições de struct
+        struct_definitions = []
         for stmt in ast.statements:
             if isinstance(stmt, StructDefinitionNode):
-                self._process_struct_definition(stmt)
+                struct_definitions.append(stmt)
         
-        # Processar structs importados
+        # Adicionar structs importados
         for symbol_name, symbol_info in self.imported_symbols.items():
             if symbol_info['type'] == 'struct':
-                struct_node = symbol_info['node']
-                self._process_struct_definition(struct_node)
+                struct_definitions.append(symbol_info['node'])
         
-        # Segunda passada: atualizar tipos de referência com os tipos corretos dos structs
-        self._update_reference_types()
+        # Processar structs em ordem de dependência
+        self._process_structs_in_dependency_order(struct_definitions)
         
         # Depois, declarar todas as variáveis globais e funções (deduplicado por identificador)
         declared_globals: set[str] = set()
@@ -2396,7 +2394,7 @@ class LLVMCodeGenerator:
                 llvm_type = self._convert_type(field_type)
             field_types.append(llvm_type)
         
-        # Cria o struct com os tipos (incluindo ponteiros para void para auto-referência)
+        # Criar o struct com os tipos corretos
         actual_struct_type = ir.LiteralStructType(field_types, packed=False)
         self.struct_types[node.name] = actual_struct_type
         
@@ -2416,11 +2414,76 @@ class LLVMCodeGenerator:
         if auto_references:
             self.struct_auto_references[node.name] = auto_references
     
-    def _update_reference_types(self):
-        """Atualiza tipos de referência com os tipos corretos dos structs após definição"""
-        # Esta função será implementada se necessário para resolver tipos de referência
-        # que dependem de structs definidos posteriormente
-        pass
+    def _process_structs_in_dependency_order(self, struct_definitions):
+        """Processa structs na ordem correta de dependências"""
+        processed = set()
+        processing = set()
+        
+        def process_struct(struct_def):
+            if struct_def.name in processed:
+                return
+            if struct_def.name in processing:
+                # Dependência circular detectada - processar com placeholders
+                self._process_struct_with_placeholders(struct_def)
+                processed.add(struct_def.name)
+                processing.discard(struct_def.name)
+                return
+            
+            processing.add(struct_def.name)
+            
+            # Encontrar dependências deste struct
+            dependencies = self._get_struct_dependencies(struct_def)
+            
+            # Processar dependências primeiro
+            for dep_name in dependencies:
+                dep_struct = next((s for s in struct_definitions if s.name == dep_name), None)
+                if dep_struct:
+                    process_struct(dep_struct)
+            
+            # Processar este struct
+            self._process_struct_definition(struct_def)
+            processed.add(struct_def.name)
+            processing.discard(struct_def.name)
+        
+        # Processar todos os structs
+        for struct_def in struct_definitions:
+            process_struct(struct_def)
+    
+    def _get_struct_dependencies(self, struct_def):
+        """Obtém lista de structs dos quais este struct depende"""
+        dependencies = set()
+        for field_name, field_type in struct_def.fields:
+            if isinstance(field_type, StructType):
+                dependencies.add(field_type.name)
+            elif isinstance(field_type, ReferenceType) and isinstance(field_type.target_type, StructType):
+                # Referências não são dependências diretas para ordem de processamento
+                pass
+        return dependencies
+    
+    def _process_struct_with_placeholders(self, struct_def):
+        """Processa struct com placeholders para dependências circulares"""
+        # Para dependências circulares, usar void* para campos problemáticos
+        field_types = []
+        for field_name, field_type in struct_def.fields:
+            if isinstance(field_type, StructType) and field_type.name not in self.struct_types:
+                # Usar void* como placeholder
+                llvm_type = ir.IntType(8).as_pointer()
+            else:
+                llvm_type = self._convert_type(field_type)
+            field_types.append(llvm_type)
+        
+        # Criar struct
+        actual_struct_type = ir.LiteralStructType(field_types, packed=False)
+        self.struct_types[struct_def.name] = actual_struct_type
+        
+        # Armazenar metadados
+        if not hasattr(self, 'struct_fields'):
+            self.struct_fields = {}
+        self.struct_fields[struct_def.name] = {field_name: i for i, (field_name, _) in enumerate(struct_def.fields)}
+        
+        if not hasattr(self, 'struct_field_types'):
+            self.struct_field_types = {}
+        self.struct_field_types[struct_def.name] = {field_name: field_type for field_name, field_type in struct_def.fields}
     
     def _generate_function(self, node: FunctionNode):
         func = self.functions[node.name]
@@ -3692,12 +3755,17 @@ class LLVMCodeGenerator:
                     
                     # Se não é o último campo, continuar navegando
                     if i < len(field_path) - 1:
-                        # Para structs, manter o ponteiro (não carregar o valor)
-                        current_ptr = field_ptr
                         # Determinar o tipo do campo para continuar navegando
                         if hasattr(self, 'struct_field_types') and current_struct_type in self.struct_field_types:
                             field_type = self.struct_field_types[current_struct_type][field_name]
                             if isinstance(field_type, StructType):
+                                # Para structs embutidos, field_ptr já aponta para o local correto
+                                # Mas precisamos fazer cast para o tipo correto
+                                if field_type.name in self.struct_types:
+                                    target_struct_type = self.struct_types[field_type.name]
+                                    current_ptr = self.builder.bitcast(field_ptr, target_struct_type.as_pointer())
+                                else:
+                                    current_ptr = field_ptr
                                 current_struct_type = field_type.name
                             elif isinstance(field_type, ReferenceType) and isinstance(field_type.target_type, StructType):
                                 # É uma referência para um struct

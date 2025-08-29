@@ -38,7 +38,7 @@ def run_noxy_file(file_path):
             text=True,
             encoding='utf-8',
             errors='replace',  # Substituir caracteres problemáticos
-            timeout=60  # Timeout de 30 segundos por arquivo
+            timeout=120  # Timeout de 30 segundos por arquivo
         )
         
         if result.returncode == 0:
