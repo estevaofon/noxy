@@ -81,7 +81,20 @@ func print_hashmap() -> void
         end
         let p: Pair = global_hashmap_data[i]
         print("\"" + p.key + "\": ")
-        print_val(p.val)
+        // Acessar campos do valor diretamente
+        if p.val.type == 1 then
+            print("\"" + p.val.string_val + "\"")
+        end
+        if p.val.type == 2 then
+            print(to_str(p.val.number_val))
+        end
+        if p.val.type == 3 then
+            if p.val.bool_val then
+                print("true")
+            else
+                print("false")
+            end
+        end
         i = i + 1
     end
     print("}")
@@ -118,4 +131,4 @@ print("")
 
 print("=== TESTE CONCLUÍDO COM SUCESSO ===")
 print("HashMap implementado com sucesso!")
-print("Estrutura pronta para uso no parser JSON!"
+print("Estrutura pronta para uso no parser JSON!")
