@@ -5635,6 +5635,27 @@ class LLVMCodeGenerator:
                         di = self.builder.gep(dst_elem_ptr, [idx_const], inbounds=True)
                         self.builder.store(self.builder.load(si), di)
                     continue
+                # Novo: campo é array estático de structs e argumento é ponteiro para ponteiros de structs → copiar structs por valor
+                if (isinstance(target_ty, _ir.ArrayType) and 
+                    isinstance(arg_value.type, _ir.PointerType) and 
+                    isinstance(arg_value.type.pointee, _ir.PointerType) and
+                    isinstance(target_ty.element, _ir.LiteralStructType)):
+                    zero32 = _ir.Constant(_ir.IntType(32), 0)
+                    # dst: ponteiro para primeiro elemento do array no struct
+                    dst_elem_ptr = self.builder.gep(field_ptr, [zero32, zero32], inbounds=True)
+                    for idx in range(target_ty.count):
+                        idx_const = _ir.Constant(self.int_type, idx)
+                        # Carregar o ponteiro para struct no índice idx do array fonte
+                        src_ptr_ptr = self.builder.gep(arg_value, [idx_const], inbounds=True)
+                        src_ptr = self.builder.load(src_ptr_ptr)
+                        # Carregar o struct por valor
+                        if src_ptr.type.pointee != target_ty.element:
+                            src_ptr = self.builder.bitcast(src_ptr, target_ty.element.as_pointer())
+                        struct_value = self.builder.load(src_ptr)
+                        # Armazenar no array de destino
+                        dst_ptr = self.builder.gep(dst_elem_ptr, [idx_const], inbounds=True)
+                        self.builder.store(struct_value, dst_ptr)
+                    continue
 
                 # Novo: se o campo é um struct embutido e o argumento veio como ponteiro para struct,
                 # carregamos o valor do ponteiro (fazendo bitcast se o pointee divergir) e armazenamos por valor.
