@@ -1,0 +1,14 @@
+// TEST 28: Array global simples sem construtores
+print("=== TEST 28: Simple Global Array ===")
+
+struct Pair
+    key: string,
+    value: int
+end
+
+// Teste direto de atribuição de array literal para variável global
+let simple_pairs: Pair[2] = [Pair("a", 1), Pair("b", 2)]
+
+print("OK Test 28 passed")
+
+

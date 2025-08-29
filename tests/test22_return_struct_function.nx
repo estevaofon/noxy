@@ -1,0 +1,18 @@
+// TEST 22: Função que retorna struct simples
+print("=== TEST 22: Return Struct Function ===")
+
+struct Any
+    type: int,
+    string_val: string
+end
+
+// Função simples que retorna struct - reproduzir o erro de return
+func make_simple() -> Any
+    return Any(1, "test")
+end
+
+print("Testing...")
+let result: Any = make_simple()
+print("OK Test 22 passed")
+
+

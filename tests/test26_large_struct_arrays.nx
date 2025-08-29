@@ -1,0 +1,30 @@
+// TEST 26: Arrays grandes de structs como no json_hashmap.nx
+print("=== TEST 26: Large Struct Arrays ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct HashMap
+    pairs: Pair[16],
+    count: int
+end
+
+// Teste básico com HashMap contendo array de Pairs
+let empty_pairs: Pair[16] = [Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1))]
+
+let hashmap: HashMap = HashMap(empty_pairs, 0)
+
+print("OK Test 26 passed")
+
+

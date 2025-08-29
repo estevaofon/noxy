@@ -1,0 +1,49 @@
+// TEST 20: Funções retornando structs complexos
+print("=== TEST 20: Function Return Complex ===")
+
+let TYPE_STRING: int = 1
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct SimpleHashMap
+    pair0: Pair,
+    pair1: Pair,
+    count: int
+end
+
+// Variável global para testar
+let test_hashmap: SimpleHashMap = SimpleHashMap(Pair("", Any(0, "", 0.0, false, -1, -1)), Pair("", Any(0, "", 0.0, false, -1, -1)), 0)
+
+// Função que retorna Any complexo - similar ao hashmap_demo
+func make_string(s: string) -> Any
+    return Any(TYPE_STRING, s, 0.0, false, -1, -1)
+end
+
+// Função que faz reatribuição global complexa - similar ao hashmap_demo  
+func put_test(key: string, value: Any) -> void
+    let count: int = test_hashmap.count
+    if count == 0 then
+        test_hashmap = SimpleHashMap(Pair(key, value), test_hashmap.pair1, 1)
+    end
+end
+
+// Testar as funções
+let test_any: Any = make_string("test")
+put_test("name", test_any)
+
+print("Test hashmap count: " + to_str(test_hashmap.count))
+print("✓ Test 20 passed")
+
+

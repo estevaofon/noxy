@@ -1,0 +1,25 @@
+// TEST 24: Função que retorna struct Any completo como no hashmap demo
+print("=== TEST 24: Full Any Struct ===")
+
+let TYPE_STRING: int = 1
+
+// Estrutura Any exatamente como no hashmap demo
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+// Função exatamente como no hashmap demo
+func make_string(s: string) -> Any
+    return Any(TYPE_STRING, s, 0.0, false, -1, -1)
+end
+
+print("Testing...")
+let result: Any = make_string("test")
+print("OK Test 24 passed")
+
+

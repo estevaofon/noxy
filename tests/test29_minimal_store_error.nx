@@ -1,0 +1,16 @@
+// TEST 29: Reproduzir erro de store específico
+print("=== TEST 29: Minimal Store Error ===")
+
+struct PessoaAoS
+    id: int,
+    nome: string
+end
+
+let a1: PessoaAoS = PessoaAoS(10, "Ana")
+let a2: PessoaAoS = PessoaAoS(20, "Bruno")
+
+let pessoas_arr: PessoaAoS[3] = [a1, a2, null]
+
+print("OK Test 29 passed")
+
+

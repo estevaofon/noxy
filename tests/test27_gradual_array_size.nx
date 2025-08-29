@@ -1,0 +1,24 @@
+// TEST 27: Testar onde o problema aparece com arrays de tamanhos diferentes
+print("=== TEST 27: Gradual Array Size ===")
+
+struct Any
+    type: int,
+    string_val: string
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+// Testar array pequeno (sabemos que funciona)
+let pairs2: Pair[2] = [Pair("a", Any(1, "test")), Pair("b", Any(2, "test2"))]
+print("Array de 2 funciona")
+
+// Testar array médio  
+let pairs4: Pair[4] = [Pair("a", Any(1, "test")), Pair("b", Any(2, "test2")), Pair("c", Any(3, "test3")), Pair("d", Any(4, "test4"))]
+print("Array de 4 funciona")
+
+print("OK Test 27 passed")
+
+

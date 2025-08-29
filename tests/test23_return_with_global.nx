@@ -1,0 +1,20 @@
+// TEST 23: Função que retorna struct usando constante global
+print("=== TEST 23: Return With Global ===")
+
+let TYPE_STRING: int = 1
+
+struct Any
+    type: int,
+    string_val: string
+end
+
+// Função que usa constante global como no hashmap demo
+func make_string_global(s: string) -> Any
+    return Any(TYPE_STRING, s)
+end
+
+print("Testing...")
+let result: Any = make_string_global("test")
+print("OK Test 23 passed")
+
+

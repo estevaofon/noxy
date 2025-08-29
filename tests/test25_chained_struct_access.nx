@@ -1,0 +1,40 @@
+// TEST 25: Acesso encadeado a structs como no hashmap demo
+print("=== TEST 25: Chained Struct Access ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct SimpleHashMap
+    pair0: Pair,
+    pair1: Pair,
+    count: int
+end
+
+// Variável global como no hashmap demo
+let main_hashmap: SimpleHashMap = SimpleHashMap(
+    Pair("test", Any(1, "value", 0.0, false, -1, -1)),
+    Pair("", Any(0, "", 0.0, false, -1, -1)),
+    1
+)
+
+// Função que retorna acesso encadeado como get_main
+func get_main(key: string) -> Any
+    return main_hashmap.pair0.value
+end
+
+print("Testing...")
+let result: Any = get_main("test")
+print("OK Test 25 passed")
+
+

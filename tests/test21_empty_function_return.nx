@@ -1,0 +1,16 @@
+// TEST 21: Função vazia que deveria retornar struct
+print("=== TEST 21: Empty Function Return ===")
+
+struct Any
+    type: int,
+    string_val: string
+end
+
+// Função vazia que deveria retornar Any - reproduzir o erro
+func make_string(s: string) -> Any
+    
+end
+
+print("Testing...")
+let result: Any = make_string("test")
+print("OK Test 21 passed")

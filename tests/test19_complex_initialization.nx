@@ -1,0 +1,34 @@
+// TEST 19: Inicialização complexa como no hashmap demo
+print("=== TEST 19: Complex Initialization ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct SimpleHashMap
+    pair0: Pair,
+    pair1: Pair,
+    count: int
+end
+
+// Testar inicialização complexa aninhada similar ao hashmap_demo
+let test_map: SimpleHashMap = SimpleHashMap(
+    Pair("name", Any(1, "João", 0.0, false, -1, -1)), 
+    Pair("age", Any(2, "30", 30.0, false, -1, -1)), 
+    2
+)
+
+print("Test map count: " + to_str(test_map.count))
+print("✓ Test 19 passed")
+
+

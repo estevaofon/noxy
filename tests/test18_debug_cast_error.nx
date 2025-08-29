@@ -1,0 +1,25 @@
+// TEST 18: Reproduzir o erro de cast específico
+print("=== TEST 18: Debug Cast Error ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+// Caso mais simples que pode reproduzir o erro
+let any1: Any = Any(1, "test", 0.0, false, -1, -1)
+let pair1: Pair = Pair("name", any1)
+
+print("Pair key: " + pair1.key)
+print("✓ Test 18 passed")
+
+
