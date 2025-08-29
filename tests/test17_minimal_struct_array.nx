@@ -1,0 +1,13 @@
+// TEST 17: Caso mínimo para debug - struct com int array
+print("=== TEST 17: Debug struct com array ===")
+
+struct Point
+    x: int
+end
+
+struct Container
+    points: Point[1]
+end
+
+let container: Container = Container([Point(10)])
+print("✓ Test 17 passed")

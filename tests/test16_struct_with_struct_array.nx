@@ -1,0 +1,17 @@
+// TEST 16: Struct com array de structs simples
+print("=== TEST 16: Struct com array de structs ===")
+
+struct Point
+    x: int,
+    y: int
+end
+
+struct PointContainer
+    points: Point[2],
+    count: int
+end
+
+let container: PointContainer = PointContainer([Point(10, 20), Point(30, 40)], 2)
+print("Count: " + to_str(container.count))
+
+print("✓ Test 16 passed")

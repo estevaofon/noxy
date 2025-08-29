@@ -1642,6 +1642,16 @@ class Parser:
                     return ArrayNode(elements, StringType())
                 elif isinstance(elements[0], BooleanNode):
                     return ArrayNode(elements, BoolType())
+                elif isinstance(elements[0], StructConstructorNode):
+                    # Array de structs - usar o tipo do struct
+                    struct_name = elements[0].struct_name
+                    if struct_name in self.struct_types:
+                        struct_type = self.struct_types[struct_name]
+                        return ArrayNode(elements, struct_type)
+                    else:
+                        # Struct não definido ainda - criar tipo temporário
+                        struct_type = StructType(struct_name, {})
+                        return ArrayNode(elements, struct_type)
                 else:
                     return ArrayNode(elements, IntType())
             else:
@@ -1794,7 +1804,8 @@ class LLVMCodeGenerator:
             target_machine = target.create_target_machine(reloc='static', codemodel='large', opt=2)
         except TypeError:
             target_machine = target.create_target_machine(opt=2)
-        self.module.data_layout = str(target_machine.target_data)
+        self.target_data = target_machine.target_data
+        self.module.data_layout = str(self.target_data)
         
         self.builder = None
         self.local_vars = {}
@@ -1985,10 +1996,23 @@ class LLVMCodeGenerator:
         elif isinstance(ml_type, BoolType):
             return self.bool_type
         elif isinstance(ml_type, ArrayType):
-            element_type = self._convert_type(ml_type.element_type)
             if ml_type.size is not None:
-                return ir.ArrayType(element_type, ml_type.size)
+                # Para arrays com tamanho definido, armazenar structs por valor
+                if isinstance(ml_type.element_type, StructType):
+                    struct_name = ml_type.element_type.name
+                    if struct_name in self.struct_types:
+                        struct_type = self.struct_types[struct_name]
+                        return ir.ArrayType(struct_type, ml_type.size)
+                    else:
+                        # Struct não definido ainda, criar tipo opaco
+                        opaque_type = ir.LiteralStructType([], packed=False)
+                        self.struct_types[struct_name] = opaque_type
+                        return ir.ArrayType(opaque_type, ml_type.size)
+                else:
+                    element_type = self._convert_type(ml_type.element_type)
+                    return ir.ArrayType(element_type, ml_type.size)
             else:
+                element_type = self._convert_type(ml_type.element_type)
                 return element_type.as_pointer()
         elif isinstance(ml_type, VoidType):
             return self.void_type
@@ -4101,18 +4125,22 @@ class LLVMCodeGenerator:
                 self._track_allocation(array_ptr)
                 typed_ptr = self.builder.bitcast(array_ptr, self.bool_type.as_pointer())
             elif isinstance(node.element_type, StructType):
-                # Array de ponteiros para structs: armazenar como <Struct*>*
-                elem_size = 8  # ponteiro de 64 bits
-                array_size = ir.Constant(self.int_type, num_elements * elem_size)
-                array_ptr = self.builder.call(self.malloc, [array_size])
-                self._track_allocation(array_ptr)
-                # Recuperar o tipo LLVM do struct
+                # Array de structs por valor (não ponteiros)
                 struct_name = node.element_type.name
                 if struct_name not in self.struct_types:
                     raise NameError(f"Struct '{struct_name}' não definido")
                 struct_lltype = self.struct_types[struct_name]
-                elem_ptr_ty = struct_lltype.as_pointer()
-                typed_ptr = self.builder.bitcast(array_ptr, elem_ptr_ty.as_pointer())
+                
+                # Calcular tamanho de cada struct
+                struct_size = struct_lltype.get_abi_size(self.target_data)
+                total_size = struct_size * num_elements
+                array_size = ir.Constant(self.int_type, total_size)
+                array_ptr = self.builder.call(self.malloc, [array_size])
+                self._track_allocation(array_ptr)
+                
+                # Criar tipo array de structs por valor
+                array_type = ir.ArrayType(struct_lltype, num_elements)
+                typed_ptr = self.builder.bitcast(array_ptr, array_type.as_pointer())
             else:
                 elem_size = 1
                 array_size = ir.Constant(self.int_type, num_elements * elem_size)
@@ -4172,17 +4200,33 @@ class LLVMCodeGenerator:
                         value = self.builder.icmp_ne(value, ir.Constant(value.type, 0))
                     self.builder.store(value, elem_ptr)
                 elif isinstance(node.element_type, StructType):
-                    # Guardar ponteiro para struct como <Struct*>
+                    # Armazenar struct por valor no array
                     elem_ptr = self.builder.gep(typed_ptr, [ir.Constant(self.int_type, i)], inbounds=True)
-                    # Gerar valor do elemento e garantir que é ponteiro para struct correto
                     struct_lltype = self.struct_types[node.element_type.name]
-                    expected_ptr_ty = struct_lltype.as_pointer()
-                    value_cast = value
-                    # Se veio struct por valor, garantir que é ponteiro (construtor retorna ponteiro)
+                    
+                    # Verificar se elem_ptr aponta para o tipo correto
+                    expected_ptr_type = struct_lltype.as_pointer()
+                    if elem_ptr.type != expected_ptr_type:
+                        elem_ptr = self.builder.bitcast(elem_ptr, expected_ptr_type)
+                    
+                    # Se o valor é um ponteiro para struct, carregar o valor
                     if hasattr(value, 'type') and isinstance(value.type, ir.PointerType):
-                        if value.type != expected_ptr_ty:
-                            value_cast = self.builder.bitcast(value, expected_ptr_ty)
-                    self.builder.store(value_cast, elem_ptr)
+                        if isinstance(value.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
+                            # Garantir que o ponteiro é do tipo correto
+                            if value.type != expected_ptr_type:
+                                value = self.builder.bitcast(value, expected_ptr_type)
+                            # Carregar o struct por valor
+                            struct_value = self.builder.load(value)
+                            self.builder.store(struct_value, elem_ptr)
+                        else:
+                            # Bitcast se necessário
+                            if value.type != expected_ptr_type:
+                                value = self.builder.bitcast(value, expected_ptr_type)
+                            struct_value = self.builder.load(value)
+                            self.builder.store(struct_value, elem_ptr)
+                    else:
+                        # Valor já é um struct por valor
+                        self.builder.store(value, elem_ptr)
                 else:
                     elem_ptr = self.builder.gep(typed_ptr, [ir.Constant(self.int_type, i)], inbounds=True)
                     self.builder.store(value, elem_ptr)

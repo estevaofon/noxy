@@ -1,0 +1,12 @@
+// TEST 15: Struct simples com array - teste isolado
+print("=== TEST 15: Struct com array ===")
+
+struct SimpleHashMap
+    names: string[2],
+    count: int
+end
+
+let my_map: SimpleHashMap = SimpleHashMap(["João", "Maria"], 2)
+print("Count: " + to_str(my_map.count))
+
+print("✓ Test 15 passed")

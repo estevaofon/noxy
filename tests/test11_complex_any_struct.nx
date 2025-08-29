@@ -1,0 +1,17 @@
+// TEST 11: Struct Any complexo - problema com tipos LLVM
+print("=== TEST 11: Struct Any complexo ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+let any1: Any = Any(1, "test", 0.0, false, -1, -1)
+print("Any type: " + to_str(any1.type))
+print("Any string: " + any1.string_val)
+
+print("✓ Test 11 passed")

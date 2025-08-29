@@ -1,0 +1,31 @@
+// TEST 14: HashMap com tipos complexos - problema de aninhamento
+print("=== TEST 14: HashMap com tipos complexos ===")
+
+struct Any
+    type: int,
+    string_val: string,
+    number_val: float,
+    bool_val: bool,
+    object_index: int,
+    array_index: int
+end
+
+struct Pair
+    key: string,
+    value: Any
+end
+
+struct HashMap
+    pairs: Pair[2],  // Este é o problema - array de structs dentro de struct
+    count: int
+end
+
+// Este deve causar o erro interno do compilador
+let my_hashmap: HashMap = HashMap([
+    Pair("name", Any(1, "test", 0.0, false, -1, -1)),
+    Pair("age", Any(2, "25", 25.0, false, -1, -1))
+], 2)
+
+print("HashMap count: " + to_str(my_hashmap.count))
+
+print("✓ Test 14 passed")
