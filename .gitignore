@@ -1,0 +1,26 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# IDE
+.idea
+.vscode
+
+# Web interpreter
+web_interpreter.py
+wsgi.py
+web_static/
+
+Dockerfile
+AWS_DEPLOY_GUIDE.md
+.dockerignore
+
+*.db
+*.exe
