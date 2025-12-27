@@ -22,7 +22,7 @@ end
 // Wrappers para funções built-in (para uso com 'select *' como 'open(...)')
 
 func open(path: string, mode: string) -> File
-    return io_open(path, mode)
+    return io_open(path, mode, File)
 end
 
 func close(file: File) -> void
@@ -30,15 +30,15 @@ func close(file: File) -> void
 end
 
 func read(file: File) -> IOResult
-    return io_read(file)
+    return io_read(file, IOResult)
 end
 
 func read_line(file: File) -> IOResult
-    return io_read_line(file)
+    return io_read_line(file, IOResult)
 end
 
 func read_lines(file: File) -> IOResult
-    return io_read_lines(file)
+    return io_read_lines(file, IOResult)
 end
 
 func write(file: File, content: string) -> void
@@ -50,7 +50,7 @@ func exists(path: string) -> bool
 end
 
 func stat(path: string) -> FileInfo
-    return io_stat(path)
+    return io_stat(path, FileInfo)
 end
 
 func remove(path: string) -> bool
@@ -66,5 +66,5 @@ func mkdir(path: string) -> bool
 end
 
 func list_dir(path: string) -> IOResult
-    return io_list_dir(path)
+    return io_list_dir(path, IOResult)
 end

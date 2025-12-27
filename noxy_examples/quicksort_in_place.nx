@@ -1,3 +1,5 @@
+
+use time select *
 let start_time: int = now_ms()
 
 func partition(array: ref int[], low: int, high: int) -> int

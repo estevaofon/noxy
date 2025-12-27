@@ -381,7 +381,16 @@ func (p *Parser) parseType() ast.NoxyType {
 		// Is "bytes" a keyword? Check token.go.
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.IDENTIFIER:
-		t = &ast.PrimitiveType{Name: p.curToken.Literal}
+		name := p.curToken.Literal
+		// Support dot notation for types (e.g. io.File)
+		for p.peekTokenIs(token.DOT) {
+			p.nextToken() // eat .
+			if !p.expectPeek(token.IDENTIFIER) {
+				return nil
+			}
+			name += "." + p.curToken.Literal
+		}
+		t = &ast.PrimitiveType{Name: name}
 	case token.MAP:
 		// map[key, val]
 		if !p.expectPeek(token.LBRACKET) {

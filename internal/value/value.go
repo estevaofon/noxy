@@ -24,9 +24,10 @@ type Value struct {
 }
 
 type ObjFunction struct {
-	Name  string
-	Arity int
-	Chunk interface{} // Avoid cyclic import for now, or use *chunk.Chunk if we fix import cycle
+	Name    string
+	Arity   int
+	Chunk   interface{}
+	Globals map[string]Value // Module/Context globals
 }
 
 type NativeFunc func(args []Value) Value
@@ -166,6 +167,14 @@ func NewMap() Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: make(map[interface{}]Value)}}
 }
 
+func NewMapWithData(data map[string]Value) Value {
+	m := make(map[interface{}]Value)
+	for k, v := range data {
+		m[k] = v
+	}
+	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: m}}
+}
+
 func NewStruct(name string, fields []string) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjStruct{Name: name, Fields: fields}}
 }
@@ -174,10 +183,10 @@ func NewInstance(def *ObjStruct) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
-func NewFunction(name string, arity int, chunk interface{}) Value {
+func NewFunction(name string, arity int, chunk interface{}, globals map[string]Value) Value {
 	return Value{
 		Type: VAL_FUNCTION,
-		Obj:  &ObjFunction{Name: name, Arity: arity, Chunk: chunk},
+		Obj:  &ObjFunction{Name: name, Arity: arity, Chunk: chunk, Globals: globals},
 	}
 }
 

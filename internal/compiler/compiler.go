@@ -44,6 +44,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 				return nil, err
 			}
 		}
+		// Implicit return for script/module
+		c.emitByte(byte(chunk.OP_NULL))
+		c.emitByte(byte(chunk.OP_RETURN))
 	case *ast.LetStmt:
 		c.setLine(n.Token.Line)
 		// Compile initializer
@@ -397,9 +400,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		loop.BreakJumps = append(loop.BreakJumps, jump)
 
 	case *ast.UseStmt:
-		// 1. Emit Module Name
+		// 1. Emit Module Name (as constant operand, not opcode)
 		nameConst := c.makeConstant(value.NewString(n.Module))
-		c.emitBytes(byte(chunk.OP_CONSTANT), nameConst)
 
 		// 2. Emit Import (Loads module and pushes it to stack)
 		c.emitBytes(byte(chunk.OP_IMPORT), nameConst)
@@ -487,7 +489,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
 
 		// Create Function Object
-		fnObj := value.NewFunction(n.Name, len(n.Parameters), fnCompiler.currentChunk)
+		fnObj := value.NewFunction(n.Name, len(n.Parameters), fnCompiler.currentChunk, nil)
 
 		// Emit Constant for Function
 		fnConst := c.makeConstant(fnObj)

@@ -218,57 +218,119 @@ func (l *Lexer) readNumber() (token.TokenType, string) {
 func (l *Lexer) readString(quote byte) string {
 	// l.ch is currently quote
 	l.readChar() // Skip opening quote
-	position := l.position
+
+	var out []byte
+
 	for {
 		if l.ch == quote || l.ch == 0 {
 			break
 		}
 		if l.ch == '\\' {
 			l.readChar() // Skip backslash
-			// Skip escaped char
+			switch l.ch {
+			case 'n':
+				out = append(out, '\n')
+			case 'r':
+				out = append(out, '\r')
+			case 't':
+				out = append(out, '\t')
+			case '"':
+				out = append(out, '"')
+			case '\'':
+				out = append(out, '\'')
+			case '\\':
+				out = append(out, '\\')
+			default:
+				// Unknown escape, keep literal backslash and char?
+				// Or just the char?
+				// Usually languages keep the backslash if invalid escape, or error.
+				// Let's keep it simple: just the char (like Go? No Go errors).
+				// Python: '\z' -> '\z'.
+				// Let's replicate python behavior roughly: if not special, keep backslash + char.
+				out = append(out, '\\')
+				out = append(out, l.ch)
+			}
+		} else {
+			out = append(out, l.ch)
 		}
 		l.readChar()
 	}
-	str := l.input[position:l.position]
-	return str
+
+	return string(out)
 }
 
 func (l *Lexer) readBytes(quote byte) string {
-	// l.ch is currently opening quote ('"' or '\'')
-	// quote argument is passed but l.ch is already at quote
-	// Actually logic in Case 'b': l.readChar() eats 'b'. l.peekChar() is quote.
-	// We read 'b'. Lexer main switch: l.ch is 'b'.
-	// Then logic: quote := l.peekChar(); l.readChar(); -> l.ch is quote.
-	// Then calls readBytes(quote).
-	// So readBytes starts with l.ch == quote.
 	l.readChar()
-	position := l.position
+
+	var out []byte
+
 	for {
 		if l.ch == quote || l.ch == 0 {
 			break
 		}
 		if l.ch == '\\' {
 			l.readChar()
+			switch l.ch {
+			case 'n':
+				out = append(out, '\n')
+			case 'r':
+				out = append(out, '\r')
+			case 't':
+				out = append(out, '\t')
+			case '"':
+				out = append(out, '"')
+			case '\'':
+				out = append(out, '\'')
+			case '\\':
+				out = append(out, '\\')
+			default:
+				out = append(out, '\\')
+				out = append(out, l.ch)
+			}
+		} else {
+			out = append(out, l.ch)
 		}
 		l.readChar()
 	}
-	return l.input[position:l.position]
+	return string(out) // The parser converts this string to Bytes Value
 }
 
 func (l *Lexer) readFString(quote byte) string {
-	// similar to String but might need more logic later.
 	l.readChar() // Skip opening quote
-	position := l.position
+
+	var out []byte
+
 	for {
 		if l.ch == quote || l.ch == 0 {
 			break
 		}
 		if l.ch == '\\' {
 			l.readChar()
+			switch l.ch {
+			case 'n':
+				out = append(out, '\n')
+			case 'r':
+				out = append(out, '\r')
+			case 't':
+				out = append(out, '\t')
+			case '"':
+				out = append(out, '"')
+			case '\'':
+				out = append(out, '\'')
+			case '\\':
+				out = append(out, '\\')
+			case '{': // Escaped interpolation start?
+				out = append(out, '{')
+			default:
+				out = append(out, '\\')
+				out = append(out, l.ch)
+			}
+		} else {
+			out = append(out, l.ch)
 		}
 		l.readChar()
 	}
-	return l.input[position:l.position]
+	return string(out)
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {

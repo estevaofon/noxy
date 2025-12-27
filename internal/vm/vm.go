@@ -19,7 +19,8 @@ const FramesMax = 64
 type CallFrame struct {
 	Function *value.ObjFunction
 	IP       int
-	Slots    int // Offset in stack where this frame's locals start
+	Slots    int                    // Offset in stack where this frame's locals start
+	Globals  map[string]value.Value // Globals visible to this frame
 }
 
 type VM struct {
@@ -37,9 +38,13 @@ type VM struct {
 	stack    [StackMax]value.Value
 	stackTop int
 
-	globals map[string]value.Value
-	modules map[string]value.Value // Cache for loaded modules
+	globals map[string]value.Value // Global variables/functions
+	modules map[string]value.Value // Cached modules (Name -> ObjMap)
 	Config  VMConfig
+
+	// IO Management
+	openFiles map[int64]*os.File
+	nextFD    int64
 }
 
 type VMConfig struct {
@@ -52,9 +57,11 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	vm := &VM{
-		globals: make(map[string]value.Value),
-		modules: make(map[string]value.Value),
-		Config:  cfg,
+		globals:   make(map[string]value.Value),
+		modules:   make(map[string]value.Value),
+		Config:    cfg,
+		openFiles: make(map[int64]*os.File),
+		nextFD:    1, // Start FDs at 1
 	}
 	// Define 'print' native
 	vm.defineNative("print", func(args []value.Value) value.Value {
@@ -297,6 +304,185 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewString(name)
 		}
 		return value.NewString(m.String())
+	})
+	vm.defineNative("io_open", func(args []value.Value) value.Value {
+		// args: path, mode, FileStructDef
+		if len(args) < 3 {
+			return value.NewNull()
+		}
+		path := args[0].String()
+		mode := args[1].String()
+
+		structDef, ok := args[2].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		flag := os.O_RDONLY
+		if mode == "w" {
+			flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		} else if mode == "a" {
+			flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+		} else if mode == "rw" || mode == "r+" {
+			flag = os.O_RDWR | os.O_CREATE
+		}
+
+		f, err := os.OpenFile(path, flag, 0644)
+		isOpen := true
+		var fd int64 = 0
+
+		if err != nil {
+			isOpen = false
+		} else {
+			fd = vm.nextFD
+			vm.nextFD++
+			vm.openFiles[fd] = f
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["fd"] = value.NewInt(fd)
+		inst.Fields["path"] = value.NewString(path)
+		inst.Fields["mode"] = value.NewString(mode)
+		inst.Fields["open"] = value.NewBool(isOpen)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("io_close", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+
+		fd := inst.Fields["fd"].AsInt
+		if f, exists := vm.openFiles[fd]; exists {
+			f.Close()
+			delete(vm.openFiles, fd)
+			inst.Fields["open"] = value.NewBool(false)
+		}
+		return value.NewNull()
+	})
+	vm.defineNative("io_write", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		content := args[1].String()
+
+		fd := inst.Fields["fd"].AsInt
+		if f, exists := vm.openFiles[fd]; exists {
+			f.WriteString(content)
+		}
+		return value.NewNull()
+	})
+	vm.defineNative("io_read", func(args []value.Value) value.Value {
+		// args: fileInst, IOResultStructDef
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct, ok := args[1].Obj.(*value.ObjStruct) // IOResult
+		if !ok {
+			return value.NewNull()
+		}
+
+		fd := inst.Fields["fd"].AsInt
+		var contentStr string
+		var errorStr string
+		var isOk bool = false
+
+		if f, exists := vm.openFiles[fd]; exists {
+			// Read all
+			stat, _ := f.Stat()
+			if stat.Size() > 0 {
+				buf := make([]byte, stat.Size())
+				f.Seek(0, 0)
+				n, err := f.Read(buf)
+				if err == nil || (err != nil && n > 0) { // simple read
+					contentStr = string(buf[:n])
+					isOk = true
+				} else {
+					errorStr = err.Error()
+				}
+			} else {
+				isOk = true // empty file
+			}
+		} else {
+			errorStr = "File not open"
+		}
+
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["ok"] = value.NewBool(isOk)
+		resInst.Fields["data"] = value.NewString(contentStr)
+		resInst.Fields["error"] = value.NewString(errorStr)
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+	})
+	vm.defineNative("io_exists", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewBool(false)
+		}
+		path := args[0].String()
+		_, err := os.Stat(path)
+		return value.NewBool(err == nil)
+	})
+	vm.defineNative("io_remove", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewBool(false)
+		}
+		path := args[0].String()
+		err := os.Remove(path)
+		return value.NewBool(err == nil)
+	})
+	vm.defineNative("io_read_line", func(args []value.Value) value.Value {
+		// Implement line reading logic if needed, strictly speaking stdlib just wraps io_read usually but if separate native is needed:
+		// For simplicity, let's just make it null/not implemented or same as read for MVP if line reading is hard on raw FD without bufio persistence
+		// Or re-open? No.
+		// Let's implement full read for now as read_line on whole file is weird.
+		// Actually, without buffering state, readline is hard.
+		// Return error 'Function not implemented yet'
+		return value.NewNull()
+	})
+	vm.defineNative("io_stat", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		path := args[0].String()
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		info, err := os.Stat(path)
+		exists := (err == nil)
+		size := int64(0)
+		isDir := false
+		if exists {
+			size = info.Size()
+			isDir = info.IsDir()
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["exists"] = value.NewBool(exists)
+		inst.Fields["size"] = value.NewInt(size)
+		inst.Fields["is_dir"] = value.NewBool(isDir)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("io_mkdir", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewBool(false)
+		}
+		path := args[0].String()
+		err := os.MkdirAll(path, 0755)
+		return value.NewBool(err == nil)
 	})
 
 	vm.defineNative("time_format_custom", func(args []value.Value) value.Value {
@@ -559,32 +745,36 @@ func (vm *VM) defineNative(name string, fn value.NativeFunc) {
 }
 
 func (vm *VM) Interpret(c *chunk.Chunk) error {
-	// Wrap top-level script in a function?
-	// For now, let's allow Interpret to start with a raw Chunk by creating a dummy "script" function.
+	// Default to VM globals
+	return vm.InterpretWithGlobals(c, vm.globals)
+}
 
+func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) error {
 	scriptFn := &value.ObjFunction{
-		Name:  "script",
-		Arity: 0,
-		Chunk: c,
+		Name:    "script",
+		Arity:   0,
+		Chunk:   c,
+		Globals: globals,
 	}
 
 	vm.stackTop = 0
-	vm.push(value.NewFunction("script", 0, c)) // Push script function to stack slot 0
+	vm.push(value.NewFunction("script", 0, c, globals)) // Push script function to stack slot 0
 
 	// Call frame for script
 	frame := &CallFrame{
 		Function: scriptFn,
 		IP:       0,
-		Slots:    0,
+		Slots:    1, // Locals start at 1
+		Globals:  globals,
 	}
 	vm.frames[0] = frame
 	vm.frameCount = 1
 	vm.currentFrame = frame
 
-	return vm.run()
+	return vm.run(1)
 }
 
-func (vm *VM) run() error {
+func (vm *VM) run(minFrameCount int) error {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
 	c := frame.Function.Chunk.(*chunk.Chunk)
@@ -592,8 +782,6 @@ func (vm *VM) run() error {
 
 	for {
 		if ip >= len(c.Code) {
-			// Implicit return if end of code?
-			// Or error? Scripts usually have OP_RETURN.
 			return nil
 		}
 
@@ -606,7 +794,21 @@ func (vm *VM) run() error {
 			index := c.Code[ip]
 			ip++
 			constant := c.Constants[index]
-			vm.push(constant)
+
+			// If it's a function, bind it to current globals (Module binding)
+			if constant.Type == value.VAL_FUNCTION {
+				fn := constant.Obj.(*value.ObjFunction)
+				// Clone to bind globals
+				boundFn := &value.ObjFunction{
+					Name:    fn.Name,
+					Arity:   fn.Arity,
+					Chunk:   fn.Chunk,
+					Globals: frame.Globals,
+				}
+				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
+			} else {
+				vm.push(constant)
+			}
 
 		case chunk.OP_NULL:
 			vm.push(value.NewNull())
@@ -641,9 +843,15 @@ func (vm *VM) run() error {
 			ip++
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
-			val, ok := vm.globals[name]
+
+			// Try frame globals (Module scope)
+			val, ok := frame.Globals[name]
 			if !ok {
-				return fmt.Errorf("undefined global variable '%s'", name)
+				// Try VM globals (Builtins / Shared)
+				val, ok = vm.globals[name]
+				if !ok {
+					return fmt.Errorf("undefined global variable '%s'", name)
+				}
 			}
 			vm.push(val)
 
@@ -652,12 +860,18 @@ func (vm *VM) run() error {
 			ip++
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
-			vm.globals[name] = vm.peek(0)
+			// Set in frame globals (Module scope)
+			if frame.Globals != nil {
+				frame.Globals[name] = vm.peek(0)
+			} else {
+				vm.globals[name] = vm.peek(0)
+			}
 
 		case chunk.OP_GET_LOCAL:
 			slot := c.Code[ip]
 			ip++
-			vm.push(vm.stack[frame.Slots+int(slot)])
+			val := vm.stack[frame.Slots+int(slot)]
+			vm.push(val)
 
 		case chunk.OP_SET_LOCAL:
 			slot := c.Code[ip]
@@ -776,7 +990,11 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_NOT:
 			v := vm.pop()
-			vm.push(value.NewBool(isFalsey(v)))
+			if v.Type == value.VAL_BOOL {
+				vm.push(value.NewBool(!v.AsBool))
+			} else {
+				return fmt.Errorf("operand must be boolean")
+			}
 		case chunk.OP_AND:
 			b := vm.pop()
 			a := vm.pop()
@@ -858,16 +1076,47 @@ func (vm *VM) run() error {
 			ip = frame.IP
 
 		case chunk.OP_RETURN:
+			// Return from function
+
+			// 1. Pop result
 			result := vm.pop()
 			calleeFrame := vm.currentFrame
 
+			// 2. Decrement frame count
 			vm.frameCount--
-			if vm.frameCount == 0 {
-				vm.pop() // Pop script function
+
+			// 3. Update current frame pointer (Always do this to keep state consistent)
+			if vm.frameCount > 0 {
+				vm.currentFrame = vm.frames[vm.frameCount-1]
+			} else {
+				vm.currentFrame = nil // Or handle main return
+			}
+
+			// 4. Return from run() if we drop below call depth
+			if vm.frameCount < minFrameCount {
+				vm.pop() // Pop script function (effectively)
+				// Note: vm.push(result) ?
+				// Usually result is consumed by caller.
+				// If we return from run(), result is on stack?
+				// vm.pop() above removed result.
+				// We need to leave result on stack for caller if this is a nested run.
+				// Original code: vm.pop() -> result. vm.pop() -> func. return.
+				// Caller (OP_CALL) expects result pushed.
+				// If we return from run(), who pushes result?
+				// The caller of run()!
+				// vm.loadModule does: vm.pop() -> pops result.
+				// So we must PUSH result back before returning?
+				// NO. The stack must be balanced.
+				// OP_RETURN pops result.
+				// Then it pops CALLEE (script/func).
+				// Then it pushes result.
+
+				// If we return from run(), we should probably leave result on stack.
+				vm.push(result)
 				return nil
 			}
 
-			vm.currentFrame = vm.frames[vm.frameCount-1] // Restore caller frame
+			// 5. Restore execution context
 			frame = vm.currentFrame
 			vm.stackTop = calleeFrame.Slots
 			vm.push(result)
@@ -933,6 +1182,16 @@ func (vm *VM) run() error {
 				vm.modules[moduleName] = mod
 				vm.push(mod)
 			}
+
+			// Refresh frame if import caused GC or stack moves (unlikely but safe)
+			// And if recursive run changed things?
+			frame = vm.currentFrame
+			// c/ip are from frame. c/ip in local vars are stale?
+			// frame IS vm.currentFrame.
+			// After loadModule, frame is valid (frames[0]).
+			// c/ip valid.
+			// But to be safe:
+			// frame = vm.currentFrame -- Done.
 
 		case chunk.OP_IMPORT_FROM_ALL:
 			modVal := vm.pop()
@@ -1152,6 +1411,7 @@ func (vm *VM) call(fn *value.ObjFunction, argCount int) bool {
 		Function: fn,
 		IP:       0,
 		Slots:    vm.stackTop - argCount - 1, // Start of locals window (fn + args)
+		Globals:  fn.Globals,
 	}
 
 	vm.frames[vm.frameCount] = frame
@@ -1213,115 +1473,83 @@ func (vm *VM) pop() value.Value {
 }
 
 func (vm *VM) loadModule(name string) (value.Value, error) {
-	// 1. Resolve Path
-	// name is dot separated: pkg.mod
-	parts := strings.Split(name, ".")
-	relativePath := filepath.Join(parts...)
+	filename := name + ".nx"
 
-	// Create potential paths
-	// 1. Relative to Config.RootPath (Script directory)
-	// 2. Relative to CWD
-	// 3. Relative to CWD/stdlib (Standard Library)
-	searchPaths := []string{
-		filepath.Join(vm.Config.RootPath, relativePath),
-		relativePath,
-		filepath.Join("stdlib", relativePath),
+	// Search paths:
+	// 1. Script/stdlib/mod.nx (Unlikely but consistent)
+	// 2. Script/mod.nx (Local module relative to script)
+	// 3. CWD/stdlib/mod.nx (Standard Library relative to VM/CWD)
+	// 4. CWD/mod.nx (Fallback)
+
+	candidates := []string{
+		filepath.Join(vm.Config.RootPath, "stdlib", filename),
+		filepath.Join(vm.Config.RootPath, filename),
+		filepath.Join("stdlib", filename),
+		filename,
 	}
 
-	for _, pathStr := range searchPaths {
-		// Try .nx file
-		filePath := pathStr + ".nx"
-		info, err := os.Stat(filePath)
-		if err == nil && !info.IsDir() {
-			return vm.loadModuleFromFile(filePath)
-		}
-
-		// Try directory (Folder Import)
-		dirPath := pathStr
-		info, err = os.Stat(dirPath)
-		if err == nil && info.IsDir() {
-			return vm.loadModuleFromDir(dirPath)
+	var path string
+	found := false
+	for _, p := range candidates {
+		// fmt.Printf("Checking %s...\n", p) // Debug
+		if _, err := os.Stat(p); err == nil {
+			path = p
+			found = true
+			break
 		}
 	}
 
-	return value.NewNull(), fmt.Errorf("module '%s' not found", name)
-}
-
-func (vm *VM) loadModuleFromDir(dirPath string) (value.Value, error) {
-	files, err := os.ReadDir(dirPath)
-	if err != nil {
-		return value.NewNull(), err
+	if !found {
+		return value.NewNull(), fmt.Errorf("module not found: %s", name)
 	}
 
-	// Create a module object (Map)
-	modMap := value.NewMap()
-	data := modMap.Obj.(*value.ObjMap).Data
-
-	for _, f := range files {
-		if !f.IsDir() && strings.HasSuffix(f.Name(), ".nx") {
-			modName := strings.TrimSuffix(f.Name(), ".nx")
-			// Load this file and merge globals
-			subMod, err := vm.loadModuleFromFile(filepath.Join(dirPath, f.Name()))
-			if err != nil {
-				return value.NewNull(), err
-			}
-
-			// Add module itself as a property (namespace)
-			data[modName] = subMod
-
-			// Merge globals
-			if subMap, ok := subMod.Obj.(*value.ObjMap); ok {
-				for k, v := range subMap.Data {
-					data[k] = v
-				}
-			}
-		}
-	}
-	return modMap, nil
-}
-
-func (vm *VM) loadModuleFromFile(path string) (value.Value, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return value.NewNull(), err
 	}
 
-	// Lexer
 	l := lexer.New(string(content))
-	// Parser
 	p := parser.New(l)
-	program := p.ParseProgram()
+	prog := p.ParseProgram()
 	if len(p.Errors()) > 0 {
-		return value.NewNull(), fmt.Errorf("parse error in %s: %v", path, p.Errors())
+		return value.NewNull(), fmt.Errorf("parse error in module %s: %v", name, p.Errors())
 	}
 
-	// Compiler
 	c := compiler.New()
-	chunk, err := c.Compile(program)
+	chunk, err := c.Compile(prog)
 	if err != nil {
-		return value.NewNull(), fmt.Errorf("compile error in %s: %v", path, err)
+		return value.NewNull(), err
 	}
 
-	// Run in NEW VM
-	// We want a fresh scope for the module.
-	moduleVM := New()
-	// Native functions are already defined in New().
-	// But if we want to share state (like valid natives), New() does define them again.
-	// This is fine for stateless natives.
+	// Create isolated Module Globals
+	moduleGlobals := make(map[string]value.Value)
 
-	// Execute
-	if err := moduleVM.Interpret(chunk); err != nil {
-		return value.NewNull(), fmt.Errorf("runtime error in %s: %v", path, err)
+	// Prepare Module Function
+	modFn := &value.ObjFunction{
+		Name:    name,
+		Arity:   0,
+		Chunk:   chunk,
+		Globals: moduleGlobals,
+	}
+	modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modFn}
+
+	// Execute Module Synchronously
+	vm.push(modVal)
+	vm.callValue(modVal, 0)
+
+	// Run until this frame returns
+	startFrameCount := vm.frameCount
+	err = vm.run(startFrameCount)
+	if err != nil {
+		return value.NewNull(), err
 	}
 
-	// Extract globals
-	modMap := value.NewMap()
-	data := modMap.Obj.(*value.ObjMap).Data
-	for k, v := range moduleVM.globals {
-		data[k] = v
-	}
+	// Module execution finished.
+	// The result of module (usually null) is on stack. Pop it.
+	vm.pop()
 
-	return modMap, nil
+	// Return the Module Map
+	return value.NewMapWithData(moduleGlobals), nil
 }
 
 func (vm *VM) peek(distance int) value.Value {

@@ -42,8 +42,8 @@ if file_ns.open then
 end
 
 
-if io.exists(path) then
-    io.remove(path)
-end
+//if io.exists(path) then
+//    io.remove(path)
+//end
 
 print("Testes finalizados.")
