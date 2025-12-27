@@ -1,0 +1,34 @@
+struct Error
+    msg: string
+end
+
+struct Result
+    value: int,
+    err: ref Error
+end
+
+// Função que simula retorno de múltiplos valores (valor, erro)
+// Se sucesso: Result(valor, null)
+// Se falha: Result(0, ref Error("msg"))
+func safe_divide(a: int, b: int) -> Result
+    if b == 0 then
+        return Result(0, ref Error("DIVISION_BY_ZERO"))
+    end
+    return Result(a / b, null)
+end
+
+func test_division(a: int, b: int) -> void
+    let res: Result = safe_divide(a, b)
+    
+    // Tratamento de erro estilo Go: "if err != nil"
+    if res.err != null then
+        print(f"{a} / {b} = Erro: {res.err.msg}")
+    else
+        print(f"{a} / {b} = {to_str(res.value)}")
+    end
+end
+
+// Testes
+test_division(10, 0)  // Deve falhar
+test_division(10, 2)  // Deve funcionar
+test_division(15, 3)  // Deve funcionar

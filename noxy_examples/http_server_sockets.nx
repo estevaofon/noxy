@@ -1,0 +1,126 @@
+// Event-driven HTTP Server
+// Single-threaded using select() with fixed arrays
+
+use net select *
+
+let port: int = 8080
+let host: string = "0.0.0.0"
+
+print("Starting HTTP server on http://localhost:" + to_str(port))
+let server: Socket = net.listen(host, port)
+
+if !server.open then
+    print("Failed to bind port")
+    return
+end
+
+// Set non-blocking
+net.setblocking(server, false)
+
+// Socket set management
+// Fixed array of 64 sockets.
+let inputs: Socket[64] = net.socket_set()
+let outputs: Socket[64] = net.socket_set() // Empty
+let errors: Socket[64] = net.socket_set()  // Empty
+
+// Add server to inputs at index 0
+inputs[0] = server
+
+print("Entering event loop. Press Ctrl+C to stop.")
+
+while true do
+    // Timeout 1000ms
+    let result: SelectResult = net.select(inputs, outputs, errors, 1000)
+    
+    // Process readable sockets
+    let i: int = 0
+    let count: int = result.read_count
+    
+    while i < count do
+        let sock: Socket = result.read[i]
+        
+        if sock.fd == server.fd then
+            // New connection
+            let client: Socket = net.accept(server)
+            if client.open then
+                print("New connection from " + client.addr)
+                net.setblocking(client, false)
+                
+                // Add to inputs
+                // Find empty slot
+                let j: int = 0
+                let inserted: bool = false
+                while j < 64 do
+                    let slot: Socket = inputs[j]
+                    if slot.fd == -1 then
+                        inputs[j] = client
+                        inserted = true
+                        break
+                    end
+                    j = j + 1
+                end
+                
+                if !inserted then
+                    print("Max connections reached, rejecting.")
+                    close(client)
+                end
+            end
+        else
+            // Data from client
+            let msg: NetResult = net.recv(sock, 4096)
+            
+            if msg.ok then
+                 if msg.count > 0 then
+                    // Basic HTTP Response
+                    let body: string = "<h1>Hello from Noxy!</h1><p>Served via select() with fixed arrays.</p>"
+                    let header: string = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n"
+                    let response_data: bytes = to_bytes(header + body)
+                    
+                    let c: int = msg.count
+                    print("Debug: About to send response")
+                    print("Bytes received: " + to_str(c))
+                    net.send(sock, response_data)
+                    print("Debug: Response sent")
+                    print(msg.data)
+                    net.close(sock)
+                    
+                    // Remove from inputs
+                     let k: int = 0
+                     while k < 64 do
+                        let slot2: Socket = inputs[k]
+                        if slot2.fd == sock.fd then
+                             inputs[k].fd = -1
+                             break
+                        end
+                        k = k + 1
+                     end
+                 else
+                    // Closed by peer
+                     net.close(sock)
+                     let k: int = 0
+                     while k < 64 do
+                        let slot2: Socket = inputs[k]
+                        if slot2.fd == sock.fd then
+                            inputs[k].fd = -1
+                            break
+                        end
+                        k = k + 1
+                     end
+                 end
+            else
+                 print("Error on recv: " + msg.error)
+                 net.close(sock)
+                 let k: int = 0
+                 while k < 64 do
+                    let slot2: Socket = inputs[k]
+                    if slot2.fd == sock.fd then
+                        inputs[k].fd = -1
+                        break
+                    end
+                    k = k + 1
+                 end
+            end
+        end
+        i = i + 1
+    end
+end

@@ -1,0 +1,30 @@
+use sqlite select *
+use sqlite
+
+let db: Database = sqlite.open("loja.db")
+
+if !db.open then
+    print("Erro ao abrir banco loja.db")
+    return
+end
+
+let res: QueryResult = sqlite.query(db, "SELECT * FROM produtos")
+
+if !res.ok then
+    print("Erro na query: " + res.error)
+    sqlite.close(db)
+    return
+end
+
+print(f"Lendo {res.row_count} registros de loja.db:")
+print("------------------------------------------------")
+
+let i: int = 0
+while i < res.row_count do
+    let row: Row = res.rows[i]
+    // id, nome, preco
+    print(f"#{row.values[0]} - {row.values[1]} (R$ {row.values[2]})")
+    i = i + 1
+end
+
+sqlite.close(db)

@@ -1,0 +1,3 @@
+func helper() -> void
+    print("Helper function called!")
+end

@@ -1,0 +1,77 @@
+// test_ref_vs_valor.nx - Demonstra a diferença entre passagem por valor vs referência
+
+struct Contador
+    valor: int,
+    nome: string
+end
+
+// ============================================
+// FUNÇÃO SEM REF - Recebe CÓPIA do struct
+// Modificações NÃO afetam o original
+// ============================================
+func incrementar_copia(c: Contador) -> void
+    c.valor = c.valor + 10
+    c.nome = "Modificado na cópia"
+    print(f"  Dentro da função (cópia): valor = {c.valor}, nome = {c.nome}")
+end
+
+// ============================================
+// FUNÇÃO COM REF - Recebe REFERÊNCIA ao struct
+// Modificações AFETAM o original
+// ============================================
+func incrementar_ref(c: ref Contador) -> void
+    c.valor = c.valor + 10
+    c.nome = "Modificado por ref"
+    print(f"  Dentro da função (ref): valor = {c.valor}, nome = {c.nome}")
+end
+
+// ============================================
+// TESTES
+// ============================================
+
+print("=== TESTE 1: Passagem por VALOR (cópia) ===")
+let cont1: Contador = Contador(100, "Original")
+print(f"Antes: valor = {cont1.valor}, nome = {cont1.nome}")
+incrementar_copia(cont1)
+print(f"Depois: valor = {cont1.valor}, nome = {cont1.nome}")
+print("")
+
+print("=== TESTE 2: Passagem por REFERÊNCIA ===")
+let cont2: Contador = Contador(100, "Original")
+print(f"Antes: valor = {cont2.valor}, nome = {cont2.nome}")
+incrementar_ref(cont2)
+print(f"Depois: valor = {cont2.valor}, nome = {cont2.nome}")
+print("")
+
+// ============================================
+// TESTE COM MÚLTIPLAS CHAMADAS
+// ============================================
+
+print("=== TESTE 3: Múltiplas chamadas por VALOR ===")
+let cont3: Contador = Contador(0, "Teste")
+print(f"Inicial: {cont3.valor}")
+incrementar_copia(cont3)
+print(f"Após 1a chamada: {cont3.valor}")
+incrementar_copia(cont3)
+print(f"Após 2a chamada: {cont3.valor}")
+incrementar_copia(cont3)
+print(f"Após 3a chamada: {cont3.valor}")
+print("(Valor nunca muda porque cada chamada recebe uma cópia)")
+print("")
+
+print("=== TESTE 4: Múltiplas chamadas por REFERÊNCIA ===")
+let cont4: Contador = Contador(0, "Teste")
+print(f"Inicial: {cont4.valor}")
+incrementar_ref(cont4)
+print(f"Após 1a chamada: {cont4.valor}")
+incrementar_ref(cont4)
+print(f"Após 2a chamada: {cont4.valor}")
+incrementar_ref(cont4)
+print(f"Após 3a chamada: {cont4.valor}")
+print("(Valor acumula porque cada chamada modifica o original)")
+print("")
+
+print("=== RESUMO ===")
+print("SEM ref: struct é COPIADO, original não muda")
+print("COM ref: struct é REFERENCIADO, original é modificado")
+

@@ -1,0 +1,21 @@
+// Teste de import alias
+use pkg_test.mod as my_mod
+use io as sys_io
+
+func main() -> void
+    print("=== Teste de Alias ===")
+    
+    // Acessando via alias 'my_mod' em vez de 'mod'
+    my_mod.hello()
+    
+    // Alias para stdlib
+    if sys_io.exists("some_file.txt") then
+        print("Arquivo existe")
+    else
+        print("Arquivo não existe (verificado via alias sys_io)")
+    end
+    
+    print("Sucesso!")
+end
+
+main()

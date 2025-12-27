@@ -1,0 +1,22 @@
+use io
+
+print("Testando use io sem select...")
+
+if io.exists("test_sugar.txt") then
+    io.remove("test_sugar.txt")
+end
+
+let file: File = io.open("test_sugar.txt", "w")
+io.write(file, "Hello Import Sugar!")
+io.close(file)
+
+print("Arquivo escrito com sucesso via io.write")
+
+let info: FileInfo = io.stat("test_sugar.txt")
+print(f"File exists: {info.exists}")
+
+if io.exists("test_sugar.txt") then
+    io.remove("test_sugar.txt")
+end
+
+

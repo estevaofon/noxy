@@ -1,0 +1,58 @@
+// test_array_ref.nx - Testa passagem de array por valor vs referência
+
+// ============================================
+// FUNÇÃO SEM REF - Recebe CÓPIA do array
+// Modificações NÃO afetam o original
+// ============================================
+func modificar_copia(arr: int[], tamanho: int) -> void
+    let i: int = 0
+    while i < tamanho do
+        arr[i] = arr[i] * 10
+        i = i + 1
+    end
+    print(f"  Dentro (cópia): {to_str(arr)}")
+end
+
+// ============================================
+// FUNÇÃO COM REF - Recebe REFERÊNCIA ao array
+// Modificações AFETAM o original
+// ============================================
+func modificar_ref(arr: ref int[], tamanho: int) -> void
+    let i: int = 0
+    while i < tamanho do
+        arr[i] = arr[i] * 10
+        i = i + 1
+    end
+    print(f"  Dentro (ref): {to_str(arr)}")
+end
+
+// ============================================
+// TESTES
+// ============================================
+
+print("=== TESTE 1: Array passado por VALOR (cópia) ===")
+let arr1: int[5] = [1, 2, 3, 4, 5]
+print(f"Antes: {to_str(arr1)}")
+modificar_copia(arr1, 5)
+print(f"Depois: {to_str(arr1)}")
+print("(Array original NÃO foi modificado)")
+print("")
+
+print("=== TESTE 2: Array passado por REFERÊNCIA ===")
+let arr2: int[5] = [1, 2, 3, 4, 5]
+print(f"Antes: {to_str(arr2)}")
+modificar_ref(arr2, 5)
+print(f"Depois: {to_str(arr2)}")
+print("(Array original FOI modificado)")
+print("")
+
+print("=== RESUMO ===")
+print("SEM ref: array é COPIADO, original não muda")
+print("COM ref: array é REFERENCIADO, original é modificado")
+print("")
+print("Agora arrays e structs têm comportamento CONSISTENTE!")
+
+
+
+
+

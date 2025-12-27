@@ -1,0 +1,8 @@
+
+use pkg_test
+
+func main() -> void
+    print(pkg_test.mod.hello())
+end
+
+main()

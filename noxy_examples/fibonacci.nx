@@ -1,0 +1,24 @@
+use time select *
+
+let start_time: int = now_ms()
+
+func fibonacci(n: int) -> int
+    if n <= 1 then
+        return n
+    end
+    return fibonacci(n-1) + fibonacci(n-2)
+end
+
+func imprimir_fibonacci(qtd: int) -> void
+    let i: int = 0
+    while qtd >= 0 do
+        print(f"F({i}) = {fibonacci(i)}")
+        i = i + 1
+        qtd = qtd - 1
+    end
+end
+
+imprimir_fibonacci(40)
+let end_time: int = now_ms()
+let elapsed_time: int = end_time - start_time
+print(f"Tempo de execução: {elapsed_time} ms")

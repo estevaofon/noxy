@@ -1,0 +1,41 @@
+// Simple TCP Echo Server
+use net select *
+
+let port: int = 8080
+let host: string = "127.0.0.1"
+
+print("Starting server on " + host + ":" + to_str(port) + "...")
+let server: Socket = net.listen(host, port)
+
+if !server.open then
+    print("Failed to bind to port " + to_str(port))
+    return
+end
+
+print("Waiting for connection...")
+let client: Socket = net.accept(server)
+
+if client.open then
+    print("Client connected from " + client.addr)
+    
+    // Receive data
+    let msg: NetResult = net.recv(client, 1024)
+    if msg.ok then
+        print("Received (" + to_str(msg.count) + " bytes): " + to_str(msg.data))
+        
+        // Send response
+        let response: bytes = b"Echo: " + msg.data
+        let sent: NetResult = net.send(client, response)
+        print("Sent response")
+    else
+        print("Error receiving: " + msg.error)
+    end
+    
+    net.close(client)
+    print("Client disconnected")
+else
+    print("Failed to accept connection")
+end
+
+net.close(server)
+print("Server closed")

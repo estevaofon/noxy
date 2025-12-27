@@ -1,0 +1,22 @@
+struct RandomGenerator
+    state: int
+    a: int
+    c: int
+    m: int
+end
+
+func new_random(rand: ref RandomGenerator) -> int
+    rand.state = rand.a * rand.state + rand.c
+    rand.state = rand.state % rand.m
+    return rand.state
+end
+
+func random(rand: ref RandomGenerator) -> int
+    return new_random(rand) / rand.m
+end
+
+func random_int(rand: ref RandomGenerator, min: int, max: int) -> int
+    return min + new_random(rand) % (max - min + 1)
+end
+
+

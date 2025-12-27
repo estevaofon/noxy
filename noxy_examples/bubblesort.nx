@@ -1,0 +1,28 @@
+struct strucArray
+    array: int[5],
+    tamanho: int
+end
+
+let myArray: strucArray = strucArray([5, 3, 8, 4, 2], 5)
+
+func bubblesort2(struct_array: ref strucArray) -> void
+    let desordenado: bool = true
+    while desordenado do
+        desordenado = false
+        let i: int = 0
+        while i < (struct_array.tamanho - 1) do
+            if struct_array.array[i] > struct_array.array[i + 1] then
+                let temp: int = 0
+                temp = struct_array.array[i]
+                struct_array.array[i] = struct_array.array[i + 1]
+                struct_array.array[i + 1] = temp
+                desordenado = true
+            end
+            i = i + 1
+        end
+    end
+end
+
+bubblesort2(myArray)
+print(to_str(myArray.array))
+

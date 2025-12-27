@@ -1,0 +1,35 @@
+// Test net module
+use net select *
+use net
+
+// Como Noxy não tem threads, não podemos testar servidor e cliente bloqueantes no mesmo processo facilmente.
+// Mas podemos abrir um servidor, e tentar conectar (se o sistema operacional permitir connect em socket listening no mesmo processo sem accept imediato).
+// Ou apenas testar a criação de sockets e verificar tipos.
+
+print("Declarando servidor...")
+let server: Socket = net.listen("127.0.0.1", 9999)
+
+if server.open then
+    print("Server listening on port", server.port)
+else
+    print("Failed to listen")
+end
+
+// Como accept é bloqueante, não podemos chamar aqui sem um cliente pronto.
+// Vamos apenas fechar o servidor.
+
+print("Closing server...")
+net.close(server)
+print("Server closed")
+
+// Teste de conexão (vai falhar pois não tem ninguem ouvindo agora, mas verifica a API)
+print("Testing connect (expected failure)...")
+let client: Socket = net.connect("127.0.0.1", 9999)
+if client.open then
+    print("Connected? Unexpected!")
+    net.close(client)
+else
+    print("Connection failed as expected")
+end
+
+print("Net tests completed")

@@ -1,0 +1,26 @@
+
+func main() -> void
+    print("Testando Literais de Mapa...")
+    
+    // 1. Inicializacao direta
+    let precos: map[string, int] = {"Cafe": 5, "Bolo": 10}
+    print(f"Cafe: {precos['Cafe']}")
+    print(f"Bolo: {precos['Bolo']}")
+    
+    // 2. Modificacao
+    precos["Cafe"] = 6
+    print(f"Cafe atualizado: {precos['Cafe']}")
+    
+    // 3. Tipos mistos (deve falhar se descomentado ou se o type checker falhar)
+    // let invalido: map[string, int] = {"A": 1, "B": "Texto"} 
+    
+    // 4. Mapa vazio
+    let vazio: map[int, bool] = {}
+    print(f"Tamanho vazio: {length(vazio)}")
+    vazio[1] = true
+    print(f"Tamanho apos insercao: {length(vazio)}")
+    
+    print("Teste concluido!")
+end
+
+main()

@@ -1,0 +1,24 @@
+// Cenário 1: Importar arquivo específico dentro de pasta
+use pkg_test.mod as my_mod
+// Esperado: 'mod' deve estar no escopo
+
+// Cenário 2: Select específico de sub-módulo
+use pkg_test.sub.util select helper
+// Esperado: 'helper' deve estar no escopo
+
+// Cenário 3: Select * de pasta
+use pkg_test.sub select *
+// Esperado: 'util' (arquivo dentro de sub) entra no escopo como módulo.
+
+func main() -> void
+    print("--- Teste 1: use pkg_test.mod ---")
+    my_mod.hello()
+    
+    print("--- Teste 2: select helper ---")
+    helper()
+    
+    print("--- Teste 3: select * de pasta ---")
+    util.helper()
+end
+
+main()

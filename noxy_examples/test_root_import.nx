@@ -1,0 +1,22 @@
+// Cenário: Importar a raiz (pkg_test) e navegar na hierarquia
+// Estrutura:
+// pkg_test/
+//   mod.nx       -> func hello()
+//   sub/
+//     util.nx    -> func helper()
+
+use pkg_test
+
+func main() -> void
+    print("=== Teste de Importação Raiz ===")
+    
+    // Acessando arquivo na raiz do pacote
+    print(pkg_test.mod.hello())
+    
+    // Acessando arquivo em subpasta
+    pkg_test.sub.util.helper()
+    
+    print("Sucesso!")
+end
+
+main()

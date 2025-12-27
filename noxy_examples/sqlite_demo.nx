@@ -1,0 +1,45 @@
+use sqlite select *
+use sqlite
+
+let db: Database = sqlite.open("loja.db")
+
+if !db.open then
+    print("Erro ao abrir banco")
+    return
+end
+
+// Cria tabela
+sqlite.exec(db, "CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY, nome TEXT, preco REAL)")
+
+// Limpa tabela para testes repetidos
+sqlite.exec(db, "DELETE FROM produtos")
+
+// Insere com prepared statement
+let stmt: Statement = sqlite.prepare(db, "INSERT INTO produtos (nome, preco) VALUES (?, ?)")
+
+sqlite.bind_text(stmt, 1, "Notebook")
+sqlite.bind_float(stmt, 2, 2599.90)
+sqlite.step_exec(stmt)
+
+sqlite.reset(stmt)
+sqlite.bind_text(stmt, 1, "Mouse")
+sqlite.bind_float(stmt, 2, 79.90)
+sqlite.step_exec(stmt)
+
+sqlite.finalize(stmt)
+
+// Consulta
+let res: QueryResult = sqlite.query(db, "SELECT * FROM produtos")
+
+print(f"Colunas: {res.columns[0]}, {res.columns[1]}, {res.columns[2]}")
+print(f"Total de linhas: {res.row_count}")
+
+let i: int = 0
+while i < res.row_count do
+    let row: Row = res.rows[i]
+    // Acesso por índice: 0=id, 1=nome, 2=preco
+    print(f"Produto {row.values[0]}: {row.values[1]} - R$ {row.values[2]}")
+    i = i + 1
+end
+
+sqlite.close(db)

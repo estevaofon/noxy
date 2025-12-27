@@ -1,0 +1,219 @@
+// stdlib/http_client.nx - Cliente HTTP
+
+use net select *
+use http_parser select *
+
+// ============================================
+// Estruturas
+// ============================================
+
+struct HttpClient
+    timeout_ms: int,          // Timeout em milissegundos
+    max_redirects: int,       // Máximo de redirects
+    user_agent: string,       // User-Agent header
+    follow_redirects: bool    // Seguir 3xx automaticamente
+end
+
+struct ClientResponse
+    ok: bool,                 // true se 2xx
+    status_code: int,         // 200, 404, etc
+    headers: string[64],
+    header_count: int,
+    body: bytes,
+    error: string
+end
+
+// ============================================
+// Factory
+// ============================================
+
+func new_client() -> HttpClient
+    return HttpClient(30000, 5, "Noxy-HTTP/1.0", true)
+end
+
+// Globais para simular "instância default" se necessário, 
+// mas funções get/post criam cliente temporário ou usam global?
+// O spec sugere: get(url) -> ClientResponse. Internamente pode criar um client default.
+let default_client: HttpClient = new_client()
+
+
+// ============================================
+// Core Request Logic
+// ============================================
+
+func request(client: ref HttpClient, method: string, url: string, headers: string[64], header_count: int, body: bytes) -> ClientResponse
+    let empty_res: ClientResponse = ClientResponse(false, 0, [], 0, b"", "")
+    
+    // 1. Parse URL
+    let u: HttpUrl = parse_url(url)
+    if !u.valid then
+        empty_res.error = "Invalid URL"
+        return empty_res
+    end
+    
+    if u.host == "" then
+        empty_res.error = "Host not found in URL"
+        return empty_res
+    end
+    
+    // 2. Conectar
+    let sock: Socket = connect(u.host, u.port)
+    if !sock.open then
+        empty_res.error = "Connection failed to " + u.host + ":" + to_str(u.port)
+        return empty_res
+    end
+    
+    // 3. Preparar Headers automáticos
+    // Adiciona Host e User-Agent se não existirem
+    // Copia headers do usuário para um novo array (mutável)
+    // Devido à limitação de tamanho fixo e falta de métodos de array dinâmico,
+    // vamos usar uma estratégia simples: copiar e adicionar.
+    
+    let final_headers: string[64]
+    let final_count: int = 0
+    let has_host: bool = false
+    let has_ua: bool = false
+    let has_len: bool = false
+    let has_type: bool = false
+    
+    let k: int = 0
+    while k < header_count do
+        final_headers[final_count] = headers[k]
+        final_count = final_count + 1
+        
+        // Verifica headers existentes (busca simples stick)
+        // Isso é meio frágil sem lowercase, mas ok pro MVP
+        // Ideal: usar helper starts_with_ignore_case
+        k = k + 1
+    end
+    
+    // Adiciona Host
+    // TODO: verificar se já existe
+    if final_count < 64 then
+        final_headers[final_count] = "Host: " + u.host
+        final_count = final_count + 1
+    end
+    
+    // Adiciona User-Agent
+    if final_count < 64 then
+        final_headers[final_count] = "User-Agent: " + client.user_agent
+        final_count = final_count + 1
+    end
+    
+    // Adiciona Content-Length se tiver body e metodo pede
+    // TODO: verificar se já existe
+    if length(body) > 0 then
+        if final_count < 64 then
+            final_headers[final_count] = "Content-Length: " + to_str(length(body))
+            final_count = final_count + 1
+        end
+    end
+    
+    if method == "POST" | method == "PUT" | method == "PATCH" then
+        // Adiciona Content-Type default se não tiver?
+        // Vamos deixar pro usuário ou spec. Spec diz: post automágico application/json
+        // Mas aqui é a função genérica request()
+    end
+    
+    // 4. Build Request
+    let req_bytes: bytes = build_request(method, u.path + "?" + u.query, final_headers, final_count, body)
+    // query precisa ser tratada: se vazia, não poe ?
+    // Correção: u.path já tem barra? Sim
+    // Se query tem algo: path + "?" + query
+    // Mas parse_url retorna query sem '?'
+    let full_path: string = u.path
+    if strlen(u.query) > 0 then
+        full_path = full_path + "?" + u.query
+    end
+    
+    // Reconstrói com path certo
+    req_bytes = build_request(method, full_path, final_headers, final_count, body)
+    
+    // 5. Enviar
+    let sent: int = send(sock, req_bytes)
+    if sent < length(req_bytes) then
+        close(sock)
+        empty_res.error = "Failed to send full request"
+        return empty_res
+    end
+    
+    // 6. Receber Loop
+    let buffer: bytes = b""
+    let total_received: int = 0
+    let MAX_SIZE: int = 10485760  // 10MB limite
+    
+    let loop_active: bool = true
+    while loop_active do
+        let result: NetResult = recv(sock, 8192)
+        
+        if !result.ok then
+            loop_active = false
+        else
+            if result.count == 0 then
+                loop_active = false // Conexão fechada
+            else
+                buffer = buffer + slice(result.data, 0, result.count)
+                total_received = total_received + result.count
+                if total_received >= MAX_SIZE then
+                    loop_active = false
+                end
+            end
+        end
+    end
+    
+    close(sock)
+    
+    if total_received == 0 then
+        empty_res.error = "Empty response"
+        return empty_res
+    end
+    
+    // 7. Parse Response
+    let http_res: HttpResponse = parse_response(buffer, total_received)
+    
+    // 8. Converter para ClientResponse
+    let client_res: ClientResponse = ClientResponse(false, http_res.status_code, http_res.headers, http_res.header_count, http_res.body, "")
+    
+    if http_res.status_code >= 200 & http_res.status_code < 300 then
+        client_res.ok = true
+    else
+        client_res.ok = false
+        client_res.error = http_res.status_text
+    end
+    
+    return client_res
+end
+
+
+// ============================================
+// Helper Methods (Shortcuts)
+// ============================================
+
+func get(url: string) -> ClientResponse
+    let headers: string[64]
+    return request(default_client, "GET", url, headers, 0, b"")
+end
+
+func post(url: string, body: bytes) -> ClientResponse
+    let headers: string[64]
+    // Default application/json for post shortcut
+    headers[0] = "Content-Type: application/json"
+    return request(default_client, "POST", url, headers, 1, body)
+end
+
+func put(url: string, body: bytes) -> ClientResponse
+    let headers: string[64]
+    headers[0] = "Content-Type: application/json"
+    return request(default_client, "PUT", url, headers, 1, body)
+end
+
+func delete(url: string) -> ClientResponse
+    let headers: string[64]
+    return request(default_client, "DELETE", url, headers, 0, b"")
+end
+
+func patch(url: string, body: bytes) -> ClientResponse
+    let headers: string[64]
+    headers[0] = "Content-Type: application/json"
+    return request(default_client, "PATCH", url, headers, 1, body)
+end

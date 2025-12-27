@@ -1,0 +1,19 @@
+use io select *
+use io
+
+print("=== Namespace Conflict Verification ===")
+
+// 1. IO Operations
+print("[IO] Opening file...")
+let f: File = open("ns_test.txt", "w")
+if f.open then
+    write(f, "Namespace test content")
+    close(f)
+    print("[IO] Write success")
+else
+    print("[IO] Failed to open file")
+end
+
+io.remove("ns_test.txt")
+
+print("=== Verification Complete ===")

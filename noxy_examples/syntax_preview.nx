@@ -1,0 +1,45 @@
+// Exemplo de Sintaxe: Arrays Dinâmicos e Hashmaps
+// Nota: Este arquivo serve como demonstração da sintaxe proposta.
+// A funcionalidade de Mapas ainda não está implementada.
+
+struct Usuario
+    id: int,
+    nome: string,
+    ativo: bool
+end
+
+func main() -> void
+    // --- Arrays Dinâmicos ---
+    // Declaração de array vazio (cresce dinamicamente)
+    let usuarios: Usuario[] = []
+    
+    // Adicionando elementos
+    append(usuarios, Usuario(1, "Ana", true))
+    append(usuarios, Usuario(2, "Bruno", false))
+    
+    // --- Hashmaps ---
+    // Declaração: map[Chave, Valor]
+    let permissoes: map[int, string]
+    
+    // Atribuição: usa sintaxe de colchetes, igual a arrays
+    permissoes[1] = "ADMIN"
+    permissoes[2] = "USER"
+    
+    // --- Uso Misto ---
+    let i: int = 0
+    while i < length(usuarios) do
+        let u: Usuario = usuarios[i]
+        
+        // Acessando valor do mapa usando ID do usuário
+        let role: string = permissoes[u.id]
+        
+        print(f"User: {u.nome}, Role: {role}")
+        
+        // Array de Maps (Exemplo de composição)
+        // let historico: map[string, int][] = [] 
+        
+        i = i + 1
+    end
+end
+
+main()

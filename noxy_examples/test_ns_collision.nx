@@ -1,0 +1,26 @@
+use io select *
+use sqlite select *
+use io
+use sqlite
+
+print("Testing namespaces...")
+
+// Test IO specific Open
+// Assumes io.open works.
+let f: File = io.open("test_ns.txt", "w")
+if f.open then
+    io.write(f, "test")
+    io.close(f)
+    print("IO Open/Close OK")
+else
+    print("IO Open Failed")
+end
+
+// Test SQLite specific Open
+let db: Database = sqlite.open("test_ns.db")
+if db.open then
+    sqlite.close(db)
+    print("SQLite Open/Close OK")
+else
+    print("SQLite Open Failed")
+end

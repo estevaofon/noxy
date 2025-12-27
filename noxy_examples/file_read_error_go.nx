@@ -1,0 +1,61 @@
+use io select *
+
+struct Error
+    msg: string
+end
+
+struct FileReadResult
+    data: string,
+    err: ref Error
+end
+
+// Tenta ler um arquivo retornando (conteúdo, erro)
+func safe_read_file(path: string) -> FileReadResult
+    // 1. Verifica se existe
+    if !exists(path) then
+        return FileReadResult("", ref Error("Arquivo não encontrado: " + path))
+    end
+
+    // 2. Tenta abrir
+    let f: File = open(path, "r")
+    if !f.open then
+        return FileReadResult("", ref Error("Falha ao abrir o arquivo"))
+    end
+
+    // 3. Lê o conteúdo
+    let io_res: IOResult = read(f)
+    close(f) // Sempre fechar
+
+    // 4. Verifica resultado da leitura
+    if !io_res.ok then
+        return FileReadResult("", ref Error(io_res.error))
+    end
+
+    // Sucesso
+    return FileReadResult(io_res.data, null)
+end
+
+func test_read(path: string)
+    print(f"Tentando ler: '{path}'")
+    let res: FileReadResult = safe_read_file(path)
+
+    if res.err != null then
+        // Tratamento de erro
+        print(f"Erro: {res.err.msg}")
+    else
+        // Caminho feliz
+        print(f"Sucesso! Tamanho: {to_str(length(res.data))} caracteres")
+        if length(res.data) > 50 then
+            print(f"Conteúdo (início): {to_str(res.data)[0]}") // Apenas para demonstrar, acesso por índice em string não suportado diretamente assim talvez? 
+            // Noxy suporta acesso a string? Spec diz: let c: string = texto[0]
+            print("Conteúdo lido com sucesso.")
+        else
+            print(f"Conteúdo: {res.data}")
+        end
+    end
+    print("---------------")
+end
+
+// Cenários de Teste
+test_read("arquivo_fantasma.txt")
+test_read("noxy_examples/file_read_error_go.nx") // Ler o próprio arquivo

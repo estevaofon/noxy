@@ -1,0 +1,64 @@
+use sqlite select *
+
+let db: Database = open("loja.db")
+
+if !db.open then
+    print("Falha ao abrir loja.db")
+    return
+end
+
+print("=== Início do Showcase SQLite ===")
+
+// 1. Transação com Commit (Insert em massa)
+print("\n[1] Inserindo produtos em transação...")
+if begin(db) then
+    let stmt: Statement = prepare(db, "INSERT INTO produtos (nome, preco) VALUES (?, ?)")
+    
+    bind_text(stmt, 1, "Tablet")
+    bind_float(stmt, 2, 1200.50)
+    step_exec(stmt)
+    reset(stmt)
+    
+    bind_text(stmt, 1, "Smartphone")
+    bind_float(stmt, 2, 3500.00)
+    step_exec(stmt)
+    
+    finalize(stmt)
+    commit(db)
+    print("Transação commitada com sucesso.")
+else
+    print("Erro ao iniciar transação.")
+end
+
+// 2. Transação com Rollback (Simulação de erro)
+print("\n[2] Tentando alterar preços (Simulação de Rollback)...")
+begin(db)
+exec(db, "UPDATE produtos SET preco = 0") // Perigo! Zera tudo
+print("Preços zerados na transação pendente.")
+
+// Verifica status "sujo"
+let res_check: QueryResult = query(db, "SELECT preco FROM produtos WHERE nome = 'Notebook'")
+if res_check.ok & res_check.row_count > 0 then
+    print(f"Preço do Notebook na transação: {res_check.rows[0].values[0]}")
+end
+
+print("Ops! Cancelando operação...")
+rollback(db) // Desfaz tudo
+print("Rollback efetuado.")
+
+// 3. Verificação Final (Read)
+print("\n[3] Estado Final do Estoque:")
+let res: QueryResult = query(db, "SELECT * FROM produtos")
+
+let i: int = 0
+while i < res.row_count do
+    let row: Row = res.rows[i]
+    print(f"ID {row.values[0]} | {row.values[1]} | R$ {row.values[2]}")
+    i = i + 1
+end
+
+// Limpeza (para não poluir o banco em execuções futuras)
+exec(db, "DELETE FROM produtos WHERE nome IN ('Tablet', 'Smartphone')")
+
+close(db)
+print("\n=== Showcase Finalizado ===")

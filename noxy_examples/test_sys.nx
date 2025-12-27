@@ -1,0 +1,67 @@
+use sys select *
+use sys
+
+print("=== TESTE DO MÓDULO SYS ===")
+print("")
+
+// Teste 1: exec (saída vai para terminal)
+print("Teste 1: exec - saída visível no terminal")
+let r1: SysResult = exec("echo 'Hello from Noxy!'")
+print(f"Exit code: {r1.exit_code}")
+print(f"Output capturado: '{r1.output}'")
+print("")
+
+// Teste 2: exec_output (captura saída)
+print("Teste 2: exec_output - saída capturada")
+let r2: SysResult = exec_output("echo 'Hello World'")
+print(f"Exit code: {r2.exit_code}")
+print(f"Output capturado: '{r2.output}'")
+print("")
+
+// Teste 3: Variáveis de ambiente
+print("Teste 3: Variáveis de ambiente")
+let home: EnvResult = getenv("HOME")
+if home.ok then
+    print(f"HOME: {home.value}")
+else
+    print("HOME não encontrado")
+end
+
+setenv("NOXY_TEST", "test_value")
+let noxy_test: EnvResult = getenv("NOXY_TEST")
+if noxy_test.ok then
+    print(f"NOXY_TEST: {noxy_test.value}")
+end
+print("")
+
+// Teste 4: Diretório atual
+print("Teste 4: Diretório")
+print(f"Working dir: {getcwd()}")
+print("")
+
+// Teste 5: Argumentos
+print("Teste 5: Argumentos da linha de comando")
+let args: string[100] = argv()
+print(f"Programa: {args[0]}")
+if strlen(args[1]) > 0 then
+    print(f"Arg 1: {args[1]}")
+end
+print("")
+
+// Teste 6: Sleep
+print("Teste 6: Sleep (1 segundo)...")
+sleep(1000)
+print("Continuou!")
+print("")
+
+// Teste 7: Comando com erro
+print("Teste 7: Comando inexistente")
+let r3: SysResult = exec_output("comando_que_nao_existe_xyz")
+if r3.ok then
+    print("OK (inesperado)")
+else
+    print(f"Erro detectado (esperado) - code: {r3.exit_code}")
+end
+print("")
+
+print("=== TESTES CONCLUÍDOS ===")

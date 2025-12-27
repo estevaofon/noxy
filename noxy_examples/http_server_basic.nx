@@ -1,0 +1,52 @@
+use http_server select *
+use http_parser select *
+use net select *
+use io select *
+
+// Handle request callback
+func handle_request(req: HttpRequest) -> HttpResponse
+    print("Received request: " + req.method + " " + req.path)
+    
+    if req.method == "GET" then
+        if req.path == "/" then
+            return serve_file("noxy_examples/public/index.html")
+        end
+        
+        if req.path == "/script.js" then
+            return serve_file("noxy_examples/public/script.js")
+        end
+        
+        if req.path == "/json" then
+            return response_json("{\"message\": \"Hello, JSON!\"}")
+        end
+        
+        if req.path == "/html" then
+            return response_html("<h1>Hello from Noxy!</h1><p>This is a HTML response.</p>")
+        end
+    end
+    
+    return response_error(404, "Not Found")
+end
+
+// Main
+print("Starting server on port 8080...")
+let server: HttpServer = new_server("127.0.0.1", 8080)
+
+// Start works in background? No, run() is blocking usually.
+// But start() initializes. run() loops.
+// The spec said: start() inits socket. run() loops.
+
+if start(server) then
+    print("Server running at http://127.0.0.1:8080/")
+    
+    while true do
+        let event: RequestEvent = server_poll(server)
+        
+        if event.type == "REQUEST" then
+            let resp: HttpResponse = handle_request(event.request)
+            server_send(server, event.client_index, resp)
+        end
+    end
+else
+    print("Failed to start server")
+end

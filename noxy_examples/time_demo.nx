@@ -1,0 +1,80 @@
+use time select *
+
+// ============================================
+// Verificação do Módulo Time
+// ============================================
+
+print("=== Iniciando Verificação do Módulo Time ===")
+
+// 1. Obtenção de Tempo
+print("\n--- 1. Obtenção de Tempo ---")
+let ts: int = now()
+print("Timestamp Unix atual:", ts)
+
+let dt: DateTime = now_datetime()
+print("Data/Hora atual:", dt.day, "/", dt.month, "/", dt.year, " às ", dt.hour, ":", dt.minute, ":", dt.second)
+print("Dia da semana (num):", dt.weekday)
+print("Dia do ano:", dt.yearday)
+
+let ms: int = now_ms()
+print("Timestamp Unix (ms):", ms)
+
+// 2. Formatação
+print("\n--- 2. Formatação ---")
+print("Formato padrão:", format(dt))
+print("Formato customizado ISO:", format_custom(dt, "%Y-%m-%dT%H:%M:%S"))
+print("Apenas Data:", format_date(dt))
+print("Apenas Hora:", format_time(dt))
+
+// 3. Conversão e Criação
+print("\n--- 3. Conversão e Criação ---")
+let natal: DateTime = make_datetime(2025, 12, 25, 0, 0, 0)
+print("Natal 2025 criado:", format(natal))
+
+let natal_ts: int = to_timestamp(natal)
+print("Timestamp Natal 2025:", natal_ts)
+
+let reconstruido: DateTime = from_timestamp(natal_ts)
+print("Reconstruído do Timestamp:", format(reconstruido))
+
+// 4. Aritmética e Diferença
+print("\n--- 4. Aritmética e Diferença ---")
+let agora_ts: int = now()
+let diff_segundos: int = diff(natal_ts, agora_ts)
+print("Diferença segundos até o Natal 2025:", diff_segundos)
+
+let duracao: Duration = diff_duration(natal_ts, agora_ts)
+print("Duração até Natal 2025:")
+print("  Dias:", duracao.days)
+print("  Horas:", duracao.hours)
+print("  Minutos:", duracao.minutes)
+print("  Segundos:", duracao.seconds)
+
+let futuro: int = add_days(agora_ts, 10)
+print("Daqui a 10 dias (ts):", futuro)
+let futuro_dt: DateTime = from_timestamp(futuro)
+print("Data daqui a 10 dias:", format_date(futuro_dt))
+
+// 5. Comparação e Utilitários
+print("\n--- 5. Comparação e Utilitários ---")
+print("Agora é antes do Natal 2025?", before(agora_ts, natal_ts))
+print("Agora é depois do Natal 2025?", after(agora_ts, natal_ts))
+
+print("2024 é bissexto?", is_leap_year(2024))
+print("2025 é bissexto?", is_leap_year(2025))
+
+print("Dias em Fevereiro 2024:", days_in_month(2024, 2))
+print("Dias em Fevereiro 2025:", days_in_month(2025, 2))
+
+print("Nome do dia da semana (hoje):", weekday_name(dt.weekday))
+print("Nome do mês (atual):", month_name(dt.month))
+
+// 6. Parsing
+print("\n--- 6. Parsing ---")
+let parsed: DateTime = parse("2023-01-01 12:00:00")
+print("Parse '2023-01-01 12:00:00':", format(parsed))
+
+let parsed_date: DateTime = parse_date("2023-01-01")
+print("Parse Date '2023-01-01':", format(parsed_date))
+
+print("\n=== Verificação Concluída ===")

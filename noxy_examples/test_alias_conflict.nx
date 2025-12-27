@@ -1,0 +1,32 @@
+// Testando resolução de conflito com Alias e renomeação de módulos longos
+
+// 1. Alias para encurtar
+use pkg_test.mod as m1
+
+// 2. Alias para evitar conflito
+use other_mod as m2
+
+// 3. Importando IO como SystemIO
+use io as SystemIO
+
+func main() -> void
+    print("=== Teste de Conflito e Alias ===")
+    
+    // Chama m1.hello()
+    print("m1 diz: " + m1.hello())
+    
+    // Chama m2.hello()
+    print("m2 diz: " + m2.hello())
+    
+    // Usa SystemIO
+    let f: SystemIO.File = SystemIO.open("log_alias.txt", "w")
+    if f.open then
+        SystemIO.write(f, "Log via SystemIO\n")
+        SystemIO.close(f)
+        print("Arquivo log_alias.txt criado via SystemIO")
+    else
+        print("Erro ao criar arquivo")
+    end
+end
+
+main()

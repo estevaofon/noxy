@@ -1,0 +1,116 @@
+use time select *
+// stdlib/uuid.nx
+struct UUIDState
+    seed: int
+end
+
+global _uuid_state: UUIDState = UUIDState(0)
+global _uuid_initialized: bool = false
+
+// Initialize the RNG with current time
+func _uuid_init() -> void
+    if !_uuid_initialized then
+        _uuid_state.seed = now_ms()
+        _uuid_initialized = true
+    end
+end
+
+// Simple LCG random number generator
+// Constants from Numerical Recipes
+func _uuid_rand() -> int
+    _uuid_init()
+    let a: int = 1664525
+    let c: int = 1013904223
+    let m: int = 4294967296 // 2^32
+    
+    _uuid_state.seed = (a * _uuid_state.seed + c) % m
+    // Ensure positive
+    if _uuid_state.seed < 0 then
+        _uuid_state.seed = _uuid_state.seed + m
+    end
+    
+    return _uuid_state.seed
+end
+
+// Get a random integer between min and max (inclusive)
+func _uuid_rand_range(min: int, max: int) -> int
+    let r: int = _uuid_rand()
+    // Use higher bits for better randomness (LCG low bits are poor)
+    let high: int = r / 65536
+    return min + (high % (max - min + 1))
+end
+
+// Helper to convert int (0-15) to hex char
+func _uuid_get_hex_digit(val: int) -> string
+    if val < 10 then
+        // 0-9
+        // return strings.from_char_code(48 + val)
+        // Manual conversion to avoid circular/heavy deps if strings not loaded
+        if val == 0 then return "0" end
+        if val == 1 then return "1" end
+        if val == 2 then return "2" end
+        if val == 3 then return "3" end
+        if val == 4 then return "4" end
+        if val == 5 then return "5" end
+        if val == 6 then return "6" end
+        if val == 7 then return "7" end
+        if val == 8 then return "8" end
+        if val == 9 then return "9" end
+    else
+        // a-f (10-15)
+        if val == 10 then return "a" end
+        if val == 11 then return "b" end
+        if val == 12 then return "c" end
+        if val == 13 then return "d" end
+        if val == 14 then return "e" end
+        if val == 15 then return "f" end
+    end
+    return "0"
+end
+
+func uuid4() -> string
+    let result: string = ""
+    let i: int = 0
+    
+    // Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    // Total 32 hex digits + 4 dashes = 36 chars
+    
+    while i < 32 do
+        // Determine hex digit value
+        let val: int = _uuid_rand_range(0, 15)
+        
+        // Apply version 4 at index 12 (13th digit)
+        if i == 12 then
+            val = 4
+        end
+        
+        // Apply variant at index 16 (17th digit)
+        // Variant 1: 0x8, 0x9, 0xA, 0xB (10xx binary)
+        if i == 16 then
+            val = _uuid_rand_range(8, 11)
+        end
+        
+        // Add dash before 8, 12, 16, 20 indices (corresponding to 9th, 14th, 19th, 24th positions)
+        // Actually indices in hex stream: 
+        // 0-7 (8 chars)
+        // -
+        // 8-11 (4 chars)
+        // -
+        // 12-15 (4 chars)
+        // -
+        // 16-19 (4 chars)
+        // -
+        // 20-31 (12 chars)
+        
+        if i == 8 then result = result + "-" end
+        if i == 12 then result = result + "-" end
+        if i == 16 then result = result + "-" end
+        if i == 20 then result = result + "-" end
+        
+        result = result + _uuid_get_hex_digit(val)
+        
+        i = i + 1
+    end
+    
+    return result
+end

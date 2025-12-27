@@ -1,0 +1,92 @@
+// structs_aninhados.nx - Exemplo de structs aninhados em Noxy
+
+// Struct simples para endereço
+struct Endereco
+    rua: string,
+    numero: int,
+    cidade: string
+end
+
+// Struct para dados pessoais
+struct Pessoa
+    nome: string,
+    idade: int
+end
+
+// Struct aninhado: Funcionário tem Pessoa e Endereco
+struct Funcionario
+    dados: Pessoa,
+    endereco: Endereco,
+    salario: float,
+    ativo: bool
+end
+
+// Struct para empresa com array de funcionários
+struct Departamento
+    nome: string,
+    gerente: Funcionario
+end
+
+// Criar endereços
+let end1: Endereco = Endereco("Rua das Flores", 123, "São Paulo")
+let end2: Endereco = Endereco("Av. Brasil", 456, "Rio de Janeiro")
+
+// Criar pessoas
+let p1: Pessoa = Pessoa("Ana Silva", 35)
+let p2: Pessoa = Pessoa("Carlos Santos", 42)
+
+// Criar funcionários (structs aninhados)
+let func1: Funcionario = Funcionario(p1, end1, 8500.50, true)
+let func2: Funcionario = Funcionario(p2, end2, 12000.00, true)
+
+// Criar departamento
+let ti: Departamento = Departamento("Tecnologia", func2)
+
+// Acessar campos aninhados
+print("=== Funcionário 1 ===")
+print(f"Nome: {func1.dados.nome}")
+print(f"Idade: {func1.dados.idade}")
+print(f"Endereço: {func1.endereco.rua}, {func1.endereco.numero}")
+print(f"Cidade: {func1.endereco.cidade}")
+print(f"Salário: {func1.salario}")
+
+print("")
+print("=== Departamento TI ===")
+print(f"Departamento: {ti.nome}")
+print(f"Gerente: {ti.gerente.dados.nome}")
+print(f"Cidade do Gerente: {ti.gerente.endereco.cidade}")
+
+// Modificar campos aninhados
+func1.dados.idade = 36
+func1.endereco.cidade = "Campinas"
+func1.salario = 9000.00
+
+print("")
+print("=== Após modificações ===")
+print(f"Nova idade: {func1.dados.idade}")
+print(f"Nova cidade: {func1.endereco.cidade}")
+print(f"Novo salário: {func1.salario}")
+
+// Função que recebe struct aninhado por referência
+func dar_aumento(f: ref Funcionario, percentual: float) -> void
+    let aumento: float = f.salario * percentual
+    f.salario = f.salario + aumento
+    print(f"Aumento de {aumento} aplicado!")
+end
+
+print("")
+print("=== Aplicando aumento de 10% ===")
+dar_aumento(func1, 0.10)
+print(f"Salário final: {func1.salario}")
+
+// Função que modifica struct aninhado profundo
+func mudar_endereco(f: ref Funcionario, nova_rua: string, novo_num: int) -> void
+    f.endereco.rua = nova_rua
+    f.endereco.numero = novo_num
+end
+
+print("")
+print("=== Mudando endereço ===")
+mudar_endereco(func1, "Rua Nova", 789)
+print(f"Novo endereço: {func1.endereco.rua}, {func1.endereco.numero}")
+

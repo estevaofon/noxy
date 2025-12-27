@@ -1,0 +1,130 @@
+use sys select *
+
+// ============================================
+// Test Runner
+// ============================================
+
+print("=== NOXY UNIT TEST RUNNER ===")
+print("Iniciando testes em 'noxy_examples/'...")
+print("")
+
+// Variáveis de controle
+let passed: int = 0
+let failed: int = 0
+let skip_self: string = "run_all_tests.nx"
+
+// Helper para verificar se string termina com sufixo
+// Como não temos endswith, fazemos manual
+func ends_with_nx(s: string) -> bool
+    let len_s: int = strlen(s)
+    let suffix: string = ".nx"
+    if len_s < 3 then return false end
+    
+    // ".nx" tem tamanho 3
+    // Compara os últimos 3 caracteres
+    if s[len_s - 1] != "x" then return false end
+    if s[len_s - 2] != "n" then return false end
+    if s[len_s - 3] != "." then return false end
+    
+    return true
+end
+
+// Helper para verificar se arquivo deve ser ignorado
+func should_ignore(s: string) -> bool
+    // Lista de exclusions
+    let exclusions: string[] = ["run_all_tests.nx", "http_server.nx", "simple_client.nx", "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx"]
+    if contains(exclusions, s) then
+         return true
+    end
+    return false
+end
+
+// Executar lista de arquivos usando 'dir /B' (Windows)
+// Para Linux seria 'ls'
+let cmd_res: SysResult = exec_output("dir /B noxy_examples")
+
+if !cmd_res.ok then
+    print("Erro ao listar diretório:")
+    print(cmd_res.error)
+    exit(1)
+end
+
+let raw_list: string = cmd_res.output
+let len_list: int = strlen(raw_list)
+let current_file: string = ""
+let i: int = 0
+
+// Parse manual da lista de arquivos
+while i < len_list do
+    let char: string = raw_list[i]
+    
+    // Verifica separadores de linha
+    if char == "\n" then
+        if strlen(current_file) > 0 then
+            // Processa arquivo encontrado
+            // Remove \r se existir no fim (Windows \r\n)
+            let last_idx: int = strlen(current_file) - 1
+            if current_file[last_idx] == "\r" then
+                // Ignora, apenas para evitar caractere
+            else
+                // Verifica extensão e auto-exclusão
+                let ignored: bool = should_ignore(current_file)
+                if ends_with_nx(current_file) & !ignored then
+                    print(f"Executando: {current_file}...")
+                    
+                    // Executa o teste
+                    // Usa python atual para garantir ambiente
+                    let cmd: string = f"uv run main.py noxy_examples/{current_file}"
+                    let run_res: SysResult = exec_output(cmd)
+                    
+                    if run_res.ok then
+                        print(f"  [PASS] {current_file}")
+                        passed = passed + 1
+                    else
+                        print(f"  [FAIL] {current_file} (Code: {run_res.exit_code})")
+                        // Opcional: print(run_res.error)
+                        failed = failed + 1
+                    end
+                end
+            end
+            current_file = ""
+        end
+    else
+        // Acumula caractere se não for \r
+        if char != "\r" then
+            current_file = current_file + char
+        end
+    end
+    
+    i = i + 1
+end
+
+// Processa último arquivo se não terminar com \n
+if strlen(current_file) > 0 then
+    let ignored2: bool = should_ignore(current_file)
+    if ends_with_nx(current_file) & !ignored2 then
+        print(f"Executando: {current_file}...")
+        let cmd_last: string = f"uv run main.py noxy_examples/{current_file}"
+        let run_res_last: SysResult = exec_output(cmd_last)
+        if run_res_last.ok then
+            print(f"  [PASS] {current_file}")
+            passed = passed + 1
+        else
+            print(f"  [FAIL] {current_file}")
+            failed = failed + 1
+        end
+    end
+end
+
+print("")
+print("=== RELATÓRIO ===")
+print(f"Total: {passed + failed}")
+print(f"Passou: {passed}")
+print(f"Falhou: {failed}")
+
+if failed > 0 then
+    print("ALGUNS TESTES FALHARAM.")
+    exit(1)
+else
+    print("TODOS TESTES PASSARAM.")
+end

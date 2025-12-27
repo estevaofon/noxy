@@ -1,0 +1,231 @@
+// dijkstra.nx - Implementação do Algoritmo de Dijkstra em Noxy
+// Encontra o menor caminho de um nó fonte para todos os outros nós
+
+// Constante para "infinito" (valor muito grande)
+let INFINITO: int = 999999
+
+// Número de vértices no grafo
+let NUM_VERTICES: int = 6
+
+// ============================================
+// ESTRUTURAS DE DADOS
+// ============================================
+
+struct Grafo
+    // Matriz de adjacência: grafo[i][j] = peso da aresta i->j
+    // 0 significa sem aresta
+    adj: int[36],  // 6x6 = 36 (simula matriz 2D)
+    num_vertices: int
+end
+
+struct Resultado
+    distancias: int[6],    // Distância mínima da fonte até cada vértice
+    anteriores: int[6],    // Vértice anterior no caminho mínimo
+    visitados: bool[6]     // Vértices já processados
+end
+
+// ============================================
+// FUNÇÕES AUXILIARES
+// ============================================
+
+// Acessa elemento da matriz de adjacência (simula [i][j])
+func get_peso(g: ref Grafo, i: int, j: int) -> int
+    let idx: int = i * NUM_VERTICES + j
+    return g.adj[idx]
+end
+
+// Define peso na matriz de adjacência
+func set_peso(g: ref Grafo, i: int, j: int, peso: int) -> void
+    let idx: int = i * NUM_VERTICES + j
+    g.adj[idx] = peso
+end
+
+// Adiciona aresta bidirecional ao grafo
+func add_aresta(g: ref Grafo, origem: int, destino: int, peso: int) -> void
+    set_peso(g, origem, destino, peso)
+    set_peso(g, destino, origem, peso)  // Grafo não-direcionado
+end
+
+// Encontra o vértice não visitado com menor distância
+func vertice_min_distancia(r: ref Resultado) -> int
+    let min_dist: int = INFINITO
+    let min_vertice: int = 0 - 1  // -1 indica não encontrado
+    
+    let v: int = 0
+    while v < NUM_VERTICES do
+        if r.visitados[v] == false then
+            if r.distancias[v] < min_dist then
+                min_dist = r.distancias[v]
+                min_vertice = v
+            end
+        end
+        v = v + 1
+    end
+    
+    return min_vertice
+end
+
+// ============================================
+// ALGORITMO DE DIJKSTRA
+// ============================================
+
+func dijkstra(g: ref Grafo, fonte: int, r: ref Resultado) -> void
+    // Inicializa distâncias e visitados
+    let i: int = 0
+    while i < NUM_VERTICES do
+        r.distancias[i] = INFINITO
+        r.anteriores[i] = 0 - 1  // -1 = sem anterior
+        r.visitados[i] = false
+        i = i + 1
+    end
+    
+    // Distância da fonte para ela mesma é 0
+    r.distancias[fonte] = 0
+    
+    // Processa todos os vértices
+    let count: int = 0
+    while count < NUM_VERTICES do
+        // Encontra vértice não visitado com menor distância
+        let u: int = vertice_min_distancia(r)
+        
+        if u == (0 - 1) then
+            // Não há mais vértices alcançáveis
+            break
+        end
+        
+        // Marca como visitado
+        r.visitados[u] = true
+        
+        // Atualiza distâncias dos vizinhos
+        let v: int = 0
+        while v < NUM_VERTICES do
+            let peso: int = get_peso(g, u, v)
+            
+            // Se há aresta e o vértice não foi visitado
+            if peso > 0 then
+                if r.visitados[v] == false then
+                    let nova_dist: int = r.distancias[u] + peso
+                    
+                    // Se encontrou caminho mais curto
+                    if nova_dist < r.distancias[v] then
+                        r.distancias[v] = nova_dist
+                        r.anteriores[v] = u
+                    end
+                end
+            end
+            
+            v = v + 1
+        end
+        
+        count = count + 1
+    end
+end
+
+// ============================================
+// FUNÇÕES DE IMPRESSÃO
+// ============================================
+
+func imprimir_distancias(r: ref Resultado, fonte: int) -> void
+    print(f"Distancias minimas a partir do vertice {fonte}:")
+    print("----------------------------------------")
+    
+    let v: int = 0
+    while v < NUM_VERTICES do
+        if r.distancias[v] == INFINITO then
+            print(f"  Vertice {v}: INALCANCAVEL")
+        else
+            print(f"  Vertice {v}: {r.distancias[v]}")
+        end
+        v = v + 1
+    end
+end
+
+func imprimir_caminho(r: ref Resultado, fonte: int, destino: int) -> void
+    print(f"Caminho de {fonte} ate {destino}:")
+    
+    if r.distancias[destino] == INFINITO then
+        print("  Nao existe caminho!")
+        return
+    end
+    
+    // Reconstrói o caminho de trás para frente
+    // Como não temos arrays dinâmicos, vamos imprimir na ordem inversa
+    // e mostrar a distância total
+    
+    print(f"  Distancia total: {r.distancias[destino]}")
+    
+    // Conta quantos passos
+    let passos: int = 0
+    let atual: int = destino
+    while atual != fonte do
+        passos = passos + 1
+        atual = r.anteriores[atual]
+        if atual == (0 - 1) then
+            break
+        end
+    end
+    print(f"  Numero de arestas: {passos}")
+end
+
+// ============================================
+// PROGRAMA PRINCIPAL
+// ============================================
+
+print("=== ALGORITMO DE DIJKSTRA ===")
+print("")
+
+// Cria o grafo
+//
+// Grafo de exemplo:
+//
+//        (1)---7---(2)
+//       / |         | \
+//      2  |         |  9
+//     /   3         1   \
+//   (0)   |         |   (5)
+//     \   |         |   /
+//      4  |         |  5
+//       \ |         | /
+//        (3)---6---(4)
+//
+
+let grafo: Grafo = Grafo(zeros(36), NUM_VERTICES)
+
+// Adiciona as arestas (origem, destino, peso)
+add_aresta(grafo, 0, 1, 2)
+add_aresta(grafo, 0, 3, 4)
+add_aresta(grafo, 1, 2, 7)
+add_aresta(grafo, 1, 3, 3)
+add_aresta(grafo, 2, 4, 1)
+add_aresta(grafo, 2, 5, 9)
+add_aresta(grafo, 3, 4, 6)
+add_aresta(grafo, 4, 5, 5)
+
+print("Grafo criado com 6 vertices e 8 arestas")
+print("")
+
+// Executa Dijkstra a partir do vértice 0
+let resultado: Resultado = Resultado(zeros(6), zeros(6), [false, false, false, false, false, false])
+let fonte: int = 0
+
+dijkstra(grafo, fonte, resultado)
+
+// Imprime resultados
+imprimir_distancias(resultado, fonte)
+print("")
+
+// Mostra caminhos específicos
+imprimir_caminho(resultado, 0, 5)
+print("")
+imprimir_caminho(resultado, 0, 2)
+print("")
+imprimir_caminho(resultado, 0, 4)
+print("")
+
+print("=== FIM ===")
+
+
+
+
+
+

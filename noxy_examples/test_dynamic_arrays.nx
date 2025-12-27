@@ -1,0 +1,55 @@
+
+// Teste de Arrays Dinâmicos
+
+func main() -> void
+    print("Testando Arrays Dinâmicos...")
+    
+    // Declaração e inicialização (sem initializer explícito, usa default [])
+    let arr: int[] 
+    print("Tamanho inicial: " + to_str(length(arr)))
+    
+    // Append
+    append(arr, 10)
+    append(arr, 20)
+    append(arr, 30)
+    print("Tamanho após appends: " + to_str(length(arr)))
+    print("Elemento 0: " + to_str(arr[0]))
+    print("Elemento 1: " + to_str(arr[1]))
+    print("Elemento 2: " + to_str(arr[2]))
+    
+    // Modificação
+    arr[1] = 25
+    print("Elemento 1 modificado: " + to_str(arr[1]))
+    
+    // Pop
+    let last: int = pop(arr)
+    print("Pop retornou: " + to_str(last))
+    print("Tamanho após pop: " + to_str(length(arr)))
+    
+    // Array de strings com lista vazia explícita (se suportado? não temos literal [])
+    // O parser de ArrayLiteral exige elementos ou void[] se vazio?
+    // check_array_literal retorna void[] se vazio.
+    // Vamos usar let sem init.
+    
+    let nomes: string[]
+    append(nomes, "Alice")
+    append(nomes, "Bob")
+    print(f"Nomes: {nomes[0]}, {nomes[1]}")
+
+    // Teste contains
+    if contains(nomes, "Alice") then
+        print("Alice esta no array")
+    else
+        print("Alice nao encontrada")
+    end
+    
+    if contains(nomes, "Zoro") then
+        print("Zoro encontrado")
+    else
+        print("Zoro nao esta no array")
+    end
+
+    print("Teste de Arrays concluído!")
+end
+
+main()

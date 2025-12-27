@@ -1,0 +1,218 @@
+use http_server select *
+use http_parser select *
+use net select *
+use io
+use sqlite
+use strings
+use json_parser select *
+use json_helpers select *
+use sys select *
+
+// ============================================
+// Database Setup
+// ============================================
+
+global db: sqlite.Database = sqlite.open("todo.db")
+
+func init_db() -> void
+    if !db.open then
+        print("Failed to open database 'todo.db'")
+        return
+    end
+
+    // Create table if not exists
+    // completed: 0 = false, 1 = true
+    let sql: string = "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY, title TEXT, completed INTEGER)"
+    let res: sqlite.ExecResult = sqlite.exec(db, sql)
+    
+    if !res.ok then
+        print("DB Init Error: " + res.error)
+    else
+        print("Database initialized.")
+    end
+end
+
+// ============================================
+// Handlers
+// ============================================
+
+func handle_get_todos() -> HttpResponse
+    let query: string = "SELECT id, title, completed FROM todos"
+    let res: sqlite.QueryResult = sqlite.query(db, query)
+    
+    if !res.ok then
+        return response_error(500, "DB Error: " + res.error)
+    end
+    
+    // Build JSON using strings.join for cleaner code
+    let items: string[100] // Limitation: max 100 items per page/request for now
+    let count: int = 0
+    
+    let i: int = 0
+    while i < res.row_count do
+        if count >= 100 then break end
+        
+        let row: sqlite.Row = res.rows[i]
+        let id: string = row.values[0]
+        let title: string = row.values[1]
+        let completed: string = row.values[2]
+        
+        // Escape title? For MVP we assume simple titles, or use a strings.replace if available
+        // Simple escape of quotes
+        let safe_title: string = strings.replace(title, "\"", "\\\"")
+        
+        let item: string = "{\"id\": " + id + ", \"title\": \"" + safe_title + "\", \"completed\": " + completed + "}"
+        items[count] = item
+        count = count + 1
+        
+        i = i + 1
+    end
+    
+    let joined: string = strings.join_count(items, ",", count)
+    let json: string = "[" + joined + "]"
+    
+    return response_json(json)
+end
+
+func handle_add_todo(body: bytes) -> HttpResponse
+    let json_str: string = to_str(body)
+    let node: ref JsonNode = json_parse(json_str)
+    
+    let title: string = get_string(node, "title")
+    
+    if strings.is_empty(title) then
+        return response_error(400, "Missing title")
+    end
+    
+    let stmt: sqlite.Statement = sqlite.prepare(db, "INSERT INTO todos (title, completed) VALUES (?, 0)")
+    sqlite.bind_text(stmt, 1, title)
+    let res: sqlite.ExecResult = sqlite.step_exec(stmt)
+    sqlite.finalize(stmt)
+    
+    if !res.ok then
+        return response_error(500, "Failed to insert: " + res.error)
+    end
+    
+    return response_json("{\"status\": \"ok\", \"id\": " + to_str(res.last_insert_id) + "}")
+end
+
+func handle_toggle_todo(body: bytes) -> HttpResponse
+    let json_str: string = to_str(body)
+    let node: ref JsonNode = json_parse(json_str)
+    
+    if node == null then return response_error(400, "Invalid JSON") end
+    
+    // Check if ID exists (it's an int)
+    if !has_key(node, "id") then
+        return response_error(400, "Missing id")
+    end
+    
+    let id: int = get_int(node, "id")
+    
+    let sql: string = "UPDATE todos SET completed = CASE WHEN completed = 0 THEN 1 ELSE 0 END WHERE id = ?"
+    let stmt: sqlite.Statement = sqlite.prepare(db, sql)
+    sqlite.bind_int(stmt, 1, id)
+    let res: sqlite.ExecResult = sqlite.step_exec(stmt)
+    sqlite.finalize(stmt)
+    
+    if !res.ok then
+        return response_error(500, "DB Error")
+    end
+    
+    return response_json("{\"status\": \"ok\"}")
+end
+
+func handle_delete_todo(body: bytes) -> HttpResponse
+    let json_str: string = to_str(body)
+    let node: ref JsonNode = json_parse(json_str)
+    
+    if node == null then return response_error(400, "Invalid JSON") end
+
+    if !has_key(node, "id") then
+        return response_error(400, "Missing id")
+    end
+    
+    let id: int = get_int(node, "id")
+    
+    let stmt: sqlite.Statement = sqlite.prepare(db, "DELETE FROM todos WHERE id = ?")
+    sqlite.bind_int(stmt, 1, id)
+    let res: sqlite.ExecResult = sqlite.step_exec(stmt)
+    sqlite.finalize(stmt)
+    
+    if !res.ok then
+        return response_error(500, "DB Error")
+    end
+    
+    return response_json("{\"status\": \"ok\"}")
+end
+
+// ============================================
+// Router
+// ============================================
+
+func handle_request(req: HttpRequest) -> HttpResponse
+    print(req.method + " " + req.path)
+    
+    if req.method == "GET" then
+        if req.path == "/" then
+            return serve_file("noxy_examples/static/index.html")
+        end
+        if req.path == "/api/todos" then
+            return handle_get_todos()
+        end
+    end
+    
+    if req.method == "POST" then
+        if req.path == "/api/todos" then
+            return handle_add_todo(req.body)
+        end
+    end
+    
+    if req.method == "PUT" then
+        if req.path == "/api/todos/toggle" then
+            return handle_toggle_todo(req.body)
+        end
+    end
+    
+    if req.method == "DELETE" then
+        if req.path == "/api/todos/delete" then
+            return handle_delete_todo(req.body)
+        end
+    end
+    
+    return response_error(404, "Not Found")
+end
+
+// ============================================
+// Main
+// ============================================
+
+init_db()
+
+// Get PORT from environment or default to 8080
+let port_str: string = sys_getenv("PORT").value
+let port: int = 8080
+if !strings.is_empty(port_str) then
+    port = to_int(port_str)
+end
+
+//let server: HttpServer = new_server("0.0.0.0", port)
+let host: string = "127.0.0.1"
+let server: HttpServer = new_server(host, port)
+
+if start(server) then
+    print(f"TODO Server running at {host}:" + to_str(port) + "/")
+    
+    while true do
+        let event: RequestEvent = server_poll(server)
+        
+        if event.type == "REQUEST" then
+            let resp: HttpResponse = handle_request(event.request)
+            server_send(server, event.client_index, resp)
+        end
+    end
+else
+    print("Failed to start server")
+end
+
+sqlite.close(db)

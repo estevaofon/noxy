@@ -1,0 +1,13 @@
+let scores: map[string, int] 
+    
+// Inserção
+scores["Alice"] = 100
+scores["Bob"] = 95
+
+print(scores)
+
+if has_key(scores, "Joao") then
+    print("Joao esta no mapa")
+else
+    print("Joao nao esta no mapa")
+end

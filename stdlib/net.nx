@@ -1,0 +1,62 @@
+struct Socket
+    fd: int,
+    addr: string,
+    port: int,
+    open: bool
+end
+
+struct NetResult
+    ok: bool,
+    data: bytes,
+    count: int,
+    error: string
+end
+
+struct SelectResult
+    read: Socket[64],
+    read_count: int,
+    write: Socket[64],
+    write_count: int,
+    error: Socket[64],
+    error_count: int
+end
+
+
+
+// Wrappers
+
+func listen(host: string, port: int) -> Socket
+    return net_listen(host, port)
+end
+
+func accept(server: Socket) -> Socket
+    return net_accept(server)
+end
+
+func connect(host: string, port: int) -> Socket
+    return net_connect(host, port)
+end
+
+func recv(sock: Socket, size: int) -> NetResult
+    return net_recv(sock, size)
+end
+
+func send(sock: Socket, data: bytes) -> NetResult
+    return net_send(sock, data)
+end
+
+func close(sock: Socket) -> void
+    net_close(sock)
+end
+
+func setblocking(sock: Socket, blocking: bool) -> void
+    net_setblocking(sock, blocking)
+end
+
+func socket_set() -> Socket[64]
+    return net_socket_set()
+end
+
+func select(read: Socket[64], write: Socket[64], error: Socket[64], timeout: int) -> SelectResult
+    return net_select(read, write, error, timeout)
+end

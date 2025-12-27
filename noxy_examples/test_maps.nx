@@ -1,0 +1,50 @@
+
+// Teste de Hashmaps
+use io
+
+func main() -> void
+    print("Testando Hashmaps...")
+    
+    // Declaração
+    let scores: map[string, int] 
+    
+    // Inserção
+    scores["Alice"] = 100
+    scores["Bob"] = 95
+    
+    print("Score Alice: " + to_str(scores["Alice"]))
+    print("Score Bob: " + to_str(scores["Bob"]))
+    
+    // Atualização
+    scores["Alice"] = 105
+    print("Score Alice atualizado: " + to_str(scores["Alice"]))
+    
+    // Keys
+    let k: string[] = keys(scores)
+    print("Numero de chaves: " + to_str(length(k)))
+    
+    // Has Key
+    if has_key(scores, "Alice") then
+        print("Alice existe")
+    end
+    
+    if !has_key(scores, "Charlie") then
+        print("Charlie não existe")
+    end
+    
+    // Delete
+    delete(scores, "Bob")
+    if !has_key(scores, "Bob") then
+        print("Bob deletado")
+    end
+
+    // Mapa com chave int
+    let squares: map[int, int]
+    squares[2] = 4
+    squares[3] = 9
+    print("Quadrado de 3: " + to_str(squares[3]))
+    
+    print("Teste de Maps concluído!")
+end
+
+main()

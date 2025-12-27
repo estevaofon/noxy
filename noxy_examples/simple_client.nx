@@ -1,0 +1,30 @@
+// Simple TCP Client
+use net select *
+
+let port: int = 8080
+let host: string = "127.0.0.1"
+
+print("Connecting to " + host + ":" + to_str(port) + "...")
+let client: Socket = net.connect(host, port)
+
+if client.open then
+    print("Connected!")
+    
+    // Send message
+    let message: bytes = b"Hello from Noxy Client!"
+    print("Sending: " + to_str(message))
+    net.send(client, message)
+    
+    // Receive response
+    let response: NetResult = net.recv(client, 1024)
+    if response.ok then
+        print("Server replied: " + to_str(response.data))
+    else
+        print("Error receiving: " + response.error)
+    end
+    
+    net.close(client)
+    print("Connection closed")
+else
+    print("Failed to connect. Make sure the server is running.")
+end

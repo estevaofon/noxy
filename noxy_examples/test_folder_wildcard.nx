@@ -1,0 +1,25 @@
+// Exemplo: Select * de uma pasta
+//
+// Estrutura de arquivos:
+// noxy_examples/
+//   pkg_test/
+//     sub/
+//       util.nx  (contém func helper())
+
+// Importa TODO o conteúdo da pasta 'pkg_test/sub' para o escopo atual.
+// Isso inclui todos os arquivos .nx como módulos.
+use pkg_test.sub select *
+
+func main() -> void
+    print("=== Teste de Wildcard em Pasta ===")
+    
+    // Como usamos 'select *' na pasta 'sub', o arquivo 'util.nx'
+    // se tornou acessível diretamente como um módulo chamado 'util'.
+    
+    print("Chamando util.helper()...")
+    util.helper() 
+    
+    print("Sucesso!")
+end
+
+main()

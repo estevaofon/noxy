@@ -1,0 +1,39 @@
+struct Result
+    is_ok: bool,      // true = Ok, false = Err
+    value: int,       // valor quando sucesso
+    error: string     // nome do erro quando falha
+end
+
+func Ok(value: int) -> Result
+    return Result(true, value, "")
+end
+
+func Err(error_name: string) -> Result
+    return Result(false, 0, error_name)
+end
+
+// Divisão Segura:
+
+func safe_divide(a: int, b: int) -> Result
+    if b == 0 then
+        return Err("DIVISION_BY_ZERO")
+    end
+    return Ok(a / b)
+end
+
+func is_ok(result: Result) -> bool
+    return result.is_ok
+end
+
+func test_division(a: int, b: int)
+    let result: Result = safe_divide(a, b)
+    if is_ok(result) then
+        print(f"{a} / {b}" + " = " + to_str(result.value))
+    else
+        print(f"{a} / {b}" + " = Erro: " + result.error)
+    end
+end
+
+// Testes
+test_division(10, 0)  // Divisão por zero
+test_division(10, 2)  // Divisão válida

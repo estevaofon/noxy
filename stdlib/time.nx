@@ -1,0 +1,162 @@
+// stdlib/time.nx
+
+struct DateTime
+    year: int,
+    month: int,        // 1-12
+    day: int,          // 1-31
+    hour: int,         // 0-23
+    minute: int,       // 0-59
+    second: int,       // 0-59
+    weekday: int,      // 0=domingo, 6=sábado
+    yearday: int,      // 1-366
+    timestamp: int     // Unix timestamp (segundos desde 1970)
+end
+
+struct Duration
+    days: int,
+    hours: int,
+    minutes: int,
+    seconds: int,
+    total_seconds: int
+end
+
+
+// ============================================
+// Obtenção de Tempo
+// ============================================
+
+// Retorna timestamp Unix atual (segundos)
+func now() -> int
+    return time_now()
+end
+
+// Retorna DateTime atual
+func now_datetime() -> DateTime
+    return time_now_datetime()
+end
+
+// Retorna timestamp em milissegundos (para medições precisas)
+func now_ms() -> int
+    return time_now_ms()
+end
+
+// ============================================
+// Conversão
+// ============================================
+
+// Timestamp -> DateTime
+func from_timestamp(ts: int) -> DateTime
+    return time_from_timestamp(ts)
+end
+
+// DateTime -> Timestamp
+func to_timestamp(dt: DateTime) -> int
+    return time_to_timestamp(dt)
+end
+
+// Cria DateTime a partir de componentes
+func make_datetime(year: int, month: int, day: int, hour: int, minute: int, second: int) -> DateTime
+    return time_make_datetime(year, month, day, hour, minute, second)
+end
+
+// ============================================
+// Formatação
+// ============================================
+
+// Formata DateTime para string
+// Formato: "YYYY-MM-DD HH:MM:SS" (padrão)
+func format(dt: DateTime) -> string
+    return time_format(dt)
+end
+
+// Formato customizado (simplificado)
+// %Y=ano, %m=mês, %d=dia, %H=hora, %M=min, %S=seg
+func format_custom(dt: DateTime, fmt: string) -> string
+    return time_format_custom(dt, fmt)
+end
+
+// Formata apenas data: "YYYY-MM-DD"
+func format_date(dt: DateTime) -> string
+    return time_format_date(dt)
+end
+
+// Formata apenas hora: "HH:MM:SS"
+func format_time(dt: DateTime) -> string
+    return time_format_time(dt)
+end
+
+// ============================================
+// Parsing
+// ============================================
+
+// Parse string "YYYY-MM-DD HH:MM:SS" -> DateTime
+func parse(s: string) -> DateTime
+    return time_parse(s)
+end
+
+// Parse apenas data "YYYY-MM-DD"
+func parse_date(s: string) -> DateTime
+    return time_parse_date(s)
+end
+
+// ============================================
+// Aritmética
+// ============================================
+
+// Adiciona segundos a um timestamp
+func add_seconds(ts: int, secs: int) -> int
+    return time_add_seconds(ts, secs)
+end
+
+// Adiciona dias a um timestamp
+func add_days(ts: int, days: int) -> int
+    return time_add_days(ts, days)
+end
+
+// Diferença entre dois timestamps (em segundos)
+func diff(ts1: int, ts2: int) -> int
+    return time_diff(ts1, ts2)
+end
+
+// Diferença como Duration
+func diff_duration(ts1: int, ts2: int) -> Duration
+    return time_diff_duration(ts1, ts2)
+end
+
+// ============================================
+// Comparação
+// ============================================
+
+// ts1 < ts2
+func before(ts1: int, ts2: int) -> bool
+    return time_before(ts1, ts2)
+end
+
+// ts1 > ts2
+func after(ts1: int, ts2: int) -> bool
+    return time_after(ts1, ts2)
+end
+
+// ============================================
+// Utilitários
+// ============================================
+
+// Verifica ano bissexto
+func is_leap_year(year: int) -> bool
+    return time_is_leap_year(year)
+end
+
+// Dias no mês
+func days_in_month(year: int, month: int) -> int
+    return time_days_in_month(year, month)
+end
+
+// Nome do dia da semana
+func weekday_name(weekday: int) -> string
+    return time_weekday_name(weekday)
+end
+
+// Nome do mês
+func month_name(month: int) -> string
+    return time_month_name(month)
+end

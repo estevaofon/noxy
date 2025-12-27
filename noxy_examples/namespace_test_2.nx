@@ -1,0 +1,36 @@
+use io
+use sqlite
+
+print("=== Namespace Conflict Verification ===")
+
+// 1. IO Operations
+print("[IO] Opening file...")
+let f: io.File = io.open("ns_test.txt", "w")
+if f.open then
+    io.write(f, "Namespace test content")
+    io.close(f)
+    print("[IO] Write success")
+else
+    print("[IO] Failed to open file")
+end
+
+// 2. SQLite Operations
+print("[SQLite] Opening database...")
+let db: sqlite.Database = sqlite.open("ns_test.db")
+if db.open then
+    let res: sqlite.ExecResult = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS test (id INTEGER)")
+    if res.ok then
+        print("[SQLite] Table created")
+    else
+        print(f"[SQLite] Error: {res.error}")
+    end
+    sqlite.close(db)
+else
+    print("[SQLite] Failed to open database")
+end
+
+
+io.remove("ns_test.txt")
+io.remove("ns_test.db")
+
+print("=== Verification Complete ===")

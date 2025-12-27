@@ -1,0 +1,111 @@
+// stdlib/sqlite.nx - Módulo SQLite para Noxy
+
+struct Database
+    handle: int,
+    path: string,
+    open: bool
+end
+
+struct Row
+    values: string[32],
+    types: int[32]
+end
+
+struct QueryResult
+    ok: bool,
+    rows: Row[100],
+    row_count: int,
+    columns: string[32],
+    column_count: int,
+    error: string
+end
+
+struct ExecResult
+    ok: bool,
+    rows_affected: int,
+    last_insert_id: int,
+    error: string
+end
+
+struct Statement
+    handle: int,
+    sql: string,
+    param_count: int,
+    ready: bool
+end
+
+
+// Wrappers para funções builtin
+// ============================================
+
+func open(path: string) -> Database
+    return sqlite_open(path)
+end
+
+func close(db: Database) -> void
+    sqlite_close(db)
+end
+
+func exec(db: Database, sql: string) -> ExecResult
+    return sqlite_exec(db, sql)
+end
+
+func query(db: Database, sql: string) -> QueryResult
+    return sqlite_query(db, sql)
+end
+
+func prepare(db: Database, sql: string) -> Statement
+    return sqlite_prepare(db, sql)
+end
+
+func bind_int(stmt: Statement, pos: int, val: int) -> void
+    sqlite_bind_int(stmt, pos, val)
+end
+
+func bind_float(stmt: Statement, pos: int, val: float) -> void
+    sqlite_bind_float(stmt, pos, val)
+end
+
+func bind_text(stmt: Statement, pos: int, val: string) -> void
+    sqlite_bind_text(stmt, pos, val)
+end
+
+func bind_null(stmt: Statement, pos: int) -> void
+    sqlite_bind_null(stmt, pos)
+end
+
+func step_exec(stmt: Statement) -> ExecResult
+    return sqlite_step_exec(stmt)
+end
+
+func step_query(stmt: Statement) -> QueryResult
+    return sqlite_step_query(stmt)
+end
+
+func reset(stmt: Statement) -> void
+    sqlite_reset(stmt)
+end
+
+func finalize(stmt: Statement) -> void
+    sqlite_finalize(stmt)
+end
+
+func begin(db: Database) -> bool
+    return sqlite_begin(db)
+end
+
+func commit(db: Database) -> bool
+    return sqlite_commit(db)
+end
+
+func rollback(db: Database) -> bool
+    return sqlite_rollback(db)
+end
+
+func table_exists(db: Database, name: string) -> bool
+    return sqlite_table_exists(db, name)
+end
+
+func escape(val: string) -> string
+    return sqlite_escape(val)
+end

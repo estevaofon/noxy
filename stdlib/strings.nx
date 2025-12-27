@@ -1,0 +1,147 @@
+// ============================================
+// NOXY STDLIB - Módulo de Manipulação de Strings
+// ============================================
+
+// Struct para resultado de split
+struct SplitResult
+    parts: string[100],
+    count: int
+end
+
+
+
+// ============================================
+// Funções de Busca e Verificação
+// ============================================
+
+func contains(s: string, sub: string) -> bool
+    return strings_contains(s, sub)
+end
+
+func starts_with(s: string, prefix: string) -> bool
+    return strings_starts_with(s, prefix)
+end
+
+func ends_with(s: string, suffix: string) -> bool
+    return strings_ends_with(s, suffix)
+end
+
+func index_of(s: string, sub: string) -> int
+    return strings_index_of(s, sub)
+end
+
+func last_index_of(s: string, sub: string) -> int
+    return strings_last_index_of(s, sub)
+end
+
+func count(s: string, sub: string) -> int
+    return strings_count(s, sub)
+end
+
+// ============================================
+// Funções de Transformação
+// ============================================
+
+func to_upper(s: string) -> string
+    return strings_to_upper(s)
+end
+
+func to_lower(s: string) -> string
+    return strings_to_lower(s)
+end
+
+func trim(s: string) -> string
+    return strings_trim(s)
+end
+
+func trim_left(s: string) -> string
+    return strings_trim_left(s)
+end
+
+func trim_right(s: string) -> string
+    return strings_trim_right(s)
+end
+
+func reverse(s: string) -> string
+    return strings_reverse(s)
+end
+
+func repeat(s: string, n: int) -> string
+    return strings_repeat(s, n)
+end
+
+// ============================================
+// Funções de Manipulação
+// ============================================
+
+func substring(s: string, start: int, end_pos: int) -> string
+    return strings_substring(s, start, end_pos)
+end
+
+func replace(s: string, old: string, new: string) -> string
+    return strings_replace(s, old, new)
+end
+
+func replace_first(s: string, old: string, new: string) -> string
+    return strings_replace_first(s, old, new)
+end
+
+func pad_left(s: string, width: int, char: string) -> string
+    return strings_pad_left(s, width, char)
+end
+
+func pad_right(s: string, width: int, char: string) -> string
+    return strings_pad_right(s, width, char)
+end
+
+// ============================================
+// Funções de Divisão e Junção
+// ============================================
+
+func split(s: string, sep: string) -> SplitResult
+    return strings_split(s, sep)
+end
+
+func join(arr: string[], sep: string) -> string
+    return strings_join(arr, sep)
+end
+
+func join_count(arr: string[], sep: string, count: int) -> string
+    return strings_join_count(arr, sep, count)
+end
+
+// ============================================
+// Funções de Verificação de Caracteres
+// ============================================
+
+func is_empty(s: string) -> bool
+    return strings_is_empty(s)
+end
+
+func is_digit(s: string) -> bool
+    return strings_is_digit(s)
+end
+
+func is_alpha(s: string) -> bool
+    return strings_is_alpha(s)
+end
+
+func is_alnum(s: string) -> bool
+    return strings_is_alnum(s)
+end
+
+func is_space(s: string) -> bool
+    return strings_is_space(s)
+end
+
+// ============================================
+// Funções de Conversão
+// ============================================
+
+func char_at(s: string, index: int) -> string
+    return strings_char_at(s, index)
+end
+
+func from_char_code(code: int) -> string
+    return strings_from_char_code(code)
+end

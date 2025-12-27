@@ -1,0 +1,141 @@
+// ============================================
+// NOXY STDLIB - JSON Helpers
+// ============================================
+// Funções utilitárias para trabalhar com JSON parseado
+
+use json_parser select *
+
+// Constantes de tipo JSON
+global TYPE_NULL: int = 0
+global TYPE_BOOL: int = 1
+global TYPE_NUMBER: int = 2
+global TYPE_STRING: int = 3
+global TYPE_ARRAY: int = 4
+global TYPE_OBJECT: int = 5
+
+// ============================================
+// Funções de Extração de Dados
+// ============================================
+
+// Extrai valor string de uma chave
+func get_string(node: ref JsonNode, key: string) -> string
+    if node == null then return "" end
+    if node.type != TYPE_OBJECT then return "" end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_STRING then
+                return current.string_val
+            end
+            return ""
+        end
+        current = current.next
+    end
+    return ""
+end
+
+// Extrai sub-objeto de uma chave
+func get_object(node: ref JsonNode, key: string) -> ref JsonNode
+    if node == null then return null end
+    if node.type != TYPE_OBJECT then return null end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_OBJECT then
+                return current
+            end
+            return null
+        end
+        current = current.next
+    end
+    return null
+end
+
+// Extrai valor inteiro de uma chave (convertendo float -> int)
+func get_int(node: ref JsonNode, key: string) -> int
+    if node == null then return 0 end
+    if node.type != TYPE_OBJECT then return 0 end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_NUMBER then
+                return to_int(current.number_val)
+            end
+            return 0
+        end
+        current = current.next
+    end
+    return 0
+end
+
+// Extrai valor float de uma chave
+func get_float(node: ref JsonNode, key: string) -> float
+    if node == null then return 0.0 end
+    if node.type != TYPE_OBJECT then return 0.0 end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_NUMBER then
+                return current.number_val
+            end
+            return 0.0
+        end
+        current = current.next
+    end
+    return 0.0
+end
+
+// Extrai valor booleano de uma chave
+func get_bool(node: ref JsonNode, key: string) -> bool
+    if node == null then return false end
+    if node.type != TYPE_OBJECT then return false end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_BOOL then
+                return current.bool_val
+            end
+            return false
+        end
+        current = current.next
+    end
+    return false
+end
+
+// Extrai array de uma chave
+func get_array(node: ref JsonNode, key: string) -> ref JsonNode
+    if node == null then return null end
+    if node.type != TYPE_OBJECT then return null end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_ARRAY then
+                return current
+            end
+            return null
+        end
+        current = current.next
+    end
+    return null
+end
+
+// Verifica se uma chave existe
+func has_key(node: ref JsonNode, key: string) -> bool
+    if node == null then return false end
+    if node.type != TYPE_OBJECT then return false end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            return true
+        end
+        current = current.next
+    end
+    return false
+end

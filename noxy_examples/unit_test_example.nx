@@ -1,0 +1,59 @@
+// unit_test_example.nx - Exemplo de Teste Unitário em Noxy
+
+// ============================================
+// FRAMEWORK DE TESTE SIMPLES
+// ============================================
+
+// Função auxiliar para asserção
+func assert(condition: bool, message: string) -> void
+    if condition then
+        print(f"[PASS] {message}")
+    else
+        print(f"[FAIL] {message}")
+    end
+end
+
+// Função auxiliar para asserção de igualdade de inteiros
+func assert_eq(actual: int, expected: int, message: string) -> void
+    if actual == expected then
+        print(f"[PASS] {message}")
+    else
+        print(f"[FAIL] {message} - Esperado: {expected}, Recebido: {actual}")
+    end
+end
+
+// ============================================
+// CÓDIGO A SER TESTADO
+// ============================================
+
+// Função fatorial recursiva para testar logicamente
+func factorial(n: int) -> int
+    if n <= 1 then
+        return 1
+    end
+    return n * factorial(n - 1)
+end
+
+// ============================================
+// SUÍTE DE TESTES
+// ============================================
+
+print("=== Iniciando Testes Unitários: Factorial ===")
+
+// Teste 1: Fatorial de 0
+let res0: int = factorial(0)
+assert_eq(res0, 1, "Factorial de 0 deve ser 1")
+
+// Teste 2: Fatorial de 1
+let res1: int = factorial(1)
+assert_eq(res1, 1, "Factorial de 1 deve ser 1")
+
+// Teste 3: Fatorial de 5
+let res5: int = factorial(5)
+assert_eq(res5, 120, "Factorial de 5 deve ser 120 (5*4*3*2*1)")
+
+// Teste 4: Testando uma falha intencional (comentado para não falhar o run geral, mas serve de exemplo)
+// let res_fail: int = factorial(3)
+// assert_eq(res_fail, 10, "Este teste deve FALHAR propositalmente (3! = 6)")
+
+print("=== Testes Finalizados ===")

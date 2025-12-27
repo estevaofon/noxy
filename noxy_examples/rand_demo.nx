@@ -1,0 +1,19 @@
+use rand select *
+use time select *
+
+print("=== Noxy Random Demo ===")
+
+// Initialize the generator with standard LCG constants
+// Seed, a, c, m
+let rng: RandomGenerator = RandomGenerator(now(), 1664525, 1013904223, 2147483647)
+
+print("Generating random numbers between 1 and 100:")
+
+let r1: int = random_int(rng, 1, 100)
+print(r1)
+
+let r2: int = random_int(rng, 1, 100)
+print(r2)
+
+let r3: int = random_int(rng, 1, 100)
+print(r3)

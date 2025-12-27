@@ -1,0 +1,15 @@
+// test_import_all.nx - Testa import de todos os símbolos
+
+// Importa TUDO do módulo math
+use math select *
+
+// Usa todas as funções
+print(f"add(3, 7) = {add(3, 7)}")
+print(f"subtract(10, 4) = {subtract(10, 4)}")
+print(f"multiply(6, 8) = {multiply(6, 8)}")
+print(f"divide(20, 4) = {divide(20, 4)}")
+print(f"power(2, 10) = {power(2, 10)}")
+print(f"factorial(5) = {factorial(5)}")
+
+print("Import * funcionando!")
+

@@ -1,0 +1,49 @@
+use io
+
+print("Iniciando testes de IO...")
+
+// Teste 1: Escrita
+let path: string = "test_io_output.txt"
+if io.exists(path) then
+    io.remove(path)
+end
+
+let file: io.File = io.open(path, "w")
+if file.open then
+    io.write(file, "Linha 1\n")
+    io.write(file, "Linha 2\n")
+    io.close(file)
+    print("Arquivo gravado com sucesso.")
+else
+    print("Erro ao abrir arquivo para escrita.")
+end
+
+// Teste 2: Leitura
+let file_r: io.File = io.open(path, "r")
+if file_r.open then
+    let res: io.IOResult = io.read(file_r)
+    if res.ok then
+        // print("Conteudo lido:")
+        print(res.data)
+    else
+        // print("Erro na leitura:")
+        print(res.error)
+    end
+    io.close(file_r)
+else
+    print("Erro ao abrir arquivo para leitura.")
+end
+
+// Teste 3: Leitura com io.open (Teste do objeto namespace)
+let file_ns: io.File = io.open(path, "r")
+if file_ns.open then
+    print("Sucesso ao abrir via io.open")
+    io.close(file_ns)
+end
+
+
+if io.exists(path) then
+    io.remove(path)
+end
+
+print("Testes finalizados.")

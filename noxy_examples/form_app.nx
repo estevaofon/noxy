@@ -1,0 +1,145 @@
+use http_server select *
+use http_parser select *
+use net select *
+use strings select *
+use io select *
+use sys select getenv
+
+// --- Helper Functions ---
+
+func read_stored_name() -> string
+    if exists("stored_name.txt") then
+        let f: File = open("stored_name.txt", "r")
+        let res: IOResult = read(f)
+        close(f)
+        if res.ok then
+            if strlen(res.data) > 0 then
+                return res.data
+            end
+        end
+    end
+    return "Stranger"
+end
+
+func save_name(name: string) -> void
+    let f: File = open("stored_name.txt", "w")
+    write(f, name)
+    close(f)
+end
+
+func parse_form_data(body: string) -> string
+    // Esperado: username=Valor+Teste...
+    let key: string = "username="
+    
+    if !contains(body, key) then
+        return "Unknown"
+    end
+
+    let res: SplitResult = split(body, key)
+    // Se contains é true, deve ter pelo menos 2 partes se não estiver no fim/inicio vazio
+    // Se username= estiver no inicio: ["", "Valor..."]
+    // Se username= estiver no meio: ["...&", "Valor..."]
+    
+    // Vamos pegar a ultima parte se houver multiplos (ex: teste=1&username=2)
+    // Na verdade, split retorna todas as ocorrencias.
+    // Vamos assumir formato padrao simples por enquanto ou pegar o elemento seguinte ao split.
+    // O split retira o separador.
+    
+    // Simplificacao: assumir que so tem 1 "username="
+    // Pegar parts[1] (o que vem depois)
+    
+    let val_part: string = ""
+    if res.count > 1 then
+        val_part = res.parts[1]
+    else
+        return "Unknown"
+    end
+    
+    // Agora separar por '&' para terminar o valor
+    let res_amp: SplitResult = split(val_part, "&")
+    let raw_val: string = res_amp.parts[0]
+    
+    // Decode '+' para espaco usando replace
+    return replace(raw_val, "+", " ")
+end
+
+// --- Handlers ---
+
+func handle_request(req: HttpRequest) -> HttpResponse
+    print("Request: " + req.method + " " + req.path)
+    
+    if req.method == "GET" then
+        if req.path == "/" then
+            let name: string = read_stored_name()
+            
+            // Ler template
+            let f: File = open("noxy_examples/public/index.html", "r")
+            let res: IOResult = read(f)
+            close(f)
+            
+            if !res.ok then
+                return response_error(500, "Could not load template")
+            end
+            
+            let html: string = res.data
+            
+            // Replace {{LAST_USER}} usando strings module
+            html = replace(html, "{{LAST_USER}}", name)
+            
+            return response_html(html)
+        end
+    end
+    
+    if req.method == "POST" then
+        if req.path == "/" then
+            let body_str: string = to_str(req.body)
+            let name: string = parse_form_data(body_str)
+            
+            print("Saving name: " + name)
+            save_name(name)
+            
+            // Redirect back to GET /
+            let headers: string[64]
+            headers[0] = "Location: /"
+            return HttpResponse("HTTP/1.1", 303, "See Other", headers, 1, b"")
+        end
+    end
+    
+    return response_error(404, "Not Found")
+end
+
+// --- Main Server Setup ---
+
+print("Starting Form App...")
+
+// Configuração de Porta e Host para Deploy (AWS/Render)
+let port: int = 8080
+let host: string = "0.0.0.0" 
+
+let port_env: EnvResult = getenv("PORT")
+if port_env.ok then
+    // Tenta converter string para int
+    // Nota: to_int é builtin
+    let p: int = to_int(port_env.value)
+    if p > 0 then
+        port = p
+    end
+end
+
+print("Binding to " + host + ":" + to_str(port))
+let server: HttpServer = new_server(host, port)
+
+if start(server) then
+    print("Server running. Open http://localhost:8080")
+    
+    while true do
+        let event: RequestEvent = server_poll(server)
+        
+        if event.type == "REQUEST" then
+            let resp: HttpResponse = handle_request(event.request)
+            server_send(server, event.client_index, resp)
+        end
+    end
+else
+    print("Failed to start server")
+end

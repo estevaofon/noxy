@@ -1,0 +1,71 @@
+struct Node
+    valor: int,
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = ref Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+
+func pop(node: ref Node) -> int
+    if node == null | node.proximo == null then
+        return -1
+    end
+    while node.proximo.proximo != null do
+        node = node.proximo
+    end
+    let valor: int = node.proximo.valor
+    node.proximo = null
+    return valor
+end
+
+
+func pop_front(head: ref Node) -> int
+    if head == null then
+        return -1
+    end
+    let valor: int = head.valor
+
+    if head.proximo == null then
+        // lista tinha 1 elemento: devolve o valor
+        // e você decide fora daqui como sinalizar "lista vazia"
+        return valor
+    end
+
+    // copia dados do próximo para o atual e pula o próximo
+    head.valor = head.proximo.valor
+    head.proximo = head.proximo.proximo
+    return valor
+end
+    
+
+let no1: Node = Node(10, null)
+_append(no1, 20)
+_append(no1, 30)
+_append(no1, 40)
+_append(no1, 50)
+_append(no1, 60)
+_append(no1, 70)
+_append(no1, 80)
+_append(no1, 90)
+_append(no1, 100)
+
+func print_list(node: ref Node)
+    while node != null do
+        print(to_str(node.valor))
+        node = node.proximo
+    end
+end
+
+let v: int = pop(no1)
+pop(no1)
+print_list(no1)
+print("Valor retornado "+to_str(v))
+let z: int = pop_front(no1)
+print("Valor retornado "+to_str(z))
+print_list(no1)

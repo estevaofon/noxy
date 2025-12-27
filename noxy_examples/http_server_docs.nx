@@ -1,0 +1,54 @@
+use http_server select *
+use http_parser select *
+use net select *
+use io select *
+
+// Callback para tratar requisições
+func handle_request(req: HttpRequest) -> HttpResponse
+    print("Received request: " + req.method + " " + req.path)
+    
+    if req.method == "GET" then
+        // Rota principal
+        if req.path == "/" then
+            return serve_file("docs/index.html")
+        end
+        
+        // Arquivos estáticos
+        if req.path == "/index.html" then
+            return serve_file("docs/index.html")
+        end
+        
+        if req.path == "/styles.css" then
+            return serve_file("docs/styles.css")
+        end
+        
+        if req.path == "/script.js" then
+            return serve_file("docs/script.js")
+        end
+        
+        if req.path == "/manifest.json" then
+            return serve_file("docs/manifest.json")
+        end
+    end
+    
+    return response_error(404, "Not Found")
+end
+
+// Main
+print("Starting documentation server on http://127.0.0.1:8080/ ...")
+let server: HttpServer = new_server("127.0.0.1", 8080)
+
+if start(server) then
+    print("Server running! Press Ctrl+C to stop.")
+    
+    while true do
+        let event: RequestEvent = server_poll(server)
+        
+        if event.type == "REQUEST" then
+            let resp: HttpResponse = handle_request(event.request)
+            server_send(server, event.client_index, resp)
+        end
+    end
+else
+    print("Failed to start server. Check if port 8080 is available.")
+end

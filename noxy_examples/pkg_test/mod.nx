@@ -1,0 +1,3 @@
+func hello() -> string
+    return "Hello from nested module!"
+end

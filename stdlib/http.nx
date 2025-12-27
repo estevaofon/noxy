@@ -1,0 +1,8 @@
+// stdlib/http.nx - Módulo HTTP Unificado
+
+use http_parser select *
+use http_client select *
+use http_server select *
+
+// Este arquivo serve apenas como ponto de entrada unificado
+// para que o usuário possa fazer: 'use http select *'

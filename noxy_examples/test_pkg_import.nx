@@ -1,0 +1,7 @@
+use pkg_test
+
+func main() -> void
+    print("Folder import worked if this runs!")
+end
+
+main()

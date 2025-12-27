@@ -1,0 +1,9 @@
+// Cenário 2: Select específico de sub-módulo
+use pkg_test.sub.util
+// Esperado: 'helper' deve estar no escopo
+
+func main() -> void
+    util.helper()
+end
+
+main()

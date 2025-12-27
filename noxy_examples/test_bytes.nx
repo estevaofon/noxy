@@ -1,0 +1,38 @@
+// Test bytes type implementation
+
+// 1. Literal declaration
+let b: bytes = b"hello world"
+print(b)
+
+// 2. Concatenation
+let concat: bytes = b"hello" + b" " + b"world"
+print(concat)
+
+// 3. Comparison
+if b == concat then
+    print("Comparison: OK")
+else
+    print("Comparison: FAIL")
+end
+
+if b"abc" != b"def" then
+    print("Inequality: OK")
+else
+    print("Inequality: FAIL")
+end
+
+// 4. Indexing
+print("Index 0 (104):", b[0]) // 'h' -> 104
+print("Index 1 (101):", b[1]) // 'e' -> 101
+
+// 5. Conversion to bytes
+let from_str: bytes = to_bytes("string to bytes")
+print(from_str)
+
+let from_int: bytes = to_bytes(65) // 'A'
+print(from_int)
+
+let from_arr: bytes = to_bytes([65, 66, 67]) // "ABC"
+print(from_arr)
+
+print("Tests completed")

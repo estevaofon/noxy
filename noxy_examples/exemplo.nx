@@ -1,0 +1,20 @@
+// exemplo.nx - Exemplo mínimo de teste do Noxy
+let x: int = 30
+let y: int = 20
+print(x+y)
+
+struct Pessoa
+    nome: string,
+    idade: int
+end
+
+
+let p: Pessoa = Pessoa("Ana", 25)
+print(p.nome)
+
+func dobrar(n: int) -> int
+    return n * 2
+end
+
+print(to_str(dobrar(x)))
+

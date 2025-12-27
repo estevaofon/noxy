@@ -1,0 +1,181 @@
+use json_parser select *
+
+// ============================================
+// NOXY WEB APP - API REST
+// ============================================
+
+// Constantes de tipo JSON
+global TYPE_NULL: int = 0
+global TYPE_BOOL: int = 1
+global TYPE_NUMBER: int = 2
+global TYPE_STRING: int = 3
+global TYPE_ARRAY: int = 4
+global TYPE_OBJECT: int = 5
+
+// ============================================
+// Funções de Auxílio para Extração de Dados JSON
+// ============================================
+
+func get_string(node: ref JsonNode, key: string) -> string
+    if node == null then return "" end
+    if node.type != TYPE_OBJECT then return "" end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_STRING then
+                return current.string_val
+            end
+            return ""
+        end
+        current = current.next
+    end
+    return ""
+end
+
+func get_object(node: ref JsonNode, key: string) -> ref JsonNode
+    if node == null then return null end
+    if node.type != TYPE_OBJECT then return null end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_OBJECT then
+                return current
+            end
+            return null
+        end
+        current = current.next
+    end
+    return null
+end
+
+func get_int(node: ref JsonNode, key: string) -> int
+    if node == null then return 0 end
+    if node.type != TYPE_OBJECT then return 0 end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_NUMBER then
+                return to_int(current.number_val)
+            end
+            return 0
+        end
+        current = current.next
+    end
+    return 0
+end
+
+// ============================================
+// HTTP Response Struct
+// ============================================
+
+struct Response
+    status: int
+    content_type: string
+    body: string
+end
+
+// Helper functions para criar responses
+func json_response(status: int, body: string) -> Response
+    return Response(status, "application/json", body)
+end
+
+func error_response(status: int, message: string) -> Response
+    let body: string = "{\"error\": \"" + message + "\"}"
+    return Response(status, "application/json", body)
+end
+
+// ============================================
+// Modelo de Dados - User (Lista Encadeada)
+// ============================================
+
+struct User
+    id: int
+    name: string
+    age: int
+    next: ref User
+end
+
+// Armazenamento em memória (lista encadeada)
+global users_head: ref User = null
+global user_count: int = 0
+
+// ============================================
+// Controllers - Retornam Response
+// ============================================
+
+func handle_users_post(requestBody: ref JsonNode) -> Response
+    let name: string = get_string(requestBody, "name")
+    let age: int = get_int(requestBody, "age")
+    
+    if (strlen(name) == 0) | (age == 0) then
+        return error_response(400, "Campos 'name' e 'age' obrigatorios")
+    end
+    
+    // Cria novo usuário e insere no início da lista
+    let new_id: int = user_count + 1
+    let new_user: ref User = User(new_id, name, age, users_head)
+    users_head = new_user
+    user_count = user_count + 1
+    
+    print(f"LOG: Usuario criado - ID={new_id}, name={name}, age={age}")
+    
+    let body: string = "{\"status\": \"created\", \"id\": " + to_str(new_id) + ", \"link\": \"/users/" + to_str(new_id) + "\"}"
+    return json_response(201, body)
+end
+
+func handle_users_get() -> Response
+    // Monta JSON array iterando a lista encadeada
+    let result: string = "["
+    let current: ref User = users_head
+    let first: int = 1
+    while current != null do
+        if first == 0 then
+            result = result + ", "
+        end
+        first = 0
+        let user_json: string = "{\"id\": " + to_str(current.id) + ", \"name\": \"" + current.name + "\", \"age\": " + to_str(current.age) + "}"
+        result = result + user_json
+        current = current.next
+    end
+    result = result + "]"
+    
+    return json_response(200, result)
+end
+
+// ============================================
+// Router Principal
+// ============================================
+
+func handle_request(raw_json: string) -> Response
+    print(f"Servidor recebeu raw: {raw_json}")
+    
+    let root: ref JsonNode = json_parse(raw_json)
+    
+    let method: string = get_string(root, "method")
+    let path: string = get_string(root, "path")
+    let body: ref JsonNode = get_object(root, "body")
+    
+    print(f"Processando: {method} {path}")
+    
+    // Roteamento
+    if path == "/users" then
+        if method == "POST" then
+            if body == null then
+                return error_response(400, "Body ausente")
+            else
+                return handle_users_post(body)
+            end
+        else
+            if method == "GET" then
+                return handle_users_get()
+            else
+                return error_response(405, "Method Not Allowed")
+            end
+        end
+    else
+        return error_response(404, "Endpoint nao encontrado")
+    end
+end

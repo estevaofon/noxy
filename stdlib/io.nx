@@ -1,0 +1,70 @@
+struct File
+    fd: int,
+    path: string,
+    mode: string,
+    open: bool
+end
+
+struct IOResult
+    ok: bool,
+    data: string,
+    error: string
+end
+
+struct FileInfo
+    exists: bool,
+    size: int,
+    is_dir: bool
+end
+
+
+
+// Wrappers para funções built-in (para uso com 'select *' como 'open(...)')
+
+func open(path: string, mode: string) -> File
+    return io_open(path, mode)
+end
+
+func close(file: File) -> void
+    io_close(file)
+end
+
+func read(file: File) -> IOResult
+    return io_read(file)
+end
+
+func read_line(file: File) -> IOResult
+    return io_read_line(file)
+end
+
+func read_lines(file: File) -> IOResult
+    return io_read_lines(file)
+end
+
+func write(file: File, content: string) -> void
+    io_write(file, content)
+end
+
+func exists(path: string) -> bool
+    return io_exists(path)
+end
+
+func stat(path: string) -> FileInfo
+    return io_stat(path)
+end
+
+func remove(path: string) -> bool
+    return io_remove(path)
+end
+
+func rename(src: string, dst: string) -> bool
+    return io_rename(src, dst)
+end
+
+func mkdir(path: string) -> bool
+    return io_mkdir(path)
+end
+
+func list_dir(path: string) -> IOResult
+    return io_list_dir(path)
+end

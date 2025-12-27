@@ -1,0 +1,14 @@
+use uuid select *
+
+func main() -> void
+    print("Generating 5 UUIDs:")
+    let i: int = 0
+    while i < 5 do
+        let id: string = uuid4()
+        print(id)
+        i = i + 1
+    end
+    print("Done.")
+end
+
+main()

@@ -1,0 +1,209 @@
+// test_strings.nx - Testes do módulo strings
+use strings select *
+
+print("=== TESTE DO MÓDULO STRINGS ===")
+print("")
+
+// ============================================
+// Teste 1: Busca e Verificação
+// ============================================
+print("--- Teste 1: Busca e Verificação ---")
+
+let texto: string = "Hello, World!"
+
+if contains(texto, "World") then
+    print("[PASS] contains('Hello, World!', 'World') = true")
+else
+    print("[FAIL] contains")
+end
+
+if starts_with(texto, "Hello") then
+    print("[PASS] starts_with('Hello, World!', 'Hello') = true")
+else
+    print("[FAIL] starts_with")
+end
+
+if ends_with(texto, "!") then
+    print("[PASS] ends_with('Hello, World!', '!') = true")
+else
+    print("[FAIL] ends_with")
+end
+
+let idx: int = index_of(texto, ",")
+if idx == 5 then
+    print(f"[PASS] index_of('Hello, World!', ',') = {idx}")
+else
+    print(f"[FAIL] index_of esperado 5, obtido {idx}")
+end
+
+let cnt: int = count("abracadabra", "a")
+if cnt == 5 then
+    print(f"[PASS] count('abracadabra', 'a') = {cnt}")
+else
+    print(f"[FAIL] count esperado 5, obtido {cnt}")
+end
+
+print("")
+
+// ============================================
+// Teste 2: Transformação
+// ============================================
+print("--- Teste 2: Transformação ---")
+
+let upper: string = to_upper("hello")
+if upper == "HELLO" then
+    print(f"[PASS] to_upper('hello') = '{upper}'")
+else
+    print(f"[FAIL] to_upper esperado 'HELLO', obtido '{upper}'")
+end
+
+let lower: string = to_lower("WORLD")
+if lower == "world" then
+    print(f"[PASS] to_lower('WORLD') = '{lower}'")
+else
+    print(f"[FAIL] to_lower esperado 'world', obtido '{lower}'")
+end
+
+let trimmed: string = trim("  espacos  ")
+if trimmed == "espacos" then
+    print(f"[PASS] trim('  espacos  ') = '{trimmed}'")
+else
+    print(f"[FAIL] trim esperado 'espacos', obtido '{trimmed}'")
+end
+
+let rev: string = reverse("abc")
+if rev == "cba" then
+    print(f"[PASS] reverse('abc') = '{rev}'")
+else
+    print(f"[FAIL] reverse esperado 'cba', obtido '{rev}'")
+end
+
+let rep: string = repeat("ab", 3)
+if rep == "ababab" then
+    print(f"[PASS] repeat('ab', 3) = '{rep}'")
+else
+    print(f"[FAIL] repeat esperado 'ababab', obtido '{rep}'")
+end
+
+print("")
+
+// ============================================
+// Teste 3: Manipulação
+// ============================================
+print("--- Teste 3: Manipulação ---")
+
+let sub: string = substring("Hello, World!", 0, 5)
+if sub == "Hello" then
+    print(f"[PASS] substring('Hello, World!', 0, 5) = '{sub}'")
+else
+    print(f"[FAIL] substring esperado 'Hello', obtido '{sub}'")
+end
+
+let replaced: string = replace("aaa", "a", "b")
+if replaced == "bbb" then
+    print(f"[PASS] replace('aaa', 'a', 'b') = '{replaced}'")
+else
+    print(f"[FAIL] replace esperado 'bbb', obtido '{replaced}'")
+end
+
+let replaced_first: string = replace_first("aaa", "a", "b")
+if replaced_first == "baa" then
+    print(f"[PASS] replace_first('aaa', 'a', 'b') = '{replaced_first}'")
+else
+    print(f"[FAIL] replace_first esperado 'baa', obtido '{replaced_first}'")
+end
+
+let padded: string = pad_left("42", 5, "0")
+if padded == "00042" then
+    print(f"[PASS] pad_left('42', 5, '0') = '{padded}'")
+else
+    print(f"[FAIL] pad_left esperado '00042', obtido '{padded}'")
+end
+
+print("")
+
+// ============================================
+// Teste 4: Divisão e Junção
+// ============================================
+print("--- Teste 4: Divisão e Junção ---")
+
+let result: SplitResult = split("a,b,c", ",")
+if result.count == 3 then
+    print(f"[PASS] split('a,b,c', ',').count = {result.count}")
+else
+    print(f"[FAIL] split count esperado 3, obtido {result.count}")
+end
+
+if result.parts[0] == "a" & result.parts[1] == "b" & result.parts[2] == "c" then
+    print("[PASS] split parts corretos")
+else
+    print("[FAIL] split parts incorretos")
+end
+
+let joined: string = join_count(result.parts, "-", result.count)
+if joined == "a-b-c" then
+    print(f"[PASS] join_count = '{joined}'")
+else
+    print(f"[FAIL] join_count esperado 'a-b-c', obtido '{joined}'")
+end
+
+print("")
+
+// ============================================
+// Teste 5: Verificação de Caracteres
+// ============================================
+print("--- Teste 5: Verificação de Caracteres ---")
+
+if is_empty("") then
+    print("[PASS] is_empty('') = true")
+else
+    print("[FAIL] is_empty")
+end
+
+if is_digit("12345") then
+    print("[PASS] is_digit('12345') = true")
+else
+    print("[FAIL] is_digit")
+end
+
+if is_alpha("abcXYZ") then
+    print("[PASS] is_alpha('abcXYZ') = true")
+else
+    print("[FAIL] is_alpha")
+end
+
+if is_alnum("abc123") then
+    print("[PASS] is_alnum('abc123') = true")
+else
+    print("[FAIL] is_alnum")
+end
+
+if is_space("   ") then
+    print("[PASS] is_space('   ') = true")
+else
+    print("[FAIL] is_space")
+end
+
+print("")
+
+// ============================================
+// Teste 6: Conversão
+// ============================================
+print("--- Teste 6: Conversão ---")
+
+let ch: string = char_at("Hello", 1)
+if ch == "e" then
+    print(f"[PASS] char_at('Hello', 1) = '{ch}'")
+else
+    print(f"[FAIL] char_at esperado 'e', obtido '{ch}'")
+end
+
+let from_code: string = from_char_code(65)
+if from_code == "A" then
+    print(f"[PASS] from_char_code(65) = '{from_code}'")
+else
+    print(f"[FAIL] from_char_code esperado 'A', obtido '{from_code}'")
+end
+
+print("")
+print("=== TESTES CONCLUÍDOS ===")

@@ -1,0 +1,14 @@
+// test_import.nx - Testa o sistema de imports
+
+// Importa funções específicas do módulo math
+use math select add, multiply, factorial
+
+// Usa as funções importadas
+let a: int = 10
+let b: int = 5
+
+print(f"add({a}, {b}) = {add(a, b)}")
+print(f"multiply({a}, {b}) = {multiply(a, b)}")
+print(f"factorial(6) = {factorial(6)}")
+
+print("Import funcionando!")
