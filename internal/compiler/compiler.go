@@ -62,6 +62,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		constant := c.makeConstant(value.NewInt(n.Value))
 		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
 
+	case *ast.FloatLiteral:
+		constant := c.makeConstant(value.NewFloat(n.Value))
+		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
+
 	case *ast.Boolean:
 		if n.Value {
 			c.emitByte(byte(chunk.OP_TRUE))
@@ -215,6 +219,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			c.emitByte(byte(chunk.OP_OR))
 		case "&":
 			c.emitByte(byte(chunk.OP_AND))
+		case "%":
+			c.emitByte(byte(chunk.OP_MODULO))
 		default:
 			return nil, fmt.Errorf("unknown operator %s", n.Operator)
 		}

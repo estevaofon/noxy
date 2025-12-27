@@ -171,6 +171,10 @@ func (vm *VM) run() error {
 				vm.push(value.NewInt(a.AsInt + b.AsInt))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
 				vm.push(value.NewFloat(a.AsFloat + b.AsFloat))
+			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewFloat(float64(a.AsInt) + b.AsFloat))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+				vm.push(value.NewFloat(a.AsFloat + float64(b.AsInt)))
 			} else if a.Type == value.VAL_OBJ && b.Type == value.VAL_OBJ {
 				// Check if both are strings
 				strA, okA := a.Obj.(string)
@@ -188,6 +192,12 @@ func (vm *VM) run() error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewInt(a.AsInt - b.AsInt))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewFloat(a.AsFloat - b.AsFloat))
+			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewFloat(float64(a.AsInt) - b.AsFloat))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+				vm.push(value.NewFloat(a.AsFloat - float64(b.AsInt)))
 			} else {
 				return fmt.Errorf("operands must be numbers")
 			}
@@ -196,6 +206,12 @@ func (vm *VM) run() error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewInt(a.AsInt * b.AsInt))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewFloat(a.AsFloat * b.AsFloat))
+			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewFloat(float64(a.AsInt) * b.AsFloat))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+				vm.push(value.NewFloat(a.AsFloat * float64(b.AsInt)))
 			} else {
 				return fmt.Errorf("operands must be numbers")
 			}
@@ -203,9 +219,38 @@ func (vm *VM) run() error {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				if b.AsInt == 0 {
+					return fmt.Errorf("division by zero")
+				}
 				vm.push(value.NewInt(a.AsInt / b.AsInt))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
+				if b.AsFloat == 0 {
+					return fmt.Errorf("division by zero")
+				}
+				vm.push(value.NewFloat(a.AsFloat / b.AsFloat))
+			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+				if b.AsFloat == 0 {
+					return fmt.Errorf("division by zero")
+				}
+				vm.push(value.NewFloat(float64(a.AsInt) / b.AsFloat))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+				if b.AsInt == 0 {
+					return fmt.Errorf("division by zero")
+				}
+				vm.push(value.NewFloat(a.AsFloat / float64(b.AsInt)))
 			} else {
 				return fmt.Errorf("operands must be numbers")
+			}
+		case chunk.OP_MODULO:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				if b.AsInt == 0 {
+					return fmt.Errorf("modulo by zero")
+				}
+				vm.push(value.NewInt(a.AsInt % b.AsInt))
+			} else {
+				return fmt.Errorf("operands must be integers")
 			}
 		case chunk.OP_NEGATE:
 			v := vm.pop()

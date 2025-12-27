@@ -32,6 +32,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.prefixParseFns = make(map[token.TokenType]func() ast.Expression)
 	p.registerPrefix(token.IDENTIFIER, p.parseIdentifier)
 	p.registerPrefix(token.INT, p.parseIntegerLiteral)
+	p.registerPrefix(token.FLOAT, p.parseFloatLiteral)
 	p.registerPrefix(token.NOT, p.parsePrefixExpression)
 	p.registerPrefix(token.MINUS, p.parsePrefixExpression)
 	p.registerPrefix(token.TRUE, p.parseBoolean)
@@ -39,6 +40,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
 	p.registerPrefix(token.STRING, p.parseStringLiteral)
+	p.registerPrefix(token.FSTRING, p.parseFString)
 	p.registerPrefix(token.NULL, p.parseNull)
 	p.registerPrefix(token.ZEROS, p.parseZeros)
 	p.registerPrefix(token.REF, p.parsePrefixExpression)
@@ -50,6 +52,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.MINUS, p.parseInfixExpression)
 	p.registerInfix(token.SLASH, p.parseInfixExpression)
 	p.registerInfix(token.STAR, p.parseInfixExpression)
+	p.registerInfix(token.PERCENT, p.parseInfixExpression) // Add this
 	p.registerInfix(token.EQ, p.parseInfixExpression)
 	p.registerInfix(token.NEQ, p.parseInfixExpression)
 	p.registerInfix(token.LT, p.parseInfixExpression)
@@ -348,6 +351,7 @@ var precedences = map[token.TokenType]int{
 	token.MINUS:    SUM,
 	token.SLASH:    PRODUCT,
 	token.STAR:     PRODUCT,
+	token.PERCENT:  PRODUCT,
 	token.LPAREN:   CALL,
 	token.LBRACKET: INDEX,
 	token.DOT:      INDEX,
@@ -387,6 +391,14 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	return lit
 }
 
+func (p *Parser) parseFloatLiteral() ast.Expression {
+	lit := &ast.FloatLiteral{Token: p.curToken}
+	value := float64(0)
+	fmt.Sscanf(p.curToken.Literal, "%f", &value)
+	lit.Value = value
+	return lit
+}
+
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
@@ -415,6 +427,110 @@ func (p *Parser) parseZeros() ast.Expression {
 
 func (p *Parser) parseBoolean() ast.Expression {
 	return &ast.Boolean{Token: p.curToken, Value: p.curTokenIs(token.TRUE)}
+}
+
+func (p *Parser) parseFString() ast.Expression {
+	// Simple F-String parser
+	// Breaks literal into parts and concatenates matches
+	literal := p.curToken.Literal
+	var exprs []ast.Expression
+
+	lastIdx := 0
+	for i := 0; i < len(literal); i++ {
+		if literal[i] == '{' {
+			// Add previous string part
+			if i > lastIdx {
+				exprs = append(exprs, &ast.StringLiteral{
+					Token: token.Token{Type: token.STRING, Literal: literal[lastIdx:i]},
+					Value: literal[lastIdx:i],
+				})
+			}
+
+			// Find closing brace
+			// Note: This logic is simple and doesn't handle nested braces like { {a:1} }
+			// For a full implementation we need a proper brace counter or sub-lexer
+			// But since we are extracting the string to pass to a new parser,
+			// we can just find the matching }
+
+			braceCount := 1
+			j := i + 1
+			for ; j < len(literal); j++ {
+				if literal[j] == '{' {
+					braceCount++
+				} else if literal[j] == '}' {
+					braceCount--
+					if braceCount == 0 {
+						break
+					}
+				}
+			}
+
+			if j >= len(literal) {
+				// Error: unclosed brace
+				p.errors = append(p.errors, fmt.Sprintf("unclosed brace in f-string"))
+				return nil
+			}
+
+			exprContent := literal[i+1 : j]
+
+			// Parse expression
+			l := lexer.New(exprContent)
+			par := New(l) // Recursive parser
+			// Note: We need to register same prefixes/infixes? New() does that.
+			// But typically recursive parser creation is heavy.
+			// Ideally we use p itself? No, p depends on p.l.
+			// New parser is safer.
+
+			innerExpr := par.parseExpression(LOWEST)
+			// Check errors
+			if len(par.Errors()) > 0 {
+				for _, msg := range par.Errors() {
+					p.errors = append(p.errors, fmt.Sprintf("f-string expr error: %s", msg))
+				}
+				return nil
+			}
+
+			// Wrap in to_str() call: to_str(expr)
+			callExpr := &ast.CallExpression{
+				Token: token.Token{Type: token.IDENTIFIER, Literal: "("}, // Dummy token?
+				Function: &ast.Identifier{
+					Token: token.Token{Type: token.IDENTIFIER, Literal: "to_str"},
+					Value: "to_str",
+				},
+				Arguments: []ast.Expression{innerExpr},
+			}
+
+			exprs = append(exprs, callExpr)
+
+			lastIdx = j + 1
+			i = j // Advance outer loop
+		}
+	}
+
+	// Add remaining string
+	if lastIdx < len(literal) {
+		exprs = append(exprs, &ast.StringLiteral{
+			Token: token.Token{Type: token.STRING, Literal: literal[lastIdx:]},
+			Value: literal[lastIdx:],
+		})
+	}
+
+	if len(exprs) == 0 {
+		return &ast.StringLiteral{Token: p.curToken, Value: ""}
+	}
+
+	// Combine with +
+	combined := exprs[0]
+	for i := 1; i < len(exprs); i++ {
+		combined = &ast.InfixExpression{
+			Token:    token.Token{Type: token.PLUS, Literal: "+"},
+			Left:     combined,
+			Operator: "+",
+			Right:    exprs[i],
+		}
+	}
+
+	return combined
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {
