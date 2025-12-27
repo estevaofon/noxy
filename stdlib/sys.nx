@@ -1,65 +1,47 @@
-// stdlib/sys.nx - Sistema de chamadas ao sistema
-
 struct SysResult
-    ok: bool,
-    output: string,
     exit_code: int,
-    error: string
+    output: string,
+    ok: bool
 end
 
 struct EnvResult
-    ok: bool,
     value: string,
-    error: string
+    ok: bool
 end
 
-
-
-// ============================================
-// Funções de Sistema
-// ============================================
-
-// Executa comando - saída vai para terminal
-func exec(command: string) -> SysResult
-    return sys_exec(command)
+func exec(cmd: string) -> SysResult
+    return sys_exec(cmd, SysResult)
 end
 
-// Executa comando e captura saída
-func exec_output(command: string) -> SysResult
-    return sys_exec_output(command)
+func exec_output(cmd: string) -> SysResult
+    return sys_exec_output(cmd, SysResult)
 end
 
-// Obtém variável de ambiente
-func getenv(name: string) -> EnvResult
-    return sys_getenv(name)
+func getenv(key: string) -> EnvResult
+    return sys_getenv(key, EnvResult)
 end
 
-// Define variável de ambiente
-func setenv(name: string, value: string) -> bool
-    return sys_setenv(name, value)
+func setenv(key: string, value: string) -> bool
+    return sys_setenv(key, value)
 end
 
-// Obtém diretório de trabalho atual
 func getcwd() -> string
     return sys_getcwd()
 end
 
-// Muda diretório de trabalho
-func chdir(path: string) -> bool
-    return sys_chdir(path)
-end
-
-// Termina programa com código de saída
-func exit(code: int) -> void
-    sys_exit(code)
-end
-
-// Obtém argumentos da linha de comando
-func argv() -> string[100]
+func argv() -> string[]
     return sys_argv()
 end
 
-// Pausa execução por milissegundos
 func sleep(ms: int) -> void
     sys_sleep(ms)
+end
+
+// Helper alias often expected
+func strlen(s: string) -> int
+    return length(s)
+end
+
+func exit(code: int) -> void
+    sys_exit(code)
 end

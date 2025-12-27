@@ -8,6 +8,7 @@ import (
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -861,6 +862,157 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewString(string(rune(args[0].AsInt)))
 	})
 
+	// Sys Module
+	vm.defineNative("sys_exec", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		cmdStr := args[0].String()
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		var cmd *exec.Cmd
+		if os.PathSeparator == '\\' {
+			cmd = exec.Command("cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.Command("sh", "-c", cmdStr)
+		}
+
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err := cmd.Run()
+		exitCode := 0
+		okVal := true
+
+		var outputStr string = "" // No captured output for sys_exec
+
+		if err != nil {
+			okVal = false
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["exit_code"] = value.NewInt(int64(exitCode))
+		inst.Fields["output"] = value.NewString(outputStr)
+		inst.Fields["ok"] = value.NewBool(okVal)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	vm.defineNative("sys_exec_output", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		cmdStr := args[0].String()
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		var cmd *exec.Cmd
+		if os.PathSeparator == '\\' {
+			cmd = exec.Command("cmd", "/C", cmdStr)
+		} else {
+			cmd = exec.Command("sh", "-c", cmdStr)
+		}
+
+		outBytes, err := cmd.CombinedOutput()
+		outputStr := string(outBytes)
+
+		exitCode := 0
+		okVal := true // Logic: if exit code 0 also? or just ran? usually ok implies success.
+
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = 1
+			}
+			okVal = false
+		} else {
+			// On success err is nil
+			okVal = true
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["exit_code"] = value.NewInt(int64(exitCode))
+		inst.Fields["output"] = value.NewString(strings.TrimSpace(outputStr))
+		inst.Fields["ok"] = value.NewBool(okVal)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	vm.defineNative("sys_getenv", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		key := args[0].String()
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		val, found := os.LookupEnv(key)
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["value"] = value.NewString(val)
+		inst.Fields["ok"] = value.NewBool(found)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	vm.defineNative("sys_setenv", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		key := args[0].String()
+		val := args[1].String()
+		err := os.Setenv(key, val)
+		return value.NewBool(err == nil)
+	})
+
+	vm.defineNative("sys_getcwd", func(args []value.Value) value.Value {
+		dir, err := os.Getwd()
+		if err != nil {
+			return value.NewString("")
+		}
+		return value.NewString(dir)
+	})
+
+	vm.defineNative("sys_argv", func(args []value.Value) value.Value {
+		// Convert os.Args to string[]
+		vals := make([]value.Value, len(os.Args))
+		for i, a := range os.Args {
+			vals[i] = value.NewString(a)
+		}
+		return value.NewArray(vals)
+	})
+
+	vm.defineNative("sys_sleep", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		ms := args[0].AsInt
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		return value.NewNull()
+	})
+
+	vm.defineNative("sys_exit", func(args []value.Value) value.Value {
+		code := 0
+		if len(args) > 0 {
+			code = int(args[0].AsInt)
+		}
+		os.Exit(code)
+		return value.NewNull()
+	})
+
 	vm.defineNative("length", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewInt(0)
@@ -1485,6 +1637,17 @@ func (vm *VM) run(minFrameCount int) error {
 					} else {
 						vm.push(val)
 					}
+					continue
+				} else if str, ok := collectionVal.Obj.(string); ok {
+					// String indexing
+					if indexVal.Type != value.VAL_INT {
+						return fmt.Errorf("string index must be integer")
+					}
+					idx := int(indexVal.AsInt)
+					if idx < 0 || idx >= len(str) {
+						return fmt.Errorf("string index out of bounds")
+					}
+					vm.push(value.NewString(string(str[idx])))
 					continue
 				}
 			}
