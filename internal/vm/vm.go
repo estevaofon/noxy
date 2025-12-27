@@ -1025,8 +1025,56 @@ func NewWithConfig(cfg VMConfig) *VM {
 			if str, ok := arg.Obj.(string); ok {
 				return value.NewInt(int64(len(str)))
 			}
+			if m, ok := arg.Obj.(*value.ObjMap); ok {
+				return value.NewInt(int64(len(m.Data)))
+			}
 		}
 		return value.NewInt(0)
+	})
+
+	vm.defineNative("keys", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewArray(nil)
+		}
+		mapVal := args[0]
+		if mapVal.Type == value.VAL_OBJ {
+			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
+				keys := make([]value.Value, 0, len(m.Data))
+				for k := range m.Data {
+					if kInt, ok := k.(int64); ok {
+						keys = append(keys, value.NewInt(kInt))
+					} else if kStr, ok := k.(string); ok {
+						keys = append(keys, value.NewString(kStr))
+					}
+				}
+				return value.NewArray(keys)
+			}
+		}
+		return value.NewArray(nil)
+	})
+
+	vm.defineNative("delete", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewNull()
+		}
+		mapVal := args[0]
+		keyVal := args[1]
+		if mapVal.Type == value.VAL_OBJ {
+			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
+				var key interface{}
+				if keyVal.Type == value.VAL_INT {
+					key = keyVal.AsInt
+				} else if keyVal.Type == value.VAL_OBJ {
+					if str, ok := keyVal.Obj.(string); ok {
+						key = str
+					}
+				}
+				if key != nil {
+					delete(m.Data, key)
+				}
+			}
+		}
+		return value.NewNull()
 	})
 	vm.defineNative("append", func(args []value.Value) value.Value {
 		if len(args) != 2 {
