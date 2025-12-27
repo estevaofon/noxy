@@ -62,6 +62,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		constant := c.makeConstant(value.NewInt(n.Value))
 		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
 
+	case *ast.Boolean:
+		if n.Value {
+			c.emitByte(byte(chunk.OP_TRUE))
+		} else {
+			c.emitByte(byte(chunk.OP_FALSE))
+		}
+
 	case *ast.StringLiteral:
 		constant := c.makeConstant(value.NewString(n.Value))
 		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
@@ -204,6 +211,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		case "<=": // <= is NOT GREATER
 			c.emitByte(byte(chunk.OP_GREATER))
 			c.emitByte(byte(chunk.OP_NOT))
+		case "|":
+			c.emitByte(byte(chunk.OP_OR))
+		case "&":
+			c.emitByte(byte(chunk.OP_AND))
 		default:
 			return nil, fmt.Errorf("unknown operator %s", n.Operator)
 		}
@@ -216,7 +227,27 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			c.emitByte(byte(chunk.OP_NEGATE))
 		} else if n.Operator == "!" {
 			c.emitByte(byte(chunk.OP_NOT))
+		} else if n.Operator == "ref" {
+			// No-op for ref in expression?
+			// Just pass the value (which is likely an object/pointer).
 		}
+
+	case *ast.NullLiteral:
+		c.emitByte(byte(chunk.OP_NULL))
+
+	case *ast.ZerosLiteral:
+		if _, err := c.Compile(n.Size); err != nil {
+			return nil, err
+		}
+		c.emitByte(byte(chunk.OP_ZEROS))
+
+		// Handle AND/OR via logic?
+		// InfixExpression generic handler is above.
+		// I should modify InfixExpression case to handle AND/OR specifically if I want short circuit.
+		// The current switch is at End. I need to move it UP or handle it special.
+		// OR just use bool logic if I add OP_AND/OP_OR.
+		// Let's add simple OP_AND / OP_OR to chunk. Simpler for now. Short circuit is optional for basic functionality (unless side effects matter).
+		// Given the constraints and time, I'll add OP_AND / OP_OR to Chunk.
 
 	case *ast.IfStatement:
 		// Compile condition

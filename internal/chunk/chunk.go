@@ -25,6 +25,8 @@ const (
 	OP_MULTIPLY
 	OP_DIVIDE
 	OP_NOT
+	OP_AND
+	OP_OR
 	OP_NEGATE
 	OP_PRINT
 	OP_JUMP
@@ -37,6 +39,7 @@ const (
 	OP_SET_INDEX
 	OP_GET_PROPERTY
 	OP_SET_PROPERTY
+	OP_ZEROS
 )
 
 type Chunk struct {
@@ -115,6 +118,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_DIVIDE", offset)
 	case OP_NOT:
 		return c.simpleInstruction("OP_NOT", offset)
+	case OP_AND:
+		return c.simpleInstruction("OP_AND", offset)
+	case OP_OR:
+		return c.simpleInstruction("OP_OR", offset)
 	case OP_NEGATE:
 		return c.simpleInstruction("OP_NEGATE", offset)
 	case OP_PRINT:
@@ -139,6 +146,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.constantInstruction("OP_GET_PROPERTY", offset)
 	case OP_SET_PROPERTY:
 		return c.constantInstruction("OP_SET_PROPERTY", offset)
+	case OP_ZEROS:
+		return c.simpleInstruction("OP_ZEROS", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

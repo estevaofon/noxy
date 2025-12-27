@@ -154,6 +154,25 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return sl.Token.Literal }
 
+type NullLiteral struct {
+	Token token.Token
+}
+
+func (n *NullLiteral) expressionNode()      {}
+func (n *NullLiteral) TokenLiteral() string { return n.Token.Literal }
+func (n *NullLiteral) String() string       { return "null" }
+
+type ZerosLiteral struct {
+	Token token.Token
+	Size  Expression
+}
+
+func (z *ZerosLiteral) expressionNode()      {}
+func (z *ZerosLiteral) TokenLiteral() string { return z.Token.Literal }
+func (z *ZerosLiteral) String() string {
+	return fmt.Sprintf("zeros(%s)", z.Size.String())
+}
+
 type Boolean struct {
 	Token token.Token
 	Value bool

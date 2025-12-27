@@ -171,8 +171,17 @@ func (vm *VM) run() error {
 				vm.push(value.NewInt(a.AsInt + b.AsInt))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
 				vm.push(value.NewFloat(a.AsFloat + b.AsFloat))
+			} else if a.Type == value.VAL_OBJ && b.Type == value.VAL_OBJ {
+				// Check if both are strings
+				strA, okA := a.Obj.(string)
+				strB, okB := b.Obj.(string)
+				if okA && okB {
+					vm.push(value.NewString(strA + strB))
+				} else {
+					return fmt.Errorf("operands must be numbers or strings")
+				}
 			} else {
-				return fmt.Errorf("operands must be numbers")
+				return fmt.Errorf("operands must be numbers or strings")
 			}
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
@@ -210,6 +219,37 @@ func (vm *VM) run() error {
 		case chunk.OP_NOT:
 			v := vm.pop()
 			vm.push(value.NewBool(isFalsey(v)))
+		case chunk.OP_AND:
+			b := vm.pop()
+			a := vm.pop()
+			// Assuming strict boolean for & operator as per usage in 'if'
+			// Or should we support truthiness?
+			// binary_tree.nx usage: if condition | condition. Conditions are bool.
+			// Let's coerce to bool if needed or error. Safe to error for now.
+			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
+				vm.push(value.NewBool(a.AsBool && b.AsBool))
+			} else {
+				return fmt.Errorf("operands for & must be boolean")
+			}
+		case chunk.OP_OR:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
+				vm.push(value.NewBool(a.AsBool || b.AsBool))
+			} else {
+				return fmt.Errorf("operands for | must be boolean")
+			}
+		case chunk.OP_ZEROS:
+			countVal := vm.pop()
+			if countVal.Type != value.VAL_INT {
+				return fmt.Errorf("zeros size must be integer")
+			}
+			count := int(countVal.AsInt)
+			elements := make([]value.Value, count)
+			for i := 0; i < count; i++ {
+				elements[i] = value.NewInt(0)
+			}
+			vm.push(value.NewArray(elements))
 		case chunk.OP_GREATER:
 			b := vm.pop()
 			a := vm.pop()

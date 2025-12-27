@@ -39,6 +39,9 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
 	p.registerPrefix(token.STRING, p.parseStringLiteral)
+	p.registerPrefix(token.NULL, p.parseNull)
+	p.registerPrefix(token.ZEROS, p.parseZeros)
+	p.registerPrefix(token.REF, p.parsePrefixExpression)
 	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
 	// p.registerPrefix(token.FUNC, p.parseFunctionLiteral) // Removed. Func is statement now.
 
@@ -53,6 +56,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.GT, p.parseInfixExpression)
 	p.registerInfix(token.LTE, p.parseInfixExpression)
 	p.registerInfix(token.GTE, p.parseInfixExpression)
+	p.registerInfix(token.AND, p.parseInfixExpression)
+	p.registerInfix(token.OR, p.parseInfixExpression)
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccess)
@@ -319,6 +324,8 @@ func (p *Parser) parseType() ast.NoxyType {
 const (
 	_ int = iota
 	LOWEST
+	OR          // |
+	AND         // &
 	EQUALS      // ==
 	LESSGREATER // > or <
 	SUM         // + or -
@@ -335,6 +342,8 @@ var precedences = map[token.TokenType]int{
 	token.GT:       LESSGREATER,
 	token.LTE:      LESSGREATER,
 	token.GTE:      LESSGREATER,
+	token.AND:      AND,
+	token.OR:       OR,
 	token.PLUS:     SUM,
 	token.MINUS:    SUM,
 	token.SLASH:    PRODUCT,
@@ -380,6 +389,28 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseNull() ast.Expression {
+	return &ast.NullLiteral{Token: p.curToken}
+}
+
+func (p *Parser) parseZeros() ast.Expression {
+	// zeros(SIZE)
+	lit := &ast.ZerosLiteral{Token: p.curToken}
+
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+
+	p.nextToken()
+	lit.Size = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(token.RPAREN) {
+		return nil
+	}
+
+	return lit
 }
 
 func (p *Parser) parseBoolean() ast.Expression {
