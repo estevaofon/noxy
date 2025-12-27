@@ -129,22 +129,27 @@ func (l *Lexer) NextToken() token.Token {
 		l.column = 0 // Will be incremented to 1 by readChar
 	case '"':
 		tok.Type = token.STRING
-		tok.Literal = l.readString()
+		tok.Literal = l.readString('"')
+	case '\'':
+		tok.Type = token.STRING
+		tok.Literal = l.readString('\'')
 	case 'b': // Potential bytes literal
 		if l.peekChar() == '"' || l.peekChar() == '\'' {
+			quote := l.peekChar()
 			l.readChar() // eat 'b'
 			tok.Type = token.BYTES
-			tok.Literal = l.readBytes()
+			tok.Literal = l.readBytes(quote)
 		} else {
 			tok.Literal = l.readIdentifier()
 			tok.Type = token.LookupIdent(tok.Literal)
 			return tok // Early return because readIdentifier advances
 		}
 	case 'f': // Potential f-string
-		if l.peekChar() == '"' {
+		if l.peekChar() == '"' || l.peekChar() == '\'' {
+			quote := l.peekChar()
 			l.readChar() // eat 'f'
 			tok.Type = token.FSTRING
-			tok.Literal = l.readFString()
+			tok.Literal = l.readFString(quote)
 		} else {
 			tok.Literal = l.readIdentifier()
 			tok.Type = token.LookupIdent(tok.Literal)
@@ -210,12 +215,12 @@ func (l *Lexer) readNumber() (token.TokenType, string) {
 	return token.INT, l.input[position:l.position]
 }
 
-func (l *Lexer) readString() string {
-	// l.ch is currently '"'
+func (l *Lexer) readString(quote byte) string {
+	// l.ch is currently quote
 	l.readChar() // Skip opening quote
 	position := l.position
 	for {
-		if l.ch == '"' || l.ch == 0 {
+		if l.ch == quote || l.ch == 0 {
 			break
 		}
 		if l.ch == '\\' {
@@ -228,9 +233,14 @@ func (l *Lexer) readString() string {
 	return str
 }
 
-func (l *Lexer) readBytes() string {
+func (l *Lexer) readBytes(quote byte) string {
 	// l.ch is currently opening quote ('"' or '\'')
-	quote := l.ch
+	// quote argument is passed but l.ch is already at quote
+	// Actually logic in Case 'b': l.readChar() eats 'b'. l.peekChar() is quote.
+	// We read 'b'. Lexer main switch: l.ch is 'b'.
+	// Then logic: quote := l.peekChar(); l.readChar(); -> l.ch is quote.
+	// Then calls readBytes(quote).
+	// So readBytes starts with l.ch == quote.
 	l.readChar()
 	position := l.position
 	for {
@@ -245,13 +255,12 @@ func (l *Lexer) readBytes() string {
 	return l.input[position:l.position]
 }
 
-func (l *Lexer) readFString() string {
+func (l *Lexer) readFString(quote byte) string {
 	// similar to String but might need more logic later.
-	// For now treating as raw string content
 	l.readChar() // Skip opening quote
 	position := l.position
 	for {
-		if l.ch == '"' || l.ch == 0 {
+		if l.ch == quote || l.ch == 0 {
 			break
 		}
 		if l.ch == '\\' {

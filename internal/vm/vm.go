@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
+	"time"
 )
 
 const StackMax = 2048
@@ -50,6 +51,97 @@ func New() *VM {
 			return value.NewString("")
 		}
 		return value.NewString(args[0].String())
+	})
+	vm.defineNative("now_ms", func(args []value.Value) value.Value {
+		return value.NewInt(time.Now().UnixMilli())
+	})
+	vm.defineNative("length", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewInt(0)
+		}
+		arg := args[0]
+		if arg.Type == value.VAL_OBJ {
+			if arr, ok := arg.Obj.(*value.ObjArray); ok {
+				return value.NewInt(int64(len(arr.Elements)))
+			}
+			if str, ok := arg.Obj.(string); ok {
+				return value.NewInt(int64(len(str)))
+			}
+		}
+		return value.NewInt(0)
+	})
+	vm.defineNative("append", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewNull()
+		}
+		arrVal := args[0]
+		item := args[1]
+		if arrVal.Type == value.VAL_OBJ {
+			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
+				arr.Elements = append(arr.Elements, item)
+			}
+		}
+		return value.NewNull()
+	})
+	vm.defineNative("pop", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		arrVal := args[0]
+		if arrVal.Type == value.VAL_OBJ {
+			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
+				if len(arr.Elements) == 0 {
+					return value.NewNull()
+				}
+				val := arr.Elements[len(arr.Elements)-1]
+				arr.Elements = arr.Elements[:len(arr.Elements)-1]
+				return val
+			}
+		}
+		return value.NewNull()
+	})
+	vm.defineNative("contains", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewBool(false)
+		}
+		arrVal := args[0]
+		target := args[1]
+		if arrVal.Type == value.VAL_OBJ {
+			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
+				for _, el := range arr.Elements {
+					if valuesEqual(el, target) {
+						return value.NewBool(true)
+					}
+				}
+			}
+		}
+		return value.NewBool(false)
+	})
+	vm.defineNative("has_key", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewBool(false)
+		}
+		mapVal := args[0]
+		keyVal := args[1]
+		if mapVal.Type == value.VAL_OBJ {
+			if mapObj, ok := mapVal.Obj.(*value.ObjMap); ok {
+				var key interface{}
+				if keyVal.Type == value.VAL_INT {
+					key = keyVal.AsInt
+				} else if keyVal.Type == value.VAL_OBJ {
+					if str, ok := keyVal.Obj.(string); ok {
+						key = str
+					} else {
+						return value.NewBool(false)
+					}
+				} else {
+					return value.NewBool(false)
+				}
+				_, ok := mapObj.Data[key]
+				return value.NewBool(ok)
+			}
+		}
+		return value.NewBool(false)
 	})
 	return vm
 }
@@ -372,52 +464,125 @@ func (vm *VM) run() error {
 			}
 			vm.push(value.NewArray(elements))
 
+			vm.push(value.NewArray(elements))
+
+		case chunk.OP_MAP:
+			count := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+
+			// Map expects keys and values on stack: K1, V1, K2, V2...
+			// Stack top is V_last.
+			// NewMap creates empty map. We populate it.
+
+			// Actually we can optimize by making NewMap taking items?
+			// Let's create Empty map and insert.
+
+			// Wait, the order on stack:
+			// K1, V1, K2, V2.
+			// Pop V2, Pop K2.
+
+			mapObj := value.NewMap()
+			mapData := mapObj.Obj.(*value.ObjMap).Data
+
+			for i := 0; i < count; i++ {
+				val := vm.pop()
+				keyVal := vm.pop()
+
+				var key interface{}
+				if keyVal.Type == value.VAL_INT {
+					key = keyVal.AsInt
+				} else if keyVal.Type == value.VAL_OBJ {
+					if str, ok := keyVal.Obj.(string); ok {
+						key = str
+					} else {
+						return fmt.Errorf("map key must be int or string")
+					}
+				} else {
+					return fmt.Errorf("map key must be int or string")
+				}
+				mapData[key] = val
+			}
+			vm.push(mapObj)
+
 		case chunk.OP_GET_INDEX:
 			indexVal := vm.pop()
-			arrayVal := vm.pop()
+			collectionVal := vm.pop()
 
-			if arrayVal.Type != value.VAL_OBJ {
-				return fmt.Errorf("cannot index non-array")
-			}
-			arr, ok := arrayVal.Obj.(*value.ObjArray)
-			if !ok {
-				return fmt.Errorf("cannot index non-array")
-			}
+			if collectionVal.Type == value.VAL_OBJ {
+				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
+					if indexVal.Type != value.VAL_INT {
+						return fmt.Errorf("array index must be integer")
+					}
+					idx := int(indexVal.AsInt)
+					if idx < 0 || idx >= len(arr.Elements) {
+						return fmt.Errorf("array index out of bounds")
+					}
+					vm.push(arr.Elements[idx])
+					continue
+				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
+					var key interface{}
+					if indexVal.Type == value.VAL_INT {
+						key = indexVal.AsInt
+					} else if indexVal.Type == value.VAL_OBJ {
+						if str, ok := indexVal.Obj.(string); ok {
+							key = str
+						} else {
+							return fmt.Errorf("map key must be int or string")
+						}
+					} else {
+						return fmt.Errorf("map key must be int or string")
+					}
 
-			if indexVal.Type != value.VAL_INT {
-				return fmt.Errorf("index must be integer")
+					val, ok := mapObj.Data[key]
+					if !ok {
+						// Return null or error? Spec says null for missing key? Or error?
+						// "has_key" exists. Missing key usually runtime error or null.
+						// Let's return Null for now, similar to dynamic languages.
+						vm.push(value.NewNull())
+					} else {
+						vm.push(val)
+					}
+					continue
+				}
 			}
-			idx := int(indexVal.AsInt)
-
-			if idx < 0 || idx >= len(arr.Elements) {
-				return fmt.Errorf("index out of bounds: %d", idx)
-			}
-			vm.push(arr.Elements[idx])
+			return fmt.Errorf("cannot index non-array/map")
 
 		case chunk.OP_SET_INDEX:
 			val := vm.pop()
 			indexVal := vm.pop()
-			arrayVal := vm.pop()
+			collectionVal := vm.pop() // The array/map itself is on stack (pointer)
 
-			if arrayVal.Type != value.VAL_OBJ {
-				return fmt.Errorf("cannot index non-array")
+			if collectionVal.Type == value.VAL_OBJ {
+				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
+					if indexVal.Type != value.VAL_INT {
+						return fmt.Errorf("array index must be integer")
+					}
+					idx := int(indexVal.AsInt)
+					if idx < 0 || idx >= len(arr.Elements) {
+						return fmt.Errorf("array index out of bounds")
+					}
+					arr.Elements[idx] = val
+					vm.push(val) // Assignment expression result
+					continue
+				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
+					var key interface{}
+					if indexVal.Type == value.VAL_INT {
+						key = indexVal.AsInt
+					} else if indexVal.Type == value.VAL_OBJ {
+						if str, ok := indexVal.Obj.(string); ok {
+							key = str
+						} else {
+							return fmt.Errorf("map key must be int or string")
+						}
+					} else {
+						return fmt.Errorf("map key must be int or string")
+					}
+					mapObj.Data[key] = val
+					vm.push(val)
+					continue
+				}
 			}
-			arr, ok := arrayVal.Obj.(*value.ObjArray)
-			if !ok {
-				return fmt.Errorf("cannot index non-array")
-			}
-
-			if indexVal.Type != value.VAL_INT {
-				return fmt.Errorf("index must be integer")
-			}
-			idx := int(indexVal.AsInt)
-
-			if idx < 0 || idx >= len(arr.Elements) {
-				return fmt.Errorf("index out of bounds: %d", idx)
-			}
-
-			arr.Elements[idx] = val
-			vm.push(val) // Return assigned value
+			return fmt.Errorf("cannot set index on non-array/map")
 
 		case chunk.OP_GET_PROPERTY:
 			index := c.Code[ip]

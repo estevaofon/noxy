@@ -12,10 +12,16 @@ type Local struct {
 	Depth int
 }
 
+type Loop struct {
+	EnclosingLocals int
+	BreakJumps      []int
+}
+
 type Compiler struct {
 	currentChunk *chunk.Chunk
 	locals       []Local
 	scopeDepth   int
+	loops        []*Loop
 }
 
 func New() *Compiler {
@@ -23,6 +29,7 @@ func New() *Compiler {
 		currentChunk: chunk.New(),
 		locals:       []Local{},
 		scopeDepth:   0,
+		loops:        []*Loop{},
 	}
 }
 
@@ -36,8 +43,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		}
 	case *ast.LetStmt:
 		// Compile initializer
-		if _, err := c.Compile(n.Value); err != nil {
-			return nil, err
+		if n.Value != nil {
+			if _, err := c.Compile(n.Value); err != nil {
+				return nil, err
+			}
+		} else {
+			// Default value
+			if err := c.emitDefaultInit(n.Type); err != nil {
+				return nil, err
+			}
 		}
 
 		if c.scopeDepth > 0 {
@@ -161,6 +175,24 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			return nil, fmt.Errorf("array literal too large")
 		}
 		c.emitByte(byte(chunk.OP_ARRAY))
+		c.emitByte(byte((count >> 8) & 0xff))
+		c.emitByte(byte(count & 0xff))
+
+	case *ast.MapLiteral:
+		// Push keys and values: k1, v1, k2, v2, ...
+		for i, key := range n.Keys {
+			if _, err := c.Compile(key); err != nil {
+				return nil, err
+			}
+			if _, err := c.Compile(n.Values[i]); err != nil {
+				return nil, err
+			}
+		}
+		count := len(n.Keys)
+		if count > 65535 {
+			return nil, fmt.Errorf("map literal too large")
+		}
+		c.emitByte(byte(chunk.OP_MAP))
 		c.emitByte(byte((count >> 8) & 0xff))
 		c.emitByte(byte(count & 0xff))
 
@@ -292,6 +324,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 	case *ast.WhileStatement:
 		loopStart := len(c.currentChunk.Code)
 
+		// Push Loop
+		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
+		c.loops = append(c.loops, loop)
+
 		if _, err := c.Compile(n.Condition); err != nil {
 			return nil, err
 		}
@@ -310,6 +346,36 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 
 		c.patchJump(jumpToExit)
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+
+		// Patch Break Jumps
+		// They land AFTER the code (so after the Pop condition)
+		for _, jump := range loop.BreakJumps {
+			c.patchJump(jump)
+		}
+
+		// Pop Loop
+		c.loops = c.loops[:len(c.loops)-1]
+
+	case *ast.BreakStmt:
+		if len(c.loops) == 0 {
+			return nil, fmt.Errorf("break outside of loop")
+		}
+		loop := c.loops[len(c.loops)-1]
+
+		// Pop locals
+		toPop := len(c.locals) - loop.EnclosingLocals
+		for i := 0; i < toPop; i++ {
+			c.emitByte(byte(chunk.OP_POP))
+		}
+
+		// Emit Jump
+		jump := c.emitJump(chunk.OP_JUMP)
+		loop.BreakJumps = append(loop.BreakJumps, jump)
+
+	case *ast.UseStmt:
+		// No-op for now.
+		// Real implementation would load module and inject into globals/scope.
+		// Since we cheat and use native functions, we ignore it.
 
 	case *ast.ReturnStmt:
 		if n.ReturnValue != nil {
@@ -466,6 +532,36 @@ func (c *Compiler) endScope() {
 
 func (c *Compiler) addLocal(name string) {
 	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth})
+}
+
+func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
+	switch typ := t.(type) {
+	case *ast.PrimitiveType:
+		switch typ.Name {
+		case "int":
+			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewInt(0)))
+		case "float":
+			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewFloat(0.0)))
+		case "bool":
+			c.emitByte(byte(chunk.OP_FALSE))
+		case "string":
+			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewString("")))
+		default:
+			c.emitByte(byte(chunk.OP_NULL))
+		}
+	case *ast.ArrayType:
+		// Empty array
+		c.emitByte(byte(chunk.OP_ARRAY))
+		c.emitByte(0)
+		c.emitByte(0)
+	case *ast.MapType:
+		c.emitByte(byte(chunk.OP_MAP))
+		c.emitByte(0)
+		c.emitByte(0)
+	default:
+		c.emitByte(byte(chunk.OP_NULL))
+	}
+	return nil
 }
 
 func (c *Compiler) resolveLocal(name string) int {

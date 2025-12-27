@@ -41,6 +41,7 @@ const (
 	OP_SET_PROPERTY
 	OP_ZEROS
 	OP_MODULO
+	OP_MAP
 )
 
 type Chunk struct {
@@ -151,6 +152,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_ZEROS", offset)
 	case OP_MODULO:
 		return c.simpleInstruction("OP_MODULO", offset)
+	case OP_MAP:
+		return c.shortInstruction("OP_MAP", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

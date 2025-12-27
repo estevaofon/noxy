@@ -61,6 +61,24 @@ func (oa *ObjArray) String() string {
 	return s
 }
 
+type ObjMap struct {
+	Data map[interface{}]Value
+}
+
+func (om *ObjMap) String() string {
+	s := "{"
+	i := 0
+	for k, v := range om.Data {
+		s += fmt.Sprintf("%v: %s", k, v.String())
+		if i < len(om.Data)-1 {
+			s += ", "
+		}
+		i++
+	}
+	s += "}"
+	return s
+}
+
 type ObjStruct struct {
 	Name   string
 	Fields []string
@@ -95,6 +113,8 @@ func (v Value) String() string {
 		// Or we can type switch here.
 		switch o := v.Obj.(type) {
 		case *ObjArray:
+			return o.String()
+		case *ObjMap:
 			return o.String()
 		case *ObjStruct:
 			return o.String()
@@ -137,6 +157,10 @@ func NewString(v string) Value {
 
 func NewArray(elements []Value) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
+}
+
+func NewMap() Value {
+	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: make(map[interface{}]Value)}}
 }
 
 func NewStruct(name string, fields []string) Value {

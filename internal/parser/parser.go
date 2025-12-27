@@ -47,6 +47,11 @@ func New(l *lexer.Lexer) *Parser {
 	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
 	// p.registerPrefix(token.FUNC, p.parseFunctionLiteral) // Removed. Func is statement now.
 
+	p.registerPrefix(token.PERCENT, p.parseGroupedExpression) // Grouped expression logic for PERCENT? No.
+	// Oh wait, I registered PERCENT for infix above in previous steps.
+	// LBRACE is for Map Literal.
+	p.registerPrefix(token.LBRACE, p.parseMapLiteral)
+
 	p.infixParseFns = make(map[token.TokenType]func(ast.Expression) ast.Expression)
 	p.registerInfix(token.PLUS, p.parseInfixExpression)
 	p.registerInfix(token.MINUS, p.parseInfixExpression)
@@ -116,6 +121,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseStructStatement()
 	case token.FUNC:
 		return p.parseFunctionStatement()
+	case token.BREAK:
+		return p.parseBreakStatement()
+	case token.USE:
+		return p.parseUseStatement()
 	case token.NEWLINE:
 		return nil // Skip empty lines / separators
 	default:
@@ -202,13 +211,11 @@ func (p *Parser) parseLetStatement() *ast.LetStmt {
 
 	stmt.Type = p.parseType()
 
-	if !p.expectPeek(token.ASSIGN) {
-		return nil
+	if p.peekToken.Type == token.ASSIGN {
+		p.nextToken() // Eat ASSIGN
+		p.nextToken() // Start expression
+		stmt.Value = p.parseExpression(LOWEST)
 	}
-
-	p.nextToken() // Eat ASSIGN
-
-	stmt.Value = p.parseExpression(LOWEST)
 
 	return stmt
 }
@@ -230,6 +237,42 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStmt {
 		p.nextToken()
 	}
 
+	return stmt
+}
+
+func (p *Parser) parseBreakStatement() *ast.BreakStmt {
+	stmt := &ast.BreakStmt{Token: p.curToken}
+	p.nextToken() // eat 'break'
+	// Optional newline
+	if p.peekToken.Type == token.NEWLINE {
+		p.nextToken()
+	}
+	return stmt
+}
+
+func (p *Parser) parseUseStatement() *ast.UseStmt {
+	stmt := &ast.UseStmt{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENTIFIER) {
+		return nil
+	}
+	stmt.Module = p.curToken.Literal
+
+	// Handle 'select *' or just 'use time'
+	// User example: use time select *
+	if p.peekToken.Type == token.SELECT {
+		p.nextToken() // eat select
+		if p.peekToken.Type == token.STAR {
+			p.nextToken() // eat *
+		} else {
+			// For now, assume *
+			// p.expectPeek(token.STAR) ?
+		}
+	}
+
+	if p.peekToken.Type == token.NEWLINE {
+		p.nextToken()
+	}
 	return stmt
 }
 
@@ -297,8 +340,43 @@ func (p *Parser) parseType() ast.NoxyType {
 	switch p.curToken.Type {
 	case token.TYPE_INT:
 		t = &ast.PrimitiveType{Name: "int"}
+	case token.TYPE_STRING:
+		t = &ast.PrimitiveType{Name: "string"}
 	case token.IDENTIFIER:
 		t = &ast.PrimitiveType{Name: p.curToken.Literal}
+	case token.MAP:
+		// map[key, val]
+		if !p.expectPeek(token.LBRACKET) {
+			return nil
+		}
+		// curToken is LBRACKET. Move to KeyType.
+		// p.nextToken() // This was redundant. expectPeek already advanced curToken to LBRACKET, and peekToken to KeyType.
+
+		// Now, p.curToken is LBRACKET, p.peekToken is the start of the KeyType.
+		// We need to advance curToken to the KeyType before parsing it.
+		p.nextToken() // Advance curToken to the KeyType
+
+		keyType := p.parseType()
+
+		// Expect COMMA
+		// parseType leaves curToken at the last token of the type (e.g. TypeName or RBRACKET of array)
+		// So peek should be COMMA.
+
+		if !p.expectPeek(token.COMMA) {
+			return nil
+		}
+		p.nextToken() // move to start of ValueType
+
+		valueType := p.parseType()
+
+		if !p.expectPeek(token.RBRACKET) {
+			return nil
+		}
+
+		t = &ast.MapType{KeyType: keyType, ValueType: valueType}
+		return t // Map type doesn't support array suffix immediately? 'map[]' -> array of maps?
+		// If so, we should fall through to array check.
+
 	default:
 		// Fallback or error?
 		t = &ast.PrimitiveType{Name: "int"} // Default
@@ -749,6 +827,39 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 	}
 
 	return exp
+}
+
+func (p *Parser) parseMapLiteral() ast.Expression {
+	hash := &ast.MapLiteral{Token: p.curToken}
+	hash.Keys = []ast.Expression{}
+	hash.Values = []ast.Expression{}
+
+	for !p.peekTokenIs(token.RBRACE) {
+		p.nextToken()
+		// Parse Key
+		key := p.parseExpression(LOWEST)
+
+		if !p.expectPeek(token.COLON) {
+			return nil
+		}
+
+		p.nextToken()
+		// Parse Value
+		value := p.parseExpression(LOWEST)
+
+		hash.Keys = append(hash.Keys, key)
+		hash.Values = append(hash.Values, value)
+
+		if !p.peekTokenIs(token.RBRACE) && !p.expectPeek(token.COMMA) {
+			return nil
+		}
+	}
+
+	if !p.expectPeek(token.RBRACE) {
+		return nil
+	}
+
+	return hash
 }
 
 func (p *Parser) parseStructStatement() *ast.StructStatement {

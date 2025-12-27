@@ -1,6 +1,7 @@
 package ast
 
 import (
+	"bytes"
 	"fmt"
 	"noxy-vm/internal/token"
 	"strings"
@@ -54,15 +55,18 @@ func (t *PrimitiveType) String() string { return t.Name }
 
 type ArrayType struct {
 	ElementType NoxyType
-	Size        *int // nil for dynamic/slice, pointer for fixed size? Or simple int
+	Size        int // 0 for dynamic
 }
 
-func (t *ArrayType) String() string {
-	size := ""
-	if t.Size != nil {
-		size = fmt.Sprintf("%d", *t.Size)
-	}
-	return fmt.Sprintf("%s[%s]", t.ElementType.String(), size)
+func (at *ArrayType) String() string { return at.ElementType.String() + "[]" }
+
+type MapType struct {
+	KeyType   NoxyType
+	ValueType NoxyType
+}
+
+func (mt *MapType) String() string {
+	return "map[" + mt.KeyType.String() + ", " + mt.ValueType.String() + "]"
 }
 
 // STATEMENTS
@@ -110,6 +114,23 @@ func (rs *ReturnStmt) String() string {
 	}
 	return out
 }
+
+type BreakStmt struct {
+	Token token.Token
+}
+
+func (bs *BreakStmt) statementNode()       {}
+func (bs *BreakStmt) TokenLiteral() string { return bs.Token.Literal }
+func (bs *BreakStmt) String() string       { return "break" }
+
+type UseStmt struct {
+	Token  token.Token // 'use'
+	Module string
+}
+
+func (us *UseStmt) statementNode()       {}
+func (us *UseStmt) TokenLiteral() string { return us.Token.Literal }
+func (us *UseStmt) String() string       { return "use " + us.Module }
 
 type ExpressionStmt struct {
 	Token      token.Token // The first token of the expression
@@ -307,11 +328,39 @@ type ArrayLiteral struct {
 func (al *ArrayLiteral) expressionNode()      {}
 func (al *ArrayLiteral) TokenLiteral() string { return al.Token.Literal }
 func (al *ArrayLiteral) String() string {
-	var elements []string
+	var out bytes.Buffer
+	elements := []string{}
 	for _, el := range al.Elements {
 		elements = append(elements, el.String())
 	}
-	return "[" + strings.Join(elements, ", ") + "]"
+	out.WriteString("[")
+	out.WriteString(strings.Join(elements, ", "))
+	out.WriteString("]")
+	return out.String()
+}
+
+type MapLiteral struct {
+	Token token.Token               // '{'
+	Pairs map[Expression]Expression // Keys are expressions too
+	// Since map range is random, for parsing we might want slice of pairs to maintain order or for deterministic tests?
+	// But runtime map is unordered.
+	// AST usually uses slice of keys and values to easier processing.
+	Keys   []Expression
+	Values []Expression
+}
+
+func (ml *MapLiteral) expressionNode()      {}
+func (ml *MapLiteral) TokenLiteral() string { return ml.Token.Literal }
+func (ml *MapLiteral) String() string {
+	var out bytes.Buffer
+	pairs := []string{}
+	for i, key := range ml.Keys {
+		pairs = append(pairs, key.String()+": "+ml.Values[i].String())
+	}
+	out.WriteString("{")
+	out.WriteString(strings.Join(pairs, ", "))
+	out.WriteString("}")
+	return out.String()
 }
 
 type IndexExpression struct {
