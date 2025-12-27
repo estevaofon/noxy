@@ -143,6 +143,32 @@ func New() *VM {
 		}
 		return value.NewBool(false)
 	})
+	vm.defineNative("to_bytes", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewBytes("")
+		}
+		arg := args[0]
+		switch arg.Type {
+		case value.VAL_OBJ:
+			if str, ok := arg.Obj.(string); ok {
+				return value.NewBytes(str)
+			}
+			if arr, ok := arg.Obj.(*value.ObjArray); ok {
+				// Array of ints -> bytes
+				bs := make([]byte, len(arr.Elements))
+				for i, el := range arr.Elements {
+					if el.Type == value.VAL_INT {
+						bs[i] = byte(el.AsInt)
+					}
+				}
+				return value.NewBytes(string(bs))
+			}
+		case value.VAL_INT:
+			// Single int to single byte
+			return value.NewBytes(string([]byte{byte(arg.AsInt)}))
+		}
+		return value.NewBytes("")
+	})
 	return vm
 }
 
@@ -273,11 +299,24 @@ func (vm *VM) run() error {
 				strB, okB := b.Obj.(string)
 				if okA && okB {
 					vm.push(value.NewString(strA + strB))
-				} else {
-					return fmt.Errorf("operands must be numbers or strings")
+					continue // Added continue for cleaner flow
 				}
+				// Check if both are BYTES?
+				// VAL_BYTES has Obj as string currently.
+				// But Type is VAL_BYTES.
+				// Wait, if Type is VAL_BYTES, Obj is string.
+				// Logic:
+				if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
+					vm.push(value.NewBytes(a.Obj.(string) + b.Obj.(string)))
+					continue
+				}
+
+				return fmt.Errorf("operands must be numbers, strings or bytes")
+			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
+				// Case where types are explicit VAL_BYTES (not VAL_OBJ)
+				vm.push(value.NewBytes(a.Obj.(string) + b.Obj.(string)))
 			} else {
-				return fmt.Errorf("operands must be numbers or strings")
+				return fmt.Errorf("operands must be numbers or strings or bytes")
 			}
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
@@ -464,8 +503,6 @@ func (vm *VM) run() error {
 			}
 			vm.push(value.NewArray(elements))
 
-			vm.push(value.NewArray(elements))
-
 		case chunk.OP_MAP:
 			count := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
@@ -545,7 +582,20 @@ func (vm *VM) run() error {
 					continue
 				}
 			}
-			return fmt.Errorf("cannot index non-array/map")
+			// Check if it's a bytes value
+			if collectionVal.Type == value.VAL_BYTES {
+				str := collectionVal.Obj.(string)
+				if indexVal.Type != value.VAL_INT {
+					return fmt.Errorf("bytes index must be integer")
+				}
+				idx := int(indexVal.AsInt)
+				if idx < 0 || idx >= len(str) {
+					return fmt.Errorf("bytes index out of bounds")
+				}
+				vm.push(value.NewInt(int64(str[idx])))
+				continue
+			}
+			return fmt.Errorf("cannot index non-array/map/bytes")
 
 		case chunk.OP_SET_INDEX:
 			val := vm.pop()
@@ -719,6 +769,8 @@ func valuesEqual(a, b value.Value) bool {
 		return a.AsFloat == b.AsFloat
 	case value.VAL_OBJ:
 		return a.Obj == b.Obj // Simple pointer/string comparison
+	case value.VAL_BYTES:
+		return a.Obj.(string) == b.Obj.(string)
 	default:
 		return false
 	}

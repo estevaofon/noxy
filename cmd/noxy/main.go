@@ -83,7 +83,7 @@ func run(input string) {
 	}
 
 	fmt.Printf("Disassembly:\n")
-	chunk.Disassemble("main")
+	chunk.DisassembleAll("main")
 
 	fmt.Printf("\nExecution:\n")
 	machine := vm.New()

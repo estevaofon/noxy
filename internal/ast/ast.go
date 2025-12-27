@@ -184,6 +184,15 @@ func (sl *StringLiteral) expressionNode()      {}
 func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 func (sl *StringLiteral) String() string       { return sl.Token.Literal }
 
+type BytesLiteral struct {
+	Token token.Token
+	Value string // Or []byte. Token matches string literal logic in Lexer so probably string.
+}
+
+func (bl *BytesLiteral) expressionNode()      {}
+func (bl *BytesLiteral) TokenLiteral() string { return bl.Token.Literal }
+func (bl *BytesLiteral) String() string       { return bl.Token.Literal }
+
 type NullLiteral struct {
 	Token token.Token
 }

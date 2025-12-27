@@ -12,6 +12,7 @@ const (
 	VAL_OBJ // String, Arrays, Structs, etc (allocated)
 	VAL_FUNCTION
 	VAL_NATIVE
+	VAL_BYTES
 )
 
 type Value struct {
@@ -129,6 +130,8 @@ func (v Value) String() string {
 		return fmt.Sprintf("<fn %s>", v.Obj.(*ObjFunction).Name)
 	case VAL_NATIVE:
 		return fmt.Sprintf("<native fn %s>", v.Obj.(*ObjNative).Name)
+	case VAL_BYTES:
+		return fmt.Sprintf("b\"%s\"", v.Obj.(string))
 	default:
 		return "unknown"
 	}
@@ -183,4 +186,8 @@ func NewNative(name string, fn NativeFunc) Value {
 		Type: VAL_NATIVE,
 		Obj:  &ObjNative{Name: name, Fn: fn},
 	}
+}
+
+func NewBytes(v string) Value {
+	return Value{Type: VAL_BYTES, Obj: v}
 }

@@ -76,6 +76,23 @@ func (c *Chunk) Disassemble(name string) {
 	}
 }
 
+// DisassembleAll disassembles this chunk and all nested function chunks
+func (c *Chunk) DisassembleAll(name string) {
+	c.Disassemble(name)
+
+	// Disassemble nested functions
+	for _, constant := range c.Constants {
+		if constant.Type == value.VAL_FUNCTION {
+			if fn, ok := constant.Obj.(*value.ObjFunction); ok {
+				if fnChunk, ok := fn.Chunk.(*Chunk); ok {
+					fmt.Println()
+					fnChunk.DisassembleAll(fn.Name)
+				}
+			}
+		}
+	}
+}
+
 func (c *Chunk) disassembleInstruction(offset int) int {
 	fmt.Printf("%04d ", offset)
 	if offset > 0 && c.Lines[offset] == c.Lines[offset-1] {

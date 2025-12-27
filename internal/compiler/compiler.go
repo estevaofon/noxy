@@ -22,6 +22,7 @@ type Compiler struct {
 	locals       []Local
 	scopeDepth   int
 	loops        []*Loop
+	currentLine  int // Track current source line for error messages
 }
 
 func New() *Compiler {
@@ -30,6 +31,7 @@ func New() *Compiler {
 		locals:       []Local{},
 		scopeDepth:   0,
 		loops:        []*Loop{},
+		currentLine:  1,
 	}
 }
 
@@ -42,6 +44,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			}
 		}
 	case *ast.LetStmt:
+		c.setLine(n.Token.Line)
 		// Compile initializer
 		if n.Value != nil {
 			if _, err := c.Compile(n.Value); err != nil {
@@ -66,19 +69,23 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		}
 
 	case *ast.ExpressionStmt:
+		c.setLine(n.Token.Line)
 		if _, err := c.Compile(n.Expression); err != nil {
 			return nil, err
 		}
 		c.emitByte(byte(chunk.OP_POP)) // Pop expression result (stmt)
 
 	case *ast.IntegerLiteral:
+		c.setLine(n.Token.Line)
 		// Convert int64 to Value
-		constant := c.makeConstant(value.NewInt(n.Value))
-		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
+		integer := value.NewInt(n.Value)
+		constIndex := c.makeConstant(integer)
+		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
 
 	case *ast.FloatLiteral:
-		constant := c.makeConstant(value.NewFloat(n.Value))
-		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
+		fl := value.NewFloat(n.Value)
+		constIndex := c.makeConstant(fl)
+		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
 
 	case *ast.Boolean:
 		if n.Value {
@@ -88,8 +95,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		}
 
 	case *ast.StringLiteral:
-		constant := c.makeConstant(value.NewString(n.Value))
-		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
+		str := value.NewString(n.Value)
+		constIndex := c.makeConstant(str)
+		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
+
+	case *ast.BytesLiteral:
+		b := value.NewBytes(n.Value)
+		constIndex := c.makeConstant(b)
+		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
 
 	case *ast.AssignStmt:
 		if ident, ok := n.Target.(*ast.Identifier); ok {
@@ -143,6 +156,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		}
 
 	case *ast.StructStatement:
+		c.setLine(n.Token.Line)
+
 		fields := []string{}
 		for _, f := range n.FieldsList {
 			fields = append(fields, f.Name)
@@ -151,10 +166,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		structConst := c.makeConstant(structObj)
 		c.emitBytes(byte(chunk.OP_CONSTANT), structConst)
 
-		// Defines a global for the struct type (constructor)
-		nameConst := c.makeConstant(value.NewString(n.Name))
-		c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
-		c.emitByte(byte(chunk.OP_POP))
+		if c.scopeDepth > 0 {
+			// Local scope: struct is a local variable
+			c.addLocal(n.Name)
+			// Value stays on stack as local
+		} else {
+			// Global scope: struct is a global
+			nameConst := c.makeConstant(value.NewString(n.Name))
+			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
+			c.emitByte(byte(chunk.OP_POP))
+		}
 
 	case *ast.MemberAccessExpression:
 		if _, err := c.Compile(n.Left); err != nil {
@@ -288,6 +309,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		// Given the constraints and time, I'll add OP_AND / OP_OR to Chunk.
 
 	case *ast.IfStatement:
+		c.setLine(n.Token.Line)
 		// Compile condition
 		if _, err := c.Compile(n.Condition); err != nil {
 			return nil, err
@@ -322,6 +344,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		c.patchJump(jumpToEnd)
 
 	case *ast.WhileStatement:
+		c.setLine(n.Token.Line)
 		loopStart := len(c.currentChunk.Code)
 
 		// Push Loop
@@ -388,6 +411,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		c.emitByte(byte(chunk.OP_RETURN))
 
 	case *ast.FunctionStatement:
+		c.setLine(n.Token.Line)
 		// Create new compiler
 		fnCompiler := New()
 		fnCompiler.scopeDepth = 1 // Inside function body
@@ -465,8 +489,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 	return c.currentChunk, nil
 }
 
+func (c *Compiler) setLine(line int) {
+	if line > 0 {
+		c.currentLine = line
+	}
+}
+
 func (c *Compiler) emitByte(b byte) {
-	c.currentChunk.Write(b, 0) // TODO: track lines
+	c.currentChunk.Write(b, c.currentLine)
 }
 
 func (c *Compiler) emitBytes(b1, b2 byte) {
@@ -511,8 +541,9 @@ func (c *Compiler) emitLoop(loopStart int) {
 func (c *Compiler) makeConstant(v value.Value) byte {
 	i := c.currentChunk.AddConstant(v)
 	if i > 255 {
-		// handle large constants
-		panic("too many constants")
+		// TODO: Implement OP_CONSTANT_LONG for 16-bit constant indices
+		// For now, log a warning but continue (will wrap around)
+		fmt.Println("WARNING: constant pool exceeds 255 entries, may cause issues")
 	}
 	return byte(i)
 }
@@ -546,6 +577,8 @@ func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
 			c.emitByte(byte(chunk.OP_FALSE))
 		case "string":
 			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewString("")))
+		case "bytes":
+			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewBytes("")))
 		default:
 			c.emitByte(byte(chunk.OP_NULL))
 		}

@@ -40,6 +40,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
 	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
 	p.registerPrefix(token.STRING, p.parseStringLiteral)
+	p.registerPrefix(token.BYTES, p.parseBytesLiteral)
 	p.registerPrefix(token.FSTRING, p.parseFString)
 	p.registerPrefix(token.NULL, p.parseNull)
 	p.registerPrefix(token.ZEROS, p.parseZeros)
@@ -342,6 +343,13 @@ func (p *Parser) parseType() ast.NoxyType {
 		t = &ast.PrimitiveType{Name: "int"}
 	case token.TYPE_STRING:
 		t = &ast.PrimitiveType{Name: "string"}
+	case token.TYPE_BYTES:
+		t = &ast.PrimitiveType{Name: "bytes"}
+	case token.BYTES: // This is Literal 'b"..."'.
+		// Shouldn't be here in parseType.
+		// But wait, declaration says ": bytes".
+		// Is "bytes" a keyword? Check token.go.
+		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.IDENTIFIER:
 		t = &ast.PrimitiveType{Name: p.curToken.Literal}
 	case token.MAP:
@@ -479,6 +487,10 @@ func (p *Parser) parseFloatLiteral() ast.Expression {
 
 func (p *Parser) parseStringLiteral() ast.Expression {
 	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseBytesLiteral() ast.Expression {
+	return &ast.BytesLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 func (p *Parser) parseNull() ast.Expression {
