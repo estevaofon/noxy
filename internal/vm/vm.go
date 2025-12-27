@@ -1711,36 +1711,72 @@ func (vm *VM) pop() value.Value {
 }
 
 func (vm *VM) loadModule(name string) (value.Value, error) {
-	filename := name + ".nx"
+	// Convert dot notation to path path separator
+	pathName := strings.ReplaceAll(name, ".", string(filepath.Separator))
 
-	// Search paths:
-	// 1. Script/stdlib/mod.nx (Unlikely but consistent)
-	// 2. Script/mod.nx (Local module relative to script)
-	// 3. CWD/stdlib/mod.nx (Standard Library relative to VM/CWD)
-	// 4. CWD/mod.nx (Fallback)
-
-	candidates := []string{
-		filepath.Join(vm.Config.RootPath, "stdlib", filename),
-		filepath.Join(vm.Config.RootPath, filename),
-		filepath.Join("stdlib", filename),
-		filename,
-	}
+	// Search paths candidates (File .nx OR Directory)
+	// We prefer file over directory if both exist? usually explicit file wins.
+	// But let's check both possibilities.
 
 	var path string
-	found := false
-	for _, p := range candidates {
-		// fmt.Printf("Checking %s...\n", p) // Debug
-		if _, err := os.Stat(p); err == nil {
-			path = p
-			found = true
-			break
+	var isDir bool
+	// found := false // Unused
+
+	// Helper to check 4 locations
+	checkLocations := func(suffix string) bool {
+		candidates := []string{
+			filepath.Join(vm.Config.RootPath, "stdlib", suffix),
+			filepath.Join(vm.Config.RootPath, suffix),
+			filepath.Join("stdlib", suffix),
+			suffix,
 		}
+		for _, p := range candidates {
+			info, err := os.Stat(p)
+			if err == nil {
+				path = p
+				isDir = info.IsDir()
+				// found = true
+				return true
+			}
+		}
+		return false
 	}
 
-	if !found {
+	// 1. Check for .nx file
+	if checkLocations(pathName+".nx") && !isDir {
+		// Found file
+	} else if checkLocations(pathName) && isDir {
+		// Found directory
+	} else {
 		return value.NewNull(), fmt.Errorf("module not found: %s", name)
 	}
 
+	// Case 1: Directory Import (Implicit Module)
+	if isDir {
+		files, err := os.ReadDir(path)
+		if err != nil {
+			return value.NewNull(), err
+		}
+
+		moduleGlobals := make(map[string]value.Value)
+
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".nx") {
+				baseName := strings.TrimSuffix(f.Name(), ".nx")
+				subModuleName := name + "." + baseName
+
+				// Recursive load
+				subMod, err := vm.loadModule(subModuleName)
+				if err != nil {
+					return value.NewNull(), fmt.Errorf("failed to load submodule %s: %v", subModuleName, err)
+				}
+				moduleGlobals[baseName] = subMod
+			}
+		}
+		return value.NewMapWithData(moduleGlobals), nil
+	}
+
+	// Case 2: File Import
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return value.NewNull(), err
