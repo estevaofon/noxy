@@ -5,6 +5,7 @@ import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
+	"strings"
 )
 
 type Local struct {
@@ -396,9 +397,52 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		loop.BreakJumps = append(loop.BreakJumps, jump)
 
 	case *ast.UseStmt:
-		// No-op for now.
-		// Real implementation would load module and inject into globals/scope.
-		// Since we cheat and use native functions, we ignore it.
+		// 1. Emit Module Name
+		nameConst := c.makeConstant(value.NewString(n.Module))
+		c.emitBytes(byte(chunk.OP_CONSTANT), nameConst)
+
+		// 2. Emit Import (Loads module and pushes it to stack)
+		c.emitBytes(byte(chunk.OP_IMPORT), nameConst)
+
+		// 3. Handle Result
+		if n.SelectAll {
+			// use pkg select *
+			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
+		} else if len(n.Selectors) > 0 {
+			// use pkg select a, b
+			for _, sel := range n.Selectors {
+				// DUP the module
+				c.emitByte(byte(chunk.OP_DUP))
+
+				// Get Property 'sel'
+				selConst := c.makeConstant(value.NewString(sel))
+				c.emitBytes(byte(chunk.OP_GET_PROPERTY), selConst)
+
+				// Set Global 'sel'
+				c.emitBytes(byte(chunk.OP_SET_GLOBAL), selConst)
+				c.emitByte(byte(chunk.OP_POP)) // Pop the set value
+			}
+			// Pop the original Module
+			c.emitByte(byte(chunk.OP_POP))
+		} else {
+			// use pkg.mod [as alias]
+			var bindName string
+			if n.Alias != "" {
+				bindName = n.Alias
+			} else {
+				// Default: last part of module path
+				parts := strings.Split(n.Module, ".")
+				if len(parts) > 0 {
+					bindName = parts[len(parts)-1]
+				} else {
+					bindName = n.Module
+				}
+			}
+
+			nameConst := c.makeConstant(value.NewString(bindName))
+			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
+			c.emitByte(byte(chunk.OP_POP)) // Pop module
+		}
 
 	case *ast.ReturnStmt:
 		if n.ReturnValue != nil {

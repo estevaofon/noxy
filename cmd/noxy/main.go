@@ -8,6 +8,7 @@ import (
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/vm"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -31,7 +32,11 @@ func main() {
 		return
 	}
 
-	run(string(content))
+	runWithConfig(string(content), getDir(filename))
+}
+
+func getDir(path string) string {
+	return filepath.Dir(path)
 }
 
 func verify() {
@@ -59,10 +64,10 @@ func verify() {
 	main()
 	`
 	fmt.Printf("Verifying with input:\n%s\n", input)
-	run(input)
+	runWithConfig(input, ".")
 }
 
-func run(input string) {
+func runWithConfig(input string, rootPath string) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -86,7 +91,7 @@ func run(input string) {
 	chunk.DisassembleAll("main")
 
 	fmt.Printf("\nExecution:\n")
-	machine := vm.New()
+	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Printf("Runtime error: %s\n", err)
 	}

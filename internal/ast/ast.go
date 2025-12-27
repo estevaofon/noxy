@@ -125,7 +125,10 @@ func (bs *BreakStmt) String() string       { return "break" }
 
 type UseStmt struct {
 	Token  token.Token // 'use'
-	Module string
+	Module    string
+	Alias     string
+	Selectors []string
+	SelectAll bool
 }
 
 func (us *UseStmt) statementNode()       {}

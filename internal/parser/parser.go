@@ -257,21 +257,51 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 	if !p.expectPeek(token.IDENTIFIER) {
 		return nil
 	}
+	// Parse dot-separated module path: pkg.sub.mod
 	stmt.Module = p.curToken.Literal
 
-	// Handle 'select *' or just 'use time'
-	// User example: use time select *
-	if p.peekToken.Type == token.SELECT {
+	for p.peekTokenIs(token.DOT) {
+		p.nextToken() // eat .
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
+		stmt.Module += "." + p.curToken.Literal
+	}
+
+	// Check for 'as' Alias
+	if p.peekTokenIs(token.AS) {
+		p.nextToken() // eat as
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
+		stmt.Alias = p.curToken.Literal
+	}
+
+	// Check for 'select'
+	if p.peekTokenIs(token.SELECT) {
 		p.nextToken() // eat select
-		if p.peekToken.Type == token.STAR {
+
+		if p.peekTokenIs(token.STAR) {
 			p.nextToken() // eat *
+			stmt.SelectAll = true
 		} else {
-			// For now, assume *
-			// p.expectPeek(token.STAR) ?
+			// Parse list of identifiers
+			start := true
+			for start || p.peekTokenIs(token.COMMA) {
+				if !start {
+					p.nextToken() // eat comma
+				}
+				start = false
+
+				if !p.expectPeek(token.IDENTIFIER) {
+					return nil
+				}
+				stmt.Selectors = append(stmt.Selectors, p.curToken.Literal)
+			}
 		}
 	}
 
-	if p.peekToken.Type == token.NEWLINE {
+	if p.peekTokenIs(token.NEWLINE) {
 		p.nextToken()
 	}
 	return stmt

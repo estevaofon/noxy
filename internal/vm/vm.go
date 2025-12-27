@@ -3,7 +3,13 @@ package vm
 import (
 	"fmt"
 	"noxy-vm/internal/chunk"
+	"noxy-vm/internal/compiler"
+	"noxy-vm/internal/lexer"
+	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -32,11 +38,23 @@ type VM struct {
 	stackTop int
 
 	globals map[string]value.Value
+	modules map[string]value.Value // Cache for loaded modules
+	Config  VMConfig
+}
+
+type VMConfig struct {
+	RootPath string
 }
 
 func New() *VM {
+	return NewWithConfig(VMConfig{RootPath: "."})
+}
+
+func NewWithConfig(cfg VMConfig) *VM {
 	vm := &VM{
 		globals: make(map[string]value.Value),
+		modules: make(map[string]value.Value),
+		Config:  cfg,
 	}
 	// Define 'print' native
 	vm.defineNative("print", func(args []value.Value) value.Value {
@@ -508,16 +526,6 @@ func (vm *VM) run() error {
 			ip += 2
 
 			// Map expects keys and values on stack: K1, V1, K2, V2...
-			// Stack top is V_last.
-			// NewMap creates empty map. We populate it.
-
-			// Actually we can optimize by making NewMap taking items?
-			// Let's create Empty map and insert.
-
-			// Wait, the order on stack:
-			// K1, V1, K2, V2.
-			// Pop V2, Pop K2.
-
 			mapObj := value.NewMap()
 			mapData := mapObj.Obj.(*value.ObjMap).Data
 
@@ -540,6 +548,43 @@ func (vm *VM) run() error {
 				mapData[key] = val
 			}
 			vm.push(mapObj)
+
+		case chunk.OP_DUP:
+			vm.push(vm.peek(0))
+
+		case chunk.OP_IMPORT:
+			index := c.Code[ip]
+			ip++
+			nameConstant := c.Constants[index]
+			moduleName := nameConstant.Obj.(string)
+
+			// Check cache
+			if mod, ok := vm.modules[moduleName]; ok {
+				vm.push(mod)
+			} else {
+				mod, err := vm.loadModule(moduleName)
+				if err != nil {
+					return fmt.Errorf("failed to import module '%s': %v", moduleName, err)
+				}
+				vm.modules[moduleName] = mod
+				vm.push(mod)
+			}
+
+		case chunk.OP_IMPORT_FROM_ALL:
+			modVal := vm.pop()
+			if modVal.Type == value.VAL_OBJ {
+				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
+					for k, v := range modMap.Data {
+						if keyStr, ok := k.(string); ok {
+							vm.globals[keyStr] = v
+						}
+					}
+				} else {
+					return fmt.Errorf("import * expected a module (map)")
+				}
+			} else {
+				return fmt.Errorf("import * expected a module object")
+			}
 
 		case chunk.OP_GET_INDEX:
 			indexVal := vm.pop()
@@ -642,18 +687,25 @@ func (vm *VM) run() error {
 
 			instanceVal := vm.pop()
 			if instanceVal.Type != value.VAL_OBJ {
-				return fmt.Errorf("only instances have properties")
-			}
-			instance, ok := instanceVal.Obj.(*value.ObjInstance)
-			if !ok {
-				return fmt.Errorf("only instances have properties")
+				return fmt.Errorf("only instances/maps have properties")
 			}
 
-			val, ok := instance.Fields[name]
-			if !ok {
-				return fmt.Errorf("undefined property '%s'", name)
+			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
+				val, ok := instance.Fields[name]
+				if !ok {
+					return fmt.Errorf("undefined property '%s'", name)
+				}
+				vm.push(val)
+			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
+				// Allow accessing map keys as properties (for modules)
+				val, ok := mapObj.Data[name]
+				if !ok {
+					return fmt.Errorf("undefined property '%s' in module/map", name)
+				}
+				vm.push(val)
+			} else {
+				return fmt.Errorf("only instances and maps have properties")
 			}
-			vm.push(val)
 
 		case chunk.OP_SET_PROPERTY:
 			index := c.Code[ip]
@@ -796,6 +848,117 @@ func (vm *VM) pop() value.Value {
 	return vm.stack[vm.stackTop]
 }
 
+func (vm *VM) loadModule(name string) (value.Value, error) {
+	// 1. Resolve Path
+	// name is dot separated: pkg.mod
+	parts := strings.Split(name, ".")
+	relativePath := filepath.Join(parts...)
+
+	// Create potential paths
+	// 1. Relative to CWD
+	// 2. Relative to Config.RootPath
+	searchPaths := []string{
+		relativePath,
+		filepath.Join(vm.Config.RootPath, relativePath),
+	}
+
+	for _, pathStr := range searchPaths {
+		// Try .nx file
+		filePath := pathStr + ".nx"
+		info, err := os.Stat(filePath)
+		if err == nil && !info.IsDir() {
+			return vm.loadModuleFromFile(filePath)
+		}
+
+		// Try directory (Folder Import)
+		dirPath := pathStr
+		info, err = os.Stat(dirPath)
+		if err == nil && info.IsDir() {
+			return vm.loadModuleFromDir(dirPath)
+		}
+	}
+
+	return value.NewNull(), fmt.Errorf("module '%s' not found", name)
+}
+
+func (vm *VM) loadModuleFromDir(dirPath string) (value.Value, error) {
+	files, err := os.ReadDir(dirPath)
+	if err != nil {
+		return value.NewNull(), err
+	}
+
+	// Create a module object (Map)
+	modMap := value.NewMap()
+	data := modMap.Obj.(*value.ObjMap).Data
+
+	for _, f := range files {
+		if !f.IsDir() && strings.HasSuffix(f.Name(), ".nx") {
+			modName := strings.TrimSuffix(f.Name(), ".nx")
+			// Load this file and merge globals
+			subMod, err := vm.loadModuleFromFile(filepath.Join(dirPath, f.Name()))
+			if err != nil {
+				return value.NewNull(), err
+			}
+
+			// Add module itself as a property (namespace)
+			data[modName] = subMod
+
+			// Merge globals
+			if subMap, ok := subMod.Obj.(*value.ObjMap); ok {
+				for k, v := range subMap.Data {
+					data[k] = v
+				}
+			}
+		}
+	}
+	return modMap, nil
+}
+
+func (vm *VM) loadModuleFromFile(path string) (value.Value, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return value.NewNull(), err
+	}
+
+	// Lexer
+	l := lexer.New(string(content))
+	// Parser
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		return value.NewNull(), fmt.Errorf("parse error in %s: %v", path, p.Errors())
+	}
+
+	// Compiler
+	c := compiler.New()
+	chunk, err := c.Compile(program)
+	if err != nil {
+		return value.NewNull(), fmt.Errorf("compile error in %s: %v", path, err)
+	}
+
+	// Run in NEW VM
+	// We want a fresh scope for the module.
+	moduleVM := New()
+	// Native functions are already defined in New().
+	// But if we want to share state (like valid natives), New() does define them again.
+	// This is fine for stateless natives.
+
+	// Execute
+	if err := moduleVM.Interpret(chunk); err != nil {
+		return value.NewNull(), fmt.Errorf("runtime error in %s: %v", path, err)
+	}
+
+	// Extract globals
+	modMap := value.NewMap()
+	data := modMap.Obj.(*value.ObjMap).Data
+	for k, v := range moduleVM.globals {
+		data[k] = v
+	}
+
+	return modMap, nil
+}
+
 func (vm *VM) peek(distance int) value.Value {
 	return vm.stack[vm.stackTop-1-distance]
+
 }
