@@ -32,7 +32,8 @@ end
 
 // Retorna DateTime atual
 func now_datetime() -> DateTime
-    return time_now_datetime()
+    // Passamos a definição da struct DateTime para a função nativa
+    return time_now_datetime(DateTime)
 end
 
 // Retorna timestamp em milissegundos (para medições precisas)
@@ -46,7 +47,7 @@ end
 
 // Timestamp -> DateTime
 func from_timestamp(ts: int) -> DateTime
-    return time_from_timestamp(ts)
+    return time_from_timestamp(ts, DateTime)
 end
 
 // DateTime -> Timestamp
@@ -56,7 +57,7 @@ end
 
 // Cria DateTime a partir de componentes
 func make_datetime(year: int, month: int, day: int, hour: int, minute: int, second: int) -> DateTime
-    return time_make_datetime(year, month, day, hour, minute, second)
+    return time_make_datetime(DateTime, year, month, day, hour, minute, second)
 end
 
 // ============================================
@@ -91,12 +92,12 @@ end
 
 // Parse string "YYYY-MM-DD HH:MM:SS" -> DateTime
 func parse(s: string) -> DateTime
-    return time_parse(s)
+    return time_parse(s, DateTime)
 end
 
 // Parse apenas data "YYYY-MM-DD"
 func parse_date(s: string) -> DateTime
-    return time_parse_date(s)
+    return time_parse_date(s, DateTime)
 end
 
 // ============================================
@@ -120,7 +121,7 @@ end
 
 // Diferença como Duration
 func diff_duration(ts1: int, ts2: int) -> Duration
-    return time_diff_duration(ts1, ts2)
+    return time_diff_duration(ts1, ts2, Duration)
 end
 
 // ============================================

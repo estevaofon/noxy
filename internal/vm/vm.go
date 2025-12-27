@@ -70,9 +70,354 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(args[0].String())
 	})
-	vm.defineNative("now_ms", func(args []value.Value) value.Value {
+	vm.defineNative("time_now_ms", func(args []value.Value) value.Value {
 		return value.NewInt(time.Now().UnixMilli())
 	})
+	vm.defineNative("time_now", func(args []value.Value) value.Value {
+		return value.NewInt(time.Now().Unix())
+	})
+	vm.defineNative("time_now_datetime", func(args []value.Value) value.Value {
+		// args[0] is DateTime struct def
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		structDef, ok := args[0].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		t := time.Now()
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["year"] = value.NewInt(int64(t.Year()))
+		inst.Fields["month"] = value.NewInt(int64(t.Month()))
+		inst.Fields["day"] = value.NewInt(int64(t.Day()))
+		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
+		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
+		inst.Fields["second"] = value.NewInt(int64(t.Second()))
+		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
+		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
+		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("time_format", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("")
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewString("")
+		}
+
+		// Reconstruct time.Time from fields
+		// Minimal fields: year, month, day, hour, minute, second
+		y := int(inst.Fields["year"].AsInt)
+		m := time.Month(inst.Fields["month"].AsInt)
+		d := int(inst.Fields["day"].AsInt)
+		h := int(inst.Fields["hour"].AsInt)
+		min := int(inst.Fields["minute"].AsInt)
+		s := int(inst.Fields["second"].AsInt)
+
+		t := time.Date(y, m, d, h, min, s, 0, time.Local)
+		return value.NewString(t.Format("2006-01-02 15:04:05"))
+	})
+	vm.defineNative("time_format_date", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("")
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewString("")
+		}
+		y := int(inst.Fields["year"].AsInt)
+		m := time.Month(inst.Fields["month"].AsInt)
+		d := int(inst.Fields["day"].AsInt)
+		t := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
+		return value.NewString(t.Format("2006-01-02"))
+	})
+	vm.defineNative("time_format_time", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("")
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewString("")
+		}
+		h := int(inst.Fields["hour"].AsInt)
+		min := int(inst.Fields["minute"].AsInt)
+		s := int(inst.Fields["second"].AsInt)
+		t := time.Date(0, 1, 1, h, min, s, 0, time.Local)
+		return value.NewString(t.Format("15:04:05"))
+	})
+	vm.defineNative("time_make_datetime", func(args []value.Value) value.Value {
+		// args: structDef, y, m, d, h, min, s
+		if len(args) < 7 {
+			return value.NewNull()
+		}
+		structDef, ok := args[0].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		y := int(args[1].AsInt)
+		m := time.Month(args[2].AsInt)
+		d := int(args[3].AsInt)
+		h := int(args[4].AsInt)
+		min := int(args[5].AsInt)
+		s := int(args[6].AsInt)
+
+		t := time.Date(y, m, d, h, min, s, 0, time.Local)
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["year"] = value.NewInt(int64(t.Year()))
+		inst.Fields["month"] = value.NewInt(int64(t.Month()))
+		inst.Fields["day"] = value.NewInt(int64(t.Day()))
+		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
+		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
+		inst.Fields["second"] = value.NewInt(int64(t.Second()))
+		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
+		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
+		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("time_to_timestamp", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewInt(0)
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewInt(0)
+		}
+
+		val, ok := inst.Fields["timestamp"]
+		if ok {
+			return val
+		}
+		return value.NewInt(0)
+	})
+	vm.defineNative("time_from_timestamp", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		ts := args[0].AsInt
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		t := time.Unix(ts, 0)
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["year"] = value.NewInt(int64(t.Year()))
+		inst.Fields["month"] = value.NewInt(int64(t.Month()))
+		inst.Fields["day"] = value.NewInt(int64(t.Day()))
+		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
+		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
+		inst.Fields["second"] = value.NewInt(int64(t.Second()))
+		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
+		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
+		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("time_diff", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewInt(0)
+		}
+		ts1 := args[0].AsInt
+		ts2 := args[1].AsInt
+		return value.NewInt(ts1 - ts2)
+	})
+	vm.defineNative("time_add_days", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewInt(0)
+		}
+		ts := args[0].AsInt
+		days := args[1].AsInt
+		return value.NewInt(ts + (days * 86400))
+	})
+	vm.defineNative("time_before", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		return value.NewBool(args[0].AsInt < args[1].AsInt)
+	})
+	vm.defineNative("time_after", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		return value.NewBool(args[0].AsInt > args[1].AsInt)
+	})
+	vm.defineNative("time_is_leap_year", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewBool(false)
+		}
+		year := args[0].AsInt
+		return value.NewBool(year%4 == 0 && (year%100 != 0 || year%400 == 0))
+	})
+	vm.defineNative("time_days_in_month", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewInt(0)
+		}
+		year := int(args[0].AsInt)
+		month := time.Month(args[1].AsInt)
+		// Trick: go to next month day 0
+		t := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
+		return value.NewInt(int64(t.Day()))
+	})
+	vm.defineNative("time_weekday_name", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("")
+		}
+		wd := time.Weekday(args[0].AsInt)
+		return value.NewString(wd.String())
+	})
+	vm.defineNative("time_month_name", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("")
+		}
+		m := time.Month(args[0].AsInt)
+		return value.NewString(m.String())
+	})
+
+	vm.defineNative("time_format_custom", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewString("")
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewString("")
+		}
+		fmtStr := args[1].Obj.(string)
+
+		y := int(inst.Fields["year"].AsInt)
+		m := time.Month(inst.Fields["month"].AsInt)
+		d := int(inst.Fields["day"].AsInt)
+		h := int(inst.Fields["hour"].AsInt)
+		min := int(inst.Fields["minute"].AsInt)
+		s := int(inst.Fields["second"].AsInt)
+		// t := time.Date(y, m, d, h, min, s, 0, time.Local) // Unused in this simple implementation
+
+		// Simplified replacement for strftime
+		// Noxy: %Y=ano, %m=mês, %d=dia, %H=hora, %M=min, %S=seg
+		res := fmtStr
+		res = strings.ReplaceAll(res, "%Y", fmt.Sprintf("%04d", y))
+		res = strings.ReplaceAll(res, "%m", fmt.Sprintf("%02d", m))
+		res = strings.ReplaceAll(res, "%d", fmt.Sprintf("%02d", d))
+		res = strings.ReplaceAll(res, "%H", fmt.Sprintf("%02d", h))
+		res = strings.ReplaceAll(res, "%M", fmt.Sprintf("%02d", min))
+		res = strings.ReplaceAll(res, "%S", fmt.Sprintf("%02d", s))
+
+		return value.NewString(res)
+	})
+	vm.defineNative("time_parse", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		str := args[0].Obj.(string)
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		t, err := time.ParseInLocation("2006-01-02 15:04:05", str, time.Local)
+		if err != nil {
+			return value.NewNull()
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["year"] = value.NewInt(int64(t.Year()))
+		inst.Fields["month"] = value.NewInt(int64(t.Month()))
+		inst.Fields["day"] = value.NewInt(int64(t.Day()))
+		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
+		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
+		inst.Fields["second"] = value.NewInt(int64(t.Second()))
+		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
+		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
+		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("time_parse_date", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		str := args[0].Obj.(string)
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		t, err := time.ParseInLocation("2006-01-02", str, time.Local)
+		if err != nil {
+			return value.NewNull()
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["year"] = value.NewInt(int64(t.Year()))
+		inst.Fields["month"] = value.NewInt(int64(t.Month()))
+		inst.Fields["day"] = value.NewInt(int64(t.Day()))
+		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
+		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
+		inst.Fields["second"] = value.NewInt(int64(t.Second()))
+		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
+		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
+		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+	vm.defineNative("time_add_seconds", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewInt(0)
+		}
+		ts := args[0].AsInt
+		secs := args[1].AsInt
+		return value.NewInt(ts + secs)
+	})
+	vm.defineNative("time_diff_duration", func(args []value.Value) value.Value {
+		if len(args) < 3 {
+			return value.NewNull()
+		}
+		ts1 := args[0].AsInt
+		ts2 := args[1].AsInt
+		structDef, ok := args[2].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		diff := ts1 - ts2
+		if diff < 0 {
+			diff = -diff
+		} // Duration is implicitly absolute or signed? Assuming diff(target, now)
+
+		// If we want signed duration, logic depends on requirement. 'diff' usually return difference.
+		// Let's assume signed.
+
+		// But logic: diff_duration(natal, agora) -> time until natal.
+
+		totalSecs := ts1 - ts2
+		absSecs := totalSecs
+		if absSecs < 0 {
+			absSecs = -absSecs
+		}
+
+		days := absSecs / 86400
+		rem := absSecs % 86400
+		hours := rem / 3600
+		rem = rem % 3600
+		mins := rem / 60
+		secs := rem % 60
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["days"] = value.NewInt(days)
+		inst.Fields["hours"] = value.NewInt(hours)
+		inst.Fields["minutes"] = value.NewInt(mins)
+		inst.Fields["seconds"] = value.NewInt(secs)
+		inst.Fields["total_seconds"] = value.NewInt(totalSecs)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
 	vm.defineNative("length", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewInt(0)
@@ -855,11 +1200,13 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 	relativePath := filepath.Join(parts...)
 
 	// Create potential paths
-	// 1. Relative to CWD
-	// 2. Relative to Config.RootPath
+	// 1. Relative to Config.RootPath (Script directory)
+	// 2. Relative to CWD
+	// 3. Relative to CWD/stdlib (Standard Library)
 	searchPaths := []string{
-		relativePath,
 		filepath.Join(vm.Config.RootPath, relativePath),
+		relativePath,
+		filepath.Join("stdlib", relativePath),
 	}
 
 	for _, pathStr := range searchPaths {
