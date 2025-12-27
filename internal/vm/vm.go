@@ -58,9 +58,11 @@ func NewWithConfig(cfg VMConfig) *VM {
 	}
 	// Define 'print' native
 	vm.defineNative("print", func(args []value.Value) value.Value {
+		var parts []string
 		for _, arg := range args {
-			fmt.Println(arg)
+			parts = append(parts, arg.String())
 		}
+		fmt.Println(strings.Join(parts, " "))
 		return value.NewNull()
 	})
 	vm.defineNative("to_str", func(args []value.Value) value.Value {
@@ -270,6 +272,14 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewString("")
 		}
 		wd := time.Weekday(args[0].AsInt)
+
+		names := []string{
+			"Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira",
+			"Quinta-feira", "Sexta-feira", "Sábado",
+		}
+		if int(wd) >= 0 && int(wd) < len(names) {
+			return value.NewString(names[wd])
+		}
 		return value.NewString(wd.String())
 	})
 	vm.defineNative("time_month_name", func(args []value.Value) value.Value {
@@ -277,6 +287,15 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewString("")
 		}
 		m := time.Month(args[0].AsInt)
+		names := map[time.Month]string{
+			time.January: "Janeiro", time.February: "Fevereiro", time.March: "Março",
+			time.April: "Abril", time.May: "Maio", time.June: "Junho",
+			time.July: "Julho", time.August: "Agosto", time.September: "Setembro",
+			time.October: "Outubro", time.November: "Novembro", time.December: "Dezembro",
+		}
+		if name, ok := names[m]; ok {
+			return value.NewString(name)
+		}
 		return value.NewString(m.String())
 	})
 
