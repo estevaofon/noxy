@@ -72,19 +72,19 @@ while i < len_list do
                 if ends_with_nx(current_file) & !ignored then
                     print(f"Executando: {current_file}...")
                     
-                    // Executa o teste
-                    // Usa python atual para garantir ambiente
-                    let cmd: string = f"uv run main.py noxy_examples/{current_file}"
-                    let run_res: SysResult = exec_output(cmd)
+                    // Executa e captura saída
+    // Para este repo Go (usando binário compilado para performance):
+    let cmd: string = "noxy.exe noxy_examples/" + current_file
+    
+    let res: SysResult = exec_output(cmd)
                     
-                    if run_res.ok then
-                        print(f"  [PASS] {current_file}")
-                        passed = passed + 1
-                    else
-                        print(f"  [FAIL] {current_file} (Code: {run_res.exit_code})")
-                        // Opcional: print(run_res.error)
-                        failed = failed + 1
-                    end
+    if res.ok then
+        print(f"  [PASS] {current_file}")
+        passed = passed + 1
+    else
+        print(f"  [FAIL] {current_file} (Code: {res.exit_code})")
+        failed = failed + 1
+    end
                 end
             end
             current_file = ""
@@ -104,13 +104,13 @@ if strlen(current_file) > 0 then
     let ignored2: bool = should_ignore(current_file)
     if ends_with_nx(current_file) & !ignored2 then
         print(f"Executando: {current_file}...")
-        let cmd_last: string = f"uv run main.py noxy_examples/{current_file}"
+        let cmd_last: string = "noxy.exe noxy_examples/" + current_file
         let run_res_last: SysResult = exec_output(cmd_last)
         if run_res_last.ok then
             print(f"  [PASS] {current_file}")
             passed = passed + 1
         else
-            print(f"  [FAIL] {current_file}")
+            print(f"  [FAIL] {current_file} (Code: {run_res_last.exit_code})")
             failed = failed + 1
         end
     end

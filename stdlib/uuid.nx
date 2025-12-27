@@ -4,8 +4,8 @@ struct UUIDState
     seed: int
 end
 
-global _uuid_state: UUIDState = UUIDState(0)
-global _uuid_initialized: bool = false
+let _uuid_state: UUIDState = UUIDState(0)
+let _uuid_initialized: bool = false
 
 // Initialize the RNG with current time
 func _uuid_init() -> void

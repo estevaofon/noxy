@@ -77,14 +77,14 @@ func runWithConfig(input string, rootPath string) {
 		for _, msg := range p.Errors() {
 			fmt.Printf("\t%s\n", msg)
 		}
-		return
+		os.Exit(1)
 	}
 
 	c := compiler.New()
 	chunk, err := c.Compile(program)
 	if err != nil {
 		fmt.Printf("Compiler error: %s\n", err)
-		return
+		os.Exit(1)
 	}
 
 	fmt.Printf("Disassembly:\n")
@@ -94,5 +94,6 @@ func runWithConfig(input string, rootPath string) {
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Printf("Runtime error: %s\n", err)
+		os.Exit(1)
 	}
 }
