@@ -36,14 +36,27 @@ func main() {
 
 func verify() {
 	input := `
-	func fib(n: int) -> int
-		if n < 2 then
-			return n
+	func main()
+		struct Point
+			x: int
+			y: int
 		end
-		return fib(n - 1) + fib(n - 2)
+
+		print(111)
+		let p1: Point = Point(1, 2)
+		print(222)
+		print(p1)
+		
+		print(333)
+		let points: Point[] = [p1, Point(3, 4)]
+		print(444)
+		
+		print(555)
+		print(points)
+		print(666)
+		print(points[0])
 	end
-	let result: int = fib(10)
-	print(result)
+	main()
 	`
 	fmt.Printf("Verifying with input:\n%s\n", input)
 	run(input)

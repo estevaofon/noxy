@@ -40,22 +40,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			return nil, err
 		}
 
-		// Emit SET_GLOBAL (treating top-level let as global for now)
-		// TODO: Handle locals
-		nameConstant := c.makeConstant(value.NewString(n.Name.Value))
-		c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConstant)
-		// Pop? No, SET_GLOBAL usually leaves value on stack?
-		// Or expression stmt pops it?
-		// In Noxy, let is a statement.
-		// VM OP_SET_GLOBAL implementation: `vm.peek(0)`. Does NOT pop.
-		// So we need to pop after assignment if it's a statement?
-		// But LetStmt code:
-		// stack: [value]
-		// SET_GLOBAL -> stack: [value].
-		// We are in a statement list.
-		// If we leave it on stack, it accumulates.
-		// We should POP.
-		c.emitByte(byte(chunk.OP_POP))
+		if c.scopeDepth > 0 {
+			// Local variable
+			c.addLocal(n.Name.Value)
+			// Do NOT pop. The value stays on stack and becomes the local variable.
+		} else {
+			// Global
+			nameConstant := c.makeConstant(value.NewString(n.Name.Value))
+			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConstant)
+			c.emitByte(byte(chunk.OP_POP))
+		}
 
 	case *ast.ExpressionStmt:
 		if _, err := c.Compile(n.Expression); err != nil {
@@ -68,21 +62,105 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		constant := c.makeConstant(value.NewInt(n.Value))
 		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
 
-	case *ast.AssignStmt:
-		// Compile value
-		if _, err := c.Compile(n.Value); err != nil {
-			return nil, err
-		}
+	case *ast.StringLiteral:
+		constant := c.makeConstant(value.NewString(n.Value))
+		c.emitBytes(byte(chunk.OP_CONSTANT), constant)
 
-		// Handle global assignment (Identifier)
-		// TODO: Handle fields/index
+	case *ast.AssignStmt:
 		if ident, ok := n.Target.(*ast.Identifier); ok {
-			nameConstant := c.makeConstant(value.NewString(ident.Value))
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConstant)
-			c.emitByte(byte(chunk.OP_POP)) // Statement assignment pops result
+			// Compile value
+			if _, err := c.Compile(n.Value); err != nil {
+				return nil, err
+			}
+			// Handle global assignment (Identifier)
+			// Check local
+			if arg := c.resolveLocal(ident.Value); arg != -1 {
+				c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+				c.emitByte(byte(chunk.OP_POP))
+			} else {
+				// Global
+				nameConstant := c.makeConstant(value.NewString(ident.Value))
+				c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConstant)
+				c.emitByte(byte(chunk.OP_POP)) // Statement assignment pops result
+			}
+		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
+			// Array Assignment: arr[i] = val
+			// Compile Array
+			if _, err := c.Compile(indexExp.Left); err != nil {
+				return nil, err
+			}
+			// Compile Index
+			if _, err := c.Compile(indexExp.Index); err != nil {
+				return nil, err
+			}
+			// Compile Value
+			if _, err := c.Compile(n.Value); err != nil {
+				return nil, err
+			}
+			// Emit SET_INDEX
+			c.emitByte(byte(chunk.OP_SET_INDEX))
+			c.emitByte(byte(chunk.OP_POP)) // Pop result
+		} else if memberExp, ok := n.Target.(*ast.MemberAccessExpression); ok {
+			// Struct Field Assignment: obj.field = val
+			if _, err := c.Compile(memberExp.Left); err != nil {
+				return nil, err
+			}
+			// Value
+			if _, err := c.Compile(n.Value); err != nil {
+				return nil, err
+			}
+			// Field Name
+			nameConst := c.makeConstant(value.NewString(memberExp.Member))
+			c.emitBytes(byte(chunk.OP_SET_PROPERTY), nameConst)
+			c.emitByte(byte(chunk.OP_POP))
 		} else {
 			return nil, fmt.Errorf("assignment target not supported yet")
 		}
+
+	case *ast.StructStatement:
+		fields := []string{}
+		for _, f := range n.FieldsList {
+			fields = append(fields, f.Name)
+		}
+		structObj := value.NewStruct(n.Name, fields)
+		structConst := c.makeConstant(structObj)
+		c.emitBytes(byte(chunk.OP_CONSTANT), structConst)
+
+		// Defines a global for the struct type (constructor)
+		nameConst := c.makeConstant(value.NewString(n.Name))
+		c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
+		c.emitByte(byte(chunk.OP_POP))
+
+	case *ast.MemberAccessExpression:
+		if _, err := c.Compile(n.Left); err != nil {
+			return nil, err
+		}
+		nameConst := c.makeConstant(value.NewString(n.Member))
+		c.emitBytes(byte(chunk.OP_GET_PROPERTY), nameConst)
+
+	case *ast.ArrayLiteral:
+		for _, el := range n.Elements {
+			if _, err := c.Compile(el); err != nil {
+				return nil, err
+			}
+		}
+		// Count
+		count := len(n.Elements)
+		if count > 65535 {
+			return nil, fmt.Errorf("array literal too large")
+		}
+		c.emitByte(byte(chunk.OP_ARRAY))
+		c.emitByte(byte((count >> 8) & 0xff))
+		c.emitByte(byte(count & 0xff))
+
+	case *ast.IndexExpression:
+		if _, err := c.Compile(n.Left); err != nil {
+			return nil, err
+		}
+		if _, err := c.Compile(n.Index); err != nil {
+			return nil, err
+		}
+		c.emitByte(byte(chunk.OP_GET_INDEX))
 
 	case *ast.Identifier:
 		// Check local
@@ -250,11 +328,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		c.emitByte(byte(chunk.OP_POP)) // Consume function value from stack (since it's a stmt)
 
 	case *ast.BlockStatement:
+		c.beginScope()
 		for _, stmt := range n.Statements {
 			if _, err := c.Compile(stmt); err != nil {
 				return nil, err
 			}
 		}
+		c.endScope()
 
 	case *ast.CallExpression:
 		// Compile Function (Identifier or Expression)

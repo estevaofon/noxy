@@ -35,6 +35,50 @@ type ObjNative struct {
 	Fn   NativeFunc
 }
 
+type ObjArray struct {
+	Elements []Value
+}
+
+func (oa *ObjArray) String() string {
+	s := "["
+	for i, e := range oa.Elements {
+		// Avoid infinite recursion if element is self
+		if e.Type == VAL_OBJ {
+			if arr, ok := e.Obj.(*ObjArray); ok && arr == oa {
+				s += "<cycle>"
+			} else {
+				s += e.String()
+			}
+		} else {
+			s += e.String()
+		}
+
+		if i < len(oa.Elements)-1 {
+			s += ", "
+		}
+	}
+	s += "]"
+	return s
+}
+
+type ObjStruct struct {
+	Name   string
+	Fields []string
+}
+
+func (os *ObjStruct) String() string {
+	return fmt.Sprintf("<struct %s>", os.Name)
+}
+
+type ObjInstance struct {
+	Struct *ObjStruct
+	Fields map[string]Value
+}
+
+func (oi *ObjInstance) String() string {
+	return fmt.Sprintf("<%s instance>", oi.Struct.Name)
+}
+
 func (v Value) String() string {
 	switch v.Type {
 	case VAL_BOOL:
@@ -46,7 +90,21 @@ func (v Value) String() string {
 	case VAL_FLOAT:
 		return fmt.Sprintf("%f", v.AsFloat)
 	case VAL_OBJ:
-		return fmt.Sprintf("%s", v.Obj)
+		// Check for specific object types if they don't implement String() naturally via fmt?
+		// But ObjArray implements String(), so fmt.Sprintf("%s", v.Obj) should work if v.Obj satisfies fmt.Stringer?
+		// Or we can type switch here.
+		switch o := v.Obj.(type) {
+		case *ObjArray:
+			return o.String()
+		case *ObjStruct:
+			return o.String()
+		case *ObjInstance:
+			return o.String()
+		case string:
+			return o
+		default:
+			return fmt.Sprintf("%v", v.Obj)
+		}
 	case VAL_FUNCTION:
 		return fmt.Sprintf("<fn %s>", v.Obj.(*ObjFunction).Name)
 	case VAL_NATIVE:
@@ -75,6 +133,18 @@ func NewNull() Value {
 
 func NewString(v string) Value {
 	return Value{Type: VAL_OBJ, Obj: v}
+}
+
+func NewArray(elements []Value) Value {
+	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
+}
+
+func NewStruct(name string, fields []string) Value {
+	return Value{Type: VAL_OBJ, Obj: &ObjStruct{Name: name, Fields: fields}}
+}
+
+func NewInstance(def *ObjStruct) Value {
+	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
 func NewFunction(name string, arity int, chunk interface{}) Value {

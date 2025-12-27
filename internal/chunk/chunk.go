@@ -32,6 +32,11 @@ const (
 	OP_LOOP
 	OP_CALL
 	OP_RETURN
+	OP_ARRAY
+	OP_GET_INDEX
+	OP_SET_INDEX
+	OP_GET_PROPERTY
+	OP_SET_PROPERTY
 )
 
 type Chunk struct {
@@ -124,6 +129,16 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.byteInstruction("OP_CALL", offset)
 	case OP_RETURN:
 		return c.simpleInstruction("OP_RETURN", offset)
+	case OP_ARRAY:
+		return c.shortInstruction("OP_ARRAY", offset)
+	case OP_GET_INDEX:
+		return c.simpleInstruction("OP_GET_INDEX", offset)
+	case OP_SET_INDEX:
+		return c.simpleInstruction("OP_SET_INDEX", offset)
+	case OP_GET_PROPERTY:
+		return c.constantInstruction("OP_GET_PROPERTY", offset)
+	case OP_SET_PROPERTY:
+		return c.constantInstruction("OP_SET_PROPERTY", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

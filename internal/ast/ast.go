@@ -145,6 +145,15 @@ func (il *IntegerLiteral) expressionNode()      {}
 func (il *IntegerLiteral) TokenLiteral() string { return il.Token.Literal }
 func (il *IntegerLiteral) String() string       { return il.Token.Literal }
 
+type StringLiteral struct {
+	Token token.Token
+	Value string
+}
+
+func (sl *StringLiteral) expressionNode()      {}
+func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
+func (sl *StringLiteral) String() string       { return sl.Token.Literal }
+
 type Boolean struct {
 	Token token.Token
 	Value bool
@@ -260,4 +269,72 @@ func (ce *CallExpression) String() string {
 	}
 	out += ")"
 	return out
+}
+
+type ArrayLiteral struct {
+	Token    token.Token // The '[' token
+	Elements []Expression
+}
+
+func (al *ArrayLiteral) expressionNode()      {}
+func (al *ArrayLiteral) TokenLiteral() string { return al.Token.Literal }
+func (al *ArrayLiteral) String() string {
+	var elements []string
+	for _, el := range al.Elements {
+		elements = append(elements, el.String())
+	}
+	return "[" + strings.Join(elements, ", ") + "]"
+}
+
+type IndexExpression struct {
+	Token token.Token // The '[' token
+	Left  Expression
+	Index Expression
+}
+
+func (ie *IndexExpression) expressionNode()      {}
+func (ie *IndexExpression) TokenLiteral() string { return ie.Token.Literal }
+func (ie *IndexExpression) String() string {
+	return "(" + ie.Left.String() + "[" + ie.Index.String() + "])"
+}
+
+type StructStatement struct {
+	Token  token.Token // 'struct'
+	Name   string
+	Fields map[string]NoxyType // Or ordered list? Ordered for constructor?
+	// Spec says: struct Point x: int, y: int end.
+	// Constructor arguments order matters.
+	// So we need list of fields.
+	FieldsList []*StructField
+}
+
+type StructField struct {
+	Name string
+	Type NoxyType
+}
+
+func (ss *StructStatement) statementNode()       {}
+func (ss *StructStatement) TokenLiteral() string { return ss.Token.Literal }
+func (ss *StructStatement) String() string {
+	s := "struct " + ss.Name + " "
+	for i, f := range ss.FieldsList {
+		s += f.Name + ": " + f.Type.String()
+		if i < len(ss.FieldsList)-1 {
+			s += ", "
+		}
+	}
+	s += " end"
+	return s
+}
+
+type MemberAccessExpression struct {
+	Token  token.Token // '.'
+	Left   Expression
+	Member string // Identifier value
+}
+
+func (mae *MemberAccessExpression) expressionNode()      {}
+func (mae *MemberAccessExpression) TokenLiteral() string { return mae.Token.Literal }
+func (mae *MemberAccessExpression) String() string {
+	return "(" + mae.Left.String() + "." + mae.Member + ")"
 }

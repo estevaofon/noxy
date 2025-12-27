@@ -44,6 +44,13 @@ func New() *VM {
 		}
 		return value.NewNull()
 	})
+	vm.defineNative("to_str", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			// Should return error or empty?
+			return value.NewString("")
+		}
+		return value.NewString(args[0].String())
+	})
 	return vm
 }
 
@@ -262,29 +269,148 @@ func (vm *VM) run() error {
 				return nil
 			}
 
+			vm.currentFrame = vm.frames[vm.frameCount-1] // Restore caller frame
+			frame = vm.currentFrame
 			vm.stackTop = calleeFrame.Slots
 			vm.push(result)
 
-			vm.currentFrame = vm.frames[vm.frameCount-1]
-			frame = vm.currentFrame
-			c = frame.Function.Chunk.(*chunk.Chunk) // Back to caller
+			c = frame.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
+
+		case chunk.OP_ARRAY:
+			count := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+
+			elements := make([]value.Value, count)
+			for i := count - 1; i >= 0; i-- {
+				elements[i] = vm.pop()
+			}
+			vm.push(value.NewArray(elements))
+
+		case chunk.OP_GET_INDEX:
+			indexVal := vm.pop()
+			arrayVal := vm.pop()
+
+			if arrayVal.Type != value.VAL_OBJ {
+				return fmt.Errorf("cannot index non-array")
+			}
+			arr, ok := arrayVal.Obj.(*value.ObjArray)
+			if !ok {
+				return fmt.Errorf("cannot index non-array")
+			}
+
+			if indexVal.Type != value.VAL_INT {
+				return fmt.Errorf("index must be integer")
+			}
+			idx := int(indexVal.AsInt)
+
+			if idx < 0 || idx >= len(arr.Elements) {
+				return fmt.Errorf("index out of bounds: %d", idx)
+			}
+			vm.push(arr.Elements[idx])
+
+		case chunk.OP_SET_INDEX:
+			val := vm.pop()
+			indexVal := vm.pop()
+			arrayVal := vm.pop()
+
+			if arrayVal.Type != value.VAL_OBJ {
+				return fmt.Errorf("cannot index non-array")
+			}
+			arr, ok := arrayVal.Obj.(*value.ObjArray)
+			if !ok {
+				return fmt.Errorf("cannot index non-array")
+			}
+
+			if indexVal.Type != value.VAL_INT {
+				return fmt.Errorf("index must be integer")
+			}
+			idx := int(indexVal.AsInt)
+
+			if idx < 0 || idx >= len(arr.Elements) {
+				return fmt.Errorf("index out of bounds: %d", idx)
+			}
+
+			arr.Elements[idx] = val
+			vm.push(val) // Return assigned value
+
+		case chunk.OP_GET_PROPERTY:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+
+			instanceVal := vm.pop()
+			if instanceVal.Type != value.VAL_OBJ {
+				return fmt.Errorf("only instances have properties")
+			}
+			instance, ok := instanceVal.Obj.(*value.ObjInstance)
+			if !ok {
+				return fmt.Errorf("only instances have properties")
+			}
+
+			val, ok := instance.Fields[name]
+			if !ok {
+				return fmt.Errorf("undefined property '%s'", name)
+			}
+			vm.push(val)
+
+		case chunk.OP_SET_PROPERTY:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+
+			val := vm.pop()
+			instanceVal := vm.pop()
+
+			if instanceVal.Type != value.VAL_OBJ {
+				return fmt.Errorf("only instances have properties")
+			}
+			instance, ok := instanceVal.Obj.(*value.ObjInstance)
+			if !ok {
+				return fmt.Errorf("only instances have properties")
+			}
+
+			instance.Fields[name] = val
+			vm.push(val)
 		}
 	}
 }
 
 func (vm *VM) callValue(callee value.Value, argCount int) bool {
 	if callee.Type == value.VAL_OBJ {
-		// handle generic obj, but strictly we need FUNCTION
+		if structDef, ok := callee.Obj.(*value.ObjStruct); ok {
+			// Instantiate
+			if argCount != len(structDef.Fields) {
+				fmt.Printf("Expected %d arguments for struct %s but got %d\n", len(structDef.Fields), structDef.Name, argCount)
+				return false
+			}
+
+			instance := value.NewInstance(structDef)
+			instObj := instance.Obj.(*value.ObjInstance)
+
+			// Args are on stack.
+			for i := 0; i < argCount; i++ {
+				arg := vm.peek(argCount - 1 - i)
+				fieldName := structDef.Fields[i]
+				instObj.Fields[fieldName] = arg
+			}
+
+			// Pop args AND callee (struct def)
+			vm.stackTop -= argCount + 1
+			// Push instance
+			vm.push(instance)
+			return true
+		}
 	}
 	if callee.Type == value.VAL_FUNCTION {
 		return vm.call(callee.Obj.(*value.ObjFunction), argCount)
 	}
 	if callee.Type == value.VAL_NATIVE {
 		native := callee.Obj.(*value.ObjNative)
-		// Native function invocation
-		// Args are on stack
 		args := vm.stack[vm.stackTop-argCount : vm.stackTop]
+		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
 		result := native.Fn(args)
 		vm.stackTop -= argCount + 1 // args + function
 		vm.push(result)
@@ -294,6 +420,8 @@ func (vm *VM) callValue(callee value.Value, argCount int) bool {
 }
 
 func (vm *VM) call(fn *value.ObjFunction, argCount int) bool {
+	// fmt.Printf("Calling function %s, code len: %d\n", fn.Name, len(chunk.Code))
+
 	if argCount != fn.Arity {
 		fmt.Printf("Expected %d arguments but got %d\n", fn.Arity, argCount)
 		return false

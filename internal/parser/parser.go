@@ -37,7 +37,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.TRUE, p.parseBoolean)
 	p.registerPrefix(token.FALSE, p.parseBoolean)
 	p.registerPrefix(token.LPAREN, p.parseGroupedExpression)
-	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
+	p.registerPrefix(token.LBRACKET, p.parseArrayLiteral)
+	p.registerPrefix(token.STRING, p.parseStringLiteral)
 	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
 	// p.registerPrefix(token.FUNC, p.parseFunctionLiteral) // Removed. Func is statement now.
 
@@ -50,7 +51,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.NEQ, p.parseInfixExpression)
 	p.registerInfix(token.LT, p.parseInfixExpression)
 	p.registerInfix(token.GT, p.parseInfixExpression)
+	p.registerInfix(token.LTE, p.parseInfixExpression)
+	p.registerInfix(token.GTE, p.parseInfixExpression)
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
+	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
+	p.registerInfix(token.DOT, p.parseMemberAccess)
 
 	return p
 }
@@ -99,17 +104,35 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseIfStatement()
 	case token.WHILE:
 		return p.parseWhileStatement()
+	case token.STRUCT:
+		return p.parseStructStatement()
 	case token.FUNC:
 		return p.parseFunctionStatement()
-	case token.IDENTIFIER:
-		if p.peekTokenIs(token.ASSIGN) {
-			return p.parseAssignStatement()
-		}
-		return p.parseExpressionStatement()
 	case token.NEWLINE:
 		return nil // Skip empty lines / separators
 	default:
-		return p.parseExpressionStatement()
+		// Attempt to parse expression
+		expr := p.parseExpression(LOWEST)
+
+		// Check if it's an assignment
+		if p.peekTokenIs(token.ASSIGN) {
+			p.nextToken() // eat ASSIGN
+			stmt := &ast.AssignStmt{Token: p.curToken, Target: expr}
+			p.nextToken() // move to value
+			stmt.Value = p.parseExpression(LOWEST)
+
+			if p.peekTokenIs(token.NEWLINE) {
+				p.nextToken()
+			}
+			return stmt
+		}
+
+		// Otherwise expression statement
+		stmt := &ast.ExpressionStmt{Token: p.curToken, Expression: expr}
+		if p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+		}
+		return stmt
 	}
 }
 
@@ -256,12 +279,40 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 
 // Type parsing
 func (p *Parser) parseType() ast.NoxyType {
-	// Simple primitive type
-	if p.curToken.Type == token.TYPE_INT {
-		return &ast.PrimitiveType{Name: "int"}
+	// Optional REF
+	if p.curToken.Type == token.REF {
+		p.nextToken()
 	}
-	// TODO: Add complex types
-	return &ast.PrimitiveType{Name: "int"}
+
+	var t ast.NoxyType
+	// Primitive types and Identifier types
+	switch p.curToken.Type {
+	case token.TYPE_INT:
+		t = &ast.PrimitiveType{Name: "int"}
+	case token.IDENTIFIER:
+		t = &ast.PrimitiveType{Name: p.curToken.Literal}
+	default:
+		// Fallback or error?
+		t = &ast.PrimitiveType{Name: "int"} // Default
+	}
+
+	// Check for array brackets [] or [size]
+	if p.peekTokenIs(token.LBRACKET) {
+		p.nextToken() // eat [
+
+		// Check for size (optional)
+		if !p.peekTokenIs(token.RBRACKET) {
+			p.nextToken() // Eat the size token (e.g. 15 or Identifier)
+			// TODO: Parse expression if complex size
+		}
+
+		if !p.expectPeek(token.RBRACKET) {
+			return nil
+		}
+		t = &ast.ArrayType{ElementType: t}
+	}
+
+	return t
 }
 
 // Precedence system setup
@@ -274,18 +325,23 @@ const (
 	PRODUCT     // * or /
 	PREFIX      // -X or !X
 	CALL        // myFunction(X)
+	INDEX       // array[index]
 )
 
 var precedences = map[token.TokenType]int{
-	token.EQ:     EQUALS,
-	token.NEQ:    EQUALS,
-	token.LT:     LESSGREATER,
-	token.GT:     LESSGREATER,
-	token.PLUS:   SUM,
-	token.MINUS:  SUM,
-	token.SLASH:  PRODUCT,
-	token.STAR:   PRODUCT,
-	token.LPAREN: CALL,
+	token.EQ:       EQUALS,
+	token.NEQ:      EQUALS,
+	token.LT:       LESSGREATER,
+	token.GT:       LESSGREATER,
+	token.LTE:      LESSGREATER,
+	token.GTE:      LESSGREATER,
+	token.PLUS:     SUM,
+	token.MINUS:    SUM,
+	token.SLASH:    PRODUCT,
+	token.STAR:     PRODUCT,
+	token.LPAREN:   CALL,
+	token.LBRACKET: INDEX,
+	token.DOT:      INDEX,
 }
 
 func (p *Parser) peekPrecedence() int {
@@ -320,6 +376,10 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	fmt.Sscanf(p.curToken.Literal, "%d", &value)
 	lit.Value = value
 	return lit
+}
+
+func (p *Parser) parseStringLiteral() ast.Expression {
+	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 func (p *Parser) parseBoolean() ast.Expression {
@@ -499,6 +559,120 @@ func (p *Parser) parseCallArguments() []ast.Expression {
 	}
 
 	return args
+}
+
+func (p *Parser) parseArrayLiteral() ast.Expression {
+	array := &ast.ArrayLiteral{Token: p.curToken}
+	array.Elements = p.parseExpressionList(token.RBRACKET)
+	return array
+}
+
+func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
+	list := []ast.Expression{}
+
+	if p.peekTokenIs(end) {
+		p.nextToken()
+		return list
+	}
+
+	p.nextToken()
+	list = append(list, p.parseExpression(LOWEST))
+
+	for p.peekTokenIs(token.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		list = append(list, p.parseExpression(LOWEST))
+	}
+
+	if !p.expectPeek(end) {
+		return nil
+	}
+
+	return list
+}
+
+func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
+	exp := &ast.IndexExpression{Token: p.curToken, Left: left}
+
+	p.nextToken()
+	exp.Index = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(token.RBRACKET) {
+		return nil
+	}
+
+	return exp
+}
+
+func (p *Parser) parseStructStatement() *ast.StructStatement {
+	stmt := &ast.StructStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENTIFIER) {
+		return nil
+	}
+	stmt.Name = p.curToken.Literal
+
+	stmt.FieldsList = []*ast.StructField{}
+	// Fields are inside until END
+	// struct Point
+	//    x: int
+	//    y: int
+	// end
+	// OR comma separated?
+	// Spec `struct Point x: int, y: int end` ?
+	// Or block-like?
+	// Noxy Python parser used `block` for struct fields?
+	// Let's assume standard block-like or comma list.
+	// Python parser: `parse_struct_def`.
+	// Let's check spec or assume block-like structure as most Noxy constructs use `end`.
+
+	// "struct" Name
+	// Fields...
+	// "end"
+
+	p.nextToken() // move past Name.
+
+	for !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.NEWLINE) || p.curTokenIs(token.COMMA) {
+			p.nextToken()
+			continue
+		}
+
+		if p.curToken.Type != token.IDENTIFIER {
+			// Error or break?
+			// If not identifier, maybe illegal.
+			p.nextToken()
+			continue
+		}
+
+		field := &ast.StructField{Name: p.curToken.Literal}
+
+		if !p.expectPeek(token.COLON) {
+			return nil
+		}
+		p.nextToken() // eat COLON
+		field.Type = p.parseType()
+
+		stmt.FieldsList = append(stmt.FieldsList, field)
+		p.nextToken() // eat Type (parseType ends at type token)
+	}
+
+	if !p.curTokenIs(token.END) {
+		return nil
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseMemberAccess(left ast.Expression) ast.Expression {
+	exp := &ast.MemberAccessExpression{Token: p.curToken, Left: left}
+
+	if !p.expectPeek(token.IDENTIFIER) {
+		return nil
+	}
+	exp.Member = p.curToken.Literal
+
+	return exp
 }
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
