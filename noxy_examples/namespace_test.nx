@@ -1,13 +1,11 @@
 use io
-use io select File
 use sqlite
-use sqlite select Database, ExecResult
 
 print("=== Namespace Conflict Verification ===")
 
 // 1. IO Operations
 print("[IO] Opening file...")
-let f: File = io.open("ns_test.txt", "w")
+let f: io.File = io.open("ns_test.txt", "w")
 if f.open then
     io.write(f, "Namespace test content")
     io.close(f)
@@ -18,9 +16,9 @@ end
 
 // 2. SQLite Operations
 print("[SQLite] Opening database...")
-let db: Database = sqlite.open("ns_test.db")
+let db: sqlite.Database = sqlite.open("ns_test.db")
 if db.open then
-    let res: ExecResult = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS test (id INTEGER)")
+    let res: sqlite.ExecResult = sqlite.exec(db, "CREATE TABLE IF NOT EXISTS test (id INTEGER)")
     if res.ok then
         print("[SQLite] Table created")
     else

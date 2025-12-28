@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"database/sql"
 	"fmt"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/compiler"
@@ -12,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 const StackMax = 2048
@@ -46,6 +49,12 @@ type VM struct {
 	// IO Management
 	openFiles map[int64]*os.File
 	nextFD    int64
+
+	dbHandles   map[int]*sql.DB
+	stmtHandles map[int]*sql.Stmt
+	stmtParams  map[int]map[int]interface{}
+	nextDbID    int
+	nextStmtID  int
 }
 
 type VMConfig struct {
@@ -58,11 +67,16 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	vm := &VM{
-		globals:   make(map[string]value.Value),
-		modules:   make(map[string]value.Value),
-		Config:    cfg,
-		openFiles: make(map[int64]*os.File),
-		nextFD:    1, // Start FDs at 1
+		globals:     make(map[string]value.Value),
+		modules:     make(map[string]value.Value),
+		Config:      cfg,
+		openFiles:   make(map[int64]*os.File),
+		nextFD:      1,
+		dbHandles:   make(map[int]*sql.DB),
+		stmtHandles: make(map[int]*sql.Stmt),
+		stmtParams:  make(map[int]map[int]interface{}),
+		nextDbID:    1,
+		nextStmtID:  1,
 	}
 	// Define 'print' native
 	vm.defineNative("print", func(args []value.Value) value.Value {
@@ -1175,6 +1189,299 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBytes("")
 	})
+
+	// SQLite Native Functions
+	vm.defineNative("sqlite_open", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewNull()
+		} // path, wrapper struct
+		path := args[0].String()
+		structInst, ok := args[1].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		structDef := structInst.Struct
+
+		db, err := sql.Open("sqlite", path)
+		openVal := true
+		if err != nil {
+			openVal = false
+		} else {
+			if err = db.Ping(); err != nil {
+				openVal = false
+			}
+		}
+
+		id := vm.nextDbID
+		vm.nextDbID++
+		vm.dbHandles[id] = db
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.Fields["handle"] = value.NewInt(int64(id))
+		inst.Fields["open"] = value.NewBool(openVal)
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	vm.defineNative("sqlite_close", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+
+		handle := int(dbInst.Fields["handle"].AsInt)
+		if db, ok := vm.dbHandles[handle]; ok {
+			db.Close()
+			delete(vm.dbHandles, handle)
+			dbInst.Fields["open"] = value.NewBool(false)
+		}
+		return value.NewNull()
+	})
+
+	vm.defineNative("sqlite_exec", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		sqlStr := args[1].String()
+
+		handle := int(dbInst.Fields["handle"].AsInt)
+		if db, ok := vm.dbHandles[handle]; ok {
+			db.Exec(sqlStr)
+		}
+		return value.NewNull()
+	})
+
+	vm.defineNative("sqlite_prepare", func(args []value.Value) value.Value {
+		if len(args) < 3 {
+			return value.NewNull()
+		} // db, sql, stmt wrapper
+		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		sqlStr := args[1].String()
+		stmtInst, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		stmtStructDef := stmtInst.Struct
+
+		handle := int(dbInst.Fields["handle"].AsInt)
+		if db, ok := vm.dbHandles[handle]; ok {
+			stmt, err := db.Prepare(sqlStr)
+			if err == nil {
+				id := vm.nextStmtID
+				vm.nextStmtID++
+				vm.stmtHandles[id] = stmt
+				vm.stmtParams[id] = make(map[int]interface{})
+
+				inst := value.NewInstance(stmtStructDef).Obj.(*value.ObjInstance)
+				inst.Fields["handle"] = value.NewInt(int64(id))
+				return value.Value{Type: value.VAL_OBJ, Obj: inst}
+			}
+		}
+		return value.NewNull()
+	})
+
+	bindFunc := func(args []value.Value, val interface{}) value.Value {
+		if len(args) < 3 {
+			return value.NewNull()
+		}
+		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		idx := int(args[1].AsInt)
+
+		handle := int(stmtInst.Fields["handle"].AsInt)
+		if _, ok := vm.stmtHandles[handle]; ok {
+			if vm.stmtParams[handle] == nil {
+				vm.stmtParams[handle] = make(map[int]interface{})
+			}
+			vm.stmtParams[handle][idx] = val
+		}
+		return value.NewNull()
+	}
+
+	vm.defineNative("sqlite_bind_text", func(args []value.Value) value.Value {
+		return bindFunc(args, args[2].String())
+	})
+	vm.defineNative("sqlite_bind_float", func(args []value.Value) value.Value {
+		return bindFunc(args, args[2].AsFloat)
+	})
+	vm.defineNative("sqlite_bind_int", func(args []value.Value) value.Value {
+		return bindFunc(args, args[2].AsInt)
+	})
+
+	vm.defineNative("sqlite_step_exec", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+
+		handle := int(stmtInst.Fields["handle"].AsInt)
+		if stmt, ok := vm.stmtHandles[handle]; ok {
+			params := vm.stmtParams[handle]
+			var maxIdx int
+			for k := range params {
+				if k > maxIdx {
+					maxIdx = k
+				}
+			}
+			argsList := make([]interface{}, maxIdx)
+			for k, v := range params {
+				if k > 0 && k <= maxIdx {
+					argsList[k-1] = v
+				}
+			}
+			stmt.Exec(argsList...)
+		}
+		return value.NewNull()
+	})
+
+	vm.defineNative("sqlite_reset", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		handle := int(stmtInst.Fields["handle"].AsInt)
+		if _, ok := vm.stmtHandles[handle]; ok {
+			vm.stmtParams[handle] = make(map[int]interface{})
+		}
+		return value.NewNull()
+	})
+
+	vm.defineNative("sqlite_finalize", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		handle := int(stmtInst.Fields["handle"].AsInt)
+		if stmt, ok := vm.stmtHandles[handle]; ok {
+			stmt.Close()
+			delete(vm.stmtHandles, handle)
+			delete(vm.stmtParams, handle)
+		}
+		return value.NewNull()
+	})
+
+	vm.defineNative("sqlite_query", func(args []value.Value) value.Value {
+		if len(args) < 4 {
+			return value.NewNull()
+		} // db, sql, tmplQueryResult, tmplRow
+
+		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		sqlStr := args[1].String()
+
+		resTmplInst, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct := resTmplInst.Struct
+
+		rowTmplInst, ok := args[3].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		rowStruct := rowTmplInst.Struct
+
+		handle := int(dbInst.Fields["handle"].AsInt)
+		if db, ok := vm.dbHandles[handle]; ok {
+			rows, err := db.Query(sqlStr)
+			if err != nil {
+				// Return QueryResult with ok=false and error message
+				resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+				resInst.Fields["columns"] = value.NewArray(nil)
+				resInst.Fields["rows"] = value.NewArray(nil)
+				resInst.Fields["row_count"] = value.NewInt(0)
+				resInst.Fields["ok"] = value.NewBool(false)
+				resInst.Fields["error"] = value.NewString(err.Error())
+				return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+			}
+			defer rows.Close()
+
+			cols, _ := rows.Columns()
+			colVals := make([]value.Value, len(cols))
+			for i, c := range cols {
+				colVals[i] = value.NewString(c)
+			}
+
+			var rowInsts []value.Value
+
+			for rows.Next() {
+				// Scan to interface{}
+				dest := make([]interface{}, len(cols))
+				destPtrs := make([]interface{}, len(cols))
+				for i := range dest {
+					destPtrs[i] = &dest[i]
+				}
+
+				rows.Scan(destPtrs...)
+
+				rowVals := make([]value.Value, len(cols))
+				for i, v := range dest {
+					// Convert Go type to Noxy value
+					switch tv := v.(type) {
+					case nil:
+						rowVals[i] = value.NewNull()
+					case int64:
+						rowVals[i] = value.NewInt(tv)
+					case float64:
+						rowVals[i] = value.NewFloat(tv)
+					case string:
+						rowVals[i] = value.NewString(tv)
+					case []byte:
+						rowVals[i] = value.NewString(string(tv))
+					default:
+						rowVals[i] = value.NewString(fmt.Sprintf("%v", tv))
+					}
+				}
+
+				// Create Row instance
+				rowInst := value.NewInstance(rowStruct).Obj.(*value.ObjInstance)
+				rowInst.Fields["values"] = value.NewArray(rowVals)
+				rowInsts = append(rowInsts, value.Value{Type: value.VAL_OBJ, Obj: rowInst})
+			}
+
+			// Create QueryResult instance with ok=true
+			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+			resInst.Fields["columns"] = value.NewArray(colVals)
+			resInst.Fields["rows"] = value.NewArray(rowInsts)
+			resInst.Fields["row_count"] = value.NewInt(int64(len(rowInsts)))
+			resInst.Fields["ok"] = value.NewBool(true)
+			resInst.Fields["error"] = value.NewString("")
+
+			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+		}
+		// DB handle not found - return error result
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["columns"] = value.NewArray(nil)
+		resInst.Fields["rows"] = value.NewArray(nil)
+		resInst.Fields["row_count"] = value.NewInt(0)
+		resInst.Fields["ok"] = value.NewBool(false)
+		resInst.Fields["error"] = value.NewString("invalid database handle")
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+	})
+
 	return vm
 }
 
