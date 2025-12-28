@@ -28,7 +28,7 @@ struct ExecResult
     last_insert_id: int
 end
 
-func open_db(path: string) -> Database
+func open(path: string) -> Database
     return sqlite_open(path, Database(0, false))
 end
 
