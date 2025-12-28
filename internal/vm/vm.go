@@ -1242,7 +1242,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	vm.defineNative("sqlite_exec", func(args []value.Value) value.Value {
-		if len(args) < 2 {
+		if len(args) < 3 {
 			return value.NewNull()
 		}
 		dbInst, ok := args[0].Obj.(*value.ObjInstance)
@@ -1251,11 +1251,34 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		sqlStr := args[1].String()
 
+		resTmplInst, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct := resTmplInst.Struct
+
 		handle := int(dbInst.Fields["handle"].AsInt)
 		if db, ok := vm.dbHandles[handle]; ok {
-			db.Exec(sqlStr)
+			result, err := db.Exec(sqlStr)
+			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+			if err != nil {
+				resInst.Fields["ok"] = value.NewBool(false)
+				resInst.Fields["error"] = value.NewString(err.Error())
+				resInst.Fields["rows_affected"] = value.NewInt(0)
+			} else {
+				rowsAffected, _ := result.RowsAffected()
+				resInst.Fields["ok"] = value.NewBool(true)
+				resInst.Fields["error"] = value.NewString("")
+				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
+			}
+			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 		}
-		return value.NewNull()
+		// Invalid handle
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["ok"] = value.NewBool(false)
+		resInst.Fields["error"] = value.NewString("invalid database handle")
+		resInst.Fields["rows_affected"] = value.NewInt(0)
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
 	vm.defineNative("sqlite_prepare", func(args []value.Value) value.Value {

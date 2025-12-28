@@ -21,6 +21,12 @@ struct QueryResult
     error: string
 end
 
+struct ExecResult
+    ok: bool
+    error: string
+    rows_affected: int
+end
+
 func open(path: string) -> Database
     return sqlite_open(path, Database(0, false))
 end
@@ -29,8 +35,8 @@ func close(db: Database) -> void
     sqlite_close(db)
 end
 
-func exec(db: Database, sql: string) -> void
-    sqlite_exec(db, sql)
+func exec(db: Database, sql: string) -> ExecResult
+    return sqlite_exec(db, sql, ExecResult(false, "", 0))
 end
 
 func prepare(db: Database, sql: string) -> Statement
@@ -65,4 +71,20 @@ end
 func query(db: Database, sql: string) -> QueryResult
     // Pass templates to allow native to instantiate structs
     return sqlite_query(db, sql, QueryResult([], [], 0, false, ""), Row([]))
+end
+
+// Transaction support
+func begin(db: Database) -> bool
+    let res: ExecResult = exec(db, "BEGIN TRANSACTION")
+    return res.ok
+end
+
+func commit(db: Database) -> bool
+    let res: ExecResult = exec(db, "COMMIT")
+    return res.ok
+end
+
+func rollback(db: Database) -> bool
+    let res: ExecResult = exec(db, "ROLLBACK")
+    return res.ok
 end
