@@ -267,16 +267,7 @@ func serve_file(filepath: string) -> HttpResponse
     return HttpResponse("HTTP/1.1", 200, "OK", headers, 2, body)
 end
 
-// Helper contains (necessário para ext check)
+// Helper contains (usa strings.contains do módulo strings)
 func contains(haystack: string, needle: string) -> bool
-    let parts: string[2] = split_once(haystack, needle)
-    if strlen(parts[1]) > 0 | (strlen(parts[0]) < strlen(haystack)) then
-        // Se split funcionou (encontrou), o tamanho muda ou parts[1] tem algo
-        // split_once retorna [s, ""] se falhar
-        if parts[1] == "" & parts[0] == haystack then
-            return false
-        end
-        return true
-    end
-    return false
+    return strings_contains(haystack, needle)
 end

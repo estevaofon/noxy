@@ -1,5 +1,7 @@
 // stdlib/http_parser.nx - Parser HTTP/1.1
 
+use strings
+
 // ============================================
 // Estruturas de Dados
 // ============================================
@@ -99,27 +101,6 @@ func string_to_bytes(s: string) -> bytes
     return to_bytes(s)
 end
 
-// Helper para fazer split de string por um delimitador (primeira ocorrência)
-// Retorna array de 2 strings: [antes, depois]. Se não achar, [s, ""]
-func split_once(s: string, delim: string) -> string[2]
-    let res: string[2] = [s, ""]
-    let len_s: int = strlen(s)
-    let len_d: int = strlen(delim)
-    let i: int = 0
-    
-    while i <= len_s - len_d do
-        let sub: string = substring(s, i, i + len_d)
-        if sub == delim then
-            res[0] = substring(s, 0, i)
-            res[1] = substring(s, i + len_d, len_s)
-            return res
-        end
-        i = i + 1
-    end
-    
-    return res
-end
-
 // Helper para trim de espaços (simplificado)
 func trim(s: string) -> string
     if strlen(s) == 0 then return "" end
@@ -142,57 +123,47 @@ func parse_url(url: string) -> HttpUrl
     let current: string = url
     
     // 1. Scheme
-    let parts_scheme: string[2] = split_once(current, "://")
-    if strlen(parts_scheme[1]) > 0 then
-        res.scheme = parts_scheme[0]
-        current = parts_scheme[1]
-    else
-        // Sem scheme explícito, assume http:// se não começar com /
-        // Mas a spec diz "HttpUrl default scheme http"
+    let split_scheme: strings.SplitResult = strings.split(current, "://")
+    if split_scheme.count > 1 then
+        res.scheme = split_scheme.parts[0]
+        current = split_scheme.parts[1]
     end
     
     // Define porta padrão baseada no scheme
     if res.scheme == "https" then res.port = 443 else res.port = 80 end
     
     // 2. Fragment (#)
-    let parts_frag: string[2] = split_once(current, "#")
-    if strlen(parts_frag[1]) > 0 then
-        res.fragment = parts_frag[1]
-        current = parts_frag[0]
+    let split_frag: strings.SplitResult = strings.split(current, "#")
+    if split_frag.count > 1 then
+        res.fragment = split_frag.parts[1]
+        current = split_frag.parts[0]
     end
     
     // 3. Query (?)
-    let parts_query: string[2] = split_once(current, "?")
-    if strlen(parts_query[1]) > 0 then
-        res.query = parts_query[1]
-        current = parts_query[0]
+    let split_query: strings.SplitResult = strings.split(current, "?")
+    if split_query.count > 1 then
+        res.query = split_query.parts[1]
+        current = split_query.parts[0]
     end
     
     // 4. Path e Authority
     // A string restante em 'current' tem formato "host:port/path" ou "host/path"
     
     // Separa no primeiro '/'
-    let parts_path: string[2] = split_once(current, "/")
-    let authority: string = parts_path[0]
+    let split_path: strings.SplitResult = strings.split(current, "/")
+    let authority: string = split_path.parts[0]
     
-    if strlen(parts_path[1]) > 0 then
-        res.path = "/" + parts_path[1]
+    if split_path.count > 1 then
+        res.path = "/" + split_path.parts[1]
     else
-        // Se a URL original tinha barra no final ou se não tinha path
-        // Se authority terminava com /, o split retornou "" no parts_path[1]
-        // Precisamos checar se tinha barra na URL original?
-        // Simplificação: se não achou path, é /
         res.path = "/"
-        // Correção bug split: se string é "example.com/", split("/") -> ["example.com", ""]
-        // Se é "example.com", split("/") -> ["example.com", ""]
-        // Precisamos verificar se a url tinha "/"
     end
     
     // 5. Host e Port (Authority)
-    let parts_port: string[2] = split_once(authority, ":")
-    if strlen(parts_port[1]) > 0 then
-        res.host = parts_port[0]
-        res.port = to_int(parts_port[1])
+    let split_port: strings.SplitResult = strings.split(authority, ":")
+    if split_port.count > 1 then
+        res.host = split_port.parts[0]
+        res.port = to_int(split_port.parts[1])
     else
         res.host = authority
     end
@@ -260,18 +231,19 @@ func parse_request(raw_data: bytes, data_len: int) -> HttpRequest
         
         if line_count == 0 then
             // Request Line: GET /path HTTP/1.1
-            let parts1: string[2] = split_once(line_str, " ")
-            req.method = parts1[0]
+            let split1: strings.SplitResult = strings.split(line_str, " ")
+            req.method = split1.parts[0]
             
-            let remainder: string = parts1[1]
-            let parts2: string[2] = split_once(remainder, " ")
-            let full_path: string = parts2[0]
-            req.version = parts2[1]
+            let remainder: string = ""
+            if split1.count > 1 then remainder = split1.parts[1] end
+            let split2: strings.SplitResult = strings.split(remainder, " ")
+            let full_path: string = split2.parts[0]
+            if split2.count > 1 then req.version = split2.parts[1] else req.version = "HTTP/1.1" end
             
             // Separa path e query
-            let parts_q: string[2] = split_once(full_path, "?")
-            req.path = parts_q[0]
-            req.query = parts_q[1]
+            let split_q: strings.SplitResult = strings.split(full_path, "?")
+            req.path = split_q.parts[0]
+            if split_q.count > 1 then req.query = split_q.parts[1] else req.query = "" end
             
         else
             // Header: Name: Value
@@ -322,15 +294,16 @@ func parse_response(raw_data: bytes, data_len: int) -> HttpResponse
         
         if line_count == 0 then
             // Status Line: HTTP/1.1 200 OK
-            let parts1: string[2] = split_once(line_str, " ")
-            resp.version = parts1[0]
+            let split1: strings.SplitResult = strings.split(line_str, " ")
+            resp.version = split1.parts[0]
             
-            let remainder: string = parts1[1]
-            let parts2: string[2] = split_once(remainder, " ")
+            let remainder: string = ""
+            if split1.count > 1 then remainder = split1.parts[1] end
+            let split2: strings.SplitResult = strings.split(remainder, " ")
             
-            // O código pode não ter texto depois, cuidado com split
-            resp.status_code = to_int(parts2[0])
-            resp.status_text = parts2[1] // Pode estar vazio se não tiver texto? "HTTP/1.1 200"
+            // O código pode não ter texto depois
+            resp.status_code = to_int(split2.parts[0])
+            if split2.count > 1 then resp.status_text = split2.parts[1] else resp.status_text = "" end
             
         else
             if resp.header_count < 64 then
@@ -407,8 +380,8 @@ func get_header(req: ref HttpRequest, name: string) -> string
             let prefix: string = substring(header_line, 0, strlen(search))
             // Se for igual (case sensitive aqui :/) 
             if prefix == search then
-                let parts: string[2] = split_once(header_line, ":")
-                return trim(parts[1])
+                let split_h: strings.SplitResult = strings.split(header_line, ":")
+                if split_h.count > 1 then return trim(split_h.parts[1]) end
             end
         end
         i = i + 1
