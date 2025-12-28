@@ -1,0 +1,243 @@
+// ============================================
+// ALGORITMOS CLÁSSICOS EM NOXY
+// ============================================
+
+// --------------------------------------------
+// 1. MERGE SORT
+// --------------------------------------------
+func merge(left: int[], right: int[]) -> int[]
+    let result: int[]
+    let i: int = 0
+    let j: int = 0
+    
+    while i < length(left) & j < length(right) do
+        if left[i] <= right[j] then
+            append(result, left[i])
+            i = i + 1
+        else
+            append(result, right[j])
+            j = j + 1
+        end
+    end
+    
+    while i < length(left) do
+        append(result, left[i])
+        i = i + 1
+    end
+    
+    while j < length(right) do
+        append(result, right[j])
+        j = j + 1
+    end
+    
+    return result
+end
+
+func merge_sort(arr: int[]) -> int[]
+    if length(arr) <= 1 then
+        return arr
+    end
+    
+    let mid: int = length(arr) / 2
+    let left: int[]
+    let right: int[]
+    
+    let i: int = 0
+    while i < mid do
+        append(left, arr[i])
+        i = i + 1
+    end
+    
+    while i < length(arr) do
+        append(right, arr[i])
+        i = i + 1
+    end
+    
+    let sorted_left: int[] = merge_sort(left)
+    let sorted_right: int[] = merge_sort(right)
+    
+    return merge(sorted_left, sorted_right)
+end
+
+
+// --------------------------------------------
+// 2. BUSCA BINÁRIA
+// --------------------------------------------
+func binary_search(arr: int[], target: int) -> int
+    let low: int = 0
+    let high: int = length(arr) - 1
+    
+    while low <= high do
+        let mid: int = (low + high) / 2
+        
+        if arr[mid] == target then
+            return mid
+        else
+            if arr[mid] < target then
+                low = mid + 1
+            else
+                high = mid - 1
+            end
+        end
+    end
+    
+    return -1  // não encontrado
+end
+
+
+// --------------------------------------------
+// 3. CRIVO DE ERATÓSTENES (Primos)
+// --------------------------------------------
+func sieve_of_eratosthenes(limit: int) -> int[]
+    let is_prime: bool[]
+    let primes: int[]
+    
+    // Inicializa todos como true
+    let i: int = 0
+    while i <= limit do
+        append(is_prime, true)
+        i = i + 1
+    end
+    
+    is_prime[0] = false
+    is_prime[1] = false
+    
+    // Marca compostos
+    let p: int = 2
+    while p * p <= limit do
+        if is_prime[p] then
+            let multiple: int = p * p
+            while multiple <= limit do
+                is_prime[multiple] = false
+                multiple = multiple + p
+            end
+        end
+        p = p + 1
+    end
+    
+    // Coleta primos
+    i = 2
+    while i <= limit do
+        if is_prime[i] then
+            append(primes, i)
+        end
+        i = i + 1
+    end
+    
+    return primes
+end
+
+
+// --------------------------------------------
+// 4. TORRE DE HANOI
+// --------------------------------------------
+func hanoi(n: int, from: string, to: string, aux: string)
+    if n == 1 then
+        print("Move disco 1 de " + from + " para " + to)
+        return
+    end
+    
+    hanoi(n - 1, from, aux, to)
+    print("Move disco " + to_str(n) + " de " + from + " para " + to)
+    hanoi(n - 1, aux, to, from)
+end
+
+
+// --------------------------------------------
+// 5. MÁXIMO DIVISOR COMUM (Euclides)
+// --------------------------------------------
+func gcd(a: int, b: int) -> int
+    while b != 0 do
+        let temp: int = b
+        b = a % b
+        a = temp
+    end
+    return a
+end
+
+func lcm(a: int, b: int) -> int
+    return (a * b) / gcd(a, b)
+end
+
+
+// --------------------------------------------
+// 6. SEQUÊNCIA DE COLLATZ
+// --------------------------------------------
+func collatz(n: int) -> int[]
+    let sequence: int[]
+    append(sequence, n)
+    
+    while n != 1 do
+        if n % 2 == 0 then
+            n = n / 2
+        else
+            n = 3 * n + 1
+        end
+        append(sequence, n)
+    end
+    
+    return sequence
+end
+
+
+// --------------------------------------------
+// 7. FLOYD'S CYCLE DETECTION (Linked List)
+// --------------------------------------------
+struct ListNode
+    val: int
+    next: ref ListNode
+end
+
+func has_cycle(head: ref ListNode) -> bool
+    if head == null then
+        return false
+    end
+    
+    let slow: ref ListNode = head
+    let fast: ref ListNode = head
+    
+    while fast != null & fast.next != null do
+        slow = slow.next
+        fast = fast.next.next
+        
+        if slow == fast then
+            return true
+        end
+    end
+    
+    return false
+end
+
+
+// --------------------------------------------
+// MAIN - Demonstração
+// --------------------------------------------
+func main()
+    print("=== MERGE SORT ===")
+    let arr: int[] = [64, 34, 25, 12, 22, 11, 90]
+    print("Original: " + to_str(arr))
+    let sorted: int[] = merge_sort(arr)
+    print("Ordenado: " + to_str(sorted))
+    
+    print("\n=== BUSCA BINÁRIA ===")
+    let idx: int = binary_search(sorted, 25)
+    print("Índice do 25: " + to_str(idx))
+    
+    print("\n=== CRIVO DE ERATÓSTENES ===")
+    let primes: int[] = sieve_of_eratosthenes(50)
+    print("Primos até 50: " + to_str(primes))
+    
+    print("\n=== TORRE DE HANOI (3 discos) ===")
+    hanoi(3, "A", "C", "B")
+    
+    print("\n=== MDC e MMC ===")
+    print("GCD(48, 18) = " + to_str(gcd(48, 18)))
+    print("LCM(48, 18) = " + to_str(lcm(48, 18)))
+    
+    print("\n=== COLLATZ (27) ===")
+    let seq: int[] = collatz(27)
+    print("Sequência: " + to_str(seq))
+    print("Passos: " + to_str(length(seq) - 1))
+end
+
+main()

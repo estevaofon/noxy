@@ -14,7 +14,7 @@ def imprimir_fibonacci(qtd: int) -> None:
         i = i + 1
         qtd = qtd - 1
 
-imprimir_fibonacci(40)
+imprimir_fibonacci(30)
 
 end_time = time.time_ns() // 1_000_000
 elapsed_time = end_time - start_time
