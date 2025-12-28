@@ -433,16 +433,19 @@ func (p *Parser) parseType() ast.NoxyType {
 	if p.peekTokenIs(token.LBRACKET) {
 		p.nextToken() // eat [
 
+		size := 0
 		// Check for size (optional)
 		if !p.peekTokenIs(token.RBRACKET) {
-			p.nextToken() // Eat the size token (e.g. 15 or Identifier)
-			// TODO: Parse expression if complex size
+			p.nextToken()                     // Eat the size token
+			if p.curToken.Type == token.INT { // Verify token type name
+				fmt.Sscanf(p.curToken.Literal, "%d", &size)
+			}
 		}
 
 		if !p.expectPeek(token.RBRACKET) {
 			return nil
 		}
-		t = &ast.ArrayType{ElementType: t}
+		t = &ast.ArrayType{ElementType: t, Size: size}
 	}
 
 	return t

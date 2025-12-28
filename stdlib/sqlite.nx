@@ -25,9 +25,10 @@ struct ExecResult
     ok: bool
     error: string
     rows_affected: int
+    last_insert_id: int
 end
 
-func open(path: string) -> Database
+func open_db(path: string) -> Database
     return sqlite_open(path, Database(0, false))
 end
 
@@ -36,7 +37,11 @@ func close(db: Database) -> void
 end
 
 func exec(db: Database, sql: string) -> ExecResult
-    return sqlite_exec(db, sql, ExecResult(false, "", 0))
+    return sqlite_exec(db, sql, ExecResult(false, "", 0, 0))
+end
+
+func execute(db: Database, sql: string) -> ExecResult
+    return exec(db, sql)
 end
 
 func prepare(db: Database, sql: string) -> Statement
@@ -56,8 +61,8 @@ func bind_int(stmt: Statement, idx: int, val: int) -> void
     sqlite_bind_int(stmt, idx, val)
 end
 
-func step_exec(stmt: Statement) -> void
-    sqlite_step_exec(stmt)
+func step_exec(stmt: Statement) -> ExecResult
+    return sqlite_step_exec(stmt, ExecResult(false, "", 0, 0))
 end
 
 func reset(stmt: Statement) -> void

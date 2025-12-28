@@ -1,14 +1,14 @@
 // ============================================
-// JSON PARSER EM NOXY - VERSÃO CORRIGIDA
+// JSON PARSER EM NOXY - VERS?O CORRIGIDA
 // ============================================
 
 // Constantes de Tipo
-global TYPE_NULL: int = 0
-global TYPE_BOOL: int = 1
-global TYPE_NUMBER: int = 2
-global TYPE_STRING: int = 3
-global TYPE_ARRAY: int = 4
-global TYPE_OBJECT: int = 5
+let TYPE_NULL: int = 0
+let TYPE_BOOL: int = 1
+let TYPE_NUMBER: int = 2
+let TYPE_STRING: int = 3
+let TYPE_ARRAY: int = 4
+let TYPE_OBJECT: int = 5
 
 // Estrutura para representar qualquer valor JSON
 struct JsonNode
@@ -29,7 +29,7 @@ struct Parser
 end
 
 // ============================================
-// Construtores de Nós
+// Construtores de N?s
 // ============================================
 
 func make_null() -> JsonNode
@@ -57,7 +57,7 @@ func make_object() -> JsonNode
 end
 
 // ============================================
-// Funções Auxiliares
+// Fun??es Auxiliares
 // ============================================
 
 func append_child(parent: ref JsonNode, child: ref JsonNode) -> void
@@ -102,7 +102,7 @@ end
 
 func match_text(p: ref Parser, text: string) -> bool
     let i: int = 0
-    let text_len: int = strlen(text)
+    let text_len: int = length(text)
     
     if p.pos + text_len > p.len then
         return false
@@ -120,7 +120,7 @@ func match_text(p: ref Parser, text: string) -> bool
 end
 
 // ============================================
-// CORREÇÃO PRINCIPAL: parse_string_val
+// CORRE??O PRINCIPAL: parse_string_val
 // ============================================
 
 func parse_string_val(p: ref Parser) -> string
@@ -146,13 +146,13 @@ func parse_string_val(p: ref Parser) -> string
         res = res + advance(p)
     end
     
-    // Se chegou aqui, string não foi fechada
-    print(f"Erro: String não fechada (começou na posição {p.pos})")
+    // Se chegou aqui, string n?o foi fechada
+    print(f"Erro: String n?o fechada (come?ou na posi??o {p.pos})")
     return res
 end
 
 // ============================================
-// Parser de Números
+// Parser de N?meros
 // ============================================
 
 func parse_number_val(p: ref Parser) -> float
@@ -171,7 +171,7 @@ func parse_number_val(p: ref Parser) -> float
         c = peek(p)
     end
     
-    // Parte fracionária
+    // Parte fracion?ria
     if c == "." then
         num_str = num_str + advance(p)
         c = peek(p)
@@ -228,7 +228,7 @@ func parse_value(p: ref Parser) -> ref JsonNode
         return ref make_number(n)
     end
     
-    print(f"Erro: caractere inesperado '{c}' na posição {p.pos}")
+    print(f"Erro: caractere inesperado '{c}' na posi??o {p.pos}")
     return ref make_null()
 end
 
@@ -284,7 +284,7 @@ func parse_object(p: ref Parser) -> ref JsonNode
         
         skip_whitespace(p)
         if peek(p) != ":" then
-            print("Erro: esperado ':' após chave")
+            print("Erro: esperado ':' ap?s chave")
             break
         end
         ignored = advance(p)
@@ -311,12 +311,12 @@ func parse_object(p: ref Parser) -> ref JsonNode
 end
 
 func json_parse(json: string) -> ref JsonNode
-    let p: Parser = Parser(json, 0, strlen(json))
+    let p: Parser = Parser(json, 0, length(json))
     return parse_value(p)
 end
 
 // ============================================
-// Impressão
+// Impress?o
 // ============================================
 
 func print_indent(indent: int) -> void
@@ -380,36 +380,4 @@ func print_json(node: ref JsonNode, indent: int) -> void
     end
 end
 
-// ============================================
-// Teste
-// ============================================
-
-print("=== JSON Parser em Noxy (Corrigido) ===")
-print("")
-
-let json1: string = "{\"nome\": \"Estevao\", \"idade\": 30, \"ativo\": true}"
-print(f"Teste 1: {json1}")
-let result1: ref JsonNode = json_parse(json1)
-print("Resultado: ")
-print_json(result1, 0)
-print("")
-print("")
-print(result1.child.key)
-print(result1.child.string_val)
-
-let json2: string = "{\"pessoa\": {\"nome\": \"Ana\", \"idade\": 25}, \"notas\": [10, 8.5, 9]}"
-print(f"Teste 2: {json2}")
-let result2: ref JsonNode = json_parse(json2)
-print("Resultado: ")
-print_json(result2, 0)
-print("")
-print("")
-
-let json3: string = "[1, 2, 3, {\"x\": true, \"y\": null}]"
-print(f"Teste 3: {json3}")
-let result3: ref JsonNode = json_parse(json3)
-print("Resultado: ")
-print_json(result3, 0)
-print("")
-
-print("=== Sucesso! ===")
+// Module exports: json_parse, JsonNode, make_null, make_bool, make_number, make_string, make_array, make_object

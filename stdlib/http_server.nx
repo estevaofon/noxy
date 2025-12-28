@@ -1,7 +1,7 @@
 // stdlib/http_server.nx - Servidor HTTP Event-Driven
 
 use net select *
-use io
+use io select *
 use http_parser select *
 
 // ============================================
@@ -19,7 +19,7 @@ end
 
 struct RequestEvent
     type: string,             // "REQUEST", "NONE", "ERROR"
-    client_index: int,        // Índice do cliente no array
+    client_index: int,        // ?ndice do cliente no array
     request: HttpRequest
 end
 
@@ -28,9 +28,9 @@ end
 // ============================================
 
 func new_server(host: string, port: int) -> HttpServer
-    // Cria servidor com socket inválido inicial
-    // Cria servidor com socket inválido inicial
-    // Socket() cria um inválido por padrão (fd=-1)
+    // Cria servidor com socket inv?lido inicial
+    // Cria servidor com socket inv?lido inicial
+    // Socket() cria um inv?lido por padr?o (fd=-1)
     let s: Socket = Socket(-1, "", 0, false) 
     let sockets: Socket[64]
     
@@ -47,7 +47,7 @@ func start(server: ref HttpServer) -> bool
     setblocking(s, false) // Non-blocking accept
     server.running = true
     
-    // Inicializa slots de clientes ? Já são Socket() inválidos
+    // Inicializa slots de clientes ? J? s?o Socket() inv?lidos
     return true
 end
 
@@ -57,8 +57,10 @@ func stop(server: ref HttpServer) -> void
     
     let i: int = 0
     while i < 64 do
-        if server.client_sockets[i].open then
-            net_close(server.client_sockets[i])
+        if server.client_sockets[i] != null then
+            if server.client_sockets[i].open then
+                net_close(server.client_sockets[i])
+            end
         end
         i = i + 1
     end
@@ -69,7 +71,7 @@ end
 // ============================================
 
 func server_poll(server: ref HttpServer) -> RequestEvent
-    // Evento padrão (None)
+    // Evento padr?o (None)
     let empty_headers: string[64]
     let no_event: RequestEvent = RequestEvent("NONE", -1, HttpRequest("GET", "/", "", "HTTP/1.1", empty_headers, 0, b""))
     
@@ -84,15 +86,18 @@ func server_poll(server: ref HttpServer) -> RequestEvent
     
     let i: int = 0
     while i < 64 do
-        if server.client_sockets[i].open then
-            if input_count < 64 then
-                inputs[input_count] = server.client_sockets[i]
-                input_count = input_count + 1
+        if server.client_sockets[i] != null then
+            if server.client_sockets[i].open then
+                if input_count < 64 then
+                    inputs[input_count] = server.client_sockets[i]
+                    input_count = input_count + 1
+                end
             end
         end
         i = i + 1
     end
     
+    // 2. Poll (timeout 50ms)
     // 2. Poll (timeout 50ms)
     let res: SelectResult = poll(inputs, outputs, errors, 50)
     
@@ -101,7 +106,7 @@ func server_poll(server: ref HttpServer) -> RequestEvent
         while j < res.read_count do
             let active_sock: Socket = res.read[j]
             
-            // Verifica se é o listener
+            // Verifica se ? o listener
             let is_listener: bool = false
             if active_sock == server.server_socket then
                 is_listener = true
@@ -117,7 +122,17 @@ func server_poll(server: ref HttpServer) -> RequestEvent
                     let added: bool = false
                     let k: int = 0
                     while k < 64 do
-                        if !server.client_sockets[k].open then
+                        // Find empty slot (null or closed)
+                        let slot_free: bool = false
+                        if server.client_sockets[k] == null then
+                            slot_free = true
+                        else
+                            if !server.client_sockets[k].open then
+                                slot_free = true
+                            end
+                        end
+                        
+                        if slot_free then
                             server.client_sockets[k] = client
                             added = true
                             break
@@ -172,13 +187,17 @@ end
 func server_send(server: ref HttpServer, client_index: int, resp: HttpResponse) -> void
     if (client_index >= 0) & (client_index < 64) then
         let sock: Socket = server.client_sockets[client_index]
-        if sock.open then
-            let resp_bytes: bytes = build_response(resp.status_code, resp.status_text, resp.headers, resp.header_count, resp.body)
-            send(sock, resp_bytes)
-            
-            // Close after send (HTTP 1.0 style for MVP)
-            net_close(sock)
-            server.client_sockets[client_index] = Socket(-1, "", 0, false)
+        if sock != null then
+            if sock.open then
+                let resp_bytes: bytes = build_response(resp.status_code, resp.status_text, resp.headers, resp.header_count, resp.body)
+                send(sock, resp_bytes)
+                
+                // Close after send (HTTP 1.0 style for MVP)
+                net_close(sock)
+                // server.client_sockets[client_index] = Socket(-1, "", 0, false)
+                // Can set to null instead? Or bad socket.
+                server.client_sockets[client_index] = null
+            end
         end
     end
 end
@@ -217,33 +236,33 @@ end
 // ============================================
 
 func serve_file(filepath: string) -> HttpResponse
-    // Verifica existência
-    // Assumindo io.exists disponível (se não for, open falha)
+    // Verifica exist?ncia
+    // Assumindo io.exists dispon?vel (se n?o for, open falha)
     // Vamos tentar abrir direto
     
-    let f: File = io.open(filepath, "r")
+    let f: File = open(filepath, "r")
     // Como verificar se abriu? File tem 'open' ou similar?
-    // io.nx geralmente retorna File struct. Se falha, pode dar erro ou retornar file inválido.
+    // io.nx geralmente retorna File struct. Se falha, pode dar erro ou retornar file inv?lido.
     // Vamos assumir que temos como checar ou usar try-catch se Noxy tivesse... 
     // Spec do IO diz que open retorna File. File tem handle?
-    // Vamos assumir que open lança erro ou retorna algo checável.
+    // Vamos assumir que open lan?a erro ou retorna algo chec?vel.
     // Baseado na spec anterior do IO: File tem descriptor?
     
-    // Simplificação: vamos ler. Se der erro de leitura, return 500/404.
+    // Simplifica??o: vamos ler. Se der erro de leitura, return 500/404.
     // io.read retorna IOResult?
     // io.nx original: 
     // func read(f: File) -> IOResult
     
-    let res: IOResult = io.read(f)
-    io.close(f)
+    let res: IOResult = read(f)
+    close(f)
     
     if !res.ok then
         return response_error(404, "File not found or unreadable")
     end
     
     let content: string = res.data
-    // IOResult.data é string. Precisamos de bytes para o body.
-    // Arquivos binários (imagens) lidos como string podem corromper se Noxy strings forem utf-8 strict.
+    // IOResult.data ? string. Precisamos de bytes para o body.
+    // Arquivos bin?rios (imagens) lidos como string podem corromper se Noxy strings forem utf-8 strict.
     // O io.nx usa 'read_text' ou 'read_binary'?
     // stdlib/io.nx mostrava 'io_read' retornando string.
     // Se quisermos servir imagens, precisaria ser bytes.
@@ -251,7 +270,7 @@ func serve_file(filepath: string) -> HttpResponse
     
     let body: bytes = to_bytes(content)
     
-    // Detect Mime Type (simplificado por extensão)
+    // Detect Mime Type (simplificado por extens?o)
     let mime: string = "application/octet-stream"
     if contains(filepath, ".html") then mime = "text/html" end
     if contains(filepath, ".css") then mime = "text/css" end
@@ -267,7 +286,7 @@ func serve_file(filepath: string) -> HttpResponse
     return HttpResponse("HTTP/1.1", 200, "OK", headers, 2, body)
 end
 
-// Helper contains (usa strings.contains do módulo strings)
+// Helper contains (usa strings.contains do m?dulo strings)
 func contains(haystack: string, needle: string) -> bool
     return strings_contains(haystack, needle)
 end

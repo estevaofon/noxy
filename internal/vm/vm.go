@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,9 +59,11 @@ type VM struct {
 	nextStmtID  int
 
 	// Net Management
-	netListeners map[int]net.Listener
-	netConns     map[int]net.Conn
-	nextNetID    int
+	netListeners     map[int]net.Listener
+	netConns         map[int]net.Conn
+	netBufferedData  map[int][]byte   // For peeked data during select
+	netBufferedConns map[int]net.Conn // For peeked accepts
+	nextNetID        int
 }
 
 type VMConfig struct {
@@ -73,19 +76,21 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	vm := &VM{
-		globals:      make(map[string]value.Value),
-		modules:      make(map[string]value.Value),
-		Config:       cfg,
-		openFiles:    make(map[int64]*os.File),
-		nextFD:       1,
-		dbHandles:    make(map[int]*sql.DB),
-		stmtHandles:  make(map[int]*sql.Stmt),
-		stmtParams:   make(map[int]map[int]interface{}),
-		nextDbID:     1,
-		nextStmtID:   1,
-		netListeners: make(map[int]net.Listener),
-		netConns:     make(map[int]net.Conn),
-		nextNetID:    1,
+		globals:          make(map[string]value.Value),
+		modules:          make(map[string]value.Value),
+		Config:           cfg,
+		openFiles:        make(map[int64]*os.File),
+		nextFD:           1,
+		dbHandles:        make(map[int]*sql.DB),
+		stmtHandles:      make(map[int]*sql.Stmt),
+		stmtParams:       make(map[int]map[int]interface{}),
+		nextDbID:         1,
+		nextStmtID:       1,
+		netListeners:     make(map[int]net.Listener),
+		netConns:         make(map[int]net.Conn),
+		netBufferedData:  make(map[int][]byte),
+		netBufferedConns: make(map[int]net.Conn),
+		nextNetID:        1,
 	}
 	// Define 'print' native
 	vm.defineNative("print", func(args []value.Value) value.Value {
@@ -101,7 +106,53 @@ func NewWithConfig(cfg VMConfig) *VM {
 			// Should return error or empty?
 			return value.NewString("")
 		}
+		if args[0].Type == value.VAL_BYTES {
+			return value.NewString(args[0].Obj.(string))
+		}
 		return value.NewString(args[0].String())
+	})
+	vm.defineNative("to_int", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewInt(0)
+		}
+		v := args[0]
+		if v.Type == value.VAL_INT {
+			return value.NewInt(v.AsInt)
+		}
+		if v.Type == value.VAL_FLOAT {
+			return value.NewInt(int64(v.AsFloat))
+		}
+		if v.Type == value.VAL_OBJ {
+			if s, ok := v.Obj.(string); ok {
+				if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+					return value.NewInt(i)
+				}
+				if f, err := strconv.ParseFloat(s, 64); err == nil {
+					return value.NewInt(int64(f))
+				}
+			}
+		}
+		return value.NewInt(0)
+	})
+	vm.defineNative("to_float", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewFloat(0.0)
+		}
+		v := args[0]
+		if v.Type == value.VAL_FLOAT {
+			return value.NewFloat(v.AsFloat)
+		}
+		if v.Type == value.VAL_INT {
+			return value.NewFloat(float64(v.AsInt))
+		}
+		if v.Type == value.VAL_OBJ {
+			if s, ok := v.Obj.(string); ok {
+				if f, err := strconv.ParseFloat(s, 64); err == nil {
+					return value.NewFloat(f)
+				}
+			}
+		}
+		return value.NewFloat(0.0)
 	})
 	vm.defineNative("time_now_ms", func(args []value.Value) value.Value {
 		return value.NewInt(time.Now().UnixMilli())
@@ -781,23 +832,74 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 	vm.defineNative("strings_join_count", func(args []value.Value) value.Value {
-		// args: parts (array), sep, count (ignored/redundant for logic but passed)
-		if len(args) < 2 {
+		if len(args) < 3 {
 			return value.NewString("")
 		}
 		arrVal := args[0]
 		sep := args[1].String()
+		count := int(args[2].AsInt)
 
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				var parts []string
-				for _, el := range arr.Elements {
-					parts = append(parts, el.String())
+				max := len(arr.Elements)
+				if count < max {
+					max = count
+				}
+				for i := 0; i < max; i++ {
+					parts = append(parts, arr.Elements[i].String())
 				}
 				return value.NewString(strings.Join(parts, sep))
 			}
 		}
 		return value.NewString("")
+	})
+	vm.defineNative("ord", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewInt(0)
+		}
+		s := args[0].String()
+		if len(s) == 0 {
+			return value.NewInt(0)
+		}
+		return value.NewInt(int64(s[0]))
+	})
+	vm.defineNative("strings_contains", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		s := args[0].String()
+		substr := args[1].String()
+		return value.NewBool(strings.Contains(s, substr))
+	})
+	vm.defineNative("strings_replace", func(args []value.Value) value.Value {
+		if len(args) < 3 {
+			return value.NewString("")
+		}
+		s := args[0].String()
+		old := args[1].String()
+		new := args[2].String()
+		return value.NewString(strings.ReplaceAll(s, old, new))
+	})
+	vm.defineNative("strings_substring", func(args []value.Value) value.Value {
+		if len(args) < 3 {
+			return value.NewString("")
+		}
+		s := args[0].String()
+		start := int(args[1].AsInt)
+		end := int(args[2].AsInt)
+
+		if start < 0 {
+			start = 0
+		}
+		if end > len(s) {
+			end = len(s)
+		}
+		if start >= end {
+			return value.NewString("")
+		}
+
+		return value.NewString(s[start:end])
 	})
 	vm.defineNative("strings_is_empty", func(args []value.Value) value.Value {
 		if len(args) < 1 {
@@ -1041,15 +1143,20 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewInt(0)
 		}
 		arg := args[0]
-		if arg.Type == value.VAL_OBJ {
-			if arr, ok := arg.Obj.(*value.ObjArray); ok {
-				return value.NewInt(int64(len(arr.Elements)))
-			}
+		if arg.Type == value.VAL_BYTES {
 			if str, ok := arg.Obj.(string); ok {
 				return value.NewInt(int64(len(str)))
 			}
-			if m, ok := arg.Obj.(*value.ObjMap); ok {
-				return value.NewInt(int64(len(m.Data)))
+		}
+		if arg.Type == value.VAL_OBJ {
+			if str, ok := arg.Obj.(string); ok {
+				return value.NewInt(int64(len(str)))
+			}
+			if arr, ok := arg.Obj.(*value.ObjArray); ok {
+				return value.NewInt(int64(len(arr.Elements)))
+			}
+			if mp, ok := arg.Obj.(*value.ObjMap); ok {
+				return value.NewInt(int64(len(mp.Data)))
 			}
 		}
 		return value.NewInt(0)
@@ -1125,6 +1232,65 @@ func NewWithConfig(cfg VMConfig) *VM {
 				val := arr.Elements[len(arr.Elements)-1]
 				arr.Elements = arr.Elements[:len(arr.Elements)-1]
 				return val
+			}
+		}
+		return value.NewNull()
+	})
+	vm.defineNative("slice", func(args []value.Value) value.Value {
+		if len(args) < 3 {
+			return value.NewNull()
+		}
+		seq := args[0]
+		start := int(args[1].AsInt)
+		end := int(args[2].AsInt)
+
+		// Clamp logic helper
+		clamp := func(idx, length int) int {
+			if idx < 0 {
+				return 0
+			}
+			if idx > length {
+				return length
+			}
+			return idx
+		}
+
+		switch seq.Type {
+		case value.VAL_OBJ:
+			if str, ok := seq.Obj.(string); ok {
+				runes := []rune(str)
+				start = clamp(start, len(runes))
+				end = clamp(end, len(runes))
+				if start > end {
+					return value.NewString("")
+				}
+				return value.NewString(string(runes[start:end]))
+			}
+			if arr, ok := seq.Obj.(*value.ObjArray); ok {
+				start = clamp(start, len(arr.Elements))
+				end = clamp(end, len(arr.Elements))
+				if start > end {
+					return value.NewArray(nil)
+				}
+
+				// Deep copy? Or slice? Go slices reference underlying array.
+				// For immutability or safety in Noxy, usually we might want copy if Noxy arrays are mutable refs.
+				// But slicing usually shares backing store in languages like Go/Python? Python slices are copies.
+				// Go slices share.
+				// Let's create a new array with copied elements to be safe/consistent with Python-style likely expected.
+				newElems := make([]value.Value, end-start)
+				copy(newElems, arr.Elements[start:end])
+				return value.NewArray(newElems)
+			}
+		case value.VAL_BYTES:
+			if str, ok := seq.Obj.(string); ok {
+				// Bytes stored as string
+				start = clamp(start, len(str))
+				end = clamp(end, len(str))
+				if start > end {
+					return value.NewBytes("")
+				}
+				return value.NewBytes(str[start:end])
 			}
 		}
 		return value.NewNull()
@@ -1258,7 +1424,17 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewMapWithData(socketFields)
 		}
 
-		conn, err := listener.Accept()
+		// Check buffered connection from select
+		var conn net.Conn
+		var err error
+
+		if bufferedConn, ok := vm.netBufferedConns[fd]; ok {
+			conn = bufferedConn
+			delete(vm.netBufferedConns, fd)
+		} else {
+			conn, err = listener.Accept()
+		}
+
 		if err != nil {
 			socketFields := map[string]value.Value{
 				"fd":   value.NewInt(-1),
@@ -1338,16 +1514,48 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewMapWithData(resultFields)
 		}
 
+		var n int
 		buf := make([]byte, size)
-		n, err := conn.Read(buf)
-		if err != nil {
-			resultFields := map[string]value.Value{
-				"ok":    value.NewBool(false),
-				"data":  value.NewBytes(""),
-				"count": value.NewInt(0),
-				"error": value.NewString(err.Error()),
+
+		// Check buffered data from select
+		if buffered, ok := vm.netBufferedData[fd]; ok {
+			// Copy buffered data
+			copy(buf, buffered)
+			n = len(buffered)
+			delete(vm.netBufferedData, fd)
+		}
+
+		// Try to read more if space available
+		if n < size {
+			// Set short deadline to avoid blocking event loop
+			conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+			n2, err2 := conn.Read(buf[n:])
+			if n2 > 0 {
+				n += n2
 			}
-			return value.NewMapWithData(resultFields)
+			// Reset deadline
+			conn.SetReadDeadline(time.Time{})
+
+			// Ignore timeout errors if we have at least some data
+			if err2 != nil {
+				// If we have data, we return it. If we have no data (n==0), we might return error.
+				// But buffer might have given us data.
+				// If err2 is EOF, we still want to return data we have.
+				if n == 0 {
+					// Only return error if we really got nothing
+					if err2 != nil && n2 == 0 {
+						// If it's just timeout and n=0? Logic above handles buffer.
+						// If n=0 and read failed, return failure.
+						resultFields := map[string]value.Value{
+							"ok":    value.NewBool(false),
+							"data":  value.NewBytes(""),
+							"count": value.NewInt(0),
+							"error": value.NewString(err2.Error()),
+						}
+						return value.NewMapWithData(resultFields)
+					}
+				}
+			}
 		}
 
 		resultFields := map[string]value.Value{
@@ -1435,6 +1643,121 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
+	vm.defineNative("net_select", func(args []value.Value) value.Value {
+		// args: read, write (ignored), err (ignored), timeout
+		if len(args) < 4 {
+			return value.NewNull() // Or error map
+		}
+
+		timeoutMs := int(args[3].AsInt)
+		// Minimum 1ms to allow polling
+		if timeoutMs < 1 {
+			timeoutMs = 1
+		}
+
+		// Prepare Result Data
+		readyRead := make([]value.Value, 0)
+
+		// Parse Read Set
+		readArrVal := args[0]
+		if readArrVal.Type == value.VAL_OBJ {
+			if arr, ok := readArrVal.Obj.(*value.ObjArray); ok {
+				for _, el := range arr.Elements {
+					if el.Type == value.VAL_OBJ { // Check if socket (Map or Instance)
+						// Extract FD
+						var fd int64 = -1
+
+						if m, ok := el.Obj.(*value.ObjMap); ok {
+							if f, ok := m.Data["fd"]; ok {
+								fd = f.AsInt
+							}
+						} else if inst, ok := el.Obj.(*value.ObjInstance); ok {
+							if f, ok := inst.Fields["fd"]; ok {
+								fd = f.AsInt
+							}
+						}
+
+						if fd != -1 {
+							isReady := false
+							id := int(fd)
+
+							// 1. Check buffers first
+							if _, ok := vm.netBufferedConns[id]; ok {
+								isReady = true
+							} else if _, ok := vm.netBufferedData[id]; ok {
+								isReady = true
+							} else {
+								// 2. Poll
+								if l, ok := vm.netListeners[id]; ok {
+									// Set short deadline to peek
+									// Cast to TCPListener to set deadline
+									// net.Listener interface doesn't have SetDeadline, specific implementations do.
+									// But Accept() blocks.
+									// We can only use SetDeadline if we have access to underlying FD or type assertion.
+									// Assuming TCPListener
+									if tcpL, ok := l.(*net.TCPListener); ok {
+										tcpL.SetDeadline(time.Now().Add(time.Millisecond * time.Duration(timeoutMs)))
+										conn, err := l.Accept()
+										if err == nil {
+											isReady = true
+											vm.netBufferedConns[id] = conn
+										}
+										// Reset deadline?
+										tcpL.SetDeadline(time.Time{})
+									}
+								} else if conn, ok := vm.netConns[id]; ok {
+									conn.SetReadDeadline(time.Now().Add(time.Millisecond * time.Duration(timeoutMs)))
+									buf := make([]byte, 1) // Peek 1 byte
+									n, err := conn.Read(buf)
+									if err == nil && n > 0 {
+										isReady = true
+										// Buffer the data
+										vm.netBufferedData[id] = buf[:n]
+									}
+									// Reset deadline
+									conn.SetReadDeadline(time.Time{})
+								}
+							}
+
+							if isReady {
+								readyRead = append(readyRead, el)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Construct SelectResult Map
+		// struct SelectResult { read: Socket[64], read_count: int, ... }
+
+		// Fill read array up to 64
+		resReadArr := make([]value.Value, 64)
+		for i := 0; i < 64; i++ {
+			if i < len(readyRead) {
+				resReadArr[i] = readyRead[i]
+			} else {
+				resReadArr[i] = value.NewNull()
+			}
+		}
+
+		// Empties for others
+		emptyArr := make([]value.Value, 64)
+		for i := 0; i < 64; i++ {
+			emptyArr[i] = value.NewNull()
+		}
+
+		resFields := map[string]value.Value{
+			"read":        value.NewArray(resReadArr),
+			"read_count":  value.NewInt(int64(len(readyRead))),
+			"write":       value.NewArray(emptyArr),
+			"write_count": value.NewInt(0),
+			"error":       value.NewArray(emptyArr),
+			"error_count": value.NewInt(0),
+		}
+		return value.NewMapWithData(resFields)
+	})
+
 	// SQLite Native Functions
 	vm.defineNative("sqlite_open", func(args []value.Value) value.Value {
 		if len(args) != 2 {
@@ -1510,11 +1833,14 @@ func NewWithConfig(cfg VMConfig) *VM {
 				resInst.Fields["ok"] = value.NewBool(false)
 				resInst.Fields["error"] = value.NewString(err.Error())
 				resInst.Fields["rows_affected"] = value.NewInt(0)
+				resInst.Fields["last_insert_id"] = value.NewInt(0)
 			} else {
 				rowsAffected, _ := result.RowsAffected()
+				lastId, _ := result.LastInsertId()
 				resInst.Fields["ok"] = value.NewBool(true)
 				resInst.Fields["error"] = value.NewString("")
 				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
+				resInst.Fields["last_insert_id"] = value.NewInt(lastId)
 			}
 			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 		}
@@ -1523,6 +1849,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		resInst.Fields["ok"] = value.NewBool(false)
 		resInst.Fields["error"] = value.NewString("invalid database handle")
 		resInst.Fields["rows_affected"] = value.NewInt(0)
+		resInst.Fields["last_insert_id"] = value.NewInt(0)
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
@@ -1589,13 +1916,18 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	vm.defineNative("sqlite_step_exec", func(args []value.Value) value.Value {
-		if len(args) < 1 {
+		if len(args) < 2 {
 			return value.NewNull()
 		}
 		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
 		if !ok {
 			return value.NewNull()
 		}
+		resTmplInst, ok := args[1].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct := resTmplInst.Struct
 
 		handle := int(stmtInst.Fields["handle"].AsInt)
 		if stmt, ok := vm.stmtHandles[handle]; ok {
@@ -1612,9 +1944,31 @@ func NewWithConfig(cfg VMConfig) *VM {
 					argsList[k-1] = v
 				}
 			}
-			stmt.Exec(argsList...)
+			result, err := stmt.Exec(argsList...)
+
+			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+			if err != nil {
+				resInst.Fields["ok"] = value.NewBool(false)
+				resInst.Fields["error"] = value.NewString(err.Error())
+				resInst.Fields["rows_affected"] = value.NewInt(0)
+				resInst.Fields["last_insert_id"] = value.NewInt(0)
+			} else {
+				rowsAffected, _ := result.RowsAffected()
+				lastId, _ := result.LastInsertId()
+				resInst.Fields["ok"] = value.NewBool(true)
+				resInst.Fields["error"] = value.NewString("")
+				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
+				resInst.Fields["last_insert_id"] = value.NewInt(lastId)
+			}
+			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 		}
-		return value.NewNull()
+
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["ok"] = value.NewBool(false)
+		resInst.Fields["error"] = value.NewString("invalid statement handle")
+		resInst.Fields["rows_affected"] = value.NewInt(0)
+		resInst.Fields["last_insert_id"] = value.NewInt(0)
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
 	vm.defineNative("sqlite_reset", func(args []value.Value) value.Value {

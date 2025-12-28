@@ -1,6 +1,6 @@
 // stdlib/http_parser.nx - Parser HTTP/1.1
 
-use strings
+use strings select *
 
 // ============================================
 // Estruturas de Dados
@@ -12,8 +12,8 @@ struct HttpRequest
     query: string,            // "id=123&name=test" (sem o '?')
     version: string,          // "HTTP/1.1"
     headers: string[64],      // Array de headers "Name: Value"
-    header_count: int,        // Número de headers válidos
-    body: bytes               // Corpo da requisição
+    header_count: int,        // Numero de headers validos
+    body: bytes               // Corpo da requisicao
 end
 
 struct HttpResponse
@@ -70,13 +70,13 @@ func get_status_text(code: int) -> string
     return "Unknown"
 end
 
-// Encontra próxima ocorrência de \r\n (13, 10 bytes)
-// Retorna -1 se não encontrar
+// Encontra proxima ocorrencia de \r\n (13, 10 bytes)
+// Retorna -1 se nao encontrar
 func find_crlf(data: bytes, start: int, len: int) -> int
     let i: int = start
     while i < len - 1 do
         // Checando manualmente os bytes para CR (13) e LF (10)
-        // Como o tipo é bytes, acesso por índice retorna int (byte value)
+        // Como o tipo e bytes, acesso por indice retorna int (byte value)
         if data[i] == 13 then
             if data[i+1] == 10 then
                 return i
@@ -87,8 +87,8 @@ func find_crlf(data: bytes, start: int, len: int) -> int
     return -1
 end
 
-// Helper para converter sub-sequência de bytes para string
-// Assumindo to_str converte bytes inteiros, então vamos fatiar
+// Helper para converter sub-sequencia de bytes para string
+// Assumindo to_str converte bytes inteiros, entao vamos fatiar
 func bytes_to_string(data: bytes, start: int, end_idx: int) -> string
     // slice(bytes, start, end) -> bytes
     // to_str(bytes) -> string (decodifica)
@@ -101,13 +101,13 @@ func string_to_bytes(s: string) -> bytes
     return to_bytes(s)
 end
 
-// Helper para trim de espaços (simplificado)
+// Helper para trim de espacos (simplificado)
 func trim(s: string) -> string
-    if strlen(s) == 0 then return "" end
+    if length(s) == 0 then return "" end
     
-    // Simplificação: apenas retorna a string por enquanto
-    // Noxy não tem suporte fácil a checar isspace char a char ainda
-    // Se necessário, implementar checagem de ' ' e '\t'
+    // Simplificacao: apenas retorna a string por enquanto
+    // Noxy nao tem suporte facil a checar isspace char a char ainda
+    // Se necessario, implementar checagem de ' ' e '\t'
     return s
 end
 
@@ -118,29 +118,33 @@ end
 func parse_url(url: string) -> HttpUrl
     let res: HttpUrl = HttpUrl("http", "", 80, "/", "", "", false)
     
-    if strlen(url) == 0 then return res end
+    if length(url) == 0 then return res end
     
     let current: string = url
     
     // 1. Scheme
-    let split_scheme: strings.SplitResult = strings.split(current, "://")
+    let split_scheme: SplitResult = split(current, "://")
     if split_scheme.count > 1 then
         res.scheme = split_scheme.parts[0]
         current = split_scheme.parts[1]
     end
     
-    // Define porta padrão baseada no scheme
-    if res.scheme == "https" then res.port = 443 else res.port = 80 end
+    // Define porta padrao baseada no scheme
+    if res.scheme == "https" then
+        res.port = 443
+    else
+        res.port = 80
+    end
     
     // 2. Fragment (#)
-    let split_frag: strings.SplitResult = strings.split(current, "#")
+    let split_frag: SplitResult = split(current, "#")
     if split_frag.count > 1 then
         res.fragment = split_frag.parts[1]
         current = split_frag.parts[0]
     end
     
     // 3. Query (?)
-    let split_query: strings.SplitResult = strings.split(current, "?")
+    let split_query: SplitResult = split(current, "?")
     if split_query.count > 1 then
         res.query = split_query.parts[1]
         current = split_query.parts[0]
@@ -150,7 +154,7 @@ func parse_url(url: string) -> HttpUrl
     // A string restante em 'current' tem formato "host:port/path" ou "host/path"
     
     // Separa no primeiro '/'
-    let split_path: strings.SplitResult = strings.split(current, "/")
+    let split_path: SplitResult = split(current, "/")
     let authority: string = split_path.parts[0]
     
     if split_path.count > 1 then
@@ -160,7 +164,7 @@ func parse_url(url: string) -> HttpUrl
     end
     
     // 5. Host e Port (Authority)
-    let split_port: strings.SplitResult = strings.split(authority, ":")
+    let split_port: SplitResult = split(authority, ":")
     if split_port.count > 1 then
         res.host = split_port.parts[0]
         res.port = to_int(split_port.parts[1])
@@ -178,7 +182,7 @@ end
 
 func parse_headers(raw_str: string) -> string[64]
     let headers: string[64]
-    // Não temos split_lines fácil, vamos processar linha a linha manualmente ou assumir que já temos vetor?
+    // Nao temos split_lines facil, vamos processar linha a linha manualmente ou assumir que ja temos vetor?
     // A funcao parse_request vai processar linha a linha a partir dos bytes.
     return headers
 end
@@ -201,9 +205,9 @@ func parse_request(raw_data: bytes, data_len: int) -> HttpRequest
         let crlf_pos: int = find_crlf(raw_data, cursor, data_len)
         
         if crlf_pos == -1 then
-            // Sem mais CRLF, o resto é body ou fim
+            // Sem mais CRLF, o resto e body ou fim
             if !is_body then
-                // Se ainda estávamos nos headers, algo errado ou fim abrupto
+                // Se ainda estavamos nos headers, algo errado ou fim abrupto
                 // Assumimos resto como body se tiver algo
                 if cursor < data_len then
                    req.body = slice(raw_data, cursor, data_len) 
@@ -212,14 +216,14 @@ func parse_request(raw_data: bytes, data_len: int) -> HttpRequest
             break // Sai do loop
         end
         
-        // Temos uma linha de cursor até crlf_pos
+        // Temos uma linha de cursor ate crlf_pos
         
         // Verifica linha vazia (fim dos headers)
         if crlf_pos == cursor then
             is_body = true
             // Pula o CRLF
             cursor = crlf_pos + 2
-            // O resto é body
+            // O resto e body
             if cursor < data_len then
                 req.body = slice(raw_data, cursor, data_len)
             end
@@ -231,19 +235,27 @@ func parse_request(raw_data: bytes, data_len: int) -> HttpRequest
         
         if line_count == 0 then
             // Request Line: GET /path HTTP/1.1
-            let split1: strings.SplitResult = strings.split(line_str, " ")
+            let split1: SplitResult = split(line_str, " ")
             req.method = split1.parts[0]
             
             let remainder: string = ""
             if split1.count > 1 then remainder = split1.parts[1] end
-            let split2: strings.SplitResult = strings.split(remainder, " ")
+            let split2: SplitResult = split(remainder, " ")
             let full_path: string = split2.parts[0]
-            if split2.count > 1 then req.version = split2.parts[1] else req.version = "HTTP/1.1" end
+            if split2.count > 1 then
+                req.version = split2.parts[1]
+            else
+                req.version = "HTTP/1.1"
+            end
             
             // Separa path e query
-            let split_q: strings.SplitResult = strings.split(full_path, "?")
+            let split_q: SplitResult = split(full_path, "?")
             req.path = split_q.parts[0]
-            if split_q.count > 1 then req.query = split_q.parts[1] else req.query = "" end
+            if split_q.count > 1 then
+                req.query = split_q.parts[1]
+            else
+                req.query = ""
+            end
             
         else
             // Header: Name: Value
@@ -255,7 +267,7 @@ func parse_request(raw_data: bytes, data_len: int) -> HttpRequest
         end
         
         line_count = line_count + 1
-        cursor = crlf_pos + 2 // Avança após \r\n
+        cursor = crlf_pos + 2 // Avanca apos \r\n
     end
     
     return req
@@ -294,16 +306,20 @@ func parse_response(raw_data: bytes, data_len: int) -> HttpResponse
         
         if line_count == 0 then
             // Status Line: HTTP/1.1 200 OK
-            let split1: strings.SplitResult = strings.split(line_str, " ")
+            let split1: SplitResult = split(line_str, " ")
             resp.version = split1.parts[0]
             
             let remainder: string = ""
             if split1.count > 1 then remainder = split1.parts[1] end
-            let split2: strings.SplitResult = strings.split(remainder, " ")
+            let split2: SplitResult = split(remainder, " ")
             
-            // O código pode não ter texto depois
+            // O codigo pode nao ter texto depois
             resp.status_code = to_int(split2.parts[0])
-            if split2.count > 1 then resp.status_text = split2.parts[1] else resp.status_text = "" end
+            if split2.count > 1 then
+                resp.status_text = split2.parts[1]
+            else
+                resp.status_text = ""
+            end
             
         else
             if resp.header_count < 64 then
@@ -373,14 +389,14 @@ func get_header(req: ref HttpRequest, name: string) -> string
         
         let header_line: string = req.headers[i]
         
-        // Verifica se começa com name:
-        // Como não temos starts_with ainda ou lower(), vamos fazer um check manual básico
+        // Verifica se comeca com name:
+        // Como nao temos starts_with ainda ou lower(), vamos fazer um check manual basico
         // ou usar substring
-        if strlen(header_line) > strlen(search) then
-            let prefix: string = substring(header_line, 0, strlen(search))
+        if length(header_line) > length(search) then
+            let prefix: string = substring(header_line, 0, length(search))
             // Se for igual (case sensitive aqui :/) 
             if prefix == search then
-                let split_h: strings.SplitResult = strings.split(header_line, ":")
+                let split_h: SplitResult = split(header_line, ":")
                 if split_h.count > 1 then return trim(split_h.parts[1]) end
             end
         end

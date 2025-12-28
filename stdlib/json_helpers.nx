@@ -1,20 +1,20 @@
 // ============================================
 // NOXY STDLIB - JSON Helpers
 // ============================================
-// Funções utilitárias para trabalhar com JSON parseado
+// Fun??es utilit?rias para trabalhar com JSON parseado
 
 use json_parser select *
 
 // Constantes de tipo JSON
-global TYPE_NULL: int = 0
-global TYPE_BOOL: int = 1
-global TYPE_NUMBER: int = 2
-global TYPE_STRING: int = 3
-global TYPE_ARRAY: int = 4
-global TYPE_OBJECT: int = 5
+let TYPE_NULL: int = 0
+let TYPE_BOOL: int = 1
+let TYPE_NUMBER: int = 2
+let TYPE_STRING: int = 3
+let TYPE_ARRAY: int = 4
+let TYPE_OBJECT: int = 5
 
 // ============================================
-// Funções de Extração de Dados
+// Fun??es de Extra??o de Dados
 // ============================================
 
 // Extrai valor string de uma chave

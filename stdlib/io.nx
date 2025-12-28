@@ -19,7 +19,7 @@ end
 
 
 
-// Wrappers para funções built-in (para uso com 'select *' como 'open(...)')
+// Wrappers para fun??es built-in (para uso com 'select *' como 'open(...)')
 
 func open(path: string, mode: string) -> File
     return io_open(path, mode, File)

@@ -629,10 +629,22 @@ func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
 			c.emitByte(byte(chunk.OP_NULL))
 		}
 	case *ast.ArrayType:
-		// Empty array
-		c.emitByte(byte(chunk.OP_ARRAY))
-		c.emitByte(0)
-		c.emitByte(0)
+		if typ.Size > 0 {
+			// Initialize 'Size' elements with default value
+			for i := 0; i < typ.Size; i++ {
+				if err := c.emitDefaultInit(typ.ElementType); err != nil {
+					return err
+				}
+			}
+			c.emitByte(byte(chunk.OP_ARRAY))
+			c.emitByte(byte((typ.Size >> 8) & 0xff))
+			c.emitByte(byte(typ.Size & 0xff))
+		} else {
+			// Empty array (dynamic)
+			c.emitByte(byte(chunk.OP_ARRAY))
+			c.emitByte(0)
+			c.emitByte(0)
+		}
 	case *ast.MapType:
 		c.emitByte(byte(chunk.OP_MAP))
 		c.emitByte(0)

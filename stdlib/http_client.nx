@@ -9,7 +9,7 @@ use http_parser select *
 
 struct HttpClient
     timeout_ms: int,          // Timeout em milissegundos
-    max_redirects: int,       // Máximo de redirects
+    max_redirects: int,       // M?ximo de redirects
     user_agent: string,       // User-Agent header
     follow_redirects: bool    // Seguir 3xx automaticamente
 end
@@ -31,8 +31,8 @@ func new_client() -> HttpClient
     return HttpClient(30000, 5, "Noxy-HTTP/1.0", true)
 end
 
-// Globais para simular "instância default" se necessário, 
-// mas funções get/post criam cliente temporário ou usam global?
+// Globais para simular "inst?ncia default" se necess?rio, 
+// mas fun??es get/post criam cliente tempor?rio ou usam global?
 // O spec sugere: get(url) -> ClientResponse. Internamente pode criar um client default.
 let default_client: HttpClient = new_client()
 
@@ -63,11 +63,11 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         return empty_res
     end
     
-    // 3. Preparar Headers automáticos
-    // Adiciona Host e User-Agent se não existirem
-    // Copia headers do usuário para um novo array (mutável)
-    // Devido à limitação de tamanho fixo e falta de métodos de array dinâmico,
-    // vamos usar uma estratégia simples: copiar e adicionar.
+    // 3. Preparar Headers autom?ticos
+    // Adiciona Host e User-Agent se n?o existirem
+    // Copia headers do usu?rio para um novo array (mut?vel)
+    // Devido ? limita??o de tamanho fixo e falta de m?todos de array din?mico,
+    // vamos usar uma estrat?gia simples: copiar e adicionar.
     
     let final_headers: string[64]
     let final_count: int = 0
@@ -82,13 +82,13 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         final_count = final_count + 1
         
         // Verifica headers existentes (busca simples stick)
-        // Isso é meio frágil sem lowercase, mas ok pro MVP
+        // Isso ? meio fr?gil sem lowercase, mas ok pro MVP
         // Ideal: usar helper starts_with_ignore_case
         k = k + 1
     end
     
     // Adiciona Host
-    // TODO: verificar se já existe
+    // TODO: verificar se j? existe
     if final_count < 64 then
         final_headers[final_count] = "Host: " + u.host
         final_count = final_count + 1
@@ -101,7 +101,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     end
     
     // Adiciona Content-Length se tiver body e metodo pede
-    // TODO: verificar se já existe
+    // TODO: verificar se j? existe
     if length(body) > 0 then
         if final_count < 64 then
             final_headers[final_count] = "Content-Length: " + to_str(length(body))
@@ -110,15 +110,15 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     end
     
     if method == "POST" | method == "PUT" | method == "PATCH" then
-        // Adiciona Content-Type default se não tiver?
-        // Vamos deixar pro usuário ou spec. Spec diz: post automágico application/json
-        // Mas aqui é a função genérica request()
+        // Adiciona Content-Type default se n?o tiver?
+        // Vamos deixar pro usu?rio ou spec. Spec diz: post autom?gico application/json
+        // Mas aqui ? a fun??o gen?rica request()
     end
     
     // 4. Build Request
     let req_bytes: bytes = build_request(method, u.path + "?" + u.query, final_headers, final_count, body)
-    // query precisa ser tratada: se vazia, não poe ?
-    // Correção: u.path já tem barra? Sim
+    // query precisa ser tratada: se vazia, n?o poe ?
+    // Corre??o: u.path j? tem barra? Sim
     // Se query tem algo: path + "?" + query
     // Mas parse_url retorna query sem '?'
     let full_path: string = u.path
@@ -126,7 +126,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         full_path = full_path + "?" + u.query
     end
     
-    // Reconstrói com path certo
+    // Reconstr?i com path certo
     req_bytes = build_request(method, full_path, final_headers, final_count, body)
     
     // 5. Enviar
@@ -150,7 +150,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
             loop_active = false
         else
             if result.count == 0 then
-                loop_active = false // Conexão fechada
+                loop_active = false // Conex?o fechada
             else
                 buffer = buffer + slice(result.data, 0, result.count)
                 total_received = total_received + result.count
