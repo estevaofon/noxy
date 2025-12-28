@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"noxy-vm/internal/compiler"
@@ -18,21 +19,29 @@ func main() {
 		}
 	}()
 
-	if len(os.Args) < 2 {
-		fmt.Printf("Usage: noxy <script.nx>\n")
+	// Parse flags
+	showDisassembly := flag.Bool("disassembly", false, "Show bytecode disassembly")
+	flag.Parse()
+
+	// Remaining args are positional
+	args := flag.Args()
+
+	if len(args) < 1 {
+		fmt.Printf("Usage: noxy [options] <script.nx>\n")
 		// Fallback to inline verification if no args
-		verify()
+		// verify() // Removing automatic verify on empty args to keep it clean, or keep it explicitly?
+		// Let's keep it consistent.
 		return
 	}
 
-	filename := os.Args[1]
+	filename := args[0]
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
 		fmt.Printf("Error reading file: %s\n", err)
 		return
 	}
 
-	runWithConfig(string(content), getDir(filename))
+	runWithConfig(string(content), getDir(filename), *showDisassembly)
 }
 
 func getDir(path string) string {
@@ -64,10 +73,10 @@ func verify() {
 	main()
 	`
 	fmt.Printf("Verifying with input:\n%s\n", input)
-	runWithConfig(input, ".")
+	runWithConfig(input, ".", true)
 }
 
-func runWithConfig(input string, rootPath string) {
+func runWithConfig(input string, rootPath string, showDisasm bool) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -87,10 +96,12 @@ func runWithConfig(input string, rootPath string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Disassembly:\n")
-	chunk.DisassembleAll("main")
+	if showDisasm {
+		fmt.Printf("Disassembly:\n")
+		chunk.DisassembleAll("main")
+		fmt.Printf("\nExecution:\n")
+	}
 
-	fmt.Printf("\nExecution:\n")
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Printf("Runtime error: %s\n", err)

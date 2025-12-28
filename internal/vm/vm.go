@@ -8,6 +8,7 @@ import (
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
+	"noxy-vm/internal/stdlib"
 	"noxy-vm/internal/value"
 	"os"
 	"os/exec"
@@ -2886,8 +2887,50 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 	if checkLocations(pathName+".nx") && !isDir {
 		// Found file
 	} else if checkLocations(pathName) && isDir {
-		// Found directory
+		// Found directory (on disk)
 	} else {
+		// Not found on disk, check embedded stdlib
+		// Stdlib is flat in embed.go usually? Or structure preserved?
+		// We moved stdlib/* to internal/stdlib.
+		// So internal/stdlib has *.nx files directly.
+		// Name would be "time" "io" etc.
+		// pathName for "time" is "time".
+		// embedded file is "time.nx".
+
+		// Check if it exists in embedded FS
+		embedPath := pathName + ".nx"
+		content, err := stdlib.FS.ReadFile(embedPath)
+		if err == nil {
+			// Found in embedded stdlib!
+			l := lexer.New(string(content))
+			p := parser.New(l)
+			prog := p.ParseProgram()
+			if len(p.Errors()) > 0 {
+				return value.NewNull(), fmt.Errorf("parse error in embedded module %s: %v", name, p.Errors())
+			}
+			c := compiler.New()
+			chunk, err := c.Compile(prog)
+			if err != nil {
+				return value.NewNull(), err
+			}
+			moduleGlobals := make(map[string]value.Value)
+			modFn := &value.ObjFunction{
+				Name:    name,
+				Arity:   0,
+				Chunk:   chunk,
+				Globals: moduleGlobals,
+			}
+			modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modFn}
+			vm.push(modVal)
+			vm.callValue(modVal, 0)
+			err = vm.run(vm.frameCount) // Run until return
+			if err != nil {
+				return value.NewNull(), err
+			}
+			vm.pop() // Pop result
+			return value.NewMapWithData(moduleGlobals), nil
+		}
+
 		return value.NewNull(), fmt.Errorf("module not found: %s", name)
 	}
 

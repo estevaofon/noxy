@@ -114,10 +114,10 @@ func handle_toggle_todo(body: bytes) -> HttpResponse
     let id: int = get_int(node, "id")
     
     let sql: string = "UPDATE todos SET completed = CASE WHEN completed = 0 THEN 1 ELSE 0 END WHERE id = ?"
-    let stmt: sqlite.Statement = prepare(db, sql)
-    bind_int(stmt, 1, id)
-    let res: sqlite.ExecResult = step_exec(stmt)
-    finalize(stmt)
+    let stmt: sqlite.Statement = sqlite.prepare(db, sql)
+    sqlite.bind_int(stmt, 1, id)
+    let res: sqlite.ExecResult = sqlite.step_exec(stmt)
+    sqlite.finalize(stmt)
     
     if !res.ok then
         return response_error(500, "DB Error")
@@ -140,10 +140,10 @@ func handle_delete_todo(body: bytes) -> HttpResponse
     
     let id: int = get_int(node, "id")
     
-    let stmt: sqlite.Statement = prepare(db, "DELETE FROM todos WHERE id = ?")
-    bind_int(stmt, 1, id)
-    let res: sqlite.ExecResult = step_exec(stmt)
-    finalize(stmt)
+    let stmt: sqlite.Statement = sqlite.prepare(db, "DELETE FROM todos WHERE id = ?")
+    sqlite.bind_int(stmt, 1, id)
+    let res: sqlite.ExecResult = sqlite.step_exec(stmt)
+    sqlite.finalize(stmt)
     
     if !res.ok then
         return response_error(500, "DB Error")
