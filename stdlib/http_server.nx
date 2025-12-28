@@ -93,8 +93,8 @@ func server_poll(server: ref HttpServer) -> RequestEvent
         i = i + 1
     end
     
-    // 2. Select (timeout 50ms)
-    let res: SelectResult = select(inputs, outputs, errors, 50)
+    // 2. Poll (timeout 50ms)
+    let res: SelectResult = poll(inputs, outputs, errors, 50)
     
     if res.read_count > 0 then
         let j: int = 0

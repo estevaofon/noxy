@@ -3,6 +3,7 @@ package vm
 import (
 	"database/sql"
 	"fmt"
+	"net"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
@@ -55,6 +56,11 @@ type VM struct {
 	stmtParams  map[int]map[int]interface{}
 	nextDbID    int
 	nextStmtID  int
+
+	// Net Management
+	netListeners map[int]net.Listener
+	netConns     map[int]net.Conn
+	nextNetID    int
 }
 
 type VMConfig struct {
@@ -67,16 +73,19 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	vm := &VM{
-		globals:     make(map[string]value.Value),
-		modules:     make(map[string]value.Value),
-		Config:      cfg,
-		openFiles:   make(map[int64]*os.File),
-		nextFD:      1,
-		dbHandles:   make(map[int]*sql.DB),
-		stmtHandles: make(map[int]*sql.Stmt),
-		stmtParams:  make(map[int]map[int]interface{}),
-		nextDbID:    1,
-		nextStmtID:  1,
+		globals:      make(map[string]value.Value),
+		modules:      make(map[string]value.Value),
+		Config:       cfg,
+		openFiles:    make(map[int64]*os.File),
+		nextFD:       1,
+		dbHandles:    make(map[int]*sql.DB),
+		stmtHandles:  make(map[int]*sql.Stmt),
+		stmtParams:   make(map[int]map[int]interface{}),
+		nextDbID:     1,
+		nextStmtID:   1,
+		netListeners: make(map[int]net.Listener),
+		netConns:     make(map[int]net.Conn),
+		nextNetID:    1,
 	}
 	// Define 'print' native
 	vm.defineNative("print", func(args []value.Value) value.Value {
@@ -1188,6 +1197,242 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewBytes(string([]byte{byte(arg.AsInt)}))
 		}
 		return value.NewBytes("")
+	})
+
+	// Net Native Functions
+	vm.defineNative("net_listen", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		host := args[0].String()
+		port := int(args[1].AsInt)
+		addr := fmt.Sprintf("%s:%d", host, port)
+
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			// Return Socket with open=false
+			socketFields := map[string]value.Value{
+				"fd":   value.NewInt(-1),
+				"addr": value.NewString(host),
+				"port": value.NewInt(int64(port)),
+				"open": value.NewBool(false),
+			}
+			return value.NewMapWithData(socketFields)
+		}
+
+		id := vm.nextNetID
+		vm.nextNetID++
+		vm.netListeners[id] = listener
+
+		socketFields := map[string]value.Value{
+			"fd":   value.NewInt(int64(id)),
+			"addr": value.NewString(host),
+			"port": value.NewInt(int64(port)),
+			"open": value.NewBool(true),
+		}
+		return value.NewMapWithData(socketFields)
+	})
+
+	vm.defineNative("net_accept", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		sockMap, ok := args[0].Obj.(*value.ObjMap)
+		if !ok {
+			return value.NewNull()
+		}
+		fdVal, exists := sockMap.Data["fd"]
+		if !exists {
+			return value.NewNull()
+		}
+		fd := int(fdVal.AsInt)
+
+		listener, ok := vm.netListeners[fd]
+		if !ok {
+			socketFields := map[string]value.Value{
+				"fd":   value.NewInt(-1),
+				"addr": value.NewString(""),
+				"port": value.NewInt(0),
+				"open": value.NewBool(false),
+			}
+			return value.NewMapWithData(socketFields)
+		}
+
+		conn, err := listener.Accept()
+		if err != nil {
+			socketFields := map[string]value.Value{
+				"fd":   value.NewInt(-1),
+				"addr": value.NewString(""),
+				"port": value.NewInt(0),
+				"open": value.NewBool(false),
+			}
+			return value.NewMapWithData(socketFields)
+		}
+
+		id := vm.nextNetID
+		vm.nextNetID++
+		vm.netConns[id] = conn
+
+		remoteAddr := conn.RemoteAddr().String()
+		socketFields := map[string]value.Value{
+			"fd":   value.NewInt(int64(id)),
+			"addr": value.NewString(remoteAddr),
+			"port": value.NewInt(0),
+			"open": value.NewBool(true),
+		}
+		return value.NewMapWithData(socketFields)
+	})
+
+	vm.defineNative("net_connect", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		host := args[0].String()
+		port := int(args[1].AsInt)
+		addr := fmt.Sprintf("%s:%d", host, port)
+
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			socketFields := map[string]value.Value{
+				"fd":   value.NewInt(-1),
+				"addr": value.NewString(host),
+				"port": value.NewInt(int64(port)),
+				"open": value.NewBool(false),
+			}
+			return value.NewMapWithData(socketFields)
+		}
+
+		id := vm.nextNetID
+		vm.nextNetID++
+		vm.netConns[id] = conn
+
+		socketFields := map[string]value.Value{
+			"fd":   value.NewInt(int64(id)),
+			"addr": value.NewString(host),
+			"port": value.NewInt(int64(port)),
+			"open": value.NewBool(true),
+		}
+		return value.NewMapWithData(socketFields)
+	})
+
+	vm.defineNative("net_recv", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		sockMap, ok := args[0].Obj.(*value.ObjMap)
+		if !ok {
+			return value.NewNull()
+		}
+		fdVal, _ := sockMap.Data["fd"]
+		fd := int(fdVal.AsInt)
+		size := int(args[1].AsInt)
+
+		conn, ok := vm.netConns[fd]
+		if !ok {
+			resultFields := map[string]value.Value{
+				"ok":    value.NewBool(false),
+				"data":  value.NewBytes(""),
+				"count": value.NewInt(0),
+				"error": value.NewString("invalid socket"),
+			}
+			return value.NewMapWithData(resultFields)
+		}
+
+		buf := make([]byte, size)
+		n, err := conn.Read(buf)
+		if err != nil {
+			resultFields := map[string]value.Value{
+				"ok":    value.NewBool(false),
+				"data":  value.NewBytes(""),
+				"count": value.NewInt(0),
+				"error": value.NewString(err.Error()),
+			}
+			return value.NewMapWithData(resultFields)
+		}
+
+		resultFields := map[string]value.Value{
+			"ok":    value.NewBool(true),
+			"data":  value.NewBytes(string(buf[:n])),
+			"count": value.NewInt(int64(n)),
+			"error": value.NewString(""),
+		}
+		return value.NewMapWithData(resultFields)
+	})
+
+	vm.defineNative("net_send", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		sockMap, ok := args[0].Obj.(*value.ObjMap)
+		if !ok {
+			return value.NewNull()
+		}
+		fdVal, _ := sockMap.Data["fd"]
+		fd := int(fdVal.AsInt)
+		data := args[1].String() // bytes are stored as strings internally
+
+		conn, ok := vm.netConns[fd]
+		if !ok {
+			resultFields := map[string]value.Value{
+				"ok":    value.NewBool(false),
+				"data":  value.NewBytes(""),
+				"count": value.NewInt(0),
+				"error": value.NewString("invalid socket"),
+			}
+			return value.NewMapWithData(resultFields)
+		}
+
+		n, err := conn.Write([]byte(data))
+		if err != nil {
+			resultFields := map[string]value.Value{
+				"ok":    value.NewBool(false),
+				"data":  value.NewBytes(""),
+				"count": value.NewInt(0),
+				"error": value.NewString(err.Error()),
+			}
+			return value.NewMapWithData(resultFields)
+		}
+
+		resultFields := map[string]value.Value{
+			"ok":    value.NewBool(true),
+			"data":  value.NewBytes(""),
+			"count": value.NewInt(int64(n)),
+			"error": value.NewString(""),
+		}
+		return value.NewMapWithData(resultFields)
+	})
+
+	vm.defineNative("net_close", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		sockMap, ok := args[0].Obj.(*value.ObjMap)
+		if !ok {
+			return value.NewNull()
+		}
+		fdVal, _ := sockMap.Data["fd"]
+		fd := int(fdVal.AsInt)
+
+		// Try closing as listener
+		if listener, ok := vm.netListeners[fd]; ok {
+			listener.Close()
+			delete(vm.netListeners, fd)
+			return value.NewNull()
+		}
+
+		// Try closing as connection
+		if conn, ok := vm.netConns[fd]; ok {
+			conn.Close()
+			delete(vm.netConns, fd)
+		}
+
+		return value.NewNull()
+	})
+
+	vm.defineNative("net_setblocking", func(args []value.Value) value.Value {
+		// For TCP in Go, blocking is handled at a different level
+		// This is a no-op for now, as Go handles timeouts via SetDeadline
+		return value.NewNull()
 	})
 
 	// SQLite Native Functions

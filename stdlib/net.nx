@@ -57,6 +57,6 @@ func socket_set() -> Socket[64]
     return net_socket_set()
 end
 
-func select(read: Socket[64], write: Socket[64], error: Socket[64], timeout: int) -> SelectResult
-    return net_select(read, write, error, timeout)
+func poll(read: Socket[64], write: Socket[64], err: Socket[64], timeout: int) -> SelectResult
+    return net_select(read, write, err, timeout)
 end
