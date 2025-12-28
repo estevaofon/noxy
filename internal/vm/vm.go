@@ -2302,7 +2302,16 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 		moduleGlobals := make(map[string]value.Value)
 
 		for _, f := range files {
-			if !f.IsDir() && strings.HasSuffix(f.Name(), ".nx") {
+			if f.IsDir() {
+				// Recursively load subdirectory as a nested module
+				subDirName := name + "." + f.Name()
+				subMod, err := vm.loadModule(subDirName)
+				if err != nil {
+					// Ignore subdirectories that fail to load (e.g., empty or invalid)
+					continue
+				}
+				moduleGlobals[f.Name()] = subMod
+			} else if strings.HasSuffix(f.Name(), ".nx") {
 				baseName := strings.TrimSuffix(f.Name(), ".nx")
 				subModuleName := name + "." + baseName
 
