@@ -1,22 +1,24 @@
+use time
+
 struct RandomGenerator
-    state: int
-    a: int
-    c: int
+    state: int,
+    a: int,
+    c: int,
     m: int
 end
 
-func new_random(rand: ref RandomGenerator) -> int
-    rand.state = rand.a * rand.state + rand.c
-    rand.state = rand.state % rand.m
-    return rand.state
+let rng: RandomGenerator = RandomGenerator(time.now(), 1664525, 1013904223, 2147483647)
+
+func new_random(g: ref RandomGenerator) -> int
+    g.state = g.a * g.state + g.c
+    g.state = g.state % g.m
+    return g.state
 end
 
-func random(rand: ref RandomGenerator) -> int
-    return new_random(rand) / rand.m
+func random() -> int
+    return new_random(ref rng) / rng.m
 end
 
-func random_int(rand: ref RandomGenerator, min: int, max: int) -> int
-    return min + new_random(rand) % (max - min + 1)
+func random_int(min: int, max: int) -> int
+    return min + new_random(ref rng) % (max - min + 1)
 end
-
-

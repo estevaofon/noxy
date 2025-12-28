@@ -1,8 +1,8 @@
 use time
 
 struct Database
-    handle: int
-    open: bool
+    handle: int,
+    open: bool,
 end
 
 struct Statement
@@ -14,17 +14,17 @@ struct Row
 end
 
 struct QueryResult
-    columns: string[]
-    rows: Row[]
-    row_count: int
-    ok: bool
+    columns: string[],
+    rows: Row[],
+    row_count: int,
+    ok: bool,
     error: string
 end
 
 struct ExecResult
-    ok: bool
-    error: string
-    rows_affected: int
+    ok: bool,
+    error: string,
+    rows_affected: int,
     last_insert_id: int
 end
 
