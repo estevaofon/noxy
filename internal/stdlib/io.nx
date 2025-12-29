@@ -11,12 +11,17 @@ struct IOResult
     error: string
 end
 
+struct IOLinesResult
+    ok: bool,
+    data: []string,
+    error: string
+end
+
 struct FileInfo
     exists: bool,
     size: int,
     is_dir: bool
 end
-
 
 
 // Wrappers para fun??es built-in (para uso com 'select *' como 'open(...)')
@@ -37,8 +42,8 @@ func read_line(file: File) -> IOResult
     return io_read_line(file, IOResult)
 end
 
-func read_lines(file: File) -> IOResult
-    return io_read_lines(file, IOResult)
+func read_lines(file: File) -> IOLinesResult
+    return io_read_lines(file, IOLinesResult)
 end
 
 func write(file: File, content: string) -> void

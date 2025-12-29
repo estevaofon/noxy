@@ -1,0 +1,51 @@
+use io
+
+print("Iniciando testes de IO...")
+
+// Teste 1: Escrita
+let path: string = "D:\\OneDrive\\Documentos\\go_projects\\noxy-vm\\noxy_examples\\password_generator.nx"
+
+
+// Teste 2: Leitura
+let file_r: io.File = io.open(path, "r")
+if file_r.open then
+    let res: io.IOResult = io.read(file_r)
+    if res.ok then
+        // print("Conteudo lido:")
+        print(res.data)
+    else
+        // print("Erro na leitura:")
+        print(res.error)
+    end
+    io.close(file_r)
+else
+    print("Erro ao abrir arquivo para leitura.")
+end
+
+
+// Teste 2: Leitura
+let file_r2: io.File = io.open(path, "r")
+if file_r2.open then
+    let res2: io.IOLinesResult = io.read_lines(file_r2)
+    if res2.ok then
+        // print("Conteudo lido:")
+        print(res2.data)
+        let size: int = length(res2.data)
+        print("Tamanho: " + to_str(size))
+        print(res2.data[0])
+        print(res2.data[size - 1])
+    else
+        // print("Erro na leitura:")
+        print(res2.error)
+    end
+    io.close(file_r2)
+else
+    print("Erro ao abrir arquivo para leitura.")
+end
+
+
+//if io.exists(path) then
+//    io.remove(path)
+//end
+
+print("Testes finalizados.")

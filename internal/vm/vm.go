@@ -13,9 +13,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"runtime"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -518,14 +518,67 @@ func NewWithConfig(cfg VMConfig) *VM {
 		err := os.Remove(path)
 		return value.NewBool(err == nil)
 	})
-	vm.defineNative("io_read_line", func(args []value.Value) value.Value {
-		// Implement line reading logic if needed, strictly speaking stdlib just wraps io_read usually but if separate native is needed:
-		// For simplicity, let's just make it null/not implemented or same as read for MVP if line reading is hard on raw FD without bufio persistence
-		// Or re-open? No.
-		// Let's implement full read for now as read_line on whole file is weird.
-		// Actually, without buffering state, readline is hard.
-		// Return error 'Function not implemented yet'
-		return value.NewNull()
+	vm.defineNative("io_read_lines", func(args []value.Value) value.Value {
+		// args: fileInst, IOLinesResultStructDef
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct, ok := args[1].Obj.(*value.ObjStruct) // IOLinesResult
+		if !ok {
+			return value.NewNull()
+		}
+
+		fd := inst.Fields["fd"].AsInt
+		var lines []string
+		var errorStr string
+		var isOk bool = false
+
+		if f, exists := vm.openFiles[fd]; exists {
+			// Read all
+			stat, _ := f.Stat()
+			var contentStr string
+			if stat.Size() > 0 {
+				f.Seek(0, 0)
+				buf := make([]byte, stat.Size())
+				n, err := f.Read(buf)
+				if err == nil || (err != nil && n > 0) {
+					contentStr = string(buf[:n])
+					isOk = true
+				} else {
+					errorStr = err.Error()
+				}
+			} else {
+				isOk = true
+			}
+
+			if isOk {
+				// Split by newlines, handling \r\n and \n
+				// Naive split
+				contentStr = strings.ReplaceAll(contentStr, "\r\n", "\n")
+				lines = strings.Split(contentStr, "\n")
+				// If last line is empty due to trailing newline, maybe keep it?
+				// strings.Split("a\n", "\n") -> ["a", ""]
+				// Usually read_lines might expect that. Let's keep it simple.
+			}
+		} else {
+			errorStr = "File not open"
+		}
+
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["ok"] = value.NewBool(isOk)
+
+		linesVal := make([]value.Value, len(lines))
+		for i, line := range lines {
+			linesVal[i] = value.NewString(line)
+		}
+		resInst.Fields["data"] = value.NewArray(linesVal)
+
+		resInst.Fields["error"] = value.NewString(errorStr)
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 	vm.defineNative("io_stat", func(args []value.Value) value.Value {
 		if len(args) < 2 {
