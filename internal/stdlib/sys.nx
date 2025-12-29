@@ -25,6 +25,10 @@ func setenv(key: string, value: string) -> bool
     return sys_setenv(key, value)
 end
 
+func os() -> string
+    return sys_os()
+end
+
 func getcwd() -> string
     return sys_getcwd()
 end

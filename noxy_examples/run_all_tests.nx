@@ -39,13 +39,24 @@ func should_ignore(s: string) -> bool
     return false
 end
 
-// Executar lista de arquivos usando 'dir /B' (Windows)
-// Para Linux seria 'ls'
-let cmd_res: SysResult = exec_output("dir /B noxy_examples")
+// Detectar OS para comando de lista e binário noxy
+let os_name: string = os()
+let list_cmd: string = ""
+let noxy_bin: string = ""
+
+if os_name == "windows" then
+    list_cmd = "dir /B noxy_examples"
+    noxy_bin = "noxy.exe"
+else
+    list_cmd = "ls noxy_examples"
+    noxy_bin = "./noxy" // Assume ./noxy no linux/mac
+end
+
+let cmd_res: SysResult = exec_output(list_cmd)
 
 if !cmd_res.ok then
     print("Erro ao listar diretório:")
-    print(cmd_res.error)
+    print(cmd_res.output)
     exit(1)
 end
 
@@ -74,7 +85,7 @@ while i < len_list do
                     
                     // Executa e captura saída
     // Para este repo Go (usando binário compilado para performance):
-    let cmd: string = "noxy.exe noxy_examples/" + current_file
+    let cmd: string = noxy_bin + " noxy_examples/" + current_file
     
     let res: SysResult = exec_output(cmd)
                     
@@ -104,7 +115,7 @@ if strlen(current_file) > 0 then
     let ignored2: bool = should_ignore(current_file)
     if ends_with_nx(current_file) & !ignored2 then
         print(f"Executando: {current_file}...")
-        let cmd_last: string = "noxy.exe noxy_examples/" + current_file
+        let cmd_last: string = noxy_bin + " noxy_examples/" + current_file
         let run_res_last: SysResult = exec_output(cmd_last)
         if run_res_last.ok then
             print(f"  [PASS] {current_file}")

@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"runtime"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -989,6 +990,10 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	// Sys Module
+	vm.defineNative("sys_os", func(args []value.Value) value.Value {
+		return value.NewString(runtime.GOOS)
+	})
+
 	vm.defineNative("sys_exec", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
