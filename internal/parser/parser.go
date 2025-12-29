@@ -79,8 +79,18 @@ func (p *Parser) Errors() []string {
 }
 
 func (p *Parser) peekError(t token.TokenType) {
-	msg := fmt.Sprintf("expected next token to be %s, got %s instead",
-		t, p.peekToken.Type)
+	msg := fmt.Sprintf("  File \"%s\", line %d\n    %s\nSyntaxError: expected %s, found %s",
+		"file", p.peekToken.Line, "code line here...", t.Display(), p.peekToken.Type.Display())
+	// Wait, I can't easily get the filename and code line here without passing it down or storing simpler "Line:Col: msg" and letting main format it?
+	// The user requested: SyntaxError: invalid syntax "def"
+	// My previous format was: [Line:Col] msg.
+	// Providing a full Python-style traceback (File "...", line X \n code \n Error) requires more context in the error or main.
+	// For now, I will stick to the requested single line format or simple multiline if I can't get file/code easily.
+	// "[Line:Col] SyntaxError: ..." is good enough for now.
+	// Actually, let's just do:
+	// [Line:Col] SyntaxError: expected ')' found ':'
+	msg = fmt.Sprintf("[%d:%d] SyntaxError: expected %s, found %s",
+		p.peekToken.Line, p.peekToken.Column, t.Display(), p.peekToken.Type.Display())
 	p.errors = append(p.errors, msg)
 }
 
@@ -146,6 +156,18 @@ func (p *Parser) parseStatement() ast.Statement {
 		}
 
 		// Otherwise expression statement
+		if _, ok := expr.(*ast.CallExpression); !ok {
+			// If expr is nil (parse error already?), skip
+			if expr != nil {
+				// Specific edge case: "def" or others might be parsed as identifiers
+				// If it's a bare identifier string literal, it's invalid syntax here
+				// unless it's a function call.
+				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: invalid syntax %q",
+					p.curToken.Line, p.curToken.Column, expr.String()))
+				return nil
+			}
+		}
+
 		stmt := &ast.ExpressionStmt{Token: p.curToken, Expression: expr}
 		if p.peekTokenIs(token.NEWLINE) {
 			p.nextToken()
@@ -188,7 +210,6 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 	stmt.Consequence = p.parseBlockStatement()
 
 	if p.curTokenIs(token.ELSE) {
-		p.nextToken() // eat ELSE
 		stmt.Alternative = p.parseBlockStatement()
 	}
 
@@ -712,6 +733,16 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 
 	stmt.Body = p.parseBlockStatement()
 
+	if !p.curTokenIs(token.END) {
+		got := p.curToken.Literal
+		if p.curTokenIs(token.EOF) {
+			got = "EOF"
+		}
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', found %s",
+			p.curToken.Line, p.curToken.Column, got))
+		return nil
+	}
+
 	return stmt
 }
 
@@ -723,6 +754,13 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	p.nextToken()
 
 	for !p.curTokenIs(token.END) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.FUNC) || p.curTokenIs(token.STRUCT) {
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unexpected %q, expected 'end'",
+				p.curToken.Line, p.curToken.Column, p.curToken.Literal))
+			// Stop parsing this block to prevent consuming the next function
+			break
+		}
+
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
@@ -764,6 +802,23 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 	}
 
 	stmt.Body = p.parseBlockStatement()
+
+	if !p.curTokenIs(token.END) {
+		got := p.curToken.Literal
+		if p.curTokenIs(token.EOF) {
+			got = "EOF"
+		}
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', found %s",
+			p.curToken.Line, p.curToken.Column, got))
+		return nil
+	}
+	// Consume END
+	// p.nextToken() // Actually parseBlockStatement stops AT end.
+	// But `parseFunctionStatement` ends here.
+	// The next statement parsing will call `nextToken` at start of loop?
+	// `ParseProgram` loop: `p.nextToken()` at end of loop.
+	// So if we leave `curToken` as `END`, next iteration calls `nextToken` and gets whatever is next.
+	// That seems correct.
 
 	return stmt
 }
@@ -970,6 +1025,12 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 	}
 
 	if !p.curTokenIs(token.END) {
+		got := p.curToken.Literal
+		if p.curTokenIs(token.EOF) {
+			got = "EOF"
+		}
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', found %s",
+			p.curToken.Line, p.curToken.Column, got))
 		return nil
 	}
 
@@ -988,6 +1049,10 @@ func (p *Parser) parseMemberAccess(left ast.Expression) ast.Expression {
 }
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
-	msg := fmt.Sprintf("no prefix parse function for %s found", t)
+	msg := fmt.Sprintf("[%d:%d] SyntaxError: invalid syntax %q", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
+	// If literal is empty (e.g. EOF), might be weird.
+	if p.curToken.Type == token.EOF {
+		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
+	}
 	p.errors = append(p.errors, msg)
 }

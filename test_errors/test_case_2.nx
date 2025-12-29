@@ -1,0 +1,4 @@
+
+func main()
+    let x: int = 1 + * 2
+end

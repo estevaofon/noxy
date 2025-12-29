@@ -82,9 +82,8 @@ func runWithConfig(input string, rootPath string, showDisasm bool) {
 	program := p.ParseProgram()
 
 	if len(p.Errors()) > 0 {
-		fmt.Printf("Parser errors:\n")
 		for _, msg := range p.Errors() {
-			fmt.Printf("\t%s\n", msg)
+			fmt.Printf("%s\n", msg)
 		}
 		os.Exit(1)
 	}

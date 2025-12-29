@@ -40,12 +40,12 @@ func (l *Lexer) peekChar() byte {
 func (l *Lexer) NextToken() token.Token {
 	var tok token.Token
 
-	// Skip whitespace but NOT newlines (Noxy uses newlines as separators in some contexts, though parser might ignore them mostly)
-	// Actually original lexer treats NEWLINE as a token.
+	// Skip whitespace
 	l.skipWhitespace()
 
-	tok.Line = l.line
-	tok.Column = l.column
+	// Capture start position of the token
+	startLine := l.line
+	startColumn := l.column
 
 	switch l.ch {
 	case '=':
@@ -125,34 +125,68 @@ func (l *Lexer) NextToken() token.Token {
 		tok = newToken(token.DOT, l.ch)
 	case '\n':
 		tok = newToken(token.NEWLINE, l.ch)
+		// For NEWLINE token, we want the line/col of the newline char itself
+		tok.Line = startLine
+		tok.Column = startColumn
 		l.line++
-		l.column = 0 // Will be incremented to 1 by readChar
+		l.column = 0 // Reset for next line
+		l.readChar()
+		return tok
 	case '"':
-		tok.Type = token.STRING
-		tok.Literal = l.readString('"')
+		lit, ok := l.readString('"')
+		if !ok {
+			tok.Type = token.ILLEGAL
+			tok.Literal = "unterminated string"
+		} else {
+			tok.Type = token.STRING
+			tok.Literal = lit
+		}
 	case '\'':
-		tok.Type = token.STRING
-		tok.Literal = l.readString('\'')
+		lit, ok := l.readString('\'')
+		if !ok {
+			tok.Type = token.ILLEGAL
+			tok.Literal = "unterminated string"
+		} else {
+			tok.Type = token.STRING
+			tok.Literal = lit
+		}
 	case 'b': // Potential bytes literal
 		if l.peekChar() == '"' || l.peekChar() == '\'' {
 			quote := l.peekChar()
 			l.readChar() // eat 'b'
-			tok.Type = token.BYTES
-			tok.Literal = l.readBytes(quote)
+			lit, ok := l.readBytes(quote)
+			if !ok {
+				tok.Type = token.ILLEGAL
+				tok.Literal = "unterminated bytes literal"
+			} else {
+				tok.Type = token.BYTES
+				tok.Literal = lit
+			}
 		} else {
 			tok.Literal = l.readIdentifier()
 			tok.Type = token.LookupIdent(tok.Literal)
-			return tok // Early return because readIdentifier advances
+			// Early return for identifier needed because readIdentifier advances
+			tok.Line = startLine
+			tok.Column = startColumn
+			return tok
 		}
 	case 'f': // Potential f-string
 		if l.peekChar() == '"' || l.peekChar() == '\'' {
 			quote := l.peekChar()
 			l.readChar() // eat 'f'
-			tok.Type = token.FSTRING
-			tok.Literal = l.readFString(quote)
+			lit, ok := l.readFString(quote)
+			if !ok {
+				tok.Type = token.ILLEGAL
+				tok.Literal = "unterminated f-string"
+			} else {
+				tok.Type = token.FSTRING
+				tok.Literal = lit
+			}
 		} else {
 			tok.Literal = l.readIdentifier()
 			tok.Type = token.LookupIdent(tok.Literal)
+			tok.Line = startLine
+			tok.Column = startColumn
 			return tok
 		}
 	case 0:
@@ -162,14 +196,22 @@ func (l *Lexer) NextToken() token.Token {
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()
 			tok.Type = token.LookupIdent(tok.Literal)
+			tok.Line = startLine
+			tok.Column = startColumn
 			return tok
 		} else if isDigit(l.ch) {
 			tok.Type, tok.Literal = l.readNumber()
+			tok.Line = startLine
+			tok.Column = startColumn
 			return tok
 		} else {
 			tok = newToken(token.ILLEGAL, l.ch)
 		}
 	}
+
+	// Apply position info to all other tokens
+	tok.Line = startLine
+	tok.Column = startColumn
 
 	l.readChar()
 	return tok
@@ -215,14 +257,17 @@ func (l *Lexer) readNumber() (token.TokenType, string) {
 	return token.INT, l.input[position:l.position]
 }
 
-func (l *Lexer) readString(quote byte) string {
+func (l *Lexer) readString(quote byte) (string, bool) {
 	// l.ch is currently quote
 	l.readChar() // Skip opening quote
 
 	var out []byte
 
 	for {
-		if l.ch == quote || l.ch == 0 {
+		if l.ch == 0 {
+			return string(out), false
+		}
+		if l.ch == quote {
 			break
 		}
 		if l.ch == '\\' {
@@ -256,16 +301,19 @@ func (l *Lexer) readString(quote byte) string {
 		l.readChar()
 	}
 
-	return string(out)
+	return string(out), true
 }
 
-func (l *Lexer) readBytes(quote byte) string {
+func (l *Lexer) readBytes(quote byte) (string, bool) {
 	l.readChar()
 
 	var out []byte
 
 	for {
-		if l.ch == quote || l.ch == 0 {
+		if l.ch == 0 {
+			return string(out), false
+		}
+		if l.ch == quote {
 			break
 		}
 		if l.ch == '\\' {
@@ -292,16 +340,19 @@ func (l *Lexer) readBytes(quote byte) string {
 		}
 		l.readChar()
 	}
-	return string(out) // The parser converts this string to Bytes Value
+	return string(out), true // The parser converts this string to Bytes Value
 }
 
-func (l *Lexer) readFString(quote byte) string {
+func (l *Lexer) readFString(quote byte) (string, bool) {
 	l.readChar() // Skip opening quote
 
 	var out []byte
 
 	for {
-		if l.ch == quote || l.ch == 0 {
+		if l.ch == 0 {
+			return string(out), false
+		}
+		if l.ch == quote {
 			break
 		}
 		if l.ch == '\\' {
@@ -330,7 +381,7 @@ func (l *Lexer) readFString(quote byte) string {
 		}
 		l.readChar()
 	}
-	return string(out)
+	return string(out), true
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {

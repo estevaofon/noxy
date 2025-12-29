@@ -1,0 +1,6 @@
+
+func main()
+    let s: string = "hello
+end
+
+main()

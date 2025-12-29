@@ -1,0 +1,4 @@
+
+func main()
+    if true print("Missing then") end
+end

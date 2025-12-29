@@ -1,0 +1,4 @@
+
+func main() void
+    print("Missing arrow")
+end

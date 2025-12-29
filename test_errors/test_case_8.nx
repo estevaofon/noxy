@@ -1,0 +1,6 @@
+
+func main()
+    if true then
+        print("Missing end")
+    
+end
