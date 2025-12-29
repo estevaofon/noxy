@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noxy - Linguagem de Programação Estaticamente Tipada</title>
+    <meta name="description"
+        content="Noxy é uma linguagem de programação estaticamente tipada com VM baseada em pilha escrita em Go. Mascote: uma coruja roxa que simboliza sabedoria e elegância no código.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a"
+        type="image/png">
+    <meta name="theme-color" content="#a855f7">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Noxy">
+    <link rel="apple-touch-icon" href="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a">
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <img src="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a"
+                    alt="Noxy Logo" class="logo-img">
+                <span class="logo-text">Noxy</span>
+            </div>
+            <div class="nav-menu" id="nav-menu">
+                <a href="#home" class="nav-link">Início</a>
+                <a href="#features" class="nav-link">Recursos</a>
+                <a href="#syntax" class="nav-link">Sintaxe</a>
+                <a href="#examples" class="nav-link">Exemplos</a>
+                <a href="#installation" class="nav-link">Instalação</a>
+
+            </div>
+            <div class="hamburger" id="hamburger">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="gradient-text">Noxy</span>
+                    <br>Linguagem de Programação Estaticamente Tipada
+                </h1>
+                <p class="hero-description">
+                    Uma linguagem poderosa estaticamente tipada com uma Virtual Machine baseada em pilha de alta
+                    performance escrita em Go.
+                    Suporte a tips primitivos, structs, arrays dinâmicos, mapas e muito mais.
+                    <br><br>
+                    <span class="mascot-description">🦉 <strong>Mascote:</strong> Nossa coruja roxa simboliza a
+                        sabedoria e elegância no desenvolvimento de software.</span>
+                </p>
+                <a href="https://estevaofon.pythonanywhere.com/" class="btn btn-primary" target="_blank">
+                    <i class="fas fa-globe"></i>
+                    Web Interpreter
+                </a>
+                <a href="https://github.com/estevaofon/noxy-vm" class="btn btn-secondary" target="_blank">
+                    <i class="fab fa-github"></i>
+                    GitHub
+                </a>
+                <a href="#examples" class="btn btn-secondary">
+                    <i class="fas fa-code"></i>
+                    Ver Exemplos
+                </a>
+            </div>
+            <div class="hero-code">
+                <div class="code-window">
+                    <div class="window-header">
+                        <div class="window-buttons">
+                            <span class="btn-close"></span>
+                            <span class="btn-minimize"></span>
+                            <span class="btn-maximize"></span>
+                        </div>
+                        <span class="window-title">hello.nx</span>
+                    </div>
+                    <pre><code class="language-go">print("Hello from Noxy!")
+
+// Operações básicas
+let x: int = 10
+let y: int = 20
+print("Sum: " + to_str(x + y))
+
+// Exemplo de struct
+struct Produto
+    codigo: int,
+    nome: string,
+    preco: float
+end
+
+let produto: Produto = Produto(1, "Laptop", 2500.50)
+print("Product: " + produto.nome)</code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Recursos da Linguagem</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>Sistema de Tipos Estático</h3>
+                    <p>Suporte completo para tipos int, float, string, bool e arrays com verificação de tipos em tempo
+                        de compilação.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-microchip"></i>
+                    </div>
+                    <h3>VM Baseada em Pilha</h3>
+                    <p>Virtual Machine stack-based escrita em Go para alta performance e portabilidade.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-cubes"></i>
+                    </div>
+                    <h3>Estruturas de Dados</h3>
+                    <p>Suporte nativo para structs, arrays, auto-referenciamento e estruturas de dados complexas.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-sitemap"></i>
+                    </div>
+                    <h3>Algoritmos Avançados</h3>
+                    <p>Implementação de busca binária, listas ligadas, árvores binárias e algoritmos de ordenação.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-link"></i>
+                    </div>
+                    <h3>Auto-Referenciamento</h3>
+                    <p>Structs auto-referenciáveis usando o operador ref para criar estruturas de dados recursivas.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-exchange-alt"></i>
+                    </div>
+                    <h3>Conversões de Tipo</h3>
+                    <p>Função universal to_str e conversões numéricas para manipulação flexível de dados.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Syntax Section -->
+    <section id="syntax" class="syntax">
+        <div class="container">
+            <h2 class="section-title">Sintaxe da Linguagem</h2>
+            <div class="syntax-grid">
+                <div class="syntax-card">
+                    <h3>Declaração de Variáveis</h3>
+                    <pre><code class="language-go">let x: int = 42
+let y: float = 3.14
+let texto: string = "Hello, World!"
+let ativo: bool = true</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Arrays</h3>
+                    <pre><code class="language-go">let numeros: int[5] = [1, 2, 3, 4, 5]
+let matriz: float[3] = [1.1, 2.2, 3.3]
+let tamanho: int = length(numeros)</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Estruturas</h3>
+                    <pre><code class="language-go">struct Pessoa
+    nome: string,
+    idade: int,
+    ativo: bool
+end
+
+let pessoa: Pessoa = Pessoa("João", 25, true)
+pessoa.idade = 26</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Funções</h3>
+                    <pre><code class="language-go">func add(a: int, b: int) -> int
+    return a + b
+end
+
+func saudacao(nome: string)
+    print("Olá, " + nome + "!")
+end</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Estruturas de Controle</h3>
+                    <pre><code class="language-go">if x > 10 then
+    print("x é maior que 10")
+else
+    print("x é 10 ou menor")
+end
+
+while i < 10 do
+    print(i)
+    i = i + 1
+end</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Auto-Referenciamento</h3>
+                    <pre><code class="language-go">struct TreeNode
+    valor: int,
+    esquerda: ref TreeNode,
+    direita: ref TreeNode
+end
+
+let raiz: TreeNode = TreeNode(50, null, null)
+raiz.esquerda = ref TreeNode(25, null, null)</code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Examples Section -->
+    <section id="examples" class="examples">
+        <div class="container">
+            <h2 class="section-title">Exemplos Práticos</h2>
+            <div class="examples-nav">
+                <button class="tab-btn active" data-tab="hello">Hello World</button>
+                <button class="tab-btn" data-tab="binary-tree">Árvore Binária</button>
+                <button class="tab-btn" data-tab="linked-list">Lista Ligada</button>
+                <button class="tab-btn" data-tab="hashmap">HashMap</button>
+                <button class="tab-btn" data-tab="safe-division">Divisão Segura</button>
+            </div>
+            <div class="examples-content">
+                <div class="example-tab active" id="hello">
+                    <h3>Hello World</h3>
+                    <p>Um exemplo básico mostrando a sintaxe fundamental da linguagem Noxy.</p>
+                    <pre><code class="language-go">print("Hello from Noxy!")
+
+// Operações básicas
+let x: int = 10
+let y: int = 30
+print("Sum: ")
+print(x + y)
+
+// Exemplo de struct
+struct Produto
+    codigo: int,
+    nome: string,
+    preco: float
+end
+
+let produto: Produto = Produto(1, "Laptop", 2500.50)
+print("Product: ")
+print(produto.nome)</code></pre>
+                </div>
+                <div class="example-tab" id="binary-tree">
+                    <h3>Árvore Binária</h3>
+                    <p>Implementação de uma árvore binária com travessia pre-order.</p>
+                    <pre><code class="language-go">struct Node
+  data: int,
+  left: ref Node,
+  right: ref Node
+end
+
+// Criar árvore binária
+let root: Node = Node(1, null, null)
+root.left = Node(2, null, null)
+root.right = Node(3, null, null)
+root.left.left = Node(4, null, null)
+root.left.right = Node(5, null, null)
+
+func pre_order(node: ref Node)
+  if node != null then
+    print(to_str(node.data))
+    pre_order(node.left)
+    pre_order(node.right)
+  end
+end
+
+pre_order(root)</code></pre>
+                </div>
+                <div class="example-tab" id="linked-list">
+                    <h3>Lista Ligada</h3>
+                    <p>Implementação de uma lista ligada com operações de inserção e remoção.</p>
+                    <pre><code class="language-go">struct Node
+    valor: int,
+    proximo: ref Node
+end
+
+func append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = ref Node(valor, null)
+    else
+        append(node.proximo, valor)
+    end
+end
+
+func print_list(node: ref Node)
+    while node != null do
+        print(to_str(node.valor))
+        node = node.proximo
+    end
+end
+
+let lista: Node = Node(10, null)
+append(lista, 20)
+append(lista, 30)
+print_list(lista)</code></pre>
+                </div>
+                <div class="example-tab" id="hashmap">
+                    <h3>HashMap</h3>
+                    <p>Implementação de um hashmap com chaves string usando função hash polinomial.</p>
+                    <pre><code class="language-go">struct Node
+    key: string,
+    value: string,
+    next: ref Node
+end
+
+let buckets: Node[16] = [null, null, null, null, ...]
+
+func hash(chave: string, tamanho: int) -> int
+    let hash_value: int = 0
+    let i: int = 0
+    while i < strlen(chave) do
+        hash_value = (hash_value * 31 + ord(chave[i])) % tamanho
+        i = i + 1
+    end
+    return hash_value
+end
+
+func push(key: string, value: string)
+    let index: int = hash(key, 16)
+    if buckets[index] == null then
+        buckets[index] = Node(key, value, null)
+    else
+        // Adicionar à lista ligada
+        let node: Node = buckets[index]
+        while node.next != null do
+            node = node.next
+        end
+        node.next = ref Node(key, value, null)
+    end
+end</code></pre>
+                </div>
+                <div class="example-tab" id="safe-division">
+                    <h3>Divisão Segura</h3>
+                    <p>Padrão Result para tratamento seguro de erros em operações que podem falhar.</p>
+                    <pre><code class="language-go">struct Result
+    is_ok: bool,
+    value: int,
+    error: string
+end
+
+func Ok(value: int) -> Result
+    return Result(true, value, "")
+end
+
+func Err(error_name: string) -> Result
+    return Result(false, 0, error_name)
+end
+
+func safe_divide(a: int, b: int) -> Result
+    if b == 0 then
+        return Err("DIVISION_BY_ZERO")
+    end
+    return Ok(a / b)
+end
+
+let result: Result = safe_divide(10, 0)
+if result.is_ok then
+    print("Resultado: " + to_str(result.value))
+else
+    print("Erro: " + result.error)
+end</code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Installation Section -->
+    <section id="installation" class="installation">
+        <div class="container">
+            <h2 class="section-title">Instalação e Uso</h2>
+            <div class="installation-grid">
+                <div class="installation-card">
+                    <h3><i class="fas fa-download"></i> Pré-requisitos</h3>
+                    <ul>
+                        <li>Go 1.21 ou superior</li>
+                        <li>Git</li>
+                    </ul>
+                </div>
+                <div class="installation-card">
+                    <h3><i class="fas fa-terminal"></i> Instalação</h3>
+                    <pre><code class="language-bash"># Clone o repositório
+git clone https://github.com/estevaofon/noxy-vm.git
+cd noxy-vm
+
+# Compile o projeto
+go build -o noxy ./cmd/noxy</code></pre>
+                </div>
+                <div class="installation-card">
+                    <h3><i class="fas fa-play"></i> Compilando Programas</h3>
+                    <pre><code class="language-bash"># Execute o programa
+./noxy programa.nx
+
+# Ou via Go run
+go run ./cmd/noxy/main.go programa.nx</code></pre>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <div class="footer-logo">
+                        <img src="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a"
+                            alt="Noxy Logo - Coruja Roxa">
+                        <span>Noxy</span>
+                    </div>
+                    <p>Uma linguagem de programação estaticamente tipada com VM em Go para alta performance.</p>
+                    <p class="mascot-footer">🦉 Nossa coruja roxa representa a sabedoria e elegância que Noxy traz ao
+                        desenvolvimento de software.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Links Rápidos</h4>
+                    <ul>
+                        <li><a href="#home">Início</a></li>
+                        <li><a href="#features">Recursos</a></li>
+                        <li><a href="#syntax">Sintaxe</a></li>
+                        <li><a href="#examples">Exemplos</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Desenvolvimento</h4>
+                    <ul>
+                        <li><a href="#installation">Instalação</a></li>
+                        <li><a href="#examples">Exemplos</a></li>
+                        <li><a href="https://github.com/estevaofon/noxy-vm" target="_blank">GitHub</a></li>
+                        <li><a href="#">Issues</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Comunidade</h4>
+                    <ul>
+                        <li><a href="#">Discussões</a></li>
+                        <li><a href="#">Contribuir</a></li>
+                        <li><a href="#">Changelog</a></li>
+                        <li><a href="#">License</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 Noxy. Projeto educacional.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <script src="script.js"></script>
+</body>
+
+</html>

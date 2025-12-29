@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://estevaofon.github.io/noxy/sitemap.xml

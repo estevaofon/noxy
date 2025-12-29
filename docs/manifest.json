@@ -1,0 +1,29 @@
+{
+    "name": "Noxy - Linguagem de Programação",
+    "short_name": "Noxy",
+    "description": "Linguagem de programação estaticamente tipada com VM baseada em pilha (Go). Mascote: coruja roxa.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#000000",
+    "theme_color": "#a855f7",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "https://github.com/user-attachments/assets/8af825b7-fc42-4e0b-8aab-da9bba99b6e0",
+            "sizes": "300x300",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": ["developer", "programming", "education"],
+    "lang": "pt-BR",
+    "dir": "ltr",
+    "scope": "/",
+    "screenshots": [
+        {
+            "src": "https://github.com/user-attachments/assets/8af825b7-fc42-4e0b-8aab-da9bba99b6e0",
+            "sizes": "300x300",
+            "type": "image/png"
+        }
+    ]
+}

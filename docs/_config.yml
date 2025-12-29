@@ -1,0 +1,38 @@
+# GitHub Pages Configuration for Noxy
+
+# Site settings
+title: "Noxy - Linguagem de Programação"
+description: "Linguagem de programação estaticamente tipada com VM baseada em pilha (Go). Mascote: coruja roxa que simboliza sabedoria e elegância."
+url: "https://estevaofon.github.io"
+baseurl: "/noxy-vm"
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+plugins:
+  - jekyll-sitemap
+  - jekyll-feed
+
+# Exclude files
+exclude:
+  - README.md
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+# SEO settings
+author: "Noxy Team"
+lang: "pt-BR"
+
+# Social media
+social:
+  name: "Noxy"
+  links:
+    - "https://github.com/seu-usuario/noxy"
+
+# Logo
+logo: "https://github.com/user-attachments/assets/8af825b7-fc42-4e0b-8aab-da9bba99b6e0"
+
+# Theme color
+theme_color: "#6366f1"
