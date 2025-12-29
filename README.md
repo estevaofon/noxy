@@ -1,6 +1,6 @@
 # Noxy VM 🚀
 
-A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://estevaofon.github.io/noxy-interpreter/)
+A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://noxylang.com/)
 
 <p align="center">
 <img width="300" height="300" alt="Noxy Logo" src="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a" />
@@ -8,7 +8,7 @@ A complete bytecode virtual machine for the **Noxy** programming language, writt
 
 ## What is Noxy VM?
 
-Noxy VM is a bytecode compiler and virtual machine for the Noxy language. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
+Noxy VM is a bytecode compiler and virtual machine for the Noxy language created by Estevão Fonseca. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
 
 ### Features
 
