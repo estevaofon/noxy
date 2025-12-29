@@ -1,70 +1,70 @@
 # Noxy VM 🚀
 
-Uma máquina virtual bytecode completa para a linguagem de programação **Noxy**, escrita em Go.
+A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://estevaofon.github.io/noxy-interpreter/)
 
 <p align="center">
 <img width="300" height="300" alt="Noxy Logo" src="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a" />
 </p>
 
-## O que é Noxy VM?
+## What is Noxy VM?
 
-Noxy VM é um compilador bytecode e máquina virtual para a linguagem Noxy. Diferente do interpretador tree-walking em Python, esta implementação compila o código para bytecode e o executa em uma VM stack-based, oferecendo melhor performance.
+Noxy VM is a bytecode compiler and virtual machine for the Noxy language. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
 
-### Características
+### Features
 
-- ✅ Compilador para bytecode
-- ✅ VM stack-based de alta performance
-- ✅ Tipos primitivos: `int`, `float`, `string`, `bool`, `bytes`
-- ✅ Structs com campos tipados (escopo global e local)
-- ✅ Arrays dinâmicos com `append`, `pop`, `contains`
-- ✅ Maps (hashmaps) com literais `{key: value}`
-- ✅ Funções com recursão
-- ✅ Sistema de referências (`ref`)
-- ✅ F-strings com interpolação
-- ✅ Suporte a aspas simples e duplas
-- ✅ Rastreamento de linhas para debug
+- ✅ Bytecode compiler
+- ✅ High-performance stack-based VM
+- ✅ Primitive types: `int`, `float`, `string`, `bool`, `bytes`
+- ✅ Structs with typed fields (global and local scope)
+- ✅ Dynamic arrays with `append`, `pop`, `contains`
+- ✅ Maps (hashmaps) with literals `{key: value}`
+- ✅ Functions with recursion
+- ✅ Reference system (`ref`)
+- ✅ F-strings with interpolation
+- ✅ Single and double quote support
+- ✅ Line tracking for debugging
 
-## Instalação
+## Installation
 
 ```bash
-# Clone o repositório
+# Clone the repository
 git clone <repo-url>
 cd noxy-vm
 
-# Compile
+# Build
 go build -o noxy ./cmd/noxy
 
-# Ou execute diretamente
-go run ./cmd/noxy/main.go arquivo.nx
+# Or run directly
+go run ./cmd/noxy/main.go file.nx
 ```
 
-## Uso
+## Usage
 
 ```bash
-# Executar um programa Noxy
-./noxy programa.nx
+# Run a Noxy program
+./noxy program.nx
 
-# Ou com go run
-go run ./cmd/noxy/main.go programa.nx
+# Or with go run
+go run ./cmd/noxy/main.go program.nx
 ```
 
-## Exemplo Rápido
+## Quick Example
 
 ```noxy
 func main()
     let x: int = 10
     let y: int = 20
-    print(f"Soma: {x + y}")
+    print(f"Sum: {x + y}")
 
-    struct Pessoa
-        nome: string
-        idade: int
+    struct Person
+        name: string
+        age: int
     end
 
-    let p: Pessoa = Pessoa("Ana", 25)
-    print(p.nome)
+    let p: Person = Person("Ana", 25)
+    print(p.name)
 
-    // Arrays dinâmicos
+    // Dynamic arrays
     let nums: int[] = []
     append(nums, 1)
     append(nums, 2)
@@ -77,42 +77,79 @@ end
 main()
 ```
 
-Saída:
+Output:
 ```
-Soma: 30
+Sum: 30
 Ana
 Length: 2
 Alice: 100
 ```
 
-## Arquitetura
+## Architecture
 
 ```
 noxy-vm/
-├── cmd/noxy/main.go      # CLI principal
+├── cmd/noxy/main.go      # Main CLI
 ├── internal/
-│   ├── lexer/            # Tokenização
-│   ├── token/            # Tipos de tokens
-│   ├── parser/           # Parser recursive descent → AST
-│   ├── ast/              # Nós da AST
-│   ├── compiler/         # Compilador AST → Bytecode
-│   ├── chunk/            # Bytecode e operações
-│   ├── value/            # Sistema de valores (int, float, string, etc.)
-│   └── vm/               # Máquina virtual stack-based
+│   ├── lexer/            # Tokenization
+│   ├── token/            # Token types
+│   ├── parser/           # Recursive descent parser → AST
+│   ├── ast/              # AST nodes
+│   ├── compiler/         # AST → Bytecode Compiler
+│   ├── chunk/            # Bytecode and operations
+│   ├── value/            # Value system (int, float, string, etc.)
+│   └── vm/               # Stack-based virtual machine
 ```
 
-## Tipos de Dados
+```mermaid
+flowchart TB
+    subgraph INPUT["📄 SOURCE"]
+        A[("program.nx")]
+    end
 
-### Primitivos
+    subgraph FRONTEND["🔍 FRONTEND"]
+        direction TB
+        B["🔤 <b>LEXER</b><br/><i>Tokenization</i><br/><code>let, func, if → Tokens</code>"]
+        C["🌳 <b>PARSER</b><br/><i>Syntax Analysis</i><br/><code>Tokens → AST</code>"]
+    end
+
+    subgraph BACKEND["⚙️ BACKEND"]
+        direction TB
+        D["📦 <b>COMPILER</b><br/><i>Code Generation</i><br/><code>AST → Bytecode</code>"]
+        E["💾 <b>CHUNK</b><br/><i>Bytecode Storage</i><br/><code>OpCodes + Constants</code>"]
+    end
+
+    subgraph RUNTIME["🚀 RUNTIME"]
+        direction TB
+        F["🖥️ <b>VIRTUAL MACHINE</b><br/><i>Stack-Based Execution</i><br/><code>Interpret Bytecode</code>"]
+        G["📚 <b>STDLIB</b><br/><i>Native Modules</i><br/><code>io, net, http, sqlite...</code>"]
+    end
+
+    subgraph OUTPUT["✨ RESULT"]
+        H[("Execution<br/>Output")]
+    end
+
+    A ==> B
+    B ==> C
+    C ==> D
+    D ==> E
+    E ==> F
+    G <-.-> F
+    F ==> H
+```
+
+## Data Types
+
+### Primitives
 ```noxy
 let x: int = 42
 let pi: float = 3.14159
-let nome: string = "Noxy"
-let ativo: bool = true
-let dados: bytes = b"hello"
+let name: string = "Noxy"
+let active: bool = true
+let data: bytes = b"hello"
 ```
 
-### Arrays Dinâmicos
+### Dynamic Arrays
 ```noxy
 let nums: int[] = []
 append(nums, 10)
@@ -139,38 +176,38 @@ let from_str: bytes = to_bytes("text")
 let from_int: bytes = to_bytes(65)  // b"A"
 ```
 
-## Funções Builtin
+## Builtin Functions
 
-| Função | Descrição |
+| Function | Description |
 |--------|-----------|
-| `print(expr)` | Imprime valor |
-| `to_str(val)` | Converte para string |
-| `length(arr)` | Tamanho do array/string |
-| `append(arr, val)` | Adiciona elemento ao array |
-| `pop(arr)` | Remove e retorna último elemento |
-| `contains(arr, val)` | Verifica se valor existe |
-| `has_key(map, key)` | Verifica se chave existe no map |
-| `to_bytes(val)` | Converte string/int/array para bytes |
-| `zeros(n)` | Array de n zeros |
-| `time_now()` | Timestamp atual em ms |
+| `print(expr)` | Prints value |
+| `to_str(val)` | Converts to string |
+| `length(arr)` | Length of array/string |
+| `append(arr, val)` | Appends element to array |
+| `pop(arr)` | Removes and returns last element |
+| `contains(arr, val)` | Checks if value exists |
+| `has_key(map, key)` | Checks if key exists in map |
+| `to_bytes(val)` | Converts string/int/array to bytes |
+| `zeros(n)` | Array of n zeros |
+| `time_now()` | Current timestamp in ms |
 
-## Opcodes da VM
+## VM Opcodes
 
-A VM utiliza os seguintes opcodes principais:
+The VM uses the following main opcodes:
 
-| Opcode | Descrição |
+| Opcode | Description |
 |--------|-----------|
-| `OP_CONSTANT` | Carrega constante |
-| `OP_ADD/SUB/MUL/DIV` | Operações aritméticas |
-| `OP_EQUAL/LESS/GREATER` | Comparações |
-| `OP_JUMP/JUMP_IF_FALSE` | Controle de fluxo |
-| `OP_CALL/RETURN` | Chamadas de função |
-| `OP_ARRAY/OP_MAP` | Criação de coleções |
-| `OP_GET_INDEX/SET_INDEX` | Acesso a índices |
+| `OP_CONSTANT` | Loads constant |
+| `OP_ADD/SUB/MUL/DIV` | Arithmetic operations |
+| `OP_EQUAL/LESS/GREATER` | Comparisons |
+| `OP_JUMP/JUMP_IF_FALSE` | Flow control |
+| `OP_CALL/RETURN` | Function calls |
+| `OP_ARRAY/OP_MAP` | Collection creation |
+| `OP_GET_INDEX/SET_INDEX` | Index access |
 
 ## Disassembly
 
-O compilador gera bytecode que pode ser visualizado:
+The compiler generates bytecode that can be visualized:
 
 ```
 == main ==
@@ -189,15 +226,15 @@ O compilador gera bytecode que pode ser visualizado:
 
 ## Performance
 
-A VM bytecode oferece melhor performance que o interpretador tree-walking Python, especialmente para:
-- Loops intensivos
-- Chamadas de função recursivas
-- Operações com arrays grandes
+The bytecode VM offers high performance, especially for:
+- Intensive loops
+- Recursive function calls
+- Operations with large arrays
 
-## Licença
+## License
 
 MIT License
 
 ---
 
-*Implementação bytecode da linguagem Noxy em Go.*
+*Bytecode implementation of the Noxy language in Go.*
