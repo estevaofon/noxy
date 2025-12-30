@@ -1,0 +1,78 @@
+
+
+use sqlite
+use sys
+
+let db: Database = sqlite.open("usuarios.db")
+
+if !db.open then
+    print("Erro ao abrir banco")
+    return
+end
+
+// Cria tabela
+sqlite.exec(db, "CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nome TEXT, email TEXT, cargo TEXT)")
+
+while true do
+    // limpar tela
+    let r1: sys.SysResult = sys.exec("cls")
+    print("")
+    print("Sistema de Gerenciamento de Usuários")
+    print("====================================")
+
+    print("1. Adicionar Usuário")
+    print("2. Listar Usuários")
+    print("3. Remover Usuário")
+    print("4. Atualizar Usuário")
+    print("5. Sair")
+    let opcao: int = input("Digite a opção desejada: ")
+
+    if opcao == "1" then
+        print("Adicionar Usuário")
+        let nome: string = input("Digite o nome: ")
+        let email: string = input("Digite o email: ")
+        let cargo: string = input("Digite o cargo: ")
+        let stmt: Statement = sqlite.prepare(db, "INSERT INTO usuarios (nome, email, cargo) VALUES (?, ?, ?)")
+        sqlite.bind_text(stmt, 1, nome)
+        sqlite.bind_text(stmt, 2, email)
+        sqlite.bind_text(stmt, 3, cargo)
+        sqlite.step_exec(stmt)
+    end
+    if opcao == "2" then
+        print("\nListar Usuários")
+        let res: QueryResult = sqlite.query(db, "SELECT * FROM usuarios")
+        let i: int = 0
+        while i < res.row_count do
+            let row: Row = res.rows[i]
+            print(f"ID: {row.values[0]}, Nome: {row.values[1]}, Email: {row.values[2]}, Cargo: {row.values[3]}")
+            i = i + 1
+        end
+        input("\nPressione Enter para continuar...")
+    end
+    if opcao == "3" then
+        print("Remover Usuário")
+        let id: int = input("Digite o id: ")
+        let stmt: Statement = sqlite.prepare(db, "DELETE FROM usuarios WHERE id = ?")
+        sqlite.bind_int(stmt, 1, id)
+        sqlite.step_exec(stmt)
+    end
+    if opcao == "4" then
+        print("Atualizar Usuário")
+        let id: int = input("Digite o id: ")
+        let nome: string = input("Digite o nome: ")
+        let email: string = input("Digite o email: ")
+        let cargo: string = input("Digite o cargo: ")
+        let stmt: Statement = sqlite.prepare(db, "UPDATE usuarios SET nome = ?, email = ?, cargo = ? WHERE id = ?")
+        sqlite.bind_text(stmt, 1, nome)
+        sqlite.bind_text(stmt, 2, email)
+        sqlite.bind_text(stmt, 3, cargo)
+        sqlite.bind_int(stmt, 4, id)
+        sqlite.step_exec(stmt)
+    end
+    if opcao == "5" then
+        print("Sair")
+        break
+    end
+end
+
+sqlite.close(db)
