@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bufio"
 	"database/sql"
 	"fmt"
 	"net"
@@ -801,6 +802,19 @@ func NewWithConfig(cfg VMConfig) *VM {
 			return value.NewString("")
 		}
 		return value.NewString(strings.TrimSpace(args[0].String()))
+	})
+
+	// Input
+	vm.defineNative("input", func(args []value.Value) value.Value {
+		// args[0]: prompt (optional)
+		if len(args) > 0 {
+			fmt.Print(args[0].String())
+		}
+		reader := bufio.NewReader(os.Stdin)
+		text, _ := reader.ReadString('\n')
+		// Trim newline (windows \r\n and unix \n)
+		text = strings.TrimRight(text, "\r\n")
+		return value.NewString(text)
 	})
 	vm.defineNative("strings_reverse", func(args []value.Value) value.Value {
 		if len(args) < 1 {
