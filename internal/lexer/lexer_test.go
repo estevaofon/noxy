@@ -30,6 +30,14 @@ end
 [1, 2]
 {foo: "bar"}
 macro(x, y)
+use pkg select * as alias
+struct Point
+  x: int
+end
+global g = 1
+zeros(10)
+ref x
+map[string, int]
 `
 
 	tests := []struct {
@@ -143,6 +151,43 @@ macro(x, y)
 		{token.COMMA, ","},
 		{token.IDENTIFIER, "y"},
 		{token.RPAREN, ")"},
+
+		{token.NEWLINE, "\n"},
+		{token.USE, "use"},
+		{token.IDENTIFIER, "pkg"},
+		{token.SELECT, "select"},
+		{token.STAR, "*"},
+		{token.AS, "as"},
+		{token.IDENTIFIER, "alias"},
+		{token.NEWLINE, "\n"},
+		{token.STRUCT, "struct"},
+		{token.IDENTIFIER, "Point"},
+		{token.NEWLINE, "\n"},
+		{token.IDENTIFIER, "x"},
+		{token.COLON, ":"},
+		{token.TYPE_INT, "int"},
+		{token.NEWLINE, "\n"},
+		{token.END, "end"},
+		{token.NEWLINE, "\n"},
+		{token.GLOBAL, "global"},
+		{token.IDENTIFIER, "g"},
+		{token.ASSIGN, "="},
+		{token.INT, "1"},
+		{token.NEWLINE, "\n"},
+		{token.ZEROS, "zeros"},
+		{token.LPAREN, "("},
+		{token.INT, "10"},
+		{token.RPAREN, ")"},
+		{token.NEWLINE, "\n"},
+		{token.REF, "ref"},
+		{token.IDENTIFIER, "x"},
+		{token.NEWLINE, "\n"},
+		{token.MAP, "map"},
+		{token.LBRACKET, "["},
+		{token.TYPE_STRING, "string"},
+		{token.COMMA, ","},
+		{token.TYPE_INT, "int"},
+		{token.RBRACKET, "]"},
 		{token.NEWLINE, "\n"},
 		{token.EOF, ""},
 	}

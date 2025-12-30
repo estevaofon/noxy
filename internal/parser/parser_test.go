@@ -79,3 +79,34 @@ func checkParserErrors(t *testing.T, p *Parser) {
 	}
 	t.FailNow()
 }
+func TestParseMap(t *testing.T) {
+	input := `
+	let m: map[string, int] = {
+		"one": 1,
+		"two": 2
+	}
+	`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d",
+			len(program.Statements))
+	}
+
+	stmt, ok := program.Statements[0].(*ast.LetStmt)
+	if !ok {
+		t.Fatalf("stmt is not LetStmt. got=%T", program.Statements[0])
+	}
+
+	mapLit, ok := stmt.Value.(*ast.MapLiteral)
+	if !ok {
+		t.Fatalf("stmt.Value is not MapLiteral. got=%T", stmt.Value)
+	}
+
+	if len(mapLit.Keys) != 2 {
+		t.Fatalf("map.Keys has wrong length. got=%d", len(mapLit.Keys))
+	}
+}

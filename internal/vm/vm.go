@@ -67,6 +67,8 @@ type VM struct {
 	netBufferedData  map[int][]byte   // For peeked data during select
 	netBufferedConns map[int]net.Conn // For peeked accepts
 	nextNetID        int
+
+	LastPopped value.Value
 }
 
 type VMConfig struct {
@@ -2347,7 +2349,7 @@ func (vm *VM) run(minFrameCount int) error {
 		case chunk.OP_FALSE:
 			vm.push(value.NewBool(false))
 		case chunk.OP_POP:
-			vm.pop()
+			vm.LastPopped = vm.pop()
 
 		case chunk.OP_GET_GLOBAL:
 			index := c.Code[ip]

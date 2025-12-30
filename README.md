@@ -85,6 +85,18 @@ Length: 2
 Alice: 100
 ```
 
+## Testing
+ 
+How to run the interpreter tests:
+ 
+```bash
+# Run all unit tests (Lexer, Parser, Compiler, VM)
+go test ./...
+ 
+# Run integration tests (Noxy scripts)
+go run cmd/noxy/main.go noxy_examples/run_all_tests.nx
+```
+ 
 ## Architecture
 
 ```
