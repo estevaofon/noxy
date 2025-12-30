@@ -904,6 +904,11 @@ func (p *Parser) parseArrayLiteral() ast.Expression {
 func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	list := []ast.Expression{}
 
+	// Skip initial newlines
+	for p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
 	if p.peekTokenIs(end) {
 		p.nextToken()
 		return list
@@ -912,10 +917,32 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 	p.nextToken()
 	list = append(list, p.parseExpression(LOWEST))
 
-	for p.peekTokenIs(token.COMMA) {
-		p.nextToken()
+	for p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.NEWLINE) {
+		// If newline, just skip
+		if p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+			continue
+		}
+
+		p.nextToken() // eat COMMA
+
+		// Skip newlines after comma
+		for p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+		}
+
+		// Check for trailing comma + end
+		if p.peekTokenIs(end) {
+			break
+		}
+
 		p.nextToken()
 		list = append(list, p.parseExpression(LOWEST))
+	}
+
+	// Skip potential trailing newlines before closing bracket
+	for p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
 	}
 
 	if !p.expectPeek(end) {
@@ -943,6 +970,11 @@ func (p *Parser) parseMapLiteral() ast.Expression {
 	hash.Keys = []ast.Expression{}
 	hash.Values = []ast.Expression{}
 
+	// Skip initial newlines
+	for p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
 	for !p.peekTokenIs(token.RBRACE) {
 		p.nextToken()
 		// Parse Key
@@ -959,8 +991,32 @@ func (p *Parser) parseMapLiteral() ast.Expression {
 		hash.Keys = append(hash.Keys, key)
 		hash.Values = append(hash.Values, value)
 
-		if !p.peekTokenIs(token.RBRACE) && !p.expectPeek(token.COMMA) {
-			return nil
+		// Check for newline/comma
+		if p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+			// Skip extra newlines
+			for p.peekTokenIs(token.NEWLINE) {
+				p.nextToken()
+			}
+			// Optional comma
+			if p.peekTokenIs(token.COMMA) {
+				p.nextToken()
+				// Skip newlines after comma
+				for p.peekTokenIs(token.NEWLINE) {
+					p.nextToken()
+				}
+			}
+		} else if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+			// Skip newlines after comma
+			for p.peekTokenIs(token.NEWLINE) {
+				p.nextToken()
+			}
+		} else if !p.peekTokenIs(token.RBRACE) {
+			// If not RBRACE and no comma/newline, error
+			if !p.expectPeek(token.COMMA) {
+				return nil
+			}
 		}
 	}
 

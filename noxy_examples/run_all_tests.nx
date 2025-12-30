@@ -32,7 +32,9 @@ end
 // Helper para verificar se arquivo deve ser ignorado
 func should_ignore(s: string) -> bool
     // Lista de exclusions
-    let exclusions: string[] = ["run_all_tests.nx", "http_server.nx", "simple_client.nx", "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx"]
+    let exclusions: string[] = ["run_all_tests.nx", "http_server.nx", "simple_client.nx", 
+    "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", 
+    "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx"]
     if contains(exclusions, s) then
          return true
     end
