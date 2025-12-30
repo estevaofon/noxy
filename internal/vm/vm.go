@@ -1926,6 +1926,77 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
+	vm.defineNative("sqlite_exec_params", func(args []value.Value) value.Value {
+		if len(args) < 4 {
+			return value.NewNull()
+		}
+		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		sqlStr := args[1].String()
+		paramsArray, ok := args[2].Obj.(*value.ObjArray)
+		if !ok {
+			return value.NewNull()
+		}
+
+		resTmplInst, ok := args[3].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct := resTmplInst.Struct
+
+		handle := int(dbInst.Fields["handle"].AsInt)
+		if db, ok := vm.dbHandles[handle]; ok {
+			// Convert params
+			queryArgs := make([]interface{}, len(paramsArray.Elements))
+			for i, val := range paramsArray.Elements {
+				switch val.Type {
+				case value.VAL_INT:
+					queryArgs[i] = val.AsInt
+				case value.VAL_FLOAT:
+					queryArgs[i] = val.AsFloat
+				case value.VAL_BOOL:
+					queryArgs[i] = val.AsBool
+				case value.VAL_NULL:
+					queryArgs[i] = nil
+				case value.VAL_OBJ:
+					if b, ok := val.Obj.(string); ok {
+						queryArgs[i] = b
+					} else {
+						queryArgs[i] = val.String()
+					}
+				default:
+					queryArgs[i] = val.String()
+				}
+			}
+
+			result, err := db.Exec(sqlStr, queryArgs...)
+			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+			if err != nil {
+				resInst.Fields["ok"] = value.NewBool(false)
+				resInst.Fields["error"] = value.NewString(err.Error())
+				resInst.Fields["rows_affected"] = value.NewInt(0)
+				resInst.Fields["last_insert_id"] = value.NewInt(0)
+			} else {
+				rowsAffected, _ := result.RowsAffected()
+				lastId, _ := result.LastInsertId()
+				resInst.Fields["ok"] = value.NewBool(true)
+				resInst.Fields["error"] = value.NewString("")
+				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
+				resInst.Fields["last_insert_id"] = value.NewInt(lastId)
+			}
+			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+		}
+		// Invalid handle
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["ok"] = value.NewBool(false)
+		resInst.Fields["error"] = value.NewString("invalid database handle")
+		resInst.Fields["rows_affected"] = value.NewInt(0)
+		resInst.Fields["last_insert_id"] = value.NewInt(0)
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+	})
+
 	vm.defineNative("sqlite_prepare", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()

@@ -32,11 +32,7 @@ while true do
         let nome: string = input("Digite o nome: ")
         let email: string = input("Digite o email: ")
         let cargo: string = input("Digite o cargo: ")
-        let stmt: Statement = sqlite.prepare(db, "INSERT INTO usuarios (nome, email, cargo) VALUES (?, ?, ?)")
-        sqlite.bind_text(stmt, 1, nome)
-        sqlite.bind_text(stmt, 2, email)
-        sqlite.bind_text(stmt, 3, cargo)
-        sqlite.step_exec(stmt)
+        sqlite.execute_params(db, "INSERT INTO usuarios (nome, email, cargo) VALUES (?, ?, ?)", [nome, email, cargo])
     end
     if opcao == "2" then
         print("\nListar Usuários")
@@ -52,9 +48,7 @@ while true do
     if opcao == "3" then
         print("Remover Usuário")
         let id: int = input("Digite o id: ")
-        let stmt: Statement = sqlite.prepare(db, "DELETE FROM usuarios WHERE id = ?")
-        sqlite.bind_int(stmt, 1, id)
-        sqlite.step_exec(stmt)
+        sqlite.execute_params(db, "DELETE FROM usuarios WHERE id = ?", [id])
     end
     if opcao == "4" then
         print("Atualizar Usuário")
@@ -62,12 +56,7 @@ while true do
         let nome: string = input("Digite o nome: ")
         let email: string = input("Digite o email: ")
         let cargo: string = input("Digite o cargo: ")
-        let stmt: Statement = sqlite.prepare(db, "UPDATE usuarios SET nome = ?, email = ?, cargo = ? WHERE id = ?")
-        sqlite.bind_text(stmt, 1, nome)
-        sqlite.bind_text(stmt, 2, email)
-        sqlite.bind_text(stmt, 3, cargo)
-        sqlite.bind_int(stmt, 4, id)
-        sqlite.step_exec(stmt)
+        sqlite.execute_params(db, "UPDATE usuarios SET nome = ?, email = ?, cargo = ? WHERE id = ?", [nome, email, cargo, id])
     end
     if opcao == "5" then
         print("Sair")
