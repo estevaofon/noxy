@@ -22,3 +22,11 @@ if db.open then
 else
     print("SQLite Open Failed")
 end
+
+if io.exists("test_ns.txt") then
+    io.remove("test_ns.txt")
+end
+
+if io.exists("test_ns.db") then
+    io.remove("test_ns.db")
+end

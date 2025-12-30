@@ -64,6 +64,7 @@ let raw_list: string = cmd_res.output
 let len_list: int = strlen(raw_list)
 let current_file: string = ""
 let i: int = 0
+let failed_files: string[] = []
 
 // Parse manual da lista de arquivos
 while i < len_list do
@@ -95,6 +96,7 @@ while i < len_list do
     else
         print(f"  [FAIL] {current_file} (Code: {res.exit_code})")
         failed = failed + 1
+        append(failed_files, current_file)
     end
                 end
             end
@@ -135,7 +137,20 @@ print(f"Falhou: {failed}")
 
 if failed > 0 then
     print("ALGUNS TESTES FALHARAM.")
-    exit(1)
 else
     print("TODOS TESTES PASSARAM.")
 end
+
+print("")
+// Printa os arquivos que falharam
+let failed_len: int = length(failed_files)
+if failed > 0 then
+    print("Arquivos que falharam:")
+    let i: int = 0
+    while i < failed_len do
+        print(f"[FAIL] {failed_files[i]}")
+        i = i + 1
+    end
+    exit(1)
+end
+

@@ -8,6 +8,7 @@ use other_mod as m2
 
 // 3. Importando IO como SystemIO
 use io as SystemIO
+use sys
 
 func main() -> void
     print("=== Teste de Conflito e Alias ===")
@@ -30,3 +31,11 @@ func main() -> void
 end
 
 main()
+
+let r1: sys.SysResult = sys.exec_output("rm log_alias.txt")
+if r1.ok then
+    print("Arquivo log_alias.txt removido")
+else
+    print("Erro ao remover arquivo")
+end
+
