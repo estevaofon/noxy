@@ -1,0 +1,146 @@
+use sys
+use io
+use strings
+
+// Função auxiliar para processar texto inline (negrito)
+func process_inline(line: string) -> string
+    // Tenta tratar negrito com **
+    let res: strings.SplitResult = strings.split(line, "**")
+    if res.count < 3 then
+        return line 
+    end
+
+    let final_str: string = ""
+    let i: int = 0
+    while i < res.count do
+        if (i % 2) == 1 then
+            // Parte ímpar = dentro do negrito
+            final_str = final_str + "<b>" + res.parts[i] + "</b>"
+        else
+            // Parte par = fora
+            final_str = final_str + res.parts[i]
+        end
+        i = i + 1
+    end
+    return final_str
+end
+
+func main()
+    let args: string[] = sys.argv()
+    // args[0] = noxy, args[1] = script, args[2] = input
+    if length(args) < 3 then
+        print("Uso: noxy md2html.nx <arquivo_entrada.md> [arquivo_saida.html]")
+        sys.exit(1)
+    end
+
+    let input_path: string = args[2]
+    let output_path: string = "output.html"
+    if length(args) >= 4 then
+        output_path = args[3]
+    end
+
+    print(f"Lendo: {input_path}")
+    
+    // Ler o arquivo
+    let file: io.File = io.open(input_path, "r")
+    if !file.open then
+        print(f"Erro ao abrir arquivo: {input_path}")
+        sys.exit(1)
+    end
+
+    let read_res: io.IOLinesResult = io.read_lines(file)
+    io.close(file)
+
+    if !read_res.ok then
+        print(f"Erro ao ler arquivo: {read_res.error}")
+        sys.exit(1)
+    end
+
+    let lines: string[] = read_res.data
+    let html_output: string = "<html>\n<head>\n<style>body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }</style>\n</head>\n<body>\n"
+
+    let in_paragraph: bool = false
+
+    let i: int = 0
+    while i < length(lines) do
+        let line: string = lines[i]
+        let trim_line: string = strings.trim(line)
+        
+        let is_empty: bool = length(trim_line) == 0
+
+        // Se linha vazia e estamos em paragrafo, fecha paragrafo
+        if is_empty then
+            if in_paragraph then
+                html_output = html_output + "</p>\n"
+                in_paragraph = false
+            end
+        else
+            // Processar Headers
+            if strings.starts_with(trim_line, "# ") then
+                if in_paragraph then
+                    html_output = html_output + "</p>\n"
+                    in_paragraph = false
+                end
+                let content: string = strings.substring(trim_line, 2, length(trim_line))
+                html_output = html_output + "<h1>" + process_inline(content) + "</h1>\n"
+            else
+                if strings.starts_with(trim_line, "## ") then
+                    if in_paragraph then
+                        html_output = html_output + "</p>\n"
+                        in_paragraph = false
+                    end
+                    let content: string = strings.substring(trim_line, 3, length(trim_line))
+                    html_output = html_output + "<h2>" + process_inline(content) + "</h2>\n"
+                else
+                    if strings.starts_with(trim_line, "### ") then
+                        if in_paragraph then
+                            html_output = html_output + "</p>\n"
+                            in_paragraph = false
+                        end
+                        let content: string = strings.substring(trim_line, 4, length(trim_line))
+                        html_output = html_output + "<h3>" + process_inline(content) + "</h3>\n"
+                    else
+                        if trim_line == "---" then
+                            if in_paragraph then
+                                html_output = html_output + "</p>\n"
+                                in_paragraph = false
+                            end
+                            html_output = html_output + "<hr>\n"
+                        else
+                            // Paragrafos
+                            if !in_paragraph then
+                                html_output = html_output + "<p>"
+                                in_paragraph = true
+                            else
+                                html_output = html_output + " " // Espaço entre linhas do mesmo paragrafo
+                            end
+                            html_output = html_output + process_inline(trim_line)
+                        end
+                    end
+                end
+            end
+        end
+
+        i = i + 1
+    end
+
+    if in_paragraph then
+        html_output = html_output + "</p>\n"
+    end
+
+    html_output = html_output + "</body>\n</html>"
+
+    // Escrever saida
+    let out_file: io.File = io.open(output_path, "w")
+    if !out_file.open then
+        print(f"Erro ao criar arquivo de saída: {output_path}")
+        sys.exit(1)
+    end
+    
+    io.write(out_file, html_output)
+    io.close(out_file)
+    
+    print(f"Conversão concluída! Salvo em: {output_path}")
+end
+
+main()

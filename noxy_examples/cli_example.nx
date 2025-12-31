@@ -1,0 +1,25 @@
+use sys
+
+// Execução: ./noxy meu_script.nx arquivo.txt --verbose 42
+
+let args: string[] = sys.argv()
+
+// args[0] = "./noxy" ou "noxy.exe"
+// args[1] = "meu_script.nx"
+// args[2] = "arquivo.txt"
+// args[3] = "--verbose"
+// args[4] = "42"
+
+
+let arquivo: string = args[1]
+print(f"Processando: {arquivo}")
+
+// Verificar flags manualmente
+let i: int = 0
+while i < length(args) do
+    print(args[i])
+    if args[i] == "--verbose" | args[i] == "-v" then
+        print("Modo verbose ativado")
+    end
+    i = i + 1
+end
