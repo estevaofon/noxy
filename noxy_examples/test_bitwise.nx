@@ -1,0 +1,47 @@
+let a: int = 5         // 0101
+let b: int = 3         // 0011
+
+print("a & b =", a & b)      // 1
+print("a | b =", a | b)      // 7
+print("a ^ b =", a ^ b)      // 6
+print("a << 1 =", a << 1)    // 10
+print("b >> 1 =", b >> 1)    // 1
+print("~a =", ~a)            // -6
+
+print("--- Logical ---")
+if true && true then 
+    print("AND OK") 
+end
+
+if false || true then 
+    print("OR OK") 
+end
+
+if true && false then 
+    print("FAIL AND") 
+else 
+    print("AND SHORT OK") 
+end
+
+if false || false then 
+    print("FAIL OR") 
+else 
+    print("OR SHORT OK") 
+end
+
+// Test Short Circuit
+func check_side_effect()
+    print("SIDE EFFECT")
+    return true
+end
+
+print("--- Short Circuit ---")
+if false && check_side_effect() then
+    print("Should not be here")
+else
+    print("Short circuit AND worked (no side effect printed above?)")
+end
+
+if true || check_side_effect() then
+    print("Short circuit OR worked (no side effect printed above?)")
+end

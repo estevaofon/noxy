@@ -71,9 +71,17 @@ const (
 	NEQ TokenType = "NEQ" // !=
 
 	// Operadores lógicos
-	AND TokenType = "AND" // &
-	OR  TokenType = "OR"  // |
+	AND TokenType = "AND" // &&
+	OR  TokenType = "OR"  // ||
 	NOT TokenType = "NOT" // !
+
+	// Operadores Bitwise
+	BIT_AND     TokenType = "BIT_AND"     // &
+	BIT_OR      TokenType = "BIT_OR"      // |
+	BIT_XOR     TokenType = "BIT_XOR"     // ^
+	BIT_NOT     TokenType = "BIT_NOT"     // ~
+	SHIFT_LEFT  TokenType = "SHIFT_LEFT"  // <<
+	SHIFT_RIGHT TokenType = "SHIFT_RIGHT" // >>
 
 	// Atribuição
 	ASSIGN TokenType = "ASSIGN" // =

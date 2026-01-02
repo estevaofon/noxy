@@ -15,7 +15,7 @@ func deve_desenhar_recursivo(linha: int, coluna: int) -> bool
     if coluna == 0 then
         return true
     else
-        if (linha % 2 == 0) & (coluna % 2 == 1) then
+        if (linha % 2 == 0) && (coluna % 2 == 1) then
             return false
         else
             let nova_linha: int = linha / 2

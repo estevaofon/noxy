@@ -38,7 +38,7 @@ print("Preços zerados na transação pendente.")
 
 // Verifica status "sujo"
 let res_check: QueryResult = query(db, "SELECT preco FROM produtos WHERE nome = 'Notebook'")
-if res_check.ok & res_check.row_count > 0 then
+if res_check.ok && res_check.row_count > 0 then
     print(f"Preço do Notebook na transação: {res_check.rows[0].values[0]}")
 end
 
@@ -53,7 +53,7 @@ let res: QueryResult = query(db, "SELECT * FROM produtos")
 let i: int = 0
 while i < res.row_count do
     let row: Row = res.rows[i]
-    print(f"ID {row.values[0]} | {row.values[1]} | R$ {row.values[2]}")
+    print(f"ID {row.values[0]} || {row.values[1]} || R$ {row.values[2]}")
     i = i + 1
 end
 

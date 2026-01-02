@@ -13,6 +13,7 @@ const (
 	OP_POP
 	OP_JUMP
 	OP_JUMP_IF_FALSE
+	OP_JUMP_IF_TRUE
 	OP_LOOP
 	OP_TRUE
 	OP_FALSE
@@ -38,6 +39,12 @@ const (
 	OP_EQUAL
 	OP_AND
 	OP_OR
+	OP_BIT_AND
+	OP_BIT_OR
+	OP_BIT_XOR
+	OP_BIT_NOT
+	OP_SHIFT_LEFT
+	OP_SHIFT_RIGHT
 	OP_CALL
 	OP_INVOKE
 	OP_RETURN
@@ -62,6 +69,8 @@ func (op OpCode) String() string {
 		return "OP_JUMP"
 	case OP_JUMP_IF_FALSE:
 		return "OP_JUMP_IF_FALSE"
+	case OP_JUMP_IF_TRUE:
+		return "OP_JUMP_IF_TRUE"
 	case OP_LOOP:
 		return "OP_LOOP"
 	case OP_TRUE:
@@ -112,6 +121,18 @@ func (op OpCode) String() string {
 		return "OP_AND"
 	case OP_OR:
 		return "OP_OR"
+	case OP_BIT_AND:
+		return "OP_BIT_AND"
+	case OP_BIT_OR:
+		return "OP_BIT_OR"
+	case OP_BIT_XOR:
+		return "OP_BIT_XOR"
+	case OP_BIT_NOT:
+		return "OP_BIT_NOT"
+	case OP_SHIFT_LEFT:
+		return "OP_SHIFT_LEFT"
+	case OP_SHIFT_RIGHT:
+		return "OP_SHIFT_RIGHT"
 	case OP_CALL:
 		return "OP_CALL"
 	case OP_INVOKE:
@@ -234,6 +255,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_AND", offset)
 	case OP_OR:
 		return c.simpleInstruction("OP_OR", offset)
+	case OP_BIT_AND:
+		return c.simpleInstruction("OP_BIT_AND", offset)
+	case OP_BIT_OR:
+		return c.simpleInstruction("OP_BIT_OR", offset)
+	case OP_BIT_XOR:
+		return c.simpleInstruction("OP_BIT_XOR", offset)
+	case OP_BIT_NOT:
+		return c.simpleInstruction("OP_BIT_NOT", offset)
+	case OP_SHIFT_LEFT:
+		return c.simpleInstruction("OP_SHIFT_LEFT", offset)
+	case OP_SHIFT_RIGHT:
+		return c.simpleInstruction("OP_SHIFT_RIGHT", offset)
 	case OP_NEGATE:
 		return c.simpleInstruction("OP_NEGATE", offset)
 	case OP_PRINT:
@@ -242,6 +275,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.shortInstruction("OP_JUMP", offset)
 	case OP_JUMP_IF_FALSE:
 		return c.shortInstruction("OP_JUMP_IF_FALSE", offset)
+	case OP_JUMP_IF_TRUE:
+		return c.shortInstruction("OP_JUMP_IF_TRUE", offset)
 	case OP_LOOP:
 		return c.shortInstruction("OP_LOOP", offset)
 	case OP_CALL:

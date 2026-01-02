@@ -82,6 +82,10 @@ func (l *Lexer) NextToken() token.Token {
 			ch := l.ch
 			l.readChar()
 			tok = token.Token{Type: token.LTE, Literal: string(ch) + string(l.ch)}
+		} else if l.peekChar() == '<' {
+			ch := l.ch
+			l.readChar()
+			tok = token.Token{Type: token.SHIFT_LEFT, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(token.LT, l.ch)
 		}
@@ -90,6 +94,10 @@ func (l *Lexer) NextToken() token.Token {
 			ch := l.ch
 			l.readChar()
 			tok = token.Token{Type: token.GTE, Literal: string(ch) + string(l.ch)}
+		} else if l.peekChar() == '>' {
+			ch := l.ch
+			l.readChar()
+			tok = token.Token{Type: token.SHIFT_RIGHT, Literal: string(ch) + string(l.ch)}
 		} else {
 			tok = newToken(token.GT, l.ch)
 		}
@@ -102,9 +110,25 @@ func (l *Lexer) NextToken() token.Token {
 			tok = newToken(token.NOT, l.ch)
 		}
 	case '&':
-		tok = newToken(token.AND, l.ch)
+		if l.peekChar() == '&' {
+			ch := l.ch
+			l.readChar()
+			tok = token.Token{Type: token.AND, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(token.BIT_AND, l.ch)
+		}
 	case '|':
-		tok = newToken(token.OR, l.ch)
+		if l.peekChar() == '|' {
+			ch := l.ch
+			l.readChar()
+			tok = token.Token{Type: token.OR, Literal: string(ch) + string(l.ch)}
+		} else {
+			tok = newToken(token.BIT_OR, l.ch)
+		}
+	case '^':
+		tok = newToken(token.BIT_XOR, l.ch)
+	case '~':
+		tok = newToken(token.BIT_NOT, l.ch)
 	case '(':
 		tok = newToken(token.LPAREN, l.ch)
 	case ')':
@@ -240,6 +264,16 @@ func (l *Lexer) readIdentifier() string {
 
 func (l *Lexer) readNumber() (token.TokenType, string) {
 	position := l.position
+
+	if l.ch == '0' && (l.peekChar() == 'x' || l.peekChar() == 'X') {
+		l.readChar() // 0
+		l.readChar() // x
+		for isHexDigit(l.ch) {
+			l.readChar()
+		}
+		return token.INT, l.input[position:l.position]
+	}
+
 	isFloat := false
 	for isDigit(l.ch) {
 		l.readChar()
@@ -255,6 +289,10 @@ func (l *Lexer) readNumber() (token.TokenType, string) {
 		return token.FLOAT, l.input[position:l.position]
 	}
 	return token.INT, l.input[position:l.position]
+}
+
+func isHexDigit(ch byte) bool {
+	return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
 func (l *Lexer) readString(quote byte) (string, bool) {

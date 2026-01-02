@@ -2250,6 +2250,50 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
+	vm.defineNative("hex", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		if args[0].Type == value.VAL_INT {
+			return value.NewString(fmt.Sprintf("0x%x", args[0].AsInt))
+		}
+		if args[0].Type == value.VAL_BYTES {
+			return value.NewString(fmt.Sprintf("%x", args[0].Obj.(string)))
+		}
+		return value.NewString(args[0].String())
+	})
+
+	vm.defineNative("fmt", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("")
+		}
+		formatStr := args[0].String()
+		fmtArgs := make([]interface{}, len(args)-1)
+		for i, val := range args[1:] {
+			switch val.Type {
+			case value.VAL_INT:
+				fmtArgs[i] = val.AsInt
+			case value.VAL_FLOAT:
+				fmtArgs[i] = val.AsFloat
+			case value.VAL_BOOL:
+				fmtArgs[i] = val.AsBool
+			case value.VAL_NULL:
+				fmtArgs[i] = nil
+			case value.VAL_OBJ:
+				if b, ok := val.Obj.(string); ok {
+					fmtArgs[i] = b
+				} else {
+					fmtArgs[i] = val.String()
+				}
+			case value.VAL_BYTES:
+				fmtArgs[i] = []byte(val.Obj.(string))
+			default:
+				fmtArgs[i] = val.String()
+			}
+		}
+		return value.NewString(fmt.Sprintf(formatStr, fmtArgs...))
+	})
+
 	return vm
 }
 
@@ -2336,6 +2380,14 @@ func (vm *VM) run(minFrameCount int) error {
 			ip += 2
 			condition := vm.peek(0)
 			if condition.Type == value.VAL_BOOL && !condition.AsBool {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_TRUE:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			condition := vm.peek(0)
+			if condition.Type == value.VAL_BOOL && condition.AsBool {
 				ip += offset
 			}
 
@@ -2490,7 +2542,66 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewInt(a.AsInt % b.AsInt))
 			} else {
-				return fmt.Errorf("operands must be integers")
+				return fmt.Errorf("operands for %% must be integers")
+			}
+
+		case chunk.OP_BIT_AND:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				vm.push(value.NewInt(a.AsInt & b.AsInt))
+			} else {
+				return fmt.Errorf("operands for & must be integers")
+			}
+
+		case chunk.OP_BIT_OR:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				vm.push(value.NewInt(a.AsInt | b.AsInt))
+			} else {
+				return fmt.Errorf("operands for | must be integers")
+			}
+
+		case chunk.OP_BIT_XOR:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				vm.push(value.NewInt(a.AsInt ^ b.AsInt))
+			} else {
+				return fmt.Errorf("operands for ^ must be integers")
+			}
+
+		case chunk.OP_BIT_NOT:
+			a := vm.pop()
+			if a.Type == value.VAL_INT {
+				vm.push(value.NewInt(^a.AsInt))
+			} else {
+				return fmt.Errorf("operand for ~ must be integer")
+			}
+
+		case chunk.OP_SHIFT_LEFT:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				if b.AsInt < 0 {
+					return fmt.Errorf("negative shift count")
+				}
+				vm.push(value.NewInt(a.AsInt << uint64(b.AsInt)))
+			} else {
+				return fmt.Errorf("operands for << must be integers")
+			}
+
+		case chunk.OP_SHIFT_RIGHT:
+			b := vm.pop()
+			a := vm.pop()
+			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
+				if b.AsInt < 0 {
+					return fmt.Errorf("negative shift count")
+				}
+				vm.push(value.NewInt(a.AsInt >> uint64(b.AsInt)))
+			} else {
+				return fmt.Errorf("operands for >> must be integers")
 			}
 		case chunk.OP_NEGATE:
 			v := vm.pop()

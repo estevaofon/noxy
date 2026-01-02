@@ -10,7 +10,7 @@ func merge(left: int[], right: int[]) -> int[]
     let i: int = 0
     let j: int = 0
     
-    while i < length(left) & j < length(right) do
+    while i < length(left) && j < length(right) do
         if left[i] <= right[j] then
             append(result, left[i])
             i = i + 1
@@ -196,7 +196,7 @@ func has_cycle(head: ref ListNode) -> bool
     let slow: ref ListNode = head
     let fast: ref ListNode = head
     
-    while fast != null & fast.next != null do
+    while fast != null && fast.next != null do
         slow = slow.next
         fast = fast.next.next
         

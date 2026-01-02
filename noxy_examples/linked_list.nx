@@ -13,7 +13,7 @@ end
 
 
 func pop(node: ref Node) -> int
-    if node == null | node.proximo == null then
+    if node == null || node.proximo == null then
         return -1
     end
     while node.proximo.proximo != null do

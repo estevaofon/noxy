@@ -5,6 +5,7 @@ import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/token"
+	"strconv"
 )
 
 type Parser struct {
@@ -45,6 +46,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.NULL, p.parseNull)
 	p.registerPrefix(token.ZEROS, p.parseZeros)
 	p.registerPrefix(token.REF, p.parsePrefixExpression)
+	p.registerPrefix(token.BIT_NOT, p.parsePrefixExpression)
 	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
 	// p.registerPrefix(token.FUNC, p.parseFunctionLiteral) // Removed. Func is statement now.
 
@@ -67,6 +69,11 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.GTE, p.parseInfixExpression)
 	p.registerInfix(token.AND, p.parseInfixExpression)
 	p.registerInfix(token.OR, p.parseInfixExpression)
+	p.registerInfix(token.BIT_AND, p.parseInfixExpression)
+	p.registerInfix(token.BIT_OR, p.parseInfixExpression)
+	p.registerInfix(token.BIT_XOR, p.parseInfixExpression)
+	p.registerInfix(token.SHIFT_LEFT, p.parseInfixExpression)
+	p.registerInfix(token.SHIFT_RIGHT, p.parseInfixExpression)
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccess)
@@ -476,34 +483,43 @@ func (p *Parser) parseType() ast.NoxyType {
 const (
 	_ int = iota
 	LOWEST
-	OR          // |
-	AND         // &
+	OR          // ||
+	AND         // &&
+	BIT_OR      // |
+	BIT_XOR     // ^
+	BIT_AND     // &
 	EQUALS      // ==
 	LESSGREATER // > or <
+	SHIFT       // << or >>
 	SUM         // + or -
 	PRODUCT     // * or /
-	PREFIX      // -X or !X
+	PREFIX      // -X or !X or ~X
 	CALL        // myFunction(X)
 	INDEX       // array[index]
 )
 
 var precedences = map[token.TokenType]int{
-	token.EQ:       EQUALS,
-	token.NEQ:      EQUALS,
-	token.LT:       LESSGREATER,
-	token.GT:       LESSGREATER,
-	token.LTE:      LESSGREATER,
-	token.GTE:      LESSGREATER,
-	token.AND:      AND,
-	token.OR:       OR,
-	token.PLUS:     SUM,
-	token.MINUS:    SUM,
-	token.SLASH:    PRODUCT,
-	token.STAR:     PRODUCT,
-	token.PERCENT:  PRODUCT,
-	token.LPAREN:   CALL,
-	token.LBRACKET: INDEX,
-	token.DOT:      INDEX,
+	token.EQ:          EQUALS,
+	token.NEQ:         EQUALS,
+	token.LT:          LESSGREATER,
+	token.GT:          LESSGREATER,
+	token.LTE:         LESSGREATER,
+	token.GTE:         LESSGREATER,
+	token.AND:         AND,
+	token.OR:          OR,
+	token.BIT_AND:     BIT_AND,
+	token.BIT_OR:      BIT_OR,
+	token.BIT_XOR:     BIT_XOR,
+	token.SHIFT_LEFT:  SHIFT,
+	token.SHIFT_RIGHT: SHIFT,
+	token.PLUS:        SUM,
+	token.MINUS:       SUM,
+	token.SLASH:       PRODUCT,
+	token.STAR:        PRODUCT,
+	token.PERCENT:     PRODUCT,
+	token.LPAREN:      CALL,
+	token.LBRACKET:    INDEX,
+	token.DOT:         INDEX,
 }
 
 func (p *Parser) peekPrecedence() int {
@@ -534,8 +550,16 @@ func (p *Parser) parseIdentifier() ast.Expression {
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	lit := &ast.IntegerLiteral{Token: p.curToken}
-	value := int64(0)
-	fmt.Sscanf(p.curToken.Literal, "%d", &value)
+
+	value, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
+	if err != nil {
+		// handle error? fallback?
+		// for now default 0 or log?
+		// Sscanf previously just set 0 if failed?
+		// Let's keep 0 but maybe log if needed.
+		// Actually ParseInt with base 0 handles 0x.
+		fmt.Printf("Error parsing int: %s\n", err) // Optional debug
+	}
 	lit.Value = value
 	return lit
 }

@@ -241,6 +241,32 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		}
 
 	case *ast.InfixExpression:
+		// Short-circuit Logic
+		if n.Operator == "&&" {
+			if _, err := c.Compile(n.Left); err != nil {
+				return nil, err
+			}
+			endJump := c.emitJump(chunk.OP_JUMP_IF_FALSE)
+			c.emitByte(byte(chunk.OP_POP))
+			if _, err := c.Compile(n.Right); err != nil {
+				return nil, err
+			}
+			c.patchJump(endJump)
+			return c.currentChunk, nil
+		}
+		if n.Operator == "||" {
+			if _, err := c.Compile(n.Left); err != nil {
+				return nil, err
+			}
+			endJump := c.emitJump(chunk.OP_JUMP_IF_TRUE)
+			c.emitByte(byte(chunk.OP_POP))
+			if _, err := c.Compile(n.Right); err != nil {
+				return nil, err
+			}
+			c.patchJump(endJump)
+			return c.currentChunk, nil
+		}
+
 		if _, err := c.Compile(n.Left); err != nil {
 			return nil, err
 		}
@@ -273,9 +299,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			c.emitByte(byte(chunk.OP_GREATER))
 			c.emitByte(byte(chunk.OP_NOT))
 		case "|":
-			c.emitByte(byte(chunk.OP_OR))
+			c.emitByte(byte(chunk.OP_BIT_OR))
 		case "&":
-			c.emitByte(byte(chunk.OP_AND))
+			c.emitByte(byte(chunk.OP_BIT_AND))
+		case "^":
+			c.emitByte(byte(chunk.OP_BIT_XOR))
+		case "<<":
+			c.emitByte(byte(chunk.OP_SHIFT_LEFT))
+		case ">>":
+			c.emitByte(byte(chunk.OP_SHIFT_RIGHT))
 		case "%":
 			c.emitByte(byte(chunk.OP_MODULO))
 		default:
@@ -290,6 +322,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			c.emitByte(byte(chunk.OP_NEGATE))
 		} else if n.Operator == "!" {
 			c.emitByte(byte(chunk.OP_NOT))
+		} else if n.Operator == "~" {
+			c.emitByte(byte(chunk.OP_BIT_NOT))
 		} else if n.Operator == "ref" {
 			// No-op for ref in expression?
 			// Just pass the value (which is likely an object/pointer).

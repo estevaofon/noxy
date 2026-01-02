@@ -83,7 +83,7 @@ while i < len_list do
             else
                 // Verifica extensão e auto-exclusão
                 let ignored: bool = should_ignore(current_file)
-                if ends_with_nx(current_file) & !ignored then
+                if ends_with_nx(current_file) && !ignored then
                     print(f"Executando: {current_file}...")
                     
                     // Executa e captura saída
@@ -117,7 +117,7 @@ end
 // Processa último arquivo se não terminar com \n
 if strlen(current_file) > 0 then
     let ignored2: bool = should_ignore(current_file)
-    if ends_with_nx(current_file) & !ignored2 then
+    if ends_with_nx(current_file) && !ignored2 then
         print(f"Executando: {current_file}...")
         let cmd_last: string = noxy_bin + " noxy_examples/" + current_file
         let run_res_last: SysResult = exec_output(cmd_last)

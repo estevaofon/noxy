@@ -1,0 +1,25 @@
+use crypto
+
+let input: bytes = b"hello"
+let hash: string = crypto.sha256(input)
+print("Input: hello")
+print("Hash:  " + hash)
+print("Exp:   2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+
+if hash == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" then
+    print("PASS")
+else
+    print("FAIL")
+end
+
+let input2: bytes = b""
+let hash2: string = crypto.sha256(input2)
+print("Input: (empty)")
+print("Hash:  " + hash2)
+print("Exp:   e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+if hash2 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" then
+    print("PASS")
+else
+    print("FAIL")
+end

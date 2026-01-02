@@ -1,0 +1,9 @@
+let name: string = "Noxy"
+let version: float = 1.0
+let count: int = 42
+
+print(fmt("Basic: Hello %s", name)) 
+print(fmt("Number with padding: %04d", count)) 
+print(fmt("Float precision: %.2f", version))
+print(fmt("Hex int: %x", 255))
+print(fmt("Bool: %v", true))

@@ -13,7 +13,7 @@ end
 
 
 func pop(node: ref Node) -> int
-    if node == null | node.proximo == null then
+    if node == null || node.proximo == null then
         return -1
     end
     while node.proximo.proximo != null do
@@ -26,7 +26,7 @@ end
 
 
 func _peek(node: ref Node) -> int
-    if node == null | node.proximo == null then
+    if node == null || node.proximo == null then
         return -1
     end
     node = node.proximo
@@ -57,7 +57,7 @@ end
 
 
 func _is_empty(node: ref Node) -> bool
-    return node == null | node.proximo == null
+    return node == null || node.proximo == null
 end
     
 
