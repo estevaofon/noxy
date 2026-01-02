@@ -3,7 +3,7 @@
 A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://noxylang.com/)
 
 <p align="center">
-<img width="300" height="300" alt="Noxy Logo" src="https://github.com/user-attachments/assets/29244835-8d84-44ad-bfd2-fd2894feac3a" />
+<img width="200" height="200" alt="noxy" src="https://github.com/user-attachments/assets/acfc226e-f129-43ed-97df-25dda7c97fcf" />
 </p>
 
 ## What is Noxy VM?
