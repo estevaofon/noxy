@@ -13,7 +13,7 @@ func read_stored_name() -> string
         let res: IOResult = read(f)
         close(f)
         if res.ok then
-            if strlen(res.data) > 0 then
+            if length(res.data) > 0 then
                 return res.data
             end
         end
