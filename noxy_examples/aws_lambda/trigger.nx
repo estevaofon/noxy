@@ -1,0 +1,20 @@
+// noxy_examples/aws_lambda/trigger.nx
+// Triggers an event on the mock server
+
+use http_client select *
+
+func main() -> void
+    let url: string = "http://localhost:8080/trigger"
+    let body: string = "{\"key1\": \"value1\", \"key2\": \"value2\"}"
+    
+    print("Triggering event to " + url)
+    let res: ClientResponse = post(url, to_bytes(body))
+    
+    if res.ok then
+        print("Trigger success: " + to_str(res.status_code))
+    else
+        print("Trigger failed: " + res.error)
+    end
+end
+
+main()

@@ -1,0 +1,17 @@
+// noxy_examples/aws_lambda/function.nx
+// User handler
+
+use json_parser select *
+
+func handler(event: string) -> string
+    // Simple echo handler
+    // Returns a JSON response
+    
+    print("Handler received: " + event)
+    
+    // Parse event if valid JSON
+    // let json: JsonValue = json_parse(event)
+    
+    // Return result
+    return "{\"message\": \"Hello from Noxy!\", \"input\": " + event + "}"
+end

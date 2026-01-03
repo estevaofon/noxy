@@ -122,7 +122,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     // Se query tem algo: path + "?" + query
     // Mas parse_url retorna query sem '?'
     let full_path: string = u.path
-    if strlen(u.query) > 0 then
+    if length(u.query) > 0 then
         full_path = full_path + "?" + u.query
     end
     
@@ -145,6 +145,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     let loop_active: bool = true
     while loop_active do
         let result: NetResult = recv(sock, 8192)
+        // print("DEBUG CLIENT RECV: c=" + to_str(result.count) + " ok=" + to_str(result.ok))
         
         if !result.ok then
             loop_active = false
