@@ -162,7 +162,7 @@ func server_poll(server: ref HttpServer) -> RequestEvent
                     k = k + 1
                 end
                 
-                if !recv_res.ok | (recv_res.count == 0) then
+                if !recv_res.ok || (recv_res.count == 0) then
                     // Closed
                     net_close(active_sock)
                     if client_idx != -1 then
@@ -185,7 +185,7 @@ func server_poll(server: ref HttpServer) -> RequestEvent
 end
 
 func server_send(server: ref HttpServer, client_index: int, resp: HttpResponse) -> void
-    if (client_index >= 0) & (client_index < 64) then
+    if (client_index >= 0) && (client_index < 64) then
         let sock: Socket = server.client_sockets[client_index]
         if sock != null then
             if sock.open then

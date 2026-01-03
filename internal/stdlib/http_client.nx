@@ -109,7 +109,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         end
     end
     
-    if method == "POST" | method == "PUT" | method == "PATCH" then
+    if method == "POST" || method == "PUT" || method == "PATCH" then
         // Adiciona Content-Type default se n?o tiver?
         // Vamos deixar pro usu?rio ou spec. Spec diz: post autom?gico application/json
         // Mas aqui ? a fun??o gen?rica request()
@@ -174,7 +174,7 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     // 8. Converter para ClientResponse
     let client_res: ClientResponse = ClientResponse(false, http_res.status_code, http_res.headers, http_res.header_count, http_res.body, "")
     
-    if http_res.status_code >= 200 & http_res.status_code < 300 then
+    if http_res.status_code >= 200 && http_res.status_code < 300 then
         client_res.ok = true
     else
         client_res.ok = false

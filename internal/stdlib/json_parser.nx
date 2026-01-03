@@ -94,7 +94,7 @@ end
 
 func skip_whitespace(p: ref Parser) -> void
     let c: string = peek(p)
-    while !is_at_end(p) & (c == " " | c == "\n" | c == "\t" | c == "\r") do
+    while !is_at_end(p) && (c == " " || c == "\n" || c == "\t" || c == "\r") do
         let ignored: string = advance(p)
         c = peek(p)
     end
@@ -166,7 +166,7 @@ func parse_number_val(p: ref Parser) -> float
     end
     
     // Parte inteira
-    while !is_at_end(p) & (ord(c) >= 48 & ord(c) <= 57) do
+    while !is_at_end(p) && (ord(c) >= 48 && ord(c) <= 57) do
         num_str = num_str + advance(p)
         c = peek(p)
     end
@@ -175,7 +175,7 @@ func parse_number_val(p: ref Parser) -> float
     if c == "." then
         num_str = num_str + advance(p)
         c = peek(p)
-        while !is_at_end(p) & (ord(c) >= 48 & ord(c) <= 57) do
+        while !is_at_end(p) && (ord(c) >= 48 && ord(c) <= 57) do
             num_str = num_str + advance(p)
             c = peek(p)
         end
@@ -223,7 +223,7 @@ func parse_value(p: ref Parser) -> ref JsonNode
         end
     end
     
-    if (c == "-") | (ord(c) >= 48 & ord(c) <= 57) then
+    if (c == "-") || (ord(c) >= 48 && ord(c) <= 57) then
         let n: float = parse_number_val(p)
         return ref make_number(n)
     end

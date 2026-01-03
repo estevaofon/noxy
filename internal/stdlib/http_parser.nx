@@ -9,7 +9,7 @@ use strings select *
 struct HttpRequest
     method: string,           // "GET", "POST", etc
     path: string,             // "/api/users"
-    query: string,            // "id=123&name=test" (sem o '?')
+    query: string,            // "id=123&&name=test" (sem o '?')
     version: string,          // "HTTP/1.1"
     headers: string[64],      // Array de headers "Name: Value"
     header_count: int,        // Numero de headers validos
@@ -287,7 +287,7 @@ func parse_response(raw_data: bytes, data_len: int) -> HttpResponse
         let crlf_pos: int = find_crlf(raw_data, cursor, data_len)
         
         if crlf_pos == -1 then
-            if !is_body & (cursor < data_len) then
+            if !is_body && (cursor < data_len) then
                 resp.body = slice(raw_data, cursor, data_len)
             end
             break
