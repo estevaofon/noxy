@@ -19,7 +19,7 @@ Noxy é uma linguagem de programação estaticamente tipada. Projetada para fins
 | Categoria | Palavras-chave |
 |-----------|----------------|
 | Declarações | `let`, `global`, `func`, `struct` |
-| Controle de Fluxo | `if`, `then`, `else`, `end`, `while`, `do`, `return`, `break` |
+| Controle de Fluxo | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break` |
 | Tipos | `int`, `float`, `string`, `str`, `bool`, `void`, `ref` |
 | Literais | `true`, `false`, `null` |
 | Módulos | `use`, `select` |
@@ -517,15 +517,21 @@ else
     // código se falso
 end
 
-// Condições aninhadas
+if condição1 then
+    // ...
+elif condição2 then
+    // ...
+else
+    // ...
+end
+
+// Condições aninhadas (com elif)
 if x > 10 then
     print("Maior que 10")
+elif x > 5 then
+    print("Maior que 5")
 else
-    if x > 5 then
-        print("Maior que 5")
-    else
-        print("5 ou menos")
-    end
+    print("5 ou menos")
 end
 ```
 
