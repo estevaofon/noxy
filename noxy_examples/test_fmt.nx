@@ -1,9 +1,42 @@
-let name: string = "Noxy"
-let version: float = 1.0
-let count: int = 42
+// Exemplo completo da função global fmt()
+// Ela funciona como o sprintf do C/Go, retornando uma string formatada.
 
-print(fmt("Basic: Hello %s", name)) 
-print(fmt("Number with padding: %04d", count)) 
-print(fmt("Float precision: %.2f", version))
-print(fmt("Hex int: %x", 255))
-print(fmt("Bool: %v", true))
+print("--- TESTE DA FUNÇÃO FMT ---")
+
+// 1. Strings e Inteiros
+let nome: string = "Noxy"
+let versao: int = 1
+let basico: string = fmt("Bem-vindo ao %s v%d", nome, versao)
+print(basico)
+
+// 2. Inteiros Avançados
+let n: int = 255
+print(fmt("Inteiro: %d", n))
+print(fmt("Padding Zero (05d): %05d", n))      // 00255
+print(fmt("Largura (5d): %5d", n))             //   255
+print(fmt("Hexadecimal (x): %x", n))           // ff
+print(fmt("Hexadecimal (X): %X", n))           // FF
+print(fmt("Binário (b): %b", n))               // 11111111
+
+// 3. Ponto Flutuante
+let pi: float = 3.14159265359
+print(fmt("Float Padrão: %f", pi))             // 3.141593
+print(fmt("2 Casas Decimais: %.2f", pi))       // 3.14
+print(fmt("4 Casas Decimais: %.4f", pi))       // 3.1416
+print(fmt("Notação Científica: %e", pi))       // 3.141593e+00
+
+// 4. Booleanos
+let status: bool = true
+print(fmt("Booleano (v): %v", status))         // true
+print(fmt("Booleano (t): %t", status))         // true
+
+// 5. Bytes (Integração com o novo tipo bytes)
+let dados: bytes = to_bytes("ABC")
+print(fmt("Bytes Raw (s): %s", dados))         // ABC
+print(fmt("Bytes Quoted (q): %q", dados))      // "ABC"
+print(fmt("Bytes Hex (x): %x", dados))         // 414243
+
+// 6. Alinhamento
+print(fmt("|%-10s|%10s|", "Esquerda", "Direita"))
+
+print("--- FIM DO TESTE ---")
