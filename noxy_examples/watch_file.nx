@@ -1,0 +1,92 @@
+use io
+use sys
+use crypto
+
+struct FileState
+    exists: bool,
+    size: int,
+    hash: string
+end
+
+func get_file_state(path: string) -> FileState
+    let info: io.FileInfo = io.stat(path)
+    if !info.exists then
+        return FileState(false, 0, "")
+    end
+
+    // Use bin mode "rb"? io.open default mode logic: "r" is usually text? 
+    // stdlib/io.nx doesn't show binary mode in 'open', but vm.go supports it if we implemented it?
+    // Wait, previous conversation "Supporting Binary File Modes" was about adding "rb".
+    // I should check if "rb" is supported or if I should just use "r".
+    // Looking at io.nx view previously:
+    // func open(path: string, mode: string) -> File
+    // In vm.go:
+    // if mode == "w" ... else if mode == "a" ... else if mode == "rw" || mode == "r+" ...
+    // It doesn't explicitly look like "rb" acts differently in VM for opening, 
+    // BUT io_read_bytes uses 'f.Read' which reads bytes.
+    // So "r" should be fine for reading bytes if we use io.read_bytes.
+
+    let f: io.File = io.open(path, "r")
+    if !f.open then
+        // Could be locked or permission error
+        return FileState(true, info.size, "error_opening")
+    end
+
+    let res: io.IOBytesResult = io.read_bytes(f)
+    io.close(f)
+
+    let hash_val: string = ""
+    if res.ok then
+        hash_val = crypto.sha256(res.data)
+    else
+        hash_val = "error_reading"
+    end
+
+    return FileState(true, info.size, hash_val)
+end
+
+func main() -> void
+    let args: string[] = sys.argv()
+    let target_file: string = "test_watch.txt"
+
+    // args[0] = noxy executable, args[1] = script path
+    if length(args) > 2 then
+        target_file = args[2]
+    end
+
+    print("Monitoring file: " + target_file)
+    print("Press Ctrl+C to stop.")
+
+    // Initial State
+    let current_state: FileState = get_file_state(target_file)
+    print("Initial State -> Exists: " + to_str(current_state.exists) + ", Size: " + to_str(current_state.size) + ", Hash: " + current_state.hash)
+
+    while true do
+        sys.sleep(1000) // 1 second
+        
+        let new_state: FileState = get_file_state(target_file)
+
+        if new_state.exists != current_state.exists then
+            if new_state.exists then
+                print("[CHANGE] File Created!")
+            else
+                print("[CHANGE] File Deleted!")
+            end
+            current_state = new_state
+        else
+            if new_state.exists then
+                if new_state.size != current_state.size then
+                    print("[CHANGE] Size changed: " + to_str(current_state.size) + " -> " + to_str(new_state.size))
+                    current_state = new_state
+                else 
+                    if new_state.hash != current_state.hash then
+                        print("[CHANGE] Content modified (Size same, hash different)")
+                        current_state = new_state
+                    end
+                end
+            end
+        end
+    end
+end
+
+main()
