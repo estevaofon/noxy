@@ -1,6 +1,6 @@
 use crypto
 
-let texto: bytes = b"hello"
+let texto: bytes = to_bytes("hello")
 let hash: string = crypto.sha256(texto)
 
 print(hash) 

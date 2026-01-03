@@ -31,7 +31,8 @@ Noxy é uma linguagem de programação estaticamente tipada. Projetada para fins
 |-----------|------------|
 | Aritméticos | `+`, `-`, `*`, `/`, `%` |
 | Comparação | `>`, `<`, `>=`, `<=`, `==`, `!=` |
-| Lógicos | `&` (AND), `|` (OR), `!` (NOT) |
+| Lógicos | `&&`, `||`, `!` |
+| Bitwise | `&`, `|`, `^`, `~`, `<<`, `>>` (Int e Bytes) |
 | Atribuição | `=` |
 | Referência | `ref` |
 | Retorno de função | `->` |
@@ -103,6 +104,7 @@ if x > 1.5 then ...      // ✗ ERRO se x é int (comparando int com float)
 | `string` | Cadeia de caracteres | `"Hello"`, `""` |
 | `bool` | Valor booleano | `true`, `false` |
 | `void` | Ausência de valor (somente retorno de função) | - |
+| `bytes` | Sequência de bytes bruta | `b"Dados"`, `hex_decode("FF")` |
 
 ### 2.2 Tipos Compostos
 
@@ -707,6 +709,21 @@ length([1, 2, 3])          // 3
 
 zeros(n)                   // Cria array de n zeros
 let arr: int[100] = zeros(100)
+```
+
+### 9.5 Bytes e Codificação
+```noxy
+to_bytes(val)              // Converte int, string ou array[int] para bytes
+to_bytes("ABC")            // b"ABC"
+
+hex_encode(b)              // Bytes -> String Hex
+hex_encode(b"\xFF")        // "ff"
+
+hex_decode(s)              // String Hex -> Bytes
+hex_decode("ff")           // b"\xFF"
+
+base64_encode(b)           // Bytes -> String Base64
+base64_decode(s)           // String Base64 -> Bytes
 ```
 
 ---

@@ -3,6 +3,8 @@ package vm
 import (
 	"bufio"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"noxy-vm/internal/chunk"
@@ -2263,6 +2265,56 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewString(args[0].String())
 	})
 
+	vm.defineNative("hex_encode", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewString("")
+		}
+		arg := args[0]
+		var data string
+		if arg.Type == value.VAL_BYTES {
+			data = arg.Obj.(string)
+		} else {
+			data = arg.String()
+		}
+		return value.NewString(hex.EncodeToString([]byte(data)))
+	})
+
+	vm.defineNative("hex_decode", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewBytes("")
+		}
+		decoded, err := hex.DecodeString(args[0].String())
+		if err != nil {
+			return value.NewBytes("") // Or null/error? Returning empty bytes for simplicity
+		}
+		return value.NewBytes(string(decoded))
+	})
+
+	vm.defineNative("base64_encode", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewString("")
+		}
+		arg := args[0]
+		var data string
+		if arg.Type == value.VAL_BYTES {
+			data = arg.Obj.(string)
+		} else {
+			data = arg.String()
+		}
+		return value.NewString(base64.StdEncoding.EncodeToString([]byte(data)))
+	})
+
+	vm.defineNative("base64_decode", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewBytes("")
+		}
+		decoded, err := base64.StdEncoding.DecodeString(args[0].String())
+		if err != nil {
+			return value.NewBytes("")
+		}
+		return value.NewBytes(string(decoded))
+	})
+
 	vm.defineNative("fmt", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
@@ -2550,8 +2602,19 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewInt(a.AsInt & b.AsInt))
+			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
+				sA := a.Obj.(string)
+				sB := b.Obj.(string)
+				if len(sA) != len(sB) {
+					return fmt.Errorf("operands for & must have same length")
+				}
+				res := make([]byte, len(sA))
+				for i := 0; i < len(sA); i++ {
+					res[i] = sA[i] & sB[i]
+				}
+				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operands for & must be integers")
+				return fmt.Errorf("operands for & must be integers or bytes")
 			}
 
 		case chunk.OP_BIT_OR:
@@ -2559,8 +2622,19 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewInt(a.AsInt | b.AsInt))
+			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
+				sA := a.Obj.(string)
+				sB := b.Obj.(string)
+				if len(sA) != len(sB) {
+					return fmt.Errorf("operands for | must have same length")
+				}
+				res := make([]byte, len(sA))
+				for i := 0; i < len(sA); i++ {
+					res[i] = sA[i] | sB[i]
+				}
+				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operands for | must be integers")
+				return fmt.Errorf("operands for | must be integers or bytes")
 			}
 
 		case chunk.OP_BIT_XOR:
@@ -2568,16 +2642,34 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewInt(a.AsInt ^ b.AsInt))
+			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
+				sA := a.Obj.(string)
+				sB := b.Obj.(string)
+				if len(sA) != len(sB) {
+					return fmt.Errorf("operands for ^ must have same length")
+				}
+				res := make([]byte, len(sA))
+				for i := 0; i < len(sA); i++ {
+					res[i] = sA[i] ^ sB[i]
+				}
+				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operands for ^ must be integers")
+				return fmt.Errorf("operands for ^ must be integers or bytes")
 			}
 
 		case chunk.OP_BIT_NOT:
 			a := vm.pop()
 			if a.Type == value.VAL_INT {
 				vm.push(value.NewInt(^a.AsInt))
+			} else if a.Type == value.VAL_BYTES {
+				sA := a.Obj.(string)
+				res := make([]byte, len(sA))
+				for i := 0; i < len(sA); i++ {
+					res[i] = ^sA[i]
+				}
+				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operand for ~ must be integer")
+				return fmt.Errorf("operand for ~ must be integer or bytes")
 			}
 
 		case chunk.OP_SHIFT_LEFT:

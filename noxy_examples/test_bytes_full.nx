@@ -1,0 +1,73 @@
+
+
+
+print("--- TEST BYTES FULL ---")
+
+// 1. Bitwise XOR
+// a = FF 00 AA
+// b = 00 FF 55
+let a: bytes = hex_decode("ff00aa")
+let b: bytes = hex_decode("00ff55")
+let xor_res: bytes = a ^ b
+print("XOR Result (should be ffffff):", hex_encode(xor_res))
+
+if hex_encode(xor_res) == "ffffff" then
+    print("XOR: OK")
+else
+    print("XOR: FAIL")
+end
+
+// 2. Bitwise AND
+let and_res: bytes = a & b
+print("AND Result (should be 000000):", hex_encode(and_res))
+if hex_encode(and_res) == "000000" then
+    print("AND: OK")
+else
+    print("AND: FAIL")
+end
+
+// 3. Bitwise OR
+let or_res: bytes = a | b
+print("OR Result (should be ffffff):", hex_encode(or_res))
+if hex_encode(or_res) == "ffffff" then
+    print("OR: OK")
+else
+    print("OR: FAIL")
+end
+
+// 4. Bitwise NOT
+let not_res: bytes = ~hex_decode("00ff") // Should be FF 00
+print("NOT Result (should be ff00):", hex_encode(not_res))
+if hex_encode(not_res) == "ff00" then
+    print("NOT: OK")
+else
+    print("NOT: FAIL")
+end
+
+// 5. Hex Encoding/Decoding
+let original: string = "Hello Noxy"
+let as_bytes: bytes = to_bytes(original)
+let encoded_hex: string = hex_encode(as_bytes)
+print("Hex Encoded:", encoded_hex)
+let decoded_hex: bytes = hex_decode(encoded_hex)
+print("Hex Decoded:", decoded_hex)
+
+if decoded_hex == as_bytes then
+    print("Hex Roundtrip: OK")
+else
+    print("Hex Roundtrip: FAIL")
+end
+
+// 6. Base64 Encoding/Decoding
+let encoded_b64: string = base64_encode(as_bytes)
+print("Base64 Encoded:", encoded_b64)
+let decoded_b64: bytes = base64_decode(encoded_b64)
+print("Base64 Decoded:", decoded_b64)
+
+if decoded_b64 == as_bytes then
+    print("Base64 Roundtrip: OK")
+else
+    print("Base64 Roundtrip: FAIL")
+end
+
+print("--- END TESTS ---")

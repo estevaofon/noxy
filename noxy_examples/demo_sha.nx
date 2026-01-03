@@ -1,0 +1,6 @@
+use crypto
+
+let input: bytes = b"Hello, World!"
+let hash: string = crypto.sha256(input)
+print("Input: hello")
+print("Hash:  " + hash)
