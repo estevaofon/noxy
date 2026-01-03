@@ -216,7 +216,24 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 
 	stmt.Consequence = p.parseBlockStatement()
 
-	if p.curTokenIs(token.ELSE) {
+	if p.curTokenIs(token.ELIF) {
+		// Treat 'elif' as 'else { if ... }'
+		// We create a wrapping block for the "else" part
+		wrapperBlock := &ast.BlockStatement{
+			Token:      p.curToken, // The ELIF token
+			Statements: []ast.Statement{},
+		}
+
+		// Recursively parse the 'if' part (since elif is essentially an if)
+		// parseIfStatement expects current token to be IF (or ELIF now) and consumes it
+		nestedIf := p.parseIfStatement()
+		if nestedIf == nil {
+			return nil
+		}
+
+		wrapperBlock.Statements = append(wrapperBlock.Statements, nestedIf)
+		stmt.Alternative = wrapperBlock
+	} else if p.curTokenIs(token.ELSE) {
 		stmt.Alternative = p.parseBlockStatement()
 	}
 
@@ -777,7 +794,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	// Skip current token (THEN or ELSE)
 	p.nextToken()
 
-	for !p.curTokenIs(token.END) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.EOF) {
+	for !p.curTokenIs(token.END) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.ELIF) && !p.curTokenIs(token.EOF) {
 		if p.curTokenIs(token.FUNC) || p.curTokenIs(token.STRUCT) {
 			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unexpected %q, expected 'end'",
 				p.curToken.Line, p.curToken.Column, p.curToken.Literal))

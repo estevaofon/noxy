@@ -25,6 +25,7 @@ const (
 	IF     TokenType = "IF"
 	THEN   TokenType = "THEN"
 	ELSE   TokenType = "ELSE"
+	ELIF   TokenType = "ELIF"
 	END    TokenType = "END"
 	WHILE  TokenType = "WHILE"
 	DO     TokenType = "DO"
@@ -135,6 +136,7 @@ var keywords = map[string]TokenType{
 	"select": SELECT,
 	"as":     AS,
 	"zeros":  ZEROS,
+	"elif":   ELIF,
 }
 
 func LookupIdent(ident string) TokenType {

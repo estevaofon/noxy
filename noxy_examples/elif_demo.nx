@@ -1,0 +1,20 @@
+
+print("Demonstração do ELIF em Noxy")
+
+let nota: int = 55
+
+print(f"Nota do aluno: {nota}")
+
+if nota >= 90 then
+    print("Conceito A")
+elif nota >= 80 then
+    print("Conceito B")
+elif nota >= 70 then
+    print("Conceito C")
+elif nota >= 60 then
+    print("Conceito D")
+else
+    print("Conceito F")
+end
+
+print("Fim da análise.")

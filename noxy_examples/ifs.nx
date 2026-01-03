@@ -1,0 +1,12 @@
+let x: int = 3
+
+// Condições aninhadas
+if x > 10 then
+    print("Maior que 10")
+else
+    if x > 5 then
+        print("Maior que 5")
+    else
+        print("5 ou menos")
+    end
+end
