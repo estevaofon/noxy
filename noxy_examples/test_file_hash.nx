@@ -1,0 +1,44 @@
+use io
+use crypto
+
+print("--- SHA-256 FILE HASH TEST ---")
+
+// 1. Create a binary file
+let filename: string = "test_icon.bin"
+// 89 PNG \r \n \x1A \n \x00...
+let content: bytes = hex_decode("89504e470d0a1a0a0000000d49484452") // PNG header via hex
+
+let f_write: io.File = io.open(filename, "w")
+io.write(f_write, content) 
+io.close(f_write)
+
+// 2. Read as Bytes
+let f_read: io.File = io.open(filename, "r")
+let res: io.IOBytesResult = io.read_bytes(f_read)
+io.close(f_read)
+
+if !res.ok then
+    print("Error reading file:", res.error)
+else
+    print("File read OK. Size:", length(res.data))
+    print("Data Hex:", hex_encode(res.data))
+    
+    // 3. Compute Hash
+    let hash: string = crypto.sha256(res.data)
+    print("SHA-256:", hash)
+    
+    // Known hash for 89504e470d0a1a0a0000000d49484452
+    // Calc online or assume consistent.
+    // Let's checking consistency.
+    
+    if hash == crypto.sha256(content) then
+        print("Hash Verification: OK")
+    else
+        print("Hash Verification: FAIL")
+        print("Expected:", crypto.sha256(content))
+    end
+end
+
+// Cleanup
+io.remove(filename)
+print("--- END TEST ---")

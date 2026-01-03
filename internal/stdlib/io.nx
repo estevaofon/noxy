@@ -11,6 +11,12 @@ struct IOResult
     error: string
 end
 
+struct IOBytesResult
+    ok: bool,
+    data: bytes,
+    error: string
+end
+
 struct IOLinesResult
     ok: bool,
     data: []string,
@@ -40,6 +46,10 @@ end
 
 func read_line(file: File) -> IOResult
     return io_read_line(file, IOResult)
+end
+
+func read_bytes(file: File) -> IOBytesResult
+    return io_read_bytes(file, IOBytesResult)
 end
 
 func read_lines(file: File) -> IOLinesResult

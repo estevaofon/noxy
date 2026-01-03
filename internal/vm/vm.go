@@ -454,11 +454,17 @@ func NewWithConfig(cfg VMConfig) *VM {
 		if !ok {
 			return value.NewNull()
 		}
-		content := args[1].String()
 
 		fd := inst.Fields["fd"].AsInt
 		if f, exists := vm.openFiles[fd]; exists {
-			f.WriteString(content)
+			if args[1].Type == value.VAL_BYTES {
+				// Bytes are stored as string in Obj, but treat as raw bytes
+				data := args[1].Obj.(string)
+				f.Write([]byte(data))
+			} else {
+				content := args[1].String()
+				f.WriteString(content)
+			}
 		}
 		return value.NewNull()
 	})
@@ -504,6 +510,65 @@ func NewWithConfig(cfg VMConfig) *VM {
 		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
 		resInst.Fields["ok"] = value.NewBool(isOk)
 		resInst.Fields["data"] = value.NewString(contentStr)
+		resInst.Fields["error"] = value.NewString(errorStr)
+		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+	})
+
+	vm.defineNative("io_read_bytes", func(args []value.Value) value.Value {
+		// args: fileInst, IOResultStructDef (reusing IOResult but data will be bytes)
+		// Or maybe we need a IOByteResult?
+		// Actually, IOResult.data is defined as string in io.nx.
+		// But in VM, VAL_OBJ fields can be any value.
+		// If io.nx defines data as `bytes`, it will work.
+		// Let's check io.nx provided. IOResult has data: string.
+		// We probably need a new struct definition passed in, or reuse IOResult but the user knows it's bytes?
+		// No, strict typing in Noxy might complain if we assign VAL_BYTES to a field expected string?
+		// Noxy VM runtime doesn't enforce field types strictly on assignment if not checked.
+		// But for clarity, we should assume io.nx will handle the struct definition.
+
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resStruct, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		fd := inst.Fields["fd"].AsInt
+		var contentBytes []byte
+		var errorStr string
+		var isOk bool = false
+
+		if f, exists := vm.openFiles[fd]; exists {
+			// Read all
+			stat, _ := f.Stat()
+			if stat.Size() > 0 {
+				buf := make([]byte, stat.Size())
+				f.Seek(0, 0)
+				n, err := f.Read(buf)
+				if err == nil || (err != nil && n > 0) {
+					contentBytes = buf[:n]
+					isOk = true
+				} else {
+					errorStr = err.Error()
+				}
+			} else {
+				contentBytes = []byte{}
+				isOk = true
+			}
+		} else {
+			errorStr = "File not open"
+		}
+
+		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
+		resInst.Fields["ok"] = value.NewBool(isOk)
+		// Crucial: NewBytes, not NewString.
+		// io.nx must define a struct where data is 'bytes' or generic.
+		resInst.Fields["data"] = value.NewBytes(string(contentBytes))
 		resInst.Fields["error"] = value.NewString(errorStr)
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
