@@ -730,6 +730,35 @@ hex_decode("ff")           // b"\xFF"
 
 base64_encode(b)           // Bytes -> String Base64
 base64_decode(s)           // String Base64 -> Bytes
+
+### 9.6 Formatação de Strings (Estilo Printf)
+A função `fmt` permite formatar strings usando especificadores de formato, similar ao `printf` do C ou `fmt.Sprintf` do Go.
+
+```noxy
+fmt(formato, argumentos...) -> string
+```
+
+**Verbos Suportados:**
+- **Geral**: `%v` (valor padrão)
+- **Strings**: `%s` (string), `%q` (quoted)
+- **Inteiros**: `%d` (decimal), `%x`/`%X` (hex), `%b` (binário), `%o` (octal)
+- **Floats**: `%f` (decimal), `%e` (científico), `%g` (geral)
+- **Booleanos**: `%t` (true/false)
+
+**Exemplos:**
+```noxy
+// Inteiros com padding
+let s1: string = fmt("ID: %05d", 42)      // "ID: 00042"
+
+// Floats com precisão
+let s2: string = fmt("PI: %.2f", 3.14159) // "PI: 3.14"
+
+// Hexadecimal
+let s3: string = fmt("Hex: %X", 255)      // "Hex: FF"
+
+// Múltiplos argumentos
+let s4: string = fmt("%s tem %d anos", "Ana", 25)
+```
 ```
 
 ---
