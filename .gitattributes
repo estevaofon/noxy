@@ -1,0 +1,2 @@
+*.nx linguist-language=Go
+*.nx linguist-detectable=false
