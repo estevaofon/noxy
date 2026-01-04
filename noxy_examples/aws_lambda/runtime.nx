@@ -11,6 +11,9 @@ use function select * // The user handler
 // Config
 // ============================================
 
+
+use strings select *
+
 func get_runtime_api() -> string
     let api: EnvResult = getenv("AWS_LAMBDA_RUNTIME_API")
     if !api.ok then
@@ -19,7 +22,11 @@ func get_runtime_api() -> string
     if api.value == "" then
         return "127.0.0.1:8080"
     end
-    return api.value
+    // Trim to avoid newlines from shell
+    let val: string = api.value
+    // Manual trim if strings_trim not imported or available?
+    // We imported strings.
+    return strings_trim(val)
 end
 
 let RUNTIME_API: string = get_runtime_api()
@@ -30,7 +37,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v7 - DEBUG MODE)")
+    print("Noxy Runtime starting... (v8 - Trimmed Env & Connection Close)")
     print("Runtime API: " + RUNTIME_API)
     
     while true do

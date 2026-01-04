@@ -105,6 +105,12 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         final_count = final_count + 1
     end
     
+    // Force Connection: close
+    if final_count < 64 then
+        final_headers[final_count] = "Connection: close"
+        final_count = final_count + 1
+    end
+    
     // Adiciona Content-Length se tiver body e metodo pede
     // TODO: verificar se j? existe
     if length(body) > 0 then

@@ -317,8 +317,20 @@ func parse_response(raw_data: bytes, data_len: int) -> HttpResponse
             
             // O codigo pode nao ter texto depois
             resp.status_code = to_int(split2.parts[0])
+            // Fix: Reconstruct rest of line or parse better. 
+            // remainder was "200 OK" -> split2 parts [200, OK]
+            // If "400 Bad Request" -> remainder "400 Bad Request" -> split2 parts [400, Bad, Request]
+            // split2.parts[1] is just "Bad".
+            
             if split2.count > 1 then
-                resp.status_text = split2.parts[1]
+                // Manual join or substring logic would be better.
+                // Let's find first space in remainder.
+                let first_space: int = index_of(remainder, " ")
+                if first_space != -1 then
+                   resp.status_text = substring(remainder, first_space + 1, length(remainder))
+                else
+                   resp.status_text = ""
+                end
             else
                 resp.status_text = ""
             end
