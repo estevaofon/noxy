@@ -196,6 +196,9 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     else
         client_res.ok = false
         client_res.error = http_res.status_text
+        if client_res.error == "" then
+             client_res.error = "Request failed with status " + to_str(http_res.status_code)
+        end
     end
     
     return client_res
