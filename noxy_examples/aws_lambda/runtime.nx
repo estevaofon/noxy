@@ -40,7 +40,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v22 - File Redirection)")
+    print("Noxy Runtime starting... (v23 - Final Fix File Redirection)")
     print("Runtime API: " + RUNTIME_API)
     
     // v18: Curl Runtime Implementation
@@ -81,77 +81,67 @@ func main() -> void
                      print("Error: Could not read " + tmp_resp + ": " + b_res.error)
                      sleep(1000)
                  else
-                     // print("DEBUG FILE READ: " + to_str(length(b_res.data)) + " bytes")
+                     // Success getting bytes
                      let http_res: HttpResponse = parse_response(b_res.data, length(b_res.data))
-             
-             if http_res.status_code != 200 then
-                 print("Runtime Error: API returned " + to_str(http_res.status_code))
-                 print("Body: " + to_str(http_res.body))
-                 sleep(1000)
-             else
-                 // 2. Extract Request ID
-                 let req_id: string = ""
-                 let i: int = 0
-                 
-                 // Debug: Check what we parsed
-                 print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
-                 
-                 while i < http_res.header_count do
-                     let h: string = http_res.headers[i]
-                     print("DEBUG HDR[" + to_str(i) + "]: " + h)
                      
-                     // Case insensitive check or relaxed check
-                     // AWS Header: Lambda-Runtime-Aws-Request-Id
-                     if strings_contains(h, "Lambda-Runtime-Aws-Request-Id") then
-                         // Use single char split
-                         let parts: SplitResult = split(h, ":")
-                         if parts.count >= 2 then
-                             // Trim value
-                             req_id = strings_trim(parts.parts[1])
-                         end
-                     end
-                     i = i + 1
-                 end
-                 
-                 // Fallback: search case insensitive or just check header value?
-                 // AWS headers are usually Camel-Case.
-                 
-                 if req_id == "" then
-                     print("Error: No Request ID found in headers")
-                     // print("Headers: " + to_str(http_res.header_count))
-                 else
-                     // 3. Invoke Handler
-                     let event_body: string = to_str(http_res.body)
-                     // print("Event: " + event_body)
-                     let resp_body: string = handler(event_body)
-                     
-                     // 4. Send Response (POST)
-                     let tmp_file: string = "/tmp/response.json"
-                     
-                     // Write response to file to handle special chars safely
-                     // io_write_file does not exist in stdlib, using open/write/close
-                     let f: File = open(tmp_file, "w")
-                     if f.open then
-                         write(f, resp_body)
-                         close(f)
+                     if http_res.status_code != 200 then
+                         print("Runtime Error: API returned " + to_str(http_res.status_code))
+                         print("Body: " + to_str(http_res.body))
+                         sleep(1000)
                      else
-                         print("Error: Could not open temp file " + tmp_file)
-                     end
-                     
-                     let video_id: string = req_id // just alias
-                     let resp_url: string = BASE_URL + req_id + "/response"
-                     let post_cmd: string = "curl -X POST -s -H \"Content-Type: application/json\" --data-binary @" + tmp_file + " " + resp_url
-                     
-                     // print("Posting response...")
-                     let post_res: SysResult = exec(post_cmd)
-                     
-                     if post_res.exit_code != 0 then
-                         print("Error POSTing response: " + to_str(post_res.exit_code))
+                         // 2. Extract Request ID and Process
+                         let req_id: string = ""
+                         let i: int = 0
+                         
+                         // Debug: Check what we parsed
+                         print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
+                         
+                         while i < http_res.header_count do
+                                 let h: string = http_res.headers[i]
+                                 print("DEBUG HDR[" + to_str(i) + "]: " + h)
+                                 
+                                 if strings_contains(h, "Lambda-Runtime-Aws-Request-Id") then
+                                     let parts: SplitResult = split(h, ":")
+                                     if parts.count >= 2 then
+                                         req_id = strings_trim(parts.parts[1])
+                                     end
+                                 end
+                                 i = i + 1
+                         end
+                         
+                         if req_id == "" then
+                             print("Error: No Request ID found in headers")
+                         else
+                             // 3. Invoke Handler
+                             let event_body: string = to_str(http_res.body)
+                             let resp_body: string = handler(event_body)
+                             
+                             // 4. Send Response (POST)
+                             let tmp_file: string = "/tmp/response.json"
+                             
+                             let f: File = open(tmp_file, "w")
+                             if f.open then
+                                 write(f, resp_body)
+                                 close(f)
+                             else
+                                 print("Error: Could not open temp file " + tmp_file)
+                             end
+                             
+                             let resp_url: string = BASE_URL + req_id + "/response"
+                             let post_cmd: string = "curl -X POST -s -H \"Content-Type: application/json\" --data-binary @" + tmp_file + " " + resp_url
+                             
+                             let post_res: SysResult = exec(post_cmd)
+                             
+                             if post_res.exit_code != 0 then
+                                 print("Error POSTing response: " + to_str(post_res.exit_code))
+                             end
+                         end
                      end
                  end
              end
-        end
     end
-end
+    end
+    end
+
 
 main()
