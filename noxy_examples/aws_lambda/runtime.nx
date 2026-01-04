@@ -40,7 +40,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v21 - Deep Debug)")
+    print("Noxy Runtime starting... (v22 - File Redirection)")
     print("Runtime API: " + RUNTIME_API)
     
     // v18: Curl Runtime Implementation
@@ -56,8 +56,10 @@ func main() -> void
     while true do
         // 1. Next Invocation (GET)
         // curl -i -s http://.../next
+        // curl -i -s http://.../next > /tmp/next_resp.txt
         let next_url: string = BASE_URL + "next"
-        let get_cmd: string = "curl -i -s " + next_url
+        let tmp_resp: string = "/tmp/next_resp.txt"
+        let get_cmd: string = "curl -i -s " + next_url + " > " + tmp_resp
         
         // print("Polling: " + get_cmd)
         let get_res: SysResult = exec(get_cmd)
@@ -66,11 +68,21 @@ func main() -> void
              print("Runtime Error: Curl exited with " + to_str(get_res.exit_code))
              sleep(1000)
         else
-             // Parse Response
-             print("DEBUG CURL OUTPUT:\n" + get_res.output + "\n----------------")
-             
-             let raw_bytes: bytes = to_bytes(get_res.output)
-             let http_res: HttpResponse = parse_response(raw_bytes, length(raw_bytes))
+             // Parse Response from File
+             let f_resp: File = open(tmp_resp, "r")
+             if !f_resp.open then
+                 print("Error: Could not open " + tmp_resp)
+                 sleep(1000)
+             else
+                 let b_res: IOBytesResult = read_bytes(f_resp)
+                 close(f_resp)
+                 
+                 if !b_res.ok then
+                     print("Error: Could not read " + tmp_resp + ": " + b_res.error)
+                     sleep(1000)
+                 else
+                     // print("DEBUG FILE READ: " + to_str(length(b_res.data)) + " bytes")
+                     let http_res: HttpResponse = parse_response(b_res.data, length(b_res.data))
              
              if http_res.status_code != 200 then
                  print("Runtime Error: API returned " + to_str(http_res.status_code))
