@@ -149,6 +149,19 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     // 5. Enviar
     // DEBUG: Imprimir request cru
     print("DEBUG RAW REQUEST:\n" + to_str(req_bytes))
+    print("HEX DUMP (First 100 bytes):")
+    let d_idx: int = 0
+    let d_len: int = length(req_bytes)
+    let d_limit: int = 100
+    if d_len < d_limit then d_limit = d_len end
+    
+    let dump_line: string = ""
+    while d_idx < d_limit do
+        dump_line = dump_line + to_str(req_bytes[d_idx]) + " "
+        d_idx = d_idx + 1
+    end
+    print(dump_line)
+    
     print("--------------------------------------------------")
 
     let sent: int = send(sock, req_bytes)
