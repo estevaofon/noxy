@@ -29,7 +29,7 @@ end
 // ============================================
 
 func new_client() -> HttpClient
-    return HttpClient(30000, 5, "Noxy-HTTP/1.0", true)
+    return HttpClient(30000, 5, "Noxy-HTTP/1.1", true)
 end
 
 // Globais para simular "inst?ncia default" se necess?rio, 
@@ -91,7 +91,11 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     // Adiciona Host
     // TODO: verificar se j? existe
     if final_count < 64 then
-        final_headers[final_count] = "Host: " + u.host
+        let host_header: string = u.host
+        if (u.scheme == "http" && u.port != 80) || (u.scheme == "https" && u.port != 443) then
+            host_header = host_header + ":" + to_str(u.port)
+        end
+        final_headers[final_count] = "Host: " + host_header
         final_count = final_count + 1
     end
     
