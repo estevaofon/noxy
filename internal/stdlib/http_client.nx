@@ -1,6 +1,7 @@
 // stdlib/http_client.nx - Cliente HTTP
 
 use net select *
+use sys select *
 use http_parser select *
 
 // ============================================
@@ -150,9 +151,14 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         if !result.ok then
             // Check for timeout
             if strings_contains(result.error, "timeout") then
-                // Continue loop
+                // Continue loop but sleep briefly to yield CPU
+                sleep(10)
             else
                 loop_active = false
+                if total_received == 0 then
+                    empty_res.error = result.error
+                    return empty_res
+                end
             end
         else
             if result.count == 0 then
