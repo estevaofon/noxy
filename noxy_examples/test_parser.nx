@@ -1,0 +1,20 @@
+// test_parser.nx
+use json_parser select *
+
+func main() -> void
+    // Test case: A string containing an escaped JSON object
+    // Source: "{\"msg\":\"hello\"}"
+    let input: string = "\"{\\\"msg\\\":\\\"hello\\\"}\""
+    
+    print("Input: " + input)
+    
+    let node: ref JsonNode = json_parse(input)
+    
+    if node.type == 3 then // STRING
+        print("Parsed String Val: " + node.string_val)
+    else
+        print("Error: Not a string. Type=" + to_str(node.type))
+    end
+end
+
+main()

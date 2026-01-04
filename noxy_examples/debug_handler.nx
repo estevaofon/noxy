@@ -1,0 +1,19 @@
+// debug_handler.nx
+use noxy_examples.aws_lambda.function select *
+use json_parser select *
+use json_helpers select *
+
+func main() -> void
+    // FULL API Gateway Payload
+    let payload: string = "{\"version\":\"2.0\",\"routeKey\":\"ANY /noxyFunction\",\"rawPath\":\"/default/noxyFunction\",\"rawQueryString\":\"\",\"headers\":{\"accept\":\"*/*\",\"content-length\":\"28\",\"content-type\":\"application/json\",\"host\":\"euf66g9z7i.execute-api.us-east-1.amazonaws.com\",\"user-agent\":\"curl/7.68.0\",\"x-amzn-trace-id\":\"Root=1-695a963d-1791e7b571e2c8b033353662\",\"x-forwarded-for\":\"187.123.22.163\",\"x-forwarded-port\":\"443\",\"x-forwarded-proto\":\"https\"},\"requestContext\":{\"accountId\":\"704841574069\",\"apiId\":\"euf66g9z7i\",\"domainName\":\"euf66g9z7i.execute-api.us-east-1.amazonaws.com\",\"domainPrefix\":\"euf66g9z7i\",\"http\":{\"method\":\"POST\",\"path\":\"/default/noxyFunction\",\"protocol\":\"HTTP/1.1\",\"sourceIp\":\"187.123.22.163\",\"userAgent\":\"curl/7.68.0\"},\"requestId\":\"WqxppgxuIAMEYyQ=\",\"routeKey\":\"ANY /noxyFunction\",\"stage\":\"default\",\"time\":\"04/Jan/2026:16:33:01 +0000\",\"timeEpoch\":1767544381313},\"body\":\"{\\\"msg\\\": \\\"teste via gateway\\\"}\",\"isBase64Encoded\":false}"
+
+    print("DEBUG PAYLOAD: " + payload)
+    print("Testing Handler with FULL Payload...")
+    
+    // Call handler
+    let res: string = handler(payload)
+    
+    print("Result: " + res)
+end
+
+main()

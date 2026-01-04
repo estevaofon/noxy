@@ -1,0 +1,14 @@
+// check_bytes_str.nx
+func main() -> void
+    let full: bytes = b"GET /path"
+    let sub: bytes = slice(full, 0, 3)
+    let s: string = to_str(sub)
+    print("Starts with b\"? : " + s)
+    if s == "GET" then
+        print("Conversion matches string content")
+    else
+        print("Conversion includes decoration")
+    end
+end
+
+main()
