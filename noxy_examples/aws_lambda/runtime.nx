@@ -30,7 +30,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v2 - Fixed Client)")
+    print("Noxy Runtime starting... (v3 - Fixed Client & Sleep)")
     print("Runtime API: " + RUNTIME_API)
     
     while true do
