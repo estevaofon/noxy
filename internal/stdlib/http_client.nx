@@ -135,6 +135,10 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     req_bytes = build_request(method, full_path, final_headers, final_count, body)
     
     // 5. Enviar
+    // DEBUG: Imprimir request cru
+    print("DEBUG RAW REQUEST:\n" + to_str(req_bytes))
+    print("--------------------------------------------------")
+
     let sent: int = send(sock, req_bytes)
     if sent < length(req_bytes) then
         close(sock)

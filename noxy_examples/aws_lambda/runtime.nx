@@ -30,7 +30,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v6 - Fixed Path Parsing)")
+    print("Noxy Runtime starting... (v7 - DEBUG MODE)")
     print("Runtime API: " + RUNTIME_API)
     
     while true do
@@ -46,6 +46,7 @@ func main() -> void
                  sleep(1000) // 1s wait
             else
                  print("Runtime Error: " + res.error)
+                 print("Response Body: " + to_str(res.body))
                  sleep(1000)
             end
         else
