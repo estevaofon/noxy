@@ -40,7 +40,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v23 - Final Fix File Redirection)")
+    print("Noxy Runtime starting... (v25 - Handler Logging)")
     print("Runtime API: " + RUNTIME_API)
     
     // v18: Curl Runtime Implementation
@@ -93,12 +93,12 @@ func main() -> void
                          let req_id: string = ""
                          let i: int = 0
                          
-                         // Debug: Check what we parsed
-                         print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
+                     // Debug: Check what we parsed
+                         // print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
                          
                          while i < http_res.header_count do
                                  let h: string = http_res.headers[i]
-                                 print("DEBUG HDR[" + to_str(i) + "]: " + h)
+                                 // print("DEBUG HDR[" + to_str(i) + "]: " + h)
                                  
                                  if strings_contains(h, "Lambda-Runtime-Aws-Request-Id") then
                                      let parts: SplitResult = split(h, ":")
@@ -114,7 +114,10 @@ func main() -> void
                          else
                              // 3. Invoke Handler
                              let event_body: string = to_str(http_res.body)
+                             
+                             print("Calling handler...")
                              let resp_body: string = handler(event_body)
+                             print("Handler returned.")
                              
                              // 4. Send Response (POST)
                              let tmp_file: string = "/tmp/response.json"

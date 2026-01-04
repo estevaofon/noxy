@@ -2,16 +2,37 @@
 // User handler
 
 use json_parser select *
+use json_helpers select *
 
 func handler(event: string) -> string
-    // Simple echo handler
+    // Simple echo handler for API Gateway
     // Returns a JSON response
     
-    print("Handler received: " + event)
+    // print("Handler received RAW: " + event)
     
-    // Parse event if valid JSON
-    // let json: JsonValue = json_parse(event)
+    // 1. Initial Checks
+    if length(event) == 0 then
+        return "{\"message\": \"Empty event\", \"input\": \"\"}"
+    end
+    
+    let final_input: string = event
+    
+    // 2. Parse the incoming event
+    let json: ref JsonNode = json_parse(event)
+    
+    if json != null then
+        // 3. Check for API Gateway "Proxy" envelope (look for "body" field)
+        // Use json_helpers functions to safely check keys
+        if has_key(json, "body") then
+            let body_str: string = get_string(json, "body")
+            if body_str != "" then
+                final_input = body_str
+            end
+        end
+    end
+    
+    print("Handler processing: " + final_input)
     
     // Return result
-    return "{\"message\": \"Hello from Noxy!\", \"input\": " + event + "}"
+    return "{\"message\": \"Hello from Noxy!\", \"input\": " + final_input + "}"
 end

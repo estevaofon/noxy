@@ -136,14 +136,29 @@ func parse_string_val(p: ref Parser) -> string
     while !is_at_end(p) do
         let c: string = peek(p)
         
-        // Encontrou aspas de fechamento
-        if c == "\"" then
-            let closing: string = advance(p)
-            return res
+        // Handle escapes
+        if c == "\\" then
+            // print("DEBUG ESCAPE DETECTED")
+            // Consume the backslash
+            let ignored_slash: string = advance(p)
+            
+            // Consume the escaped character
+            if !is_at_end(p) then
+                let escaped_char: string = advance(p)
+                // print("DEBUG ESCAPED: " + escaped_char)
+                res = res + escaped_char
+            end
+        else
+            // Check for closing quote
+            if c == "\"" then
+                let closing: string = advance(p)
+                // print("DEBUG END STRING: " + res)
+                return res
+            end
+            
+            // Normal character
+            res = res + advance(p)
         end
-        
-        // Caractere normal - adiciona diretamente
-        res = res + advance(p)
     end
     
     // Se chegou aqui, string n?o foi fechada
