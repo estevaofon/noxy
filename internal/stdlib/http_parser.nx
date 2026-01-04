@@ -153,14 +153,16 @@ func parse_url(url: string) -> HttpUrl
     // 4. Path e Authority
     // A string restante em 'current' tem formato "host:port/path" ou "host/path"
     
-    // Separa no primeiro '/'
-    let split_path: SplitResult = split(current, "/")
-    let authority: string = split_path.parts[0]
+    // Separa no primeiro '/' usando index_of para nao quebrar paths longos
+    let slash_idx: int = index_of(current, "/")
+    let authority: string = ""
     
-    if split_path.count > 1 then
-        res.path = "/" + split_path.parts[1]
-    else
+    if slash_idx == -1 then
+        authority = current
         res.path = "/"
+    else
+        authority = substring(current, 0, slash_idx)
+        res.path = substring(current, slash_idx, length(current))
     end
     
     // 5. Host e Port (Authority)
