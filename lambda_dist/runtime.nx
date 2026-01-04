@@ -1,0 +1,88 @@
+// noxy_examples/aws_lambda/runtime.nx
+// Pure Noxy AWS Lambda Runtime
+
+use sys select *
+use http_client select *
+use json_parser select *
+use json_helpers select *
+use function select * // The user handler
+
+// ============================================
+// Config
+// ============================================
+
+func get_runtime_api() -> string
+    let api: EnvResult = getenv("AWS_LAMBDA_RUNTIME_API")
+    if !api.ok then
+        return "127.0.0.1:8080" // Local fallback
+    end
+    if api.value == "" then
+        return "127.0.0.1:8080"
+    end
+    return api.value
+end
+
+let RUNTIME_API: string = get_runtime_api()
+let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation/"
+
+// ============================================
+// Loop
+// ============================================
+
+func main() -> void
+    print("Noxy Runtime starting...")
+    print("Runtime API: " + RUNTIME_API)
+    
+    while true do
+        // 1. Next Invocation
+        let next_url: string = BASE_URL + "next"
+        // print("Polling: " + next_url)
+        
+        let res: ClientResponse = get(next_url)
+        
+        if !res.ok then
+            // If 500/Queue Empty (Local), wait and retry
+            if res.status_code == 500 then
+                 sleep(1000) // 1s wait
+            else
+                 print("Runtime Error: " + res.error)
+                 sleep(1000)
+            end
+        else
+            // 2. Extract Request ID
+            let req_id: string = ""
+            let i: int = 0
+            while i < res.header_count do
+                let h: string = res.headers[i]
+                if strings_contains(h, "Lambda-Runtime-Aws-Request-Id:") then
+                    let parts: string[2] = strings_split(h, ": ")
+                    if length(parts) >= 2 then
+                        req_id = parts[1]
+                    end
+                end
+                i = i + 1
+            end
+            
+            if req_id == "" then
+                print("Error: No Request ID found")
+            else
+                // 3. Invoke Handler
+                let event_body: string = to_str(res.body)
+                let resp_body: string = handler(event_body)
+                
+                // 4. Send Response
+                let resp_url: string = BASE_URL + req_id + "/response"
+                let post_res: ClientResponse = post(resp_url, to_bytes(resp_body))
+                
+                if !post_res.ok then
+                    print("Failed to send response: " + post_res.error)
+                else
+                    // print("Response sent")
+                end
+            end
+        end
+        
+    end
+end
+
+main()
