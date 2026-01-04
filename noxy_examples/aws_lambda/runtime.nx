@@ -12,7 +12,9 @@ use function select * // The user handler
 // ============================================
 
 
+
 use strings select *
+use net select *
 
 func get_runtime_api() -> string
     let api: EnvResult = getenv("AWS_LAMBDA_RUNTIME_API")
@@ -37,11 +39,10 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v15 - Safe Manual Request)")
+    print("Noxy Runtime starting... (v16 - Fix Crash & Local Test)")
     print("Runtime API: " + RUNTIME_API)
     
-    // Manual Raw Verification Loop
-    use net select *
+// Manual Raw Verification Loop
     
     while true do
         // 1. Manually Connect
@@ -51,23 +52,15 @@ func main() -> void
         let port: int = 9001
         
         // Try strict split first
-        // Note: In Noxy, if native returns null but return type is Struct, it might be an issue?
-        // Let's assume split works, but check parts count.
-        
         if strings_contains(RUNTIME_API, ":") then
-             let split_hp: SplitResult = strings_split(RUNTIME_API, ":")
-             // Check if split_hp itself is null happens implicitly on property access?
-             // If split_hp is null, next line crashes.
-             // We can't check 'if split_hp == null' easily if it's a struct type variable in Noxy?
-             // Actually we can 'if to_str(split_hp) == "null"' or similar hacks, but let's assume it works
-             // or just use hardcoded if we suspect environment is weird.
+             // Use the wrapper 'split' which handles the struct type arg
+             let split_hp: SplitResult = split(RUNTIME_API, ":")
              
              if split_hp.count >= 2 then
                  host = split_hp.parts[0]
                  port = to_int(split_hp.parts[1])
              end
         else
-             // Fallback or assume RUNTIME_API is just IP? No, it's host:port
              print("Warning: RUNTIME_API has no colon: " + RUNTIME_API)
         end
         
