@@ -15,6 +15,7 @@ use function select * // The user handler
 
 use strings select *
 use net select *
+use io select *
 
 func get_runtime_api() -> string
     let api: EnvResult = getenv("AWS_LAMBDA_RUNTIME_API")
@@ -39,26 +40,93 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v17 - Curl Diagnostic)")
+    print("Noxy Runtime starting... (v18 - Curl Based Runtime)")
     print("Runtime API: " + RUNTIME_API)
     
-    // v17: Curl Diagnostic Loop
+    // v18: Curl Runtime Implementation
     use sys select *
+    use http_parser select *
+    // We already have use sys, json_parser, json_helpers, function, strings from top
+    
+    // Config for Curl
+    let CURL_TIMEOUT: string = "0" // No timeout for GET /next (it blocks)
+    // Actually /next can block forever, so max-time 0 or very large.
+    // However, exec might block.
     
     while true do
-        // Build curl command
-        // curl -v http://127.0.0.1:9001/2018-06-01/runtime/invocation/next
-        let cmd: string = "curl -v --max-time 1 http://" + RUNTIME_API + "/2018-06-01/runtime/invocation/next 2>&1"
+        // 1. Next Invocation (GET)
+        // curl -i -s http://.../next
+        let next_url: string = BASE_URL + "next"
+        let get_cmd: string = "curl -i -s " + next_url
         
-        print("Running: " + cmd)
-        let res: SysResult = exec(cmd)
+        // print("Polling: " + get_cmd)
+        let get_res: SysResult = exec(get_cmd)
         
-        print("CURL EXIT CODE: " + to_str(res.exit_code))
-        print("CURL OUTPUT:")
-        print(res.output)
-        print("--------------------------------------------------")
-        
-        sleep(5000)
+        if get_res.exit_code != 0 then
+             print("Runtime Error: Curl exited with " + to_str(get_res.exit_code))
+             sleep(1000)
+        else
+             // Parse Response
+             let raw_bytes: bytes = to_bytes(get_res.output)
+             let http_res: HttpResponse = parse_response(raw_bytes, length(raw_bytes))
+             
+             if http_res.status_code != 200 then
+                 print("Runtime Error: API returned " + to_str(http_res.status_code))
+                 print("Body: " + to_str(http_res.body))
+                 sleep(1000)
+             else
+                 // 2. Extract Request ID
+                 let req_id: string = ""
+                 let i: int = 0
+                 while i < http_res.header_count do
+                     let h: string = http_res.headers[i]
+                     if strings_contains(h, "Lambda-Runtime-Aws-Request-Id:") then
+                         let parts: SplitResult = split(h, ": ")
+                         if parts.count >= 2 then
+                             req_id = parts.parts[1]
+                         end
+                     end
+                     i = i + 1
+                 end
+                 
+                 // Fallback: search case insensitive or just check header value?
+                 // AWS headers are usually Camel-Case.
+                 
+                 if req_id == "" then
+                     print("Error: No Request ID found in headers")
+                     // print("Headers: " + to_str(http_res.header_count))
+                 else
+                     // 3. Invoke Handler
+                     let event_body: string = to_str(http_res.body)
+                     // print("Event: " + event_body)
+                     let resp_body: string = handler(event_body)
+                     
+                     // 4. Send Response (POST)
+                     let tmp_file: string = "/tmp/response.json"
+                     
+                     // Write response to file to handle special chars safely
+                     // io_write_file does not exist in stdlib, using open/write/close
+                     let f: File = open(tmp_file, "w")
+                     if f.open then
+                         write(f, resp_body)
+                         close(f)
+                     else
+                         print("Error: Could not open temp file " + tmp_file)
+                     end
+                     
+                     let video_id: string = req_id // just alias
+                     let resp_url: string = BASE_URL + req_id + "/response"
+                     let post_cmd: string = "curl -X POST -s -H \"Content-Type: application/json\" --data-binary @" + tmp_file + " " + resp_url
+                     
+                     // print("Posting response...")
+                     let post_res: SysResult = exec(post_cmd)
+                     
+                     if post_res.exit_code != 0 then
+                         print("Error POSTing response: " + to_str(post_res.exit_code))
+                     end
+                 end
+             end
+        end
     end
 end
 

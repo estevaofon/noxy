@@ -74,14 +74,21 @@ end
 // Retorna -1 se nao encontrar
 func find_crlf(data: bytes, start: int, len: int) -> int
     let i: int = start
-    while i < len - 1 do
+    while i < len do
         // Checando manualmente os bytes para CR (13) e LF (10)
-        // Como o tipo e bytes, acesso por indice retorna int (byte value)
-        if data[i] == 13 then
-            if data[i+1] == 10 then
+        
+        // Strict CRLF
+        if i < len - 1 then
+            if data[i] == 13 && data[i+1] == 10 then
                 return i
             end
         end
+        
+        // LF Fallback (for curl output or relaxed servers)
+        if data[i] == 10 then
+            return i
+        end
+        
         i = i + 1
     end
     return -1
