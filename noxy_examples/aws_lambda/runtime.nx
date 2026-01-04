@@ -40,7 +40,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v18 - Curl Based Runtime)")
+    print("Noxy Runtime starting... (v19 - Header Fix)")
     print("Runtime API: " + RUNTIME_API)
     
     // v18: Curl Runtime Implementation
@@ -78,12 +78,22 @@ func main() -> void
                  // 2. Extract Request ID
                  let req_id: string = ""
                  let i: int = 0
+                 
+                 // Debug: Check what we parsed
+                 // print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
+                 
                  while i < http_res.header_count do
                      let h: string = http_res.headers[i]
-                     if strings_contains(h, "Lambda-Runtime-Aws-Request-Id:") then
-                         let parts: SplitResult = split(h, ": ")
+                     // print("DEBUG HDR[" + to_str(i) + "]: " + h)
+                     
+                     // Case insensitive check or relaxed check
+                     // AWS Header: Lambda-Runtime-Aws-Request-Id
+                     if strings_contains(h, "Lambda-Runtime-Aws-Request-Id") then
+                         // Use single char split
+                         let parts: SplitResult = split(h, ":")
                          if parts.count >= 2 then
-                             req_id = parts.parts[1]
+                             // Trim value
+                             req_id = strings_trim(parts.parts[1])
                          end
                      end
                      i = i + 1
