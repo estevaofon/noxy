@@ -111,6 +111,12 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         final_count = final_count + 1
     end
     
+    // Add Accept: */*
+    if final_count < 64 then
+        final_headers[final_count] = "Accept: */*"
+        final_count = final_count + 1
+    end
+    
     // Adiciona Content-Length se tiver body e metodo pede
     // TODO: verificar se j? existe
     if length(body) > 0 then
@@ -213,6 +219,15 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         if client_res.error == "" then
              client_res.error = "Request failed with status " + to_str(http_res.status_code)
         end
+        
+        // DEBUG: Imprimir headers da resposta em caso de erro
+        print("DEBUG RESPONSE HEADERS:")
+        let h_idx: int = 0
+        while h_idx < http_res.header_count do
+            print("  " + http_res.headers[h_idx])
+            h_idx = h_idx + 1
+        end
+        print("--------------------------------------------------")
     end
     
     return client_res
