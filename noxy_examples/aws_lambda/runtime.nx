@@ -40,7 +40,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v20 - Header Debug)")
+    print("Noxy Runtime starting... (v21 - Deep Debug)")
     print("Runtime API: " + RUNTIME_API)
     
     // v18: Curl Runtime Implementation
@@ -67,6 +67,8 @@ func main() -> void
              sleep(1000)
         else
              // Parse Response
+             print("DEBUG CURL OUTPUT:\n" + get_res.output + "\n----------------")
+             
              let raw_bytes: bytes = to_bytes(get_res.output)
              let http_res: HttpResponse = parse_response(raw_bytes, length(raw_bytes))
              
