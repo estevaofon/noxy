@@ -37,8 +37,29 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v11 - HTTP/1.0 & Byte Dump)")
+    print("Noxy Runtime starting... (v12 - Minimal Request)")
     print("Runtime API: " + RUNTIME_API)
+    // Hex dump of RUNTIME_API to catch hidden nulls or CRs
+    let r_len: int = length(RUNTIME_API)
+    let r_idx: int = 0
+    let r_dump: string = "API_ENV_HEX: "
+    while r_idx < r_len do
+        let c_val: int = RUNTIME_API[r_idx] // Access string as bytes if possible? Or index gives code?
+        // In Noxy string index returns char code int?
+        // Wait, index operator on string usually returns string in some langs, or int code.
+        // Let's assume slice/substring... wait.
+        // Noxy string indexing: s[i] -> int (byte value) was used in find_crlf (bytes).
+        // For string? Let's use to_bytes first to be safe.
+        r_idx = r_idx + 1
+    end
+    
+    let api_bytes: bytes = to_bytes(RUNTIME_API)
+    r_idx = 0
+    while r_idx < length(api_bytes) do
+        r_dump = r_dump + to_str(api_bytes[r_idx]) + " "
+        r_idx = r_idx + 1
+    end
+    print(r_dump)
     
     while true do
         // 1. Next Invocation
