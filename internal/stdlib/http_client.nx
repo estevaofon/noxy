@@ -89,33 +89,34 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     end
     
     // Adiciona Host
-    // [MINIMAL]: Removing Host/UA for debugging 400
-    // if final_count < 64 then
-    //    let host_header: string = u.host
-    //    if (u.scheme == "http" && u.port != 80) || (u.scheme == "https" && u.port != 443) then
-    //        host_header = host_header + ":" + to_str(u.port)
-    //    end
-    //    final_headers[final_count] = "Host: " + host_header
-    //    final_count = final_count + 1
-    // end
+    // [RESTORED]: Host is mandatory for HTTP/1.1
+    if final_count < 64 then
+        let host_header: string = u.host
+        if (u.scheme == "http" && u.port != 80) || (u.scheme == "https" && u.port != 443) then
+            host_header = host_header + ":" + to_str(u.port)
+        end
+        final_headers[final_count] = "Host: " + host_header
+        final_count = final_count + 1
+    end
     
     // Adiciona User-Agent
-    // if final_count < 64 then
-    //    final_headers[final_count] = "User-Agent: " + client.user_agent
-    //    final_count = final_count + 1
-    // end
+    if final_count < 64 then
+        // Use a standard-looking UA
+        final_headers[final_count] = "User-Agent: aws-lambda-noxy/0.1"
+        final_count = final_count + 1
+    end
     
-    // Force Connection: close (Keep this?)
+    // Connection: Keep-Alive is default in 1.1, so we remove "close".
     // if final_count < 64 then
     //    final_headers[final_count] = "Connection: close"
     //    final_count = final_count + 1
     // end
     
     // Add Accept: */*
-    // if final_count < 64 then
-    //    final_headers[final_count] = "Accept: */*"
-    //    final_count = final_count + 1
-    // end
+    if final_count < 64 then
+        final_headers[final_count] = "Accept: */*"
+        final_count = final_count + 1
+    end
     
     // Adiciona Content-Length se tiver body e metodo pede
     // TODO: verificar se j? existe
@@ -147,22 +148,11 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
     req_bytes = build_request(method, full_path, final_headers, final_count, body)
     
     // 5. Enviar
-    // DEBUG: Imprimir request cru
-    print("DEBUG RAW REQUEST:\n" + to_str(req_bytes))
-    print("HEX DUMP (First 100 bytes):")
-    let d_idx: int = 0
-    let d_len: int = length(req_bytes)
-    let d_limit: int = 100
-    if d_len < d_limit then d_limit = d_len end
-    
-    let dump_line: string = ""
-    while d_idx < d_limit do
-        dump_line = dump_line + to_str(req_bytes[d_idx]) + " "
-        d_idx = d_idx + 1
-    end
-    print(dump_line)
-    
-    print("--------------------------------------------------")
+    // DEBUG: Imprimir request cru (Compacto)
+    print("DEBUG REQ: " + method + " " + full_path)
+    // print("DEBUG RAW REQUEST:\n" + to_str(req_bytes))
+    // print("HEX DUMP removed for brevity")
+    // print("--------------------------------------------------")
 
     let sent: int = send(sock, req_bytes)
     if sent < length(req_bytes) then

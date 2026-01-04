@@ -354,7 +354,7 @@ end
 // ============================================
 
 func build_request(method: string, path: string, headers: string[64], header_count: int, body: bytes) -> bytes
-    let req_str: string = method + " " + path + " HTTP/1.0\r\n"
+    let req_str: string = method + " " + path + " HTTP/1.1\r\n"
     
     let i: int = 0
     while i < header_count do
