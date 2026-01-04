@@ -52,8 +52,8 @@ func safe_server_send(server: ref HttpServer, client_index: int, resp: HttpRespo
         if sock != null then
             if sock.open then
                 let resp_bytes: bytes = build_response(resp.status_code, resp.status_text, resp.headers, resp.header_count, resp.body)
-                let sent_bytes: int = send(sock, resp_bytes)
-                print("SENT: " + to_str(sent_bytes) + " / " + to_str(length(resp_bytes)))
+                let res: NetResult = send(sock, resp_bytes)
+                print("SENT: " + to_str(res.count) + " / " + to_str(length(resp_bytes)))
                 
                 // Hack: Sleep to flush
                 sleep(500)

@@ -148,10 +148,20 @@ func request(client: ref HttpClient, method: string, url: string, headers: strin
         // print("DEBUG CLIENT RECV: c=" + to_str(result.count) + " ok=" + to_str(result.ok))
         
         if !result.ok then
-            loop_active = false
+            // Check for timeout
+            if strings_contains(result.error, "timeout") then
+                // Continue loop
+            else
+                loop_active = false
+            end
         else
             if result.count == 0 then
-                loop_active = false // Conex?o fechada
+                // EOF
+                loop_active = false
+                if total_received == 0 then
+                   empty_res.error = "Empty response (EOF)"
+                   return empty_res
+                end
             else
                 buffer = buffer + slice(result.data, 0, result.count)
                 total_received = total_received + result.count

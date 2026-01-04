@@ -1,0 +1,54 @@
+// raw_trigger.nx
+use net select *
+use sys select *
+
+func main() -> void
+    print("Connecting to 127.0.0.1:8080...")
+    let sock: Socket = connect("127.0.0.1", 8080)
+    
+    if sock == null then
+        print("Failed to connect (sock is null)")
+        return
+    end
+    
+    if !sock.open then
+        print("Failed to connect (sock not open)")
+        return
+    end
+    
+    let path: string = "/trigger"
+    let body: string = "{\"test\": 1}"
+    let req: string = "POST " + path + " HTTP/1.1\r\n" +
+                      "Host: localhost:8080\r\n" +
+                      "Content-Length: " + to_str(length(body)) + "\r\n" +
+                      "\r\n" +
+                      body
+                      
+    print("Sending request...")
+    let sent: NetResult = send(sock, to_bytes(req))
+    print("Sent bytes: " + to_str(sent.count))
+    
+    // Read loop
+    let total: int = 0
+    let loop: bool = true
+    while loop do
+        let res: NetResult = recv(sock, 1024)
+        if !res.ok then
+            print("Recv error or closed")
+            loop = false
+        else
+            if res.count == 0 then
+                print("Recv 0 bytes (EOF)")
+                loop = false
+            else
+                print("Recv bytes: " + to_str(res.count))
+                print("Data: " + to_str(res.data))
+                total = total + res.count
+            end
+        end
+    end
+    print("Total received: " + to_str(total))
+    net_close(sock)
+end
+
+main()
