@@ -40,7 +40,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v19 - Header Fix)")
+    print("Noxy Runtime starting... (v20 - Header Debug)")
     print("Runtime API: " + RUNTIME_API)
     
     // v18: Curl Runtime Implementation
@@ -80,11 +80,11 @@ func main() -> void
                  let i: int = 0
                  
                  // Debug: Check what we parsed
-                 // print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
+                 print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
                  
                  while i < http_res.header_count do
                      let h: string = http_res.headers[i]
-                     // print("DEBUG HDR[" + to_str(i) + "]: " + h)
+                     print("DEBUG HDR[" + to_str(i) + "]: " + h)
                      
                      // Case insensitive check or relaxed check
                      // AWS Header: Lambda-Runtime-Aws-Request-Id
