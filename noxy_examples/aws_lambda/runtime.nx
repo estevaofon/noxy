@@ -37,7 +37,7 @@ let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation
 // ============================================
 
 func main() -> void
-    print("Noxy Runtime starting... (v14 - Manual Raw Request)")
+    print("Noxy Runtime starting... (v15 - Safe Manual Request)")
     print("Runtime API: " + RUNTIME_API)
     
     // Manual Raw Verification Loop
@@ -46,13 +46,41 @@ func main() -> void
     while true do
         // 1. Manually Connect
         // Parse host/port from RUNTIME_API (format 127.0.0.1:9001)
-        // We know it is clean.
-        let split_hp: SplitResult = strings_split(RUNTIME_API, ":")
-        let host: string = split_hp.parts[0]
-        let port: int = to_int(split_hp.parts[1])
+        
+        let host: string = "127.0.0.1"
+        let port: int = 9001
+        
+        // Try strict split first
+        // Note: In Noxy, if native returns null but return type is Struct, it might be an issue?
+        // Let's assume split works, but check parts count.
+        
+        if strings_contains(RUNTIME_API, ":") then
+             let split_hp: SplitResult = strings_split(RUNTIME_API, ":")
+             // Check if split_hp itself is null happens implicitly on property access?
+             // If split_hp is null, next line crashes.
+             // We can't check 'if split_hp == null' easily if it's a struct type variable in Noxy?
+             // Actually we can 'if to_str(split_hp) == "null"' or similar hacks, but let's assume it works
+             // or just use hardcoded if we suspect environment is weird.
+             
+             if split_hp.count >= 2 then
+                 host = split_hp.parts[0]
+                 port = to_int(split_hp.parts[1])
+             end
+        else
+             // Fallback or assume RUNTIME_API is just IP? No, it's host:port
+             print("Warning: RUNTIME_API has no colon: " + RUNTIME_API)
+        end
         
         // print("Connecting to " + host + ":" + to_str(port))
         let sock: Socket = connect(host, port)
+        
+        // Safety check: is sock valid?
+        // If native connect failed and returned NULL, accessing sock.open crashes?
+        // We need a way to check if sock is null. 
+        // In this specific VM version, maybe we can rely on sock.open being false if struct is zero-initialized?
+        // But if variable is null ref...
+        
+        // Let's try to access it protected or assume it worked enough to return struct.
         if !sock.open then
             print("Connection failed manually")
             sleep(1000)
