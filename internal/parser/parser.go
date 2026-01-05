@@ -209,6 +209,17 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 
 	stmt.Consequence = p.parseBlockStatement()
 
+	// Verify valid block termination for Consequence
+	if !p.curTokenIs(token.END) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.ELIF) {
+		got := p.curToken.Literal
+		if p.curTokenIs(token.EOF) {
+			got = "EOF"
+		}
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', 'else' or 'elif', found %s",
+			p.curToken.Line, p.curToken.Column, got))
+		return nil
+	}
+
 	if p.curTokenIs(token.ELIF) {
 		// Treat 'elif' as 'else { if ... }'
 		// We create a wrapping block for the "else" part
@@ -228,6 +239,17 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 		stmt.Alternative = wrapperBlock
 	} else if p.curTokenIs(token.ELSE) {
 		stmt.Alternative = p.parseBlockStatement()
+
+		// Verify valid block termination for Alternative
+		if !p.curTokenIs(token.END) {
+			got := p.curToken.Literal
+			if p.curTokenIs(token.EOF) {
+				got = "EOF"
+			}
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', found %s",
+				p.curToken.Line, p.curToken.Column, got))
+			return nil
+		}
 	}
 
 	return stmt

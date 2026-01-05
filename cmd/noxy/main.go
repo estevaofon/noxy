@@ -57,20 +57,15 @@ func startREPL(showDisasm bool) {
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
 	scanner := bufio.NewScanner(os.Stdin)
 
-	// Compiler needs to persist scope?
-	// Currently compiler.New() creates fresh scope.
-	// But VM globals are persistent.
-	// If we want `let x = 10` to work, the compiler needs to know 'x' is defined if we were in same scope.
-	// However, Noxy 'let' in top-level creates a GLOBAL.
-	// The compiler treats top-level vars as globals.
-	// When we compile a new line "print(x)", the compiler checks 'x'.
-	// If 'x' is not in locals (scopeDepth=0 always for top level), it assumes Global.
-	// The VM will check globals at runtime.
-	// So, we do NOT need to persist Compiler state, only VM state (Globals).
-	// EXCEPT if we wanted to support multi-line structures incrementally, but for now line-by-line.
+	var inputBuffer string
 
 	for {
-		fmt.Print(">>> ")
+		if inputBuffer == "" {
+			fmt.Print(">>> ")
+		} else {
+			fmt.Print("... ")
+		}
+
 		if !scanner.Scan() {
 			break
 		}
@@ -79,21 +74,62 @@ func startREPL(showDisasm bool) {
 		if strings.TrimSpace(line) == "exit" {
 			break
 		}
-		if strings.TrimSpace(line) == "" {
+
+		// Handle empty lines in multiline mode
+		if strings.TrimSpace(line) == "" && inputBuffer == "" {
 			continue
 		}
 
+		// Append to buffer
+		if inputBuffer == "" {
+			inputBuffer = line
+		} else {
+			inputBuffer += "\n" + line
+		}
+
 		// 1. Parse
-		l := lexer.New(line)
+		l := lexer.New(inputBuffer)
 		p := parser.New(l)
 		program := p.ParseProgram()
 
 		if len(p.Errors()) > 0 {
+			// Check for incomplete input
+			isIncomplete := false
+			for _, msg := range p.Errors() {
+				// We look for errors indicating we hit EOF unexpectedly
+				// "found end of file" (from token.Display) or "found EOF" (literal fallback)
+				if strings.Contains(msg, "found end of file") || strings.Contains(msg, "found EOF") {
+					isIncomplete = true
+					break
+				}
+			}
+
+			if isIncomplete {
+				// Continue reading
+				continue
+			}
+
+			// Real Error
 			for _, msg := range p.Errors() {
 				fmt.Printf("%s\n", msg)
 			}
+			inputBuffer = "" // Reset
 			continue
 		}
+
+		// If we are here, parse was successful.
+		// BUT we might want to enforce that if we opened a block, we closed it?
+		// Parser should error if block not closed.
+		// Just creating an empty line to finish multiline input?
+		// Python REPL:
+		// >>> if True:
+		// ...     print(1)
+		// ...
+		// (Run)
+		//
+		// Noxy syntax uses 'end'. So 'end' token should close the block.
+		// If parser says OK, then the block IS closed.
+		// So we can run immediately.
 
 		// 2. REPL Magic: If statement is a single ExpressionStmt, print it.
 		// "1 + 1" -> "print(1 + 1)"
@@ -122,6 +158,7 @@ func startREPL(showDisasm bool) {
 		chunk, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)
+			inputBuffer = "" // Reset
 			continue
 		}
 
@@ -135,6 +172,8 @@ func startREPL(showDisasm bool) {
 		if err := machine.Interpret(chunk); err != nil {
 			fmt.Printf("Runtime error: %s\n", err)
 		}
+
+		inputBuffer = "" // Reset buffer after execution
 	}
 }
 
