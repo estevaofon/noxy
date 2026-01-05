@@ -9,6 +9,7 @@ type OpCode byte
 
 const (
 	OP_CONSTANT OpCode = iota
+	OP_CONSTANT_LONG
 	OP_NULL
 	OP_POP
 	OP_JUMP
@@ -61,6 +62,8 @@ func (op OpCode) String() string {
 	switch op {
 	case OP_CONSTANT:
 		return "OP_CONSTANT"
+	case OP_CONSTANT_LONG:
+		return "OP_CONSTANT_LONG"
 	case OP_NULL:
 		return "OP_NULL"
 	case OP_POP:
@@ -219,6 +222,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 	switch instruction {
 	case OP_CONSTANT:
 		return c.constantInstruction("OP_CONSTANT", offset)
+	case OP_CONSTANT_LONG:
+		return c.constantLongInstruction("OP_CONSTANT_LONG", offset)
 	case OP_NULL:
 		return c.simpleInstruction("OP_NULL", offset)
 	case OP_TRUE:
@@ -333,5 +338,17 @@ func (c *Chunk) byteInstruction(name string, offset int) int {
 func (c *Chunk) shortInstruction(name string, offset int) int {
 	slot := uint16(c.Code[offset+1])<<8 | uint16(c.Code[offset+2])
 	fmt.Printf("%-16s %4d\n", name, slot)
+	return offset + 3
+}
+
+func (c *Chunk) constantLongInstruction(name string, offset int) int {
+	constant := uint16(c.Code[offset+1])<<8 | uint16(c.Code[offset+2])
+	fmt.Printf("%-16s %4d '", name, constant)
+	if int(constant) < len(c.Constants) {
+		fmt.Print(c.Constants[constant])
+	} else {
+		fmt.Print("?")
+	}
+	fmt.Printf("'\n")
 	return offset + 3
 }

@@ -2484,6 +2484,24 @@ func (vm *VM) run(minFrameCount int) error {
 				vm.push(constant)
 			}
 
+		case chunk.OP_CONSTANT_LONG:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			constant := c.Constants[index]
+
+			if constant.Type == value.VAL_FUNCTION {
+				fn := constant.Obj.(*value.ObjFunction)
+				boundFn := &value.ObjFunction{
+					Name:    fn.Name,
+					Arity:   fn.Arity,
+					Chunk:   fn.Chunk,
+					Globals: frame.Globals,
+				}
+				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
+			} else {
+				vm.push(constant)
+			}
+
 		case chunk.OP_NULL:
 			vm.push(value.NewNull())
 

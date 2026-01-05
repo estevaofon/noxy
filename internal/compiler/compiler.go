@@ -68,7 +68,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Name.Value))
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConstant)
+			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
 			c.emitByte(byte(chunk.OP_POP))
 		}
 
@@ -82,14 +82,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 	case *ast.IntegerLiteral:
 		c.setLine(n.Token.Line)
 		// Convert int64 to Value
-		integer := value.NewInt(n.Value)
-		constIndex := c.makeConstant(integer)
-		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
+		// Convert int64 to Value
+		c.emitConstant(value.NewInt(n.Value))
 
 	case *ast.FloatLiteral:
-		fl := value.NewFloat(n.Value)
-		constIndex := c.makeConstant(fl)
-		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
+		c.emitConstant(value.NewFloat(n.Value))
 
 	case *ast.Boolean:
 		if n.Value {
@@ -99,14 +96,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		}
 
 	case *ast.StringLiteral:
-		str := value.NewString(n.Value)
-		constIndex := c.makeConstant(str)
-		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
+		c.emitConstant(value.NewString(n.Value))
 
 	case *ast.BytesLiteral:
-		b := value.NewBytes(n.Value)
-		constIndex := c.makeConstant(b)
-		c.emitBytes(byte(chunk.OP_CONSTANT), constIndex)
+		c.emitConstant(value.NewBytes(n.Value))
 
 	case *ast.AssignStmt:
 		if ident, ok := n.Target.(*ast.Identifier); ok {
@@ -122,7 +115,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			} else {
 				// Global
 				nameConstant := c.makeConstant(value.NewString(ident.Value))
-				c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConstant)
+				c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
 				c.emitByte(byte(chunk.OP_POP)) // Statement assignment pops result
 			}
 		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
@@ -153,7 +146,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			}
 			// Field Name
 			nameConst := c.makeConstant(value.NewString(memberExp.Member))
-			c.emitBytes(byte(chunk.OP_SET_PROPERTY), nameConst)
+			c.emitBytes(byte(chunk.OP_SET_PROPERTY), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP))
 		} else {
 			return nil, fmt.Errorf("assignment target not supported yet")
@@ -167,8 +160,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			fields = append(fields, f.Name)
 		}
 		structObj := value.NewStruct(n.Name, fields)
-		structConst := c.makeConstant(structObj)
-		c.emitBytes(byte(chunk.OP_CONSTANT), structConst)
+		c.emitConstant(structObj)
 
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
@@ -177,7 +169,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		} else {
 			// Global scope: struct is a global
 			nameConst := c.makeConstant(value.NewString(n.Name))
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
+			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP))
 		}
 
@@ -186,7 +178,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			return nil, err
 		}
 		nameConst := c.makeConstant(value.NewString(n.Member))
-		c.emitBytes(byte(chunk.OP_GET_PROPERTY), nameConst)
+		c.emitBytes(byte(chunk.OP_GET_PROPERTY), byte(nameConst))
 
 	case *ast.ArrayLiteral:
 		for _, el := range n.Elements {
@@ -237,7 +229,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Value))
-			c.emitBytes(byte(chunk.OP_GET_GLOBAL), nameConstant)
+			c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConstant))
 		}
 
 	case *ast.InfixExpression:
@@ -436,9 +428,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 	case *ast.UseStmt:
 		// 1. Emit Module Name (as constant operand, not opcode)
 		nameConst := c.makeConstant(value.NewString(n.Module))
-
 		// 2. Emit Import (Loads module and pushes it to stack)
-		c.emitBytes(byte(chunk.OP_IMPORT), nameConst)
+		c.emitBytes(byte(chunk.OP_IMPORT), byte(nameConst))
 
 		// 3. Handle Result
 		if n.SelectAll {
@@ -452,10 +443,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 
 				// Get Property 'sel'
 				selConst := c.makeConstant(value.NewString(sel))
-				c.emitBytes(byte(chunk.OP_GET_PROPERTY), selConst)
+				c.emitBytes(byte(chunk.OP_GET_PROPERTY), byte(selConst))
 
 				// Set Global 'sel'
-				c.emitBytes(byte(chunk.OP_SET_GLOBAL), selConst)
+				c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(selConst))
 				c.emitByte(byte(chunk.OP_POP)) // Pop the set value
 			}
 			// Pop the original Module
@@ -476,7 +467,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			}
 
 			nameConst := c.makeConstant(value.NewString(bindName))
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
+			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
 
@@ -526,12 +517,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		fnObj := value.NewFunction(n.Name, len(n.Parameters), fnCompiler.currentChunk, nil)
 
 		// Emit Constant for Function
-		fnConst := c.makeConstant(fnObj)
-		c.emitBytes(byte(chunk.OP_CONSTANT), fnConst)
+		c.emitConstant(fnObj)
 
 		// Store in Global
 		nameConst := c.makeConstant(value.NewString(n.Name))
-		c.emitBytes(byte(chunk.OP_SET_GLOBAL), nameConst)
+		c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 		c.emitByte(byte(chunk.OP_POP)) // Consume function value from stack (since it's a stmt)
 
 	case *ast.BlockStatement:
@@ -618,14 +608,23 @@ func (c *Compiler) emitLoop(loopStart int) {
 	c.emitByte(byte(offset & 0xff))
 }
 
-func (c *Compiler) makeConstant(v value.Value) byte {
+func (c *Compiler) makeConstant(v value.Value) int {
 	i := c.currentChunk.AddConstant(v)
-	if i > 255 {
-		// TODO: Implement OP_CONSTANT_LONG for 16-bit constant indices
-		// For now, log a warning but continue (will wrap around)
-		fmt.Println("WARNING: constant pool exceeds 255 entries, may cause issues")
+	// Warning removed as we support OP_CONSTANT_LONG
+	return i
+}
+
+func (c *Compiler) emitConstant(v value.Value) {
+	index := c.makeConstant(v)
+	if index <= 255 {
+		c.emitBytes(byte(chunk.OP_CONSTANT), byte(index))
+	} else if index <= 65535 {
+		c.emitByte(byte(chunk.OP_CONSTANT_LONG))
+		c.emitByte(byte((index >> 8) & 0xff))
+		c.emitByte(byte(index & 0xff))
+	} else {
+		panic("Too many constants in one chunk > 65535")
 	}
-	return byte(i)
 }
 
 func (c *Compiler) beginScope() {
@@ -650,15 +649,15 @@ func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
 	case *ast.PrimitiveType:
 		switch typ.Name {
 		case "int":
-			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewInt(0)))
+			c.emitConstant(value.NewInt(0))
 		case "float":
-			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewFloat(0.0)))
+			c.emitConstant(value.NewFloat(0.0))
 		case "bool":
 			c.emitByte(byte(chunk.OP_FALSE))
 		case "string":
-			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewString("")))
+			c.emitConstant(value.NewString(""))
 		case "bytes":
-			c.emitBytes(byte(chunk.OP_CONSTANT), c.makeConstant(value.NewBytes("")))
+			c.emitConstant(value.NewBytes(""))
 		default:
 			c.emitByte(byte(chunk.OP_NULL))
 		}
