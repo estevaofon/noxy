@@ -8,7 +8,7 @@ A complete bytecode virtual machine for the **Noxy** programming language, writt
 
 ## What is Noxy VM?
 
-Noxy VM is a bytecode compiler and virtual machine for the Noxy language created by Estevão Fonseca. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
+Noxy VM is a bytecode compiler and virtual machine for the Noxy language created by Estêvão Fonseca. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
 
 ### Features
 
