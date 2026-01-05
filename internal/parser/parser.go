@@ -163,23 +163,16 @@ func (p *Parser) parseStatement() ast.Statement {
 		}
 
 		// Otherwise expression statement
-		if _, ok := expr.(*ast.CallExpression); !ok {
-			// If expr is nil (parse error already?), skip
-			if expr != nil {
-				// Specific edge case: "def" or others might be parsed as identifiers
-				// If it's a bare identifier string literal, it's invalid syntax here
-				// unless it's a function call.
-				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: invalid syntax %q",
-					p.curToken.Line, p.curToken.Column, expr.String()))
-				return nil
+		if expr != nil {
+			// Allow all expressions as statements (Python-like)
+			stmt := &ast.ExpressionStmt{Token: p.curToken, Expression: expr}
+			if p.peekTokenIs(token.NEWLINE) {
+				p.nextToken()
 			}
+			return stmt
 		}
 
-		stmt := &ast.ExpressionStmt{Token: p.curToken, Expression: expr}
-		if p.peekTokenIs(token.NEWLINE) {
-			p.nextToken()
-		}
-		return stmt
+		return nil
 	}
 }
 
