@@ -3,7 +3,7 @@ use sys select *
 // ============================================
 // Test Runner
 // ============================================
-
+let start: int = time_now_ms()
 print("=== NOXY UNIT TEST RUNNER ===")
 print("Iniciando testes em 'noxy_examples/'...")
 print("")
@@ -35,7 +35,7 @@ func should_ignore(s: string) -> bool
     let exclusions: string[] = ["run_all_tests.nx", "http_server.nx", "simple_client.nx", 
     "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", 
     "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx", "md2html.nx",
-    "watch_file.nx"]
+    "watch_file.nx", "stress_test.nx"]
     if contains(exclusions, s) then
          return true
     end
@@ -157,3 +157,5 @@ if failed > 0 then
     exit(1)
 end
 
+let end_time: int = time_now_ms()
+print("It took:", end_time - start, "ms")

@@ -1,0 +1,16 @@
+func main()
+    let start: int = time_now_ms()
+    
+    let i: int = 0
+    let sum: int = 0
+    while i < 10000000 do
+        sum = sum + 1
+        i = i + 1
+    end
+    
+    let end_time: int = time_now_ms()
+    print("Loop 10M iterations took:", end_time - start, "ms")
+    print("Sum:", sum)
+end
+
+main()
