@@ -46,6 +46,25 @@ go run ./cmd/noxy/main.go file.nx
 
 # Or with go run
 go run ./cmd/noxy/main.go program.nx
+
+# Start Interactive REPL
+./noxy
+```
+
+## Interactive REPL
+
+Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
+
+```noxy
+Noxy REPL v0.1
+Type 'exit' to quit.
+>>> let x = 10
+>>> x + 5
+15
+>>> if true then
+...     print("Multiline support!")
+... end
+Multiline support!
 ```
 
 ## Quick Example
