@@ -110,6 +110,12 @@ func (p *Parser) nextToken() {
 	// Here we might want to handle them. For now, let's keep them and handle in parsing logic.
 }
 
+func (p *Parser) skipUntilEnd() {
+	for !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
+		p.nextToken()
+	}
+}
+
 func (p *Parser) ParseProgram() *ast.Program {
 	program := &ast.Program{}
 	program.Statements = []ast.Statement{}
@@ -862,7 +868,15 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 		return nil
 	}
 
+	errCountBefore := len(p.errors)
 	stmt.Parameters = p.parseFunctionParameters()
+
+	// If there was an error in parameters (stmt.Parameters is nil AND/OR errors increased), skip until end
+	// Note: parseFunctionParameters returns nil on error.
+	if stmt.Parameters == nil && len(p.errors) > errCountBefore {
+		p.skipUntilEnd()
+		return nil
+	}
 
 	// Return type arrow? `-> type`
 	if p.peekTokenIs(token.ARROW) {
@@ -901,11 +915,22 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 		return identifiers
 	}
 
-	p.nextToken()
+	p.nextToken() // Eat first identifier
 
 	ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
 	// Expect Type: `name: type`
+	// Check for missing type
+	if p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.RPAREN) {
+		msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation for parameter '%s'\n  hint: use '%s: <type>'",
+			p.peekToken.Line, p.peekToken.Column,
+			ident.Value, ident.Value)
+		p.errors = append(p.errors, msg)
+		// Don't return nil instantly, maybe try to recover?
+		// For now returning nil stops parsing effectively
+		return nil
+	}
+
 	if !p.expectPeek(token.COLON) {
 		return nil
 	}
@@ -915,9 +940,17 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 	identifiers = append(identifiers, ident)
 
 	for p.peekTokenIs(token.COMMA) {
-		p.nextToken()
-		p.nextToken()
+		p.nextToken() // eat COMMA
+		p.nextToken() // eat next IDENTIFIER
 		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+
+		if p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.RPAREN) {
+			msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation for parameter '%s'\n  hint: use '%s: <type>'",
+				p.peekToken.Line, p.peekToken.Column,
+				ident.Value, ident.Value)
+			p.errors = append(p.errors, msg)
+			return nil
+		}
 
 		if !p.expectPeek(token.COLON) {
 			return nil
