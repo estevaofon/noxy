@@ -264,6 +264,20 @@ func (p *Parser) parseLetStatement() *ast.LetStmt {
 
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
+	// Specific check for missing type: let x = ...
+	if p.peekTokenIs(token.ASSIGN) {
+		msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation for '%s'\n  hint: use 'let %s: <type> = ...'",
+			p.peekToken.Line, p.peekToken.Column,
+			stmt.Name.Value, stmt.Name.Value)
+		p.errors = append(p.errors, msg)
+
+		// Advance to avoid subsequent errors
+		for !p.curTokenIs(token.NEWLINE) && !p.curTokenIs(token.EOF) {
+			p.nextToken()
+		}
+		return nil
+	}
+
 	if !p.expectPeek(token.COLON) {
 		return nil
 	}

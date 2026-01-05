@@ -35,7 +35,7 @@ func should_ignore(s: string) -> bool
     let exclusions: string[] = ["run_all_tests.nx", "http_server.nx", "simple_client.nx", 
     "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", 
     "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx", "md2html.nx",
-    "watch_file.nx", "stress_test.nx", "division_error.nx"]
+    "watch_file.nx", "stress_test.nx", "division_error.nx", "error_type.nx", "error_arity.nx", "test_let_error.nx", "error_index.nx"]
     if contains(exclusions, s) then
          return true
     end
