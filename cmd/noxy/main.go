@@ -65,6 +65,7 @@ func startREPL(showDisasm bool) {
 		} else {
 			fmt.Print("... ")
 		}
+		os.Stdout.Sync()
 
 		if !scanner.Scan() {
 			break
