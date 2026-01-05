@@ -1,0 +1,10 @@
+func sum(a: int, b: int) -> int
+    return a + b
+end
+
+func main()
+    print("Testing Arity Error...")
+    sum(1)
+end
+
+main()

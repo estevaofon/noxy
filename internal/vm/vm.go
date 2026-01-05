@@ -27,6 +27,15 @@ import (
 const StackMax = 2048
 const FramesMax = 64
 
+func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interface{}) error {
+	line := 0
+	if c != nil && ip > 0 && ip <= len(c.Lines) {
+		line = c.Lines[ip-1]
+	}
+	msg := fmt.Sprintf(format, args...)
+	return fmt.Errorf("[line %d] %s", line, msg)
+}
+
 type CallFrame struct {
 	Function *value.ObjFunction
 	IP       int
@@ -2550,7 +2559,7 @@ func (vm *VM) run(minFrameCount int) error {
 				// Try VM globals (Builtins / Shared)
 				val, ok = vm.globals[name]
 				if !ok {
-					return fmt.Errorf("undefined global variable '%s'", name)
+					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 				}
 			}
 			vm.push(val)
@@ -2607,12 +2616,12 @@ func (vm *VM) run(minFrameCount int) error {
 					continue
 				}
 
-				return fmt.Errorf("operands must be numbers, strings or bytes")
+				return vm.runtimeError(c, ip, "operands must be numbers, strings or bytes")
 			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
 				// Case where types are explicit VAL_BYTES (not VAL_OBJ)
 				vm.push(value.NewBytes(a.Obj.(string) + b.Obj.(string)))
 			} else {
-				return fmt.Errorf("operands must be numbers or strings or bytes")
+				return vm.runtimeError(c, ip, "operands must be numbers or strings or bytes")
 			}
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
@@ -2626,7 +2635,7 @@ func (vm *VM) run(minFrameCount int) error {
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
 				vm.push(value.NewFloat(a.AsFloat - float64(b.AsInt)))
 			} else {
-				return fmt.Errorf("operands must be numbers")
+				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_MULTIPLY:
 			b := vm.pop()
@@ -2640,44 +2649,44 @@ func (vm *VM) run(minFrameCount int) error {
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
 				vm.push(value.NewFloat(a.AsFloat * float64(b.AsInt)))
 			} else {
-				return fmt.Errorf("operands must be numbers")
+				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_DIVIDE:
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				if b.AsInt == 0 {
-					return fmt.Errorf("division by zero")
+					return vm.runtimeError(c, ip, "division by zero")
 				}
 				vm.push(value.NewInt(a.AsInt / b.AsInt))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
 				if b.AsFloat == 0 {
-					return fmt.Errorf("division by zero")
+					return vm.runtimeError(c, ip, "division by zero")
 				}
 				vm.push(value.NewFloat(a.AsFloat / b.AsFloat))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
 				if b.AsFloat == 0 {
-					return fmt.Errorf("division by zero")
+					return vm.runtimeError(c, ip, "division by zero")
 				}
 				vm.push(value.NewFloat(float64(a.AsInt) / b.AsFloat))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
 				if b.AsInt == 0 {
-					return fmt.Errorf("division by zero")
+					return vm.runtimeError(c, ip, "division by zero")
 				}
 				vm.push(value.NewFloat(a.AsFloat / float64(b.AsInt)))
 			} else {
-				return fmt.Errorf("operands must be numbers")
+				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_MODULO:
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				if b.AsInt == 0 {
-					return fmt.Errorf("modulo by zero")
+					return vm.runtimeError(c, ip, "modulo by zero")
 				}
 				vm.push(value.NewInt(a.AsInt % b.AsInt))
 			} else {
-				return fmt.Errorf("operands for %% must be integers")
+				return vm.runtimeError(c, ip, "operands for %% must be integers")
 			}
 
 		case chunk.OP_BIT_AND:
@@ -2689,7 +2698,7 @@ func (vm *VM) run(minFrameCount int) error {
 				sA := a.Obj.(string)
 				sB := b.Obj.(string)
 				if len(sA) != len(sB) {
-					return fmt.Errorf("operands for & must have same length")
+					return vm.runtimeError(c, ip, "operands for & must have same length")
 				}
 				res := make([]byte, len(sA))
 				for i := 0; i < len(sA); i++ {
@@ -2697,7 +2706,7 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operands for & must be integers or bytes")
+				return vm.runtimeError(c, ip, "operands for & must be integers or bytes")
 			}
 
 		case chunk.OP_BIT_OR:
@@ -2709,7 +2718,7 @@ func (vm *VM) run(minFrameCount int) error {
 				sA := a.Obj.(string)
 				sB := b.Obj.(string)
 				if len(sA) != len(sB) {
-					return fmt.Errorf("operands for | must have same length")
+					return vm.runtimeError(c, ip, "operands for | must have same length")
 				}
 				res := make([]byte, len(sA))
 				for i := 0; i < len(sA); i++ {
@@ -2717,7 +2726,7 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operands for | must be integers or bytes")
+				return vm.runtimeError(c, ip, "operands for | must be integers or bytes")
 			}
 
 		case chunk.OP_BIT_XOR:
@@ -2729,7 +2738,7 @@ func (vm *VM) run(minFrameCount int) error {
 				sA := a.Obj.(string)
 				sB := b.Obj.(string)
 				if len(sA) != len(sB) {
-					return fmt.Errorf("operands for ^ must have same length")
+					return vm.runtimeError(c, ip, "operands for ^ must have same length")
 				}
 				res := make([]byte, len(sA))
 				for i := 0; i < len(sA); i++ {
@@ -2737,7 +2746,7 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operands for ^ must be integers or bytes")
+				return vm.runtimeError(c, ip, "operands for ^ must be integers or bytes")
 			}
 
 		case chunk.OP_BIT_NOT:
@@ -2752,7 +2761,7 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewBytes(string(res)))
 			} else {
-				return fmt.Errorf("operand for ~ must be integer or bytes")
+				return vm.runtimeError(c, ip, "operand for ~ must be integer or bytes")
 			}
 
 		case chunk.OP_SHIFT_LEFT:
@@ -2760,11 +2769,11 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				if b.AsInt < 0 {
-					return fmt.Errorf("negative shift count")
+					return vm.runtimeError(c, ip, "negative shift count")
 				}
 				vm.push(value.NewInt(a.AsInt << uint64(b.AsInt)))
 			} else {
-				return fmt.Errorf("operands for << must be integers")
+				return vm.runtimeError(c, ip, "operands for << must be integers")
 			}
 
 		case chunk.OP_SHIFT_RIGHT:
@@ -2772,11 +2781,11 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				if b.AsInt < 0 {
-					return fmt.Errorf("negative shift count")
+					return vm.runtimeError(c, ip, "negative shift count")
 				}
 				vm.push(value.NewInt(a.AsInt >> uint64(b.AsInt)))
 			} else {
-				return fmt.Errorf("operands for >> must be integers")
+				return vm.runtimeError(c, ip, "operands for >> must be integers")
 			}
 		case chunk.OP_NEGATE:
 			v := vm.pop()
@@ -2785,14 +2794,14 @@ func (vm *VM) run(minFrameCount int) error {
 			} else if v.Type == value.VAL_FLOAT {
 				vm.push(value.NewFloat(-v.AsFloat))
 			} else {
-				return fmt.Errorf("operand must be number")
+				return vm.runtimeError(c, ip, "operand must be number")
 			}
 		case chunk.OP_NOT:
 			v := vm.pop()
 			if v.Type == value.VAL_BOOL {
 				vm.push(value.NewBool(!v.AsBool))
 			} else {
-				return fmt.Errorf("operand must be boolean")
+				return vm.runtimeError(c, ip, "operand must be boolean")
 			}
 		case chunk.OP_AND:
 			b := vm.pop()
@@ -2804,7 +2813,7 @@ func (vm *VM) run(minFrameCount int) error {
 			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
 				vm.push(value.NewBool(a.AsBool && b.AsBool))
 			} else {
-				return fmt.Errorf("operands for & must be boolean")
+				return vm.runtimeError(c, ip, "operands for & must be boolean")
 			}
 		case chunk.OP_OR:
 			b := vm.pop()
@@ -2812,12 +2821,12 @@ func (vm *VM) run(minFrameCount int) error {
 			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
 				vm.push(value.NewBool(a.AsBool || b.AsBool))
 			} else {
-				return fmt.Errorf("operands for | must be boolean")
+				return vm.runtimeError(c, ip, "operands for | must be boolean")
 			}
 		case chunk.OP_ZEROS:
 			countVal := vm.pop()
 			if countVal.Type != value.VAL_INT {
-				return fmt.Errorf("zeros size must be integer")
+				return vm.runtimeError(c, ip, "zeros size must be integer")
 			}
 			count := int(countVal.AsInt)
 			elements := make([]value.Value, count)
@@ -2866,8 +2875,8 @@ func (vm *VM) run(minFrameCount int) error {
 
 			frame.IP = ip // Save current instruction pointer to the frame before call
 
-			if !vm.callValue(vm.peek(argCount), argCount) {
-				return fmt.Errorf("call failed")
+			if ok, err := vm.callValue(vm.peek(argCount), argCount, c, ip); !ok {
+				return err
 			}
 			// Update cached frame
 			frame = vm.currentFrame // Switch to new frame
@@ -2952,10 +2961,10 @@ func (vm *VM) run(minFrameCount int) error {
 					if str, ok := keyVal.Obj.(string); ok {
 						key = str
 					} else {
-						return fmt.Errorf("map key must be int or string")
+						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
 				} else {
-					return fmt.Errorf("map key must be int or string")
+					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
 				mapData[key] = val
 			}
@@ -2976,7 +2985,7 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				mod, err := vm.loadModule(moduleName)
 				if err != nil {
-					return fmt.Errorf("failed to import module '%s': %v", moduleName, err)
+					return vm.runtimeError(c, ip, "failed to import module '%s': %v", moduleName, err)
 				}
 				vm.modules[moduleName] = mod
 				vm.push(mod)
@@ -3002,10 +3011,10 @@ func (vm *VM) run(minFrameCount int) error {
 						}
 					}
 				} else {
-					return fmt.Errorf("import * expected a module (map)")
+					return vm.runtimeError(c, ip, "import * expected a module (map)")
 				}
 			} else {
-				return fmt.Errorf("import * expected a module object")
+				return vm.runtimeError(c, ip, "import * expected a module object")
 			}
 
 		case chunk.OP_GET_INDEX:
@@ -3015,11 +3024,11 @@ func (vm *VM) run(minFrameCount int) error {
 			if collectionVal.Type == value.VAL_OBJ {
 				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
 					if indexVal.Type != value.VAL_INT {
-						return fmt.Errorf("array index must be integer")
+						return vm.runtimeError(c, ip, "array index must be integer")
 					}
 					idx := int(indexVal.AsInt)
 					if idx < 0 || idx >= len(arr.Elements) {
-						return fmt.Errorf("array index out of bounds")
+						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
 					vm.push(arr.Elements[idx])
 					continue
@@ -3031,10 +3040,10 @@ func (vm *VM) run(minFrameCount int) error {
 						if str, ok := indexVal.Obj.(string); ok {
 							key = str
 						} else {
-							return fmt.Errorf("map key must be int or string")
+							return vm.runtimeError(c, ip, "map key must be int or string")
 						}
 					} else {
-						return fmt.Errorf("map key must be int or string")
+						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
 
 					val, ok := mapObj.Data[key]
@@ -3050,11 +3059,11 @@ func (vm *VM) run(minFrameCount int) error {
 				} else if str, ok := collectionVal.Obj.(string); ok {
 					// String indexing
 					if indexVal.Type != value.VAL_INT {
-						return fmt.Errorf("string index must be integer")
+						return vm.runtimeError(c, ip, "string index must be integer")
 					}
 					idx := int(indexVal.AsInt)
 					if idx < 0 || idx >= len(str) {
-						return fmt.Errorf("string index out of bounds")
+						return vm.runtimeError(c, ip, "string index out of bounds")
 					}
 					vm.push(value.NewString(string(str[idx])))
 					continue
@@ -3064,16 +3073,16 @@ func (vm *VM) run(minFrameCount int) error {
 			if collectionVal.Type == value.VAL_BYTES {
 				str := collectionVal.Obj.(string)
 				if indexVal.Type != value.VAL_INT {
-					return fmt.Errorf("bytes index must be integer")
+					return vm.runtimeError(c, ip, "bytes index must be integer")
 				}
 				idx := int(indexVal.AsInt)
 				if idx < 0 || idx >= len(str) {
-					return fmt.Errorf("bytes index out of bounds")
+					return vm.runtimeError(c, ip, "bytes index out of bounds")
 				}
 				vm.push(value.NewInt(int64(str[idx])))
 				continue
 			}
-			return fmt.Errorf("cannot index non-array/map/bytes")
+			return vm.runtimeError(c, ip, "cannot index non-array/map/bytes")
 
 		case chunk.OP_SET_INDEX:
 			val := vm.pop()
@@ -3083,11 +3092,11 @@ func (vm *VM) run(minFrameCount int) error {
 			if collectionVal.Type == value.VAL_OBJ {
 				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
 					if indexVal.Type != value.VAL_INT {
-						return fmt.Errorf("array index must be integer")
+						return vm.runtimeError(c, ip, "array index must be integer")
 					}
 					idx := int(indexVal.AsInt)
 					if idx < 0 || idx >= len(arr.Elements) {
-						return fmt.Errorf("array index out of bounds")
+						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
 					arr.Elements[idx] = val
 					vm.push(val) // Assignment expression result
@@ -3100,17 +3109,17 @@ func (vm *VM) run(minFrameCount int) error {
 						if str, ok := indexVal.Obj.(string); ok {
 							key = str
 						} else {
-							return fmt.Errorf("map key must be int or string")
+							return vm.runtimeError(c, ip, "map key must be int or string")
 						}
 					} else {
-						return fmt.Errorf("map key must be int or string")
+						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
 					mapObj.Data[key] = val
 					vm.push(val)
 					continue
 				}
 			}
-			return fmt.Errorf("cannot set index on non-array/map")
+			return vm.runtimeError(c, ip, "cannot set index on non-array/map")
 
 		case chunk.OP_GET_PROPERTY:
 			index := c.Code[ip]
@@ -3120,24 +3129,24 @@ func (vm *VM) run(minFrameCount int) error {
 
 			instanceVal := vm.pop()
 			if instanceVal.Type != value.VAL_OBJ {
-				return fmt.Errorf("only instances/maps have properties")
+				return vm.runtimeError(c, ip, "only instances/maps have properties")
 			}
 
 			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
 				val, ok := instance.Fields[name]
 				if !ok {
-					return fmt.Errorf("undefined property '%s'", name)
+					return vm.runtimeError(c, ip, "undefined property '%s'", name)
 				}
 				vm.push(val)
 			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
 				// Allow accessing map keys as properties (for modules)
 				val, ok := mapObj.Data[name]
 				if !ok {
-					return fmt.Errorf("undefined property '%s' in module/map", name)
+					return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
 				}
 				vm.push(val)
 			} else {
-				return fmt.Errorf("only instances and maps have properties")
+				return vm.runtimeError(c, ip, "only instances and maps have properties")
 			}
 
 		case chunk.OP_SET_PROPERTY:
@@ -3150,11 +3159,11 @@ func (vm *VM) run(minFrameCount int) error {
 			instanceVal := vm.pop()
 
 			if instanceVal.Type != value.VAL_OBJ {
-				return fmt.Errorf("only instances have properties")
+				return vm.runtimeError(c, ip, "only instances have properties")
 			}
 			instance, ok := instanceVal.Obj.(*value.ObjInstance)
 			if !ok {
-				return fmt.Errorf("only instances have properties")
+				return vm.runtimeError(c, ip, "only instances have properties")
 			}
 
 			instance.Fields[name] = val
@@ -3163,13 +3172,12 @@ func (vm *VM) run(minFrameCount int) error {
 	}
 }
 
-func (vm *VM) callValue(callee value.Value, argCount int) bool {
+func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	if callee.Type == value.VAL_OBJ {
 		if structDef, ok := callee.Obj.(*value.ObjStruct); ok {
 			// Instantiate
 			if argCount != len(structDef.Fields) {
-				fmt.Printf("Expected %d arguments for struct %s but got %d\n", len(structDef.Fields), structDef.Name, argCount)
-				return false
+				return false, vm.runtimeError(c, ip, "expected %d arguments for struct %s but got %d", len(structDef.Fields), structDef.Name, argCount)
 			}
 
 			instance := value.NewInstance(structDef)
@@ -3186,11 +3194,11 @@ func (vm *VM) callValue(callee value.Value, argCount int) bool {
 			vm.stackTop -= argCount + 1
 			// Push instance
 			vm.push(instance)
-			return true
+			return true, nil
 		}
 	}
 	if callee.Type == value.VAL_FUNCTION {
-		return vm.call(callee.Obj.(*value.ObjFunction), argCount)
+		return vm.call(callee.Obj.(*value.ObjFunction), argCount, c, ip)
 	}
 	if callee.Type == value.VAL_NATIVE {
 		native := callee.Obj.(*value.ObjNative)
@@ -3199,22 +3207,20 @@ func (vm *VM) callValue(callee value.Value, argCount int) bool {
 		result := native.Fn(args)
 		vm.stackTop -= argCount + 1 // args + function
 		vm.push(result)
-		return true
+		return true, nil
 	}
-	return false
+	return false, vm.runtimeError(c, ip, "can only call functions and classes")
 }
 
-func (vm *VM) call(fn *value.ObjFunction, argCount int) bool {
+func (vm *VM) call(fn *value.ObjFunction, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	// fmt.Printf("Calling function %s, code len: %d\n", fn.Name, len(chunk.Code))
 
 	if argCount != fn.Arity {
-		fmt.Printf("Expected %d arguments but got %d\n", fn.Arity, argCount)
-		return false
+		return false, vm.runtimeError(c, ip, "expected %d arguments but got %d", fn.Arity, argCount)
 	}
 
 	if vm.frameCount == FramesMax {
-		fmt.Printf("Stack overflow\n")
-		return false
+		return false, vm.runtimeError(c, ip, "stack overflow")
 	}
 
 	frame := &CallFrame{
@@ -3223,11 +3229,11 @@ func (vm *VM) call(fn *value.ObjFunction, argCount int) bool {
 		Slots:    vm.stackTop - argCount - 1, // Start of locals window (fn + args)
 		Globals:  fn.Globals,
 	}
-
+	// Push new frame
 	vm.frames[vm.frameCount] = frame
 	vm.frameCount++
 	vm.currentFrame = frame
-	return true
+	return true, nil
 }
 
 func (vm *VM) readShort() uint16 {
@@ -3353,7 +3359,9 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 			}
 			modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modFn}
 			vm.push(modVal)
-			vm.callValue(modVal, 0)
+			if ok, err := vm.callValue(modVal, 0, nil, 0); !ok {
+				return value.NewNull(), err
+			}
 			err = vm.run(vm.frameCount) // Run until return
 			if err != nil {
 				return value.NewNull(), err
@@ -3432,7 +3440,9 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 
 	// Execute Module Synchronously
 	vm.push(modVal)
-	vm.callValue(modVal, 0)
+	if ok, err := vm.callValue(modVal, 0, nil, 0); !ok {
+		return value.NewNull(), err
+	}
 
 	// Run until this frame returns
 	startFrameCount := vm.frameCount

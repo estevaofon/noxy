@@ -1,0 +1,7 @@
+func main()
+    let valA: int = 10
+    let valB: string = "20"
+    print("Testing Type Error...")
+    let res: int = valA - valB
+end
+main()

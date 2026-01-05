@@ -1,0 +1,6 @@
+func main()
+    let numbers: int[] = [10, 20, 30]
+    print("Testing Index Error...")
+    print(numbers[5])
+end
+main()
