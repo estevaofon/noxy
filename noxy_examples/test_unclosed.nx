@@ -1,0 +1,10 @@
+let a = 10
+
+if a > 5 then
+    print("a is greater than 5")
+end
+
+while a > 0 do
+    print(a)
+    a = a - 1
+end
