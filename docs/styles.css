@@ -374,6 +374,8 @@ body {
     overflow: hidden;
     box-shadow: var(--shadow-md);
     transition: var(--transition);
+    display: flex;
+    flex-direction: column;
 }
 
 .syntax-card:hover {
@@ -391,10 +393,11 @@ body {
 }
 
 .syntax-card pre {
-    margin: 0;
+    margin: 0 !important;
     padding: 1.5rem;
-    background: var(--bg-dark);
+    background: var(--bg-dark) !important;
     overflow-x: auto;
+    flex: 1;
 }
 
 .syntax-card code {

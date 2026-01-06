@@ -326,7 +326,7 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `io` | Input/Output operations (read/write files) |
 | `strings` | String manipulation (upper, lower, replace, split) |
 | `time` | Time and Date functions |
-| `sys` | System interactions (args, exit, env) |
+| `sys` | System interactions (argv, exit, env) |
 | `net` | Network sockets (TCP/UDP) |
 | `http` | HTTP Client and Server |
 | `json` | JSON parsing and stringification |

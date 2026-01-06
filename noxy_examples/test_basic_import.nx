@@ -1,0 +1,8 @@
+// Available modules:
+// io, time, sys, net, http, json, crypto
+
+use time
+print(time.now())
+
+use sys
+print(sys.argv()[0])
