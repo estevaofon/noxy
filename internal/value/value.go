@@ -23,9 +23,14 @@ type Value struct {
 	Obj     interface{} // Heap allocated object
 }
 
+type ParamInfo struct {
+	IsRef bool
+}
+
 type ObjFunction struct {
 	Name    string
 	Arity   int
+	Params  []ParamInfo
 	Chunk   interface{}
 	Globals map[string]Value // Module/Context globals
 }
@@ -183,10 +188,10 @@ func NewInstance(def *ObjStruct) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
-func NewFunction(name string, arity int, chunk interface{}, globals map[string]Value) Value {
+func NewFunction(name string, arity int, params []ParamInfo, chunk interface{}, globals map[string]Value) Value {
 	return Value{
 		Type: VAL_FUNCTION,
-		Obj:  &ObjFunction{Name: name, Arity: arity, Chunk: chunk, Globals: globals},
+		Obj:  &ObjFunction{Name: name, Arity: arity, Params: params, Chunk: chunk, Globals: globals},
 	}
 }
 

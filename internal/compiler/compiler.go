@@ -491,8 +491,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		fnCompiler.addLocal("")
 
 		// Add parameters as locals
+		paramsInfo := []value.ParamInfo{}
+		// fmt.Printf("Compiling func %s with %d params\n", n.Name, len(n.Parameters))
 		for _, param := range n.Parameters {
-			fnCompiler.addLocal(param.Value)
+			fnCompiler.addLocal(param.Name)
+			isRef := false
+			if _, ok := param.Type.(*ast.RefType); ok {
+				isRef = true
+			}
+			paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
 		}
 
 		// Compile body
@@ -514,7 +521,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
 
 		// Create Function Object
-		fnObj := value.NewFunction(n.Name, len(n.Parameters), fnCompiler.currentChunk, nil)
+		fnObj := value.NewFunction(n.Name, len(n.Parameters), paramsInfo, fnCompiler.currentChunk, nil)
 
 		// Emit Constant for Function
 		c.emitConstant(fnObj)

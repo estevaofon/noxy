@@ -69,6 +69,21 @@ func (mt *MapType) String() string {
 	return "map[" + mt.KeyType.String() + ", " + mt.ValueType.String() + "]"
 }
 
+type RefType struct {
+	ElementType NoxyType
+}
+
+func (rt *RefType) String() string { return "ref " + rt.ElementType.String() }
+
+type Parameter struct {
+	Name string
+	Type NoxyType
+}
+
+func (p *Parameter) String() string {
+	return p.Name + ": " + p.Type.String()
+}
+
 // STATEMENTS
 
 type AssignStmt struct {
@@ -124,7 +139,7 @@ func (bs *BreakStmt) TokenLiteral() string { return bs.Token.Literal }
 func (bs *BreakStmt) String() string       { return "break" }
 
 type UseStmt struct {
-	Token  token.Token // 'use'
+	Token     token.Token // 'use'
 	Module    string
 	Alias     string
 	Selectors []string
@@ -298,7 +313,7 @@ func (ws *WhileStatement) String() string {
 type FunctionStatement struct {
 	Token      token.Token // The 'func' token
 	Name       string
-	Parameters []*Identifier
+	Parameters []*Parameter
 	Body       *BlockStatement
 }
 

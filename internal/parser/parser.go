@@ -444,6 +444,12 @@ func (p *Parser) parseType() ast.NoxyType {
 	// Optional REF
 	if p.curToken.Type == token.REF {
 		p.nextToken()
+		// Wrap recursive call
+		elementType := p.parseType()
+		if elementType == nil {
+			return nil
+		}
+		return &ast.RefType{ElementType: elementType}
 	}
 
 	var t ast.NoxyType
@@ -907,24 +913,26 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 	return stmt
 }
 
-func (p *Parser) parseFunctionParameters() []*ast.Identifier {
-	identifiers := []*ast.Identifier{}
+func (p *Parser) parseFunctionParameters() []*ast.Parameter {
+	parameters := []*ast.Parameter{}
 
 	if p.peekTokenIs(token.RPAREN) {
 		p.nextToken()
-		return identifiers
+		return parameters
 	}
 
 	p.nextToken() // Eat first identifier
 
-	ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	// ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	paramName := p.curToken.Literal
+	// paramToken := p.curToken
 
 	// Expect Type: `name: type`
 	// Check for missing type
 	if p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.RPAREN) {
 		msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation for parameter '%s'\n  hint: use '%s: <type>'",
 			p.peekToken.Line, p.peekToken.Column,
-			ident.Value, ident.Value)
+			paramName, paramName)
 		p.errors = append(p.errors, msg)
 		// Don't return nil instantly, maybe try to recover?
 		// For now returning nil stops parsing effectively
@@ -934,20 +942,21 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 	if !p.expectPeek(token.COLON) {
 		return nil
 	}
-	p.nextToken() // eat COLON
-	p.parseType() // eat Type
+	p.nextToken()          // eat COLON
+	pType := p.parseType() // eat Type
 
-	identifiers = append(identifiers, ident)
+	parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType})
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken() // eat COMMA
 		p.nextToken() // eat next IDENTIFIER
-		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		// ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		paramName = p.curToken.Literal
 
 		if p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.RPAREN) {
 			msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation for parameter '%s'\n  hint: use '%s: <type>'",
 				p.peekToken.Line, p.peekToken.Column,
-				ident.Value, ident.Value)
+				paramName, paramName)
 			p.errors = append(p.errors, msg)
 			return nil
 		}
@@ -956,16 +965,16 @@ func (p *Parser) parseFunctionParameters() []*ast.Identifier {
 			return nil
 		}
 		p.nextToken()
-		p.parseType()
+		pType = p.parseType()
 
-		identifiers = append(identifiers, ident)
+		parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType})
 	}
 
 	if !p.expectPeek(token.RPAREN) {
 		return nil
 	}
 
-	return identifiers
+	return parameters
 }
 
 func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {

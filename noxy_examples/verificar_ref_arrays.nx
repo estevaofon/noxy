@@ -1,0 +1,97 @@
+
+// verificar_ref_arrays.nx
+// Script para verificar comportamento de passagem por valor/referência em Arrays Fixos e Dinâmicos
+
+// ============================================
+// ARRAYS FIXOS
+// ============================================
+
+func modificar_array_fixo_val(arr: int[3]) -> void
+    print("  [Func Val] Recebido. Modificando índice 0 para 999...")
+    arr[0] = 999
+    print(f"  [Func Val] Valor interno: {arr[0]}")
+end
+
+func modificar_array_fixo_ref(arr: ref int[3]) -> void
+    print("  [Func Ref] Recebido. Modificando índice 0 para 888...")
+    arr[0] = 888
+    print(f"  [Func Ref] Valor interno: {arr[0]}")
+end
+
+// ============================================
+// ARRAYS DINÂMICOS
+// ============================================
+
+func modificar_array_dinamico_val(arr: int[]) -> void
+    print("  [Func Dyn Val] Recebido. Modificando índice 0 para 777...")
+    if length(arr) > 0 then
+        arr[0] = 777
+    end
+    print(f"  [Func Dyn Val] Valor interno: {arr[0]}")
+end
+
+func modificar_array_dinamico_ref(arr: ref int[]) -> void
+    print("  [Func Dyn Ref] Recebido. Modificando índice 0 para 666...")
+    if length(arr) > 0 then
+        arr[0] = 666
+    end
+    print(f"  [Func Dyn Ref] Valor interno: {arr[0]}")
+end
+
+
+// ============================================
+// EXECUÇÃO DOS TESTES
+// ============================================
+
+print("========================================")
+print("TESTE 1: Arrays Fixos (int[3])")
+print("========================================")
+
+let fixo: int[3] = [10, 20, 30]
+print(f"Original antes (Val): {fixo[0]}")
+modificar_array_fixo_val(fixo)
+print(f"Original depois (Val): {fixo[0]}")
+if fixo[0] == 10 then
+    print("-> CONCLUSÃO: Array Fixo passado por VALOR (cópia)")
+else
+    print("-> CONCLUSÃO: Array Fixo passado por REFERÊNCIA")
+end
+
+print("")
+print(f"Original antes (Ref): {fixo[0]}")
+modificar_array_fixo_ref(fixo)
+print(f"Original depois (Ref): {fixo[0]}")
+if fixo[0] == 888 then
+    print("-> CONCLUSÃO: Array Fixo passado por REFERÊNCIA (com 'ref')")
+else
+    print("-> CONCLUSÃO: Array Fixo passado por VALOR (mesmo com 'ref' - inesperado?)")
+end
+
+print("")
+print("========================================")
+print("TESTE 2: Arrays Dinâmicos (int[])")
+print("========================================")
+
+let dinamico: int[]
+append(dinamico, 100)
+append(dinamico, 200)
+
+print(f"Original antes (Val): {dinamico[0]}")
+modificar_array_dinamico_val(dinamico)
+print(f"Original depois (Val): {dinamico[0]}")
+
+// Nota: Em muitas linguagens, slices/Lists são ref por padrão. Vamos ver no Noxy.
+if dinamico[0] == 100 then
+    print("-> CONCLUSÃO: Array Dinâmico passado por VALOR (cópia)")
+else
+    print("-> CONCLUSÃO: Array Dinâmico passado por REFERÊNCIA (ponteiro implícito)")
+end
+
+print("")
+print(f"Original antes (Ref): {dinamico[0]}")
+modificar_array_dinamico_ref(dinamico)
+print(f"Original depois (Ref): {dinamico[0]}")
+
+if dinamico[0] == 666 then
+    print("-> CONCLUSÃO: Array Dinâmico passado por REFERÊNCIA (com 'ref')")
+end

@@ -2441,7 +2441,7 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 	}
 
 	vm.stackTop = 0
-	vm.push(value.NewFunction("script", 0, c, globals)) // Push script function to stack slot 0
+	vm.push(value.NewFunction("script", 0, nil, c, globals)) // Push script function to stack slot 0
 
 	// Call frame for script
 	frame := &CallFrame{
@@ -2485,6 +2485,7 @@ func (vm *VM) run(minFrameCount int) error {
 				boundFn := &value.ObjFunction{
 					Name:    fn.Name,
 					Arity:   fn.Arity,
+					Params:  fn.Params,
 					Chunk:   fn.Chunk,
 					Globals: frame.Globals,
 				}
@@ -2503,6 +2504,7 @@ func (vm *VM) run(minFrameCount int) error {
 				boundFn := &value.ObjFunction{
 					Name:    fn.Name,
 					Arity:   fn.Arity,
+					Params:  fn.Params,
 					Chunk:   fn.Chunk,
 					Globals: frame.Globals,
 				}
@@ -3223,6 +3225,20 @@ func (vm *VM) call(fn *value.ObjFunction, argCount int, c *chunk.Chunk, ip int) 
 		return false, vm.runtimeError(c, ip, "stack overflow")
 	}
 
+	// Handle Pass-by-Value (Copy) for non-ref parameters
+	// Args are at vm.stackTop - argCount
+	baseArgs := vm.stackTop - argCount
+	for i := 0; i < argCount; i++ {
+		if i < len(fn.Params) {
+			param := fn.Params[i]
+			if !param.IsRef {
+				// Pass by Value: Copy if mutable object
+				val := vm.stack[baseArgs+i]
+				vm.stack[baseArgs+i] = vm.copyValue(val)
+			}
+		}
+	}
+
 	frame := &CallFrame{
 		Function: fn,
 		IP:       0,
@@ -3234,6 +3250,32 @@ func (vm *VM) call(fn *value.ObjFunction, argCount int, c *chunk.Chunk, ip int) 
 	vm.frameCount++
 	vm.currentFrame = frame
 	return true, nil
+}
+
+func (vm *VM) copyValue(v value.Value) value.Value {
+	if v.Type != value.VAL_OBJ {
+		return v
+	}
+	switch obj := v.Obj.(type) {
+	case *value.ObjArray:
+		newElems := make([]value.Value, len(obj.Elements))
+		copy(newElems, obj.Elements)
+		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjArray{Elements: newElems}}
+	case *value.ObjMap:
+		newData := make(map[interface{}]value.Value)
+		for k, val := range obj.Data {
+			newData[k] = val
+		}
+		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{Data: newData}}
+	case *value.ObjInstance:
+		newFields := make(map[string]value.Value)
+		for k, val := range obj.Fields {
+			newFields[k] = val
+		}
+		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjInstance{Struct: obj.Struct, Fields: newFields}}
+	default:
+		return v
+	}
 }
 
 func (vm *VM) readShort() uint16 {
