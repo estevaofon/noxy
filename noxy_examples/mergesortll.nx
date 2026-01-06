@@ -1,0 +1,70 @@
+struct Node 
+    data: int,
+    next: ref Node
+end
+
+let node_7: Node = Node(7, null)
+let node_1: Node = Node(1, ref node_7)
+let node_3: Node = Node(3, ref node_1)
+let node_9: Node = Node(9, ref node_3)
+
+func print_list(head: ref Node) 
+    let current: ref Node = head
+    while current.next != null do
+        print(current.data)
+        current = current.next
+    end
+    print(current.data)
+end
+
+
+func find_middle(head: ref Node) -> ref Node
+    let slow: ref Node = head
+    let fast: ref Node = head.next
+
+    while fast.next != null && fast.next != null do
+        slow = slow.next
+        fast = fast.next
+    end
+
+    return slow
+end
+
+func merge(l1: ref Node, l2: ref Node) -> ref Node
+    let head: ref Node = Node(0, null)
+    let tail: ref Node = head
+
+    while l1 != null && l2 != null do
+        if l1.data < l2.data then
+            tail.next = l1
+            l1 = l1.next
+        else
+            tail.next = l2
+            l2 = l2.next
+        end
+        tail = tail.next
+    end
+    if l1 != null then
+        tail.next = l1
+    else
+        tail.next = l2
+    end
+    return head.next
+end
+
+func merge_sort(head: ref Node) -> ref Node
+    if head == null || head.next == null then
+        return head
+    end
+
+    let middle: ref Node = find_middle(head)
+    let after_middle: ref Node = middle.next
+    middle.next = null
+    let left: ref Node = merge_sort(head)
+    let right: ref Node = merge_sort(after_middle)
+
+    return merge(left, right)
+end
+
+let sorted_head: ref Node = merge_sort(ref node_9)
+print_list(sorted_head)
