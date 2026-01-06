@@ -199,11 +199,25 @@ func greet(name: string)
 end</code></pre>
                 </div>
                 <div class="syntax-card">
+                    <h3>Dynamic Arrays & Maps</h3>
+                    <pre><code class="language-go">// Dynamic Array
+let list: int[] = []
+append(list, 42)
+let val: int = pop(list)
+
+// Map
+let scores: map[string, int] = {"Alice": 100}
+scores["Bob"] = 95
+print(scores["Alice"])</code></pre>
+                </div>
+                <div class="syntax-card">
                     <h3>Control Structures</h3>
                     <pre><code class="language-go">if x > 10 then
     print("x is greater than 10")
+elif x == 10 then
+    print("x is exactly 10")
 else
-    print("x is 10 or less")
+    print("x is less than 10")
 end
 
 while i < 10 do
@@ -221,6 +235,26 @@ end
 
 let root: TreeNode = TreeNode(50, null, null)
 root.left = ref TreeNode(25, null, null)</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Imports & Modules</h3>
+                    <pre><code class="language-go">// Import standard library
+use strings
+use io
+
+// Use imported functions
+print(strings.to_upper("hello"))</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Standard Library</h3>
+                    <pre><code class="language-go">// Available modules:
+// io, time, sys, net, http, json, crypto
+
+use time
+print(time.now())
+
+use sys
+print(sys.args[0])</code></pre>
                 </div>
             </div>
         </div>

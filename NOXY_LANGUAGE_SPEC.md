@@ -299,25 +299,44 @@ print(f"Hello, {name}!")
 
 ### Basic Import
 ```noxy
-use math
-let res: int = math.add(1, 2)
+use strings
+print(strings.to_upper("hello"))
 ```
 
 ### Alias
 ```noxy
-use math as m
-m.add(1, 2)
+use strings as s
+print(s.to_lower("HELLO"))
 ```
 
 ### Selective Import
 ```noxy
-use math select add, pi
-add(1, 2)
+use strings select to_upper, to_lower
+print(to_upper("hello"))
 ```
 
 ---
 
-## 11. Implementation Notes
+## 11. Standard Library
+
+Noxy comes with a comprehensive standard library. Available modules include:
+
+| Module | Description |
+|--------|-------------|
+| `io` | Input/Output operations (read/write files) |
+| `strings` | String manipulation (upper, lower, replace, split) |
+| `time` | Time and Date functions |
+| `sys` | System interactions (args, exit, env) |
+| `net` | Network sockets (TCP/UDP) |
+| `http` | HTTP Client and Server |
+| `json` | JSON parsing and stringification |
+| `crypto` | Cryptographic functions (hashing, UUID) |
+| `sqlite` | SQLite database support |
+| `rand` | Random number generation |
+
+---
+
+## 12. Implementation Notes
 
 - **VM**: Stack-based Virtual Machine.
 - **Language**: Go.
