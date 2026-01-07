@@ -5,3 +5,5 @@ while i < 5 do
     i = i + 1
 end
 print(sum)
+
+let arr: int[5] = [1, 2, 3, 4, 5]

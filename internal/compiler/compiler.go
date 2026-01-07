@@ -301,12 +301,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				elemType = t
 			} else {
 				if !c.areTypesCompatible(elemType, t) {
-					// Different types in array literal?
-					// Noxy might enforce homogeneous arrays?
-					// Let's assume yes for type safety.
-					// Or convert to 'any'?
-					// User asked for "safety", let's be strict.
-					return nil, nil, fmt.Errorf("[line %d] mixed types in array literal: %s and %s", c.currentLine, elemType, t)
+					// Mixed types detected, promote to any[]
+					elemType = &ast.PrimitiveType{Name: "any"}
 				}
 			}
 		}
