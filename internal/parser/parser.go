@@ -155,6 +155,20 @@ func (p *Parser) parseStatement() ast.Statement {
 		// Attempt to parse expression
 		expr := p.parseExpression(LOWEST)
 
+		// Check for missing 'let' (Identifier followed by Colon)
+		if ident, ok := expr.(*ast.Identifier); ok && p.peekTokenIs(token.COLON) {
+			msg := fmt.Sprintf("[%d:%d] SyntaxError: missing 'let' keyword for variable declaration\n  hint: use 'let %s%s ...'",
+				ident.Token.Line, ident.Token.Column,
+				ident.Value, p.peekToken.Literal)
+			p.errors = append(p.errors, msg)
+
+			// Skip until newline to prevent cascading errors
+			for !p.curTokenIs(token.NEWLINE) && !p.curTokenIs(token.EOF) {
+				p.nextToken()
+			}
+			return nil
+		}
+
 		// Check if it's an assignment
 		if p.peekTokenIs(token.ASSIGN) {
 			p.nextToken() // eat ASSIGN

@@ -1,5 +1,6 @@
 let i: int = 0
 let sum: int = 0
+i = 2
 while i < 5 do
     sum = sum + i
     i = i + 1
