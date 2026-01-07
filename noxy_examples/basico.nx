@@ -6,4 +6,11 @@ while i < 5 do
 end
 print(sum)
 
-let arr: int[5] = [1, 2, 3, 4, 5]
+let arr: int[5]
+print(arr)
+let str_arr: string[5]
+print(str_arr)
+print(str_arr[0])
+let bool_arr: bool[5]
+print(bool_arr)
+print(bool_arr[0])
