@@ -39,7 +39,7 @@ func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 			}
 		}
 		c := New()
-		_, err := c.Compile(program)
+		_, _, err := c.Compile(program)
 		if err != nil {
 			t.Fatalf("compiler error for input %q: %s", tt.input, err)
 		}

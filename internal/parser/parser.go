@@ -471,8 +471,12 @@ func (p *Parser) parseType() ast.NoxyType {
 	switch p.curToken.Type {
 	case token.TYPE_INT:
 		t = &ast.PrimitiveType{Name: "int"}
+	case token.TYPE_FLOAT:
+		t = &ast.PrimitiveType{Name: "float"}
 	case token.TYPE_STRING:
 		t = &ast.PrimitiveType{Name: "string"}
+	case token.TYPE_BOOL:
+		t = &ast.PrimitiveType{Name: "bool"}
 	case token.TYPE_BYTES:
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.BYTES: // This is Literal 'b"..."'.

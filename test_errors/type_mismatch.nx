@@ -1,0 +1,3 @@
+let i: int = 0
+i = "ola"
+print(i)

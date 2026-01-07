@@ -11,6 +11,7 @@ import (
 type Local struct {
 	Name  string
 	Depth int
+	Type  ast.NoxyType
 }
 
 type Loop struct {
@@ -21,6 +22,7 @@ type Loop struct {
 type Compiler struct {
 	currentChunk *chunk.Chunk
 	locals       []Local
+	globals      map[string]ast.NoxyType
 	scopeDepth   int
 	loops        []*Loop
 	currentLine  int // Track current source line for error messages
@@ -30,63 +32,83 @@ func New() *Compiler {
 	return &Compiler{
 		currentChunk: chunk.New(),
 		locals:       []Local{},
+		globals:      make(map[string]ast.NoxyType),
 		scopeDepth:   0,
 		loops:        []*Loop{},
 		currentLine:  1,
 	}
 }
 
-func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
+func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
 		for _, stmt := range n.Statements {
-			if _, err := c.Compile(stmt); err != nil {
-				return nil, err
+			if _, _, err := c.Compile(stmt); err != nil {
+				return nil, nil, err
 			}
 		}
 		// Implicit return for script/module
 		c.emitByte(byte(chunk.OP_NULL))
 		c.emitByte(byte(chunk.OP_RETURN))
+		return c.currentChunk, nil, nil
+
 	case *ast.LetStmt:
 		c.setLine(n.Token.Line)
+		var valType ast.NoxyType
 		// Compile initializer
 		if n.Value != nil {
-			if _, err := c.Compile(n.Value); err != nil {
-				return nil, err
+			_, t, err := c.Compile(n.Value)
+			if err != nil {
+				return nil, nil, err
 			}
+			valType = t
 		} else {
 			// Default value
 			if err := c.emitDefaultInit(n.Type); err != nil {
-				return nil, err
+				return nil, nil, err
+			}
+			valType = n.Type
+		}
+
+		// Type Check
+		if n.Type != nil {
+			if !c.areTypesCompatible(n.Type, valType) {
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), valType.String())
 			}
 		}
 
 		if c.scopeDepth > 0 {
 			// Local variable
-			c.addLocal(n.Name.Value)
+			c.addLocal(n.Name.Value, n.Type)
 			// Do NOT pop. The value stays on stack and becomes the local variable.
 		} else {
 			// Global
+			// Register global type
+			c.globals[n.Name.Value] = n.Type
+
 			nameConstant := c.makeConstant(value.NewString(n.Name.Value))
 			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
 			c.emitByte(byte(chunk.OP_POP))
 		}
+		return c.currentChunk, nil, nil
 
 	case *ast.ExpressionStmt:
 		c.setLine(n.Token.Line)
-		if _, err := c.Compile(n.Expression); err != nil {
-			return nil, err
+		_, _, err := c.Compile(n.Expression)
+		if err != nil {
+			return nil, nil, err
 		}
 		c.emitByte(byte(chunk.OP_POP)) // Pop expression result (stmt)
+		return c.currentChunk, nil, nil
 
 	case *ast.IntegerLiteral:
 		c.setLine(n.Token.Line)
-		// Convert int64 to Value
-		// Convert int64 to Value
 		c.emitConstant(value.NewInt(n.Value))
+		return c.currentChunk, &ast.PrimitiveType{Name: "int"}, nil
 
 	case *ast.FloatLiteral:
 		c.emitConstant(value.NewFloat(n.Value))
+		return c.currentChunk, &ast.PrimitiveType{Name: "float"}, nil
 
 	case *ast.Boolean:
 		if n.Value {
@@ -94,63 +116,135 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		} else {
 			c.emitByte(byte(chunk.OP_FALSE))
 		}
+		return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 
 	case *ast.StringLiteral:
 		c.emitConstant(value.NewString(n.Value))
+		return c.currentChunk, &ast.PrimitiveType{Name: "string"}, nil
 
 	case *ast.BytesLiteral:
 		c.emitConstant(value.NewBytes(n.Value))
+		return c.currentChunk, &ast.PrimitiveType{Name: "bytes"}, nil
 
 	case *ast.AssignStmt:
 		if ident, ok := n.Target.(*ast.Identifier); ok {
-			// Compile value
-			if _, err := c.Compile(n.Value); err != nil {
-				return nil, err
+			// 1. Compile Value (pushed to stack)
+			_, valType, err := c.Compile(n.Value)
+			if err != nil {
+				return nil, nil, err
 			}
-			// Handle global assignment (Identifier)
-			// Check local
-			if arg := c.resolveLocal(ident.Value); arg != -1 {
+
+			// 2. Check and Set Variable
+			if arg, localType := c.resolveLocal(ident.Value); arg != -1 {
+				// Local Logic
+				if !c.areTypesCompatible(localType, valType) {
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
+				}
 				c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
-				// Global
+				// Global Logic
+				if globalType, exists := c.globals[ident.Value]; exists {
+					if !c.areTypesCompatible(globalType, valType) {
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
+					}
+				}
 				nameConstant := c.makeConstant(value.NewString(ident.Value))
 				c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
-				c.emitByte(byte(chunk.OP_POP)) // Statement assignment pops result
+				c.emitByte(byte(chunk.OP_POP))
 			}
 		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
-			// Array Assignment: arr[i] = val
-			// Compile Array
-			if _, err := c.Compile(indexExp.Left); err != nil {
-				return nil, err
+			// Array/Map Assignment: arr[i] = val
+			// Stack Order: [Array, Index, Value] -> OP_SET_INDEX
+
+			// 1. Compile Array (Left)
+			_, leftType, err := c.Compile(indexExp.Left)
+			if err != nil {
+				return nil, nil, err
 			}
-			// Compile Index
-			if _, err := c.Compile(indexExp.Index); err != nil {
-				return nil, err
+
+			// 2. Compile Index
+			// TODO: check index type?
+			_, idxType, err := c.Compile(indexExp.Index)
+			if err != nil {
+				return nil, nil, err
 			}
-			// Compile Value
-			if _, err := c.Compile(n.Value); err != nil {
-				return nil, err
+
+			// 3. Compile Value
+			_, valType, err := c.Compile(n.Value)
+			if err != nil {
+				return nil, nil, err
 			}
-			// Emit SET_INDEX
+
+			// Unwrap RefType
+			if ref, ok := leftType.(*ast.RefType); ok {
+				leftType = ref.ElementType
+			}
+
+			// Unwrap RefType in index
+			if ref, ok := idxType.(*ast.RefType); ok {
+				idxType = ref.ElementType
+			}
+
+			// Type Check
+			if arrType, ok := leftType.(*ast.ArrayType); ok {
+				// Check index is int?
+				if idxType != nil && idxType.String() != "int" {
+					return nil, nil, fmt.Errorf("[line %d] array index must be int, got %s", c.currentLine, idxType.String())
+				}
+				// Check value compatibility with element type
+				if !c.areTypesCompatible(arrType.ElementType, valType) {
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
+				}
+			} else if mapType, ok := leftType.(*ast.MapType); ok {
+				// Check key type
+				if !c.areTypesCompatible(mapType.KeyType, idxType) {
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in map key: expected %s, got %s", c.currentLine, mapType.KeyType.String(), idxType.String())
+				}
+				// Check value type
+				if !c.areTypesCompatible(mapType.ValueType, valType) {
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s", c.currentLine, mapType.ValueType.String(), valType.String())
+				}
+			} else {
+				// Dynamic or error?
+				// If leftType is known and not array/map, error?
+				if leftType != nil {
+					return nil, nil, fmt.Errorf("[line %d] index assignment on non-array/map type: %s", c.currentLine, leftType.String())
+				}
+			}
+
 			c.emitByte(byte(chunk.OP_SET_INDEX))
-			c.emitByte(byte(chunk.OP_POP)) // Pop result
+			c.emitByte(byte(chunk.OP_POP))
+
 		} else if memberExp, ok := n.Target.(*ast.MemberAccessExpression); ok {
 			// Struct Field Assignment: obj.field = val
-			if _, err := c.Compile(memberExp.Left); err != nil {
-				return nil, err
+			// Stack Order: [Object, Value] -> OP_SET_PROPERTY
+
+			// 1. Compile Object
+			_, _, err := c.Compile(memberExp.Left)
+			if err != nil {
+				return nil, nil, err
 			}
-			// Value
-			if _, err := c.Compile(n.Value); err != nil {
-				return nil, err
+
+			// 2. Compile Value
+			_, valType, err := c.Compile(n.Value) // Capturing valType
+			if err != nil {
+				return nil, nil, err
 			}
+
+			// TODO: Resolve field type on struct matching leftType?
+			// Need struct definition lookup. For now, assume compatible or dynamic.
+			_ = valType // Suppress unused for now if not checking.
+
 			// Field Name
 			nameConst := c.makeConstant(value.NewString(memberExp.Member))
 			c.emitBytes(byte(chunk.OP_SET_PROPERTY), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP))
+
 		} else {
-			return nil, fmt.Errorf("assignment target not supported yet")
+			return nil, nil, fmt.Errorf("[line %d] assignment target not supported yet", c.currentLine)
 		}
+		return c.currentChunk, nil, nil
 
 	case *ast.StructStatement:
 		c.setLine(n.Token.Line)
@@ -162,108 +256,218 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		structObj := value.NewStruct(n.Name, fields)
 		c.emitConstant(structObj)
 
+		// Define Type? Struct is a type definition AND a value (constructor).
+		// The value 'Point' is a function/struct-def. Its type is... 'func' or 'struct_def'?
+		// NoxyType doesn't have FunctionType yet in AST fully?
+		// But for now we don't assign structs to variables often, we call them.
+
+		structType := &ast.PrimitiveType{Name: "struct_def"} // Dummy
+
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
-			c.addLocal(n.Name)
+			c.addLocal(n.Name, structType)
 			// Value stays on stack as local
 		} else {
 			// Global scope: struct is a global
+			c.globals[n.Name] = structType
 			nameConst := c.makeConstant(value.NewString(n.Name))
 			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP))
 		}
+		return c.currentChunk, nil, nil
 
 	case *ast.MemberAccessExpression:
-		if _, err := c.Compile(n.Left); err != nil {
-			return nil, err
+		// Left . Member
+		_, _, err := c.Compile(n.Left)
+		if err != nil {
+			return nil, nil, err
 		}
+		// TODO: Type check if member exists on leftType? requires knowing struct fields.
+		// For now, allow dynamic or just skip check.
+
 		nameConst := c.makeConstant(value.NewString(n.Member))
 		c.emitBytes(byte(chunk.OP_GET_PROPERTY), byte(nameConst))
 
+		return c.currentChunk, nil, nil // Return Unknown type? OR leftType field type.
+
 	case *ast.ArrayLiteral:
-		for _, el := range n.Elements {
-			if _, err := c.Compile(el); err != nil {
-				return nil, err
+		var elemType ast.NoxyType
+		for i, el := range n.Elements {
+			_, t, err := c.Compile(el)
+			if err != nil {
+				return nil, nil, err
+			}
+			if i == 0 {
+				elemType = t
+			} else {
+				if !c.areTypesCompatible(elemType, t) {
+					// Different types in array literal?
+					// Noxy might enforce homogeneous arrays?
+					// Let's assume yes for type safety.
+					// Or convert to 'any'?
+					// User asked for "safety", let's be strict.
+					return nil, nil, fmt.Errorf("[line %d] mixed types in array literal: %s and %s", c.currentLine, elemType, t)
+				}
 			}
 		}
 		// Count
 		count := len(n.Elements)
 		if count > 65535 {
-			return nil, fmt.Errorf("array literal too large")
+			return nil, nil, fmt.Errorf("[line %d] array literal too large", c.currentLine)
 		}
 		c.emitByte(byte(chunk.OP_ARRAY))
 		c.emitByte(byte((count >> 8) & 0xff))
 		c.emitByte(byte(count & 0xff))
 
+		return c.currentChunk, &ast.ArrayType{ElementType: elemType, Size: count}, nil
+
 	case *ast.MapLiteral:
 		// Push keys and values: k1, v1, k2, v2, ...
+		var keyType ast.NoxyType
+		var valType ast.NoxyType
+
 		for i, key := range n.Keys {
-			if _, err := c.Compile(key); err != nil {
-				return nil, err
+			_, kt, err := c.Compile(key)
+			if err != nil {
+				return nil, nil, err
 			}
-			if _, err := c.Compile(n.Values[i]); err != nil {
-				return nil, err
+			_, vt, err := c.Compile(n.Values[i])
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if i == 0 {
+				keyType = kt
+				valType = vt
+			} else {
+				if !c.areTypesCompatible(keyType, kt) {
+					return nil, nil, fmt.Errorf("[line %d] mixed key types in map", c.currentLine)
+				}
+				if !c.areTypesCompatible(valType, vt) {
+					return nil, nil, fmt.Errorf("[line %d] mixed value types in map", c.currentLine)
+				}
 			}
 		}
 		count := len(n.Keys)
 		if count > 65535 {
-			return nil, fmt.Errorf("map literal too large")
+			return nil, nil, fmt.Errorf("[line %d] map literal too large", c.currentLine)
 		}
 		c.emitByte(byte(chunk.OP_MAP))
 		c.emitByte(byte((count >> 8) & 0xff))
 		c.emitByte(byte(count & 0xff))
 
+		return c.currentChunk, &ast.MapType{KeyType: keyType, ValueType: valType}, nil
+
 	case *ast.IndexExpression:
-		if _, err := c.Compile(n.Left); err != nil {
-			return nil, err
+		_, leftType, err := c.Compile(n.Left)
+		if err != nil {
+			return nil, nil, err
 		}
-		if _, err := c.Compile(n.Index); err != nil {
-			return nil, err
+		_, idxType, err := c.Compile(n.Index)
+		if err != nil {
+			return nil, nil, err
 		}
+
+		// Unwrap RefType in index
+		if ref, ok := idxType.(*ast.RefType); ok {
+			idxType = ref.ElementType
+		}
+
+		// Index should be int (usually)
+		if idxType != nil && idxType.String() != "int" {
+			// Warn or Error? Error.
+			// return nil, nil, fmt.Errorf("index must be int, got %s", idxType)
+		}
+
 		c.emitByte(byte(chunk.OP_GET_INDEX))
+
+		// Result Type: Element type of array
+		// Unwrap RefType (getting index from ref array)
+		if ref, ok := leftType.(*ast.RefType); ok {
+			leftType = ref.ElementType
+		}
+		if arrKey, ok := leftType.(*ast.ArrayType); ok {
+			return c.currentChunk, arrKey.ElementType, nil
+		}
+		// Map logic needed here too? index on map?
+		if mapKey, ok := leftType.(*ast.MapType); ok {
+			return c.currentChunk, mapKey.ValueType, nil
+		}
+
+		return c.currentChunk, nil, nil
 
 	case *ast.Identifier:
 		// Check local
-		if arg := c.resolveLocal(n.Value); arg != -1 {
+		if arg, t := c.resolveLocal(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(arg))
+			return c.currentChunk, t, nil
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Value))
 			c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConstant))
+
+			if t, ok := c.globals[n.Value]; ok {
+				return c.currentChunk, t, nil
+			}
+			return c.currentChunk, nil, nil // Unknown global currently
 		}
 
 	case *ast.InfixExpression:
 		// Short-circuit Logic
 		if n.Operator == "&&" {
-			if _, err := c.Compile(n.Left); err != nil {
-				return nil, err
+			_, leftType, err := c.Compile(n.Left)
+			if err != nil {
+				return nil, nil, err
 			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_FALSE)
 			c.emitByte(byte(chunk.OP_POP))
-			if _, err := c.Compile(n.Right); err != nil {
-				return nil, err
+			_, rightType, err := c.Compile(n.Right)
+			if err != nil {
+				return nil, nil, err
 			}
 			c.patchJump(endJump)
-			return c.currentChunk, nil
+
+			// Type check: left should be bool, right boolean?
+			// Noxy truthiness? Python-like?
+			// If safety requested, maybe strict bool?
+			// Assuming strict for now given syntax.
+			if !c.areTypesCompatible(&ast.PrimitiveType{Name: "bool"}, leftType) || !c.areTypesCompatible(&ast.PrimitiveType{Name: "bool"}, rightType) {
+				l := "nil"
+				if leftType != nil {
+					l = leftType.String()
+				}
+				r := "nil"
+				if rightType != nil {
+					r = rightType.String()
+				}
+				return nil, nil, fmt.Errorf("[line %d] logical operators require boolean operands, got %s and %s", c.currentLine, l, r)
+			}
+
+			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
 		if n.Operator == "||" {
-			if _, err := c.Compile(n.Left); err != nil {
-				return nil, err
+			_, _, err := c.Compile(n.Left)
+			if err != nil {
+				return nil, nil, err
 			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_TRUE)
 			c.emitByte(byte(chunk.OP_POP))
-			if _, err := c.Compile(n.Right); err != nil {
-				return nil, err
+			_, _, err = c.Compile(n.Right)
+			if err != nil {
+				return nil, nil, err
 			}
 			c.patchJump(endJump)
-			return c.currentChunk, nil
+
+			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
 
-		if _, err := c.Compile(n.Left); err != nil {
-			return nil, err
+		_, leftType, err := c.Compile(n.Left)
+		if err != nil {
+			return nil, nil, err
 		}
-		if _, err := c.Compile(n.Right); err != nil {
-			return nil, err
+		_, rightType, err := c.Compile(n.Right)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		switch n.Operator {
@@ -303,46 +507,55 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		case "%":
 			c.emitByte(byte(chunk.OP_MODULO))
 		default:
-			return nil, fmt.Errorf("unknown operator %s", n.Operator)
+			return nil, nil, fmt.Errorf("unknown operator %s", n.Operator)
 		}
 
+		// Return type logic
+		if n.Operator == "==" || n.Operator == "!=" || n.Operator == ">" || n.Operator == "<" || n.Operator == ">=" || n.Operator == "<=" {
+			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
+		}
+		// Match left type (int/int -> int)
+		if c.areTypesCompatible(leftType, rightType) {
+			return c.currentChunk, leftType, nil
+		}
+		// Fallback?
+		return c.currentChunk, leftType, nil
+
 	case *ast.PrefixExpression:
-		if _, err := c.Compile(n.Right); err != nil {
-			return nil, err
+		_, rightType, err := c.Compile(n.Right)
+		if err != nil {
+			return nil, nil, err
 		}
 		if n.Operator == "-" {
 			c.emitByte(byte(chunk.OP_NEGATE))
+			return c.currentChunk, rightType, nil
 		} else if n.Operator == "!" {
 			c.emitByte(byte(chunk.OP_NOT))
+			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		} else if n.Operator == "~" {
 			c.emitByte(byte(chunk.OP_BIT_NOT))
-		} else if n.Operator == "ref" {
-			// No-op for ref in expression?
-			// Just pass the value (which is likely an object/pointer).
+			return c.currentChunk, rightType, nil
 		}
+		return c.currentChunk, rightType, nil
 
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))
+		return c.currentChunk, nil, nil // Null type?
 
 	case *ast.ZerosLiteral:
-		if _, err := c.Compile(n.Size); err != nil {
-			return nil, err
+		_, _, err := c.Compile(n.Size)
+		if err != nil {
+			return nil, nil, err
 		}
 		c.emitByte(byte(chunk.OP_ZEROS))
-
-		// Handle AND/OR via logic?
-		// InfixExpression generic handler is above.
-		// I should modify InfixExpression case to handle AND/OR specifically if I want short circuit.
-		// The current switch is at End. I need to move it UP or handle it special.
-		// OR just use bool logic if I add OP_AND/OP_OR.
-		// Let's add simple OP_AND / OP_OR to chunk. Simpler for now. Short circuit is optional for basic functionality (unless side effects matter).
-		// Given the constraints and time, I'll add OP_AND / OP_OR to Chunk.
+		return c.currentChunk, &ast.PrimitiveType{Name: "bytes"}, nil
 
 	case *ast.IfStatement:
 		c.setLine(n.Token.Line)
 		// Compile condition
-		if _, err := c.Compile(n.Condition); err != nil {
-			return nil, err
+		_, _, err := c.Compile(n.Condition)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Emit JumpIfFalse
@@ -351,8 +564,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		// Compile Then block (Consequence)
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)
 
-		if _, err := c.Compile(n.Consequence); err != nil {
-			return nil, err
+		_, _, err = c.Compile(n.Consequence)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Emit Jump to End (skip Else)
@@ -365,13 +579,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 
 		// Compile Else block (Alternative)
 		if n.Alternative != nil {
-			if _, err := c.Compile(n.Alternative); err != nil {
-				return nil, err
+			_, _, err = c.Compile(n.Alternative)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 
 		// Patch End jump
 		c.patchJump(jumpToEnd)
+		return c.currentChunk, nil, nil
 
 	case *ast.WhileStatement:
 		c.setLine(n.Token.Line)
@@ -381,8 +597,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
 		c.loops = append(c.loops, loop)
 
-		if _, err := c.Compile(n.Condition); err != nil {
-			return nil, err
+		_, _, err := c.Compile(n.Condition)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Exit jump
@@ -390,8 +607,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition
 
-		if _, err := c.Compile(n.Body); err != nil {
-			return nil, err
+		_, _, err = c.Compile(n.Body)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Loop back
@@ -401,17 +619,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
 
 		// Patch Break Jumps
-		// They land AFTER the code (so after the Pop condition)
 		for _, jump := range loop.BreakJumps {
 			c.patchJump(jump)
 		}
 
 		// Pop Loop
 		c.loops = c.loops[:len(c.loops)-1]
+		return c.currentChunk, nil, nil
 
 	case *ast.BreakStmt:
 		if len(c.loops) == 0 {
-			return nil, fmt.Errorf("break outside of loop")
+			return nil, nil, fmt.Errorf("break outside of loop")
 		}
 		loop := c.loops[len(c.loops)-1]
 
@@ -424,9 +642,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		// Emit Jump
 		jump := c.emitJump(chunk.OP_JUMP)
 		loop.BreakJumps = append(loop.BreakJumps, jump)
+		return c.currentChunk, nil, nil
 
 	case *ast.UseStmt:
-		// 1. Emit Module Name (as constant operand, not opcode)
+		// 1. Emit Module Name
 		nameConst := c.makeConstant(value.NewString(n.Module))
 		// 2. Emit Import (Loads module and pushes it to stack)
 		c.emitBytes(byte(chunk.OP_IMPORT), byte(nameConst))
@@ -470,16 +689,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
+		return c.currentChunk, nil, nil
 
 	case *ast.ReturnStmt:
 		if n.ReturnValue != nil {
-			if _, err := c.Compile(n.ReturnValue); err != nil {
-				return nil, err
+			_, _, err := c.Compile(n.ReturnValue)
+			if err != nil {
+				return nil, nil, err
 			}
 		} else {
 			c.emitByte(byte(chunk.OP_NULL))
 		}
 		c.emitByte(byte(chunk.OP_RETURN))
+		return c.currentChunk, nil, nil
 
 	case *ast.FunctionStatement:
 		c.setLine(n.Token.Line)
@@ -488,13 +710,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		fnCompiler.scopeDepth = 1 // Inside function body
 
 		// Reserve slot 0 for function instance (recursion/closures)
-		fnCompiler.addLocal("")
+		fnCompiler.addLocal("", nil)
 
 		// Add parameters as locals
 		paramsInfo := []value.ParamInfo{}
-		// fmt.Printf("Compiling func %s with %d params\n", n.Name, len(n.Parameters))
 		for _, param := range n.Parameters {
-			fnCompiler.addLocal(param.Name)
+			fnCompiler.addLocal(param.Name, param.Type)
 			isRef := false
 			if _, ok := param.Type.(*ast.RefType); ok {
 				isRef = true
@@ -502,19 +723,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 			paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
 		}
 
-		// Compile body
-		// Note: Body is BlockStatement. Compile it will handle statements.
-		// BUT BlockStatement usually doesn't create new scope in `Compile` unless we tell it to?
-		// Better: just compile statements inside.
-		// Or assume BlockStatement will work fine.
-		// One detail: Function body usually is a block.
-
-		// We explicitly compile body statements to avoid extra scope nesting if BlockStatement adds one?
-		// My BlockStatement compiler: for stmt in statements { compile(stmt) }. It does NOT call beginScope/endScope.
-		// So we are good.
-
-		if _, err := fnCompiler.Compile(n.Body); err != nil {
-			return nil, err
+		_, _, err := fnCompiler.Compile(n.Body)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Implicit return null if end of function
@@ -526,45 +737,57 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, error) {
 		// Emit Constant for Function
 		c.emitConstant(fnObj)
 
+		funcType := &ast.PrimitiveType{Name: "func"} // Dummy
+
 		// Store in Global
+		c.globals[n.Name] = funcType
+
 		nameConst := c.makeConstant(value.NewString(n.Name))
 		c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
-		c.emitByte(byte(chunk.OP_POP)) // Consume function value from stack (since it's a stmt)
+		c.emitByte(byte(chunk.OP_POP))
+
+		return c.currentChunk, nil, nil
 
 	case *ast.BlockStatement:
 		c.beginScope()
 		for _, stmt := range n.Statements {
-			if _, err := c.Compile(stmt); err != nil {
-				return nil, err
+			_, _, err := c.Compile(stmt)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 		c.endScope()
+		return c.currentChunk, nil, nil
 
 	case *ast.CallExpression:
-		// Compile Function (Identifier or Expression)
-		if _, err := c.Compile(n.Function); err != nil {
-			return nil, err
+		// Compile Function
+		_, _, err := c.Compile(n.Function)
+		if err != nil {
+			return nil, nil, err
 		}
 
 		// Compile Arguments
 		for _, arg := range n.Arguments {
-			if _, err := c.Compile(arg); err != nil {
-				return nil, err
+			_, _, err := c.Compile(arg)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 
 		// Emit Call
 		c.emitBytes(byte(chunk.OP_CALL), byte(len(n.Arguments)))
+		return c.currentChunk, nil, nil // Return type of call? Unknown for now.
 
 	case nil:
 		// Skip
+		return c.currentChunk, nil, nil
 	default:
-		return nil, fmt.Errorf("unsupported node type %T", n)
+		return nil, nil, fmt.Errorf("unsupported node type %T", n)
 	}
-
-	// c.emitByte(byte(chunk.OP_RETURN)) // Added in Program only
-	return c.currentChunk, nil
 }
+
+// Rewritten specific AssignStmt handler inside Compile, skipping invalid overwrite
+// Just careful re-introduction of AssignStmt Case body.
 
 func (c *Compiler) setLine(line int) {
 	if line > 0 {
@@ -589,35 +812,26 @@ func (c *Compiler) emitJump(op chunk.OpCode) int {
 }
 
 func (c *Compiler) patchJump(offset int) {
-	// -2 to adjust for the jump instruction itself ip advancement?
-	// Jump is relative to IP AFTER reading the offset.
-	// Current len(c.currentChunk.Code) is target.
-	// IP when jump executes is offset + 2.
 	jump := len(c.currentChunk.Code) - offset - 2
-
 	if jump > 65535 {
 		panic("Jump too large")
 	}
-
 	c.currentChunk.Code[offset] = byte((jump >> 8) & 0xff)
 	c.currentChunk.Code[offset+1] = byte(jump & 0xff)
 }
 
 func (c *Compiler) emitLoop(loopStart int) {
 	c.emitByte(byte(chunk.OP_LOOP))
-
 	offset := len(c.currentChunk.Code) - loopStart + 2
 	if offset > 65535 {
 		panic("Loop too large")
 	}
-
 	c.emitByte(byte((offset >> 8) & 0xff))
 	c.emitByte(byte(offset & 0xff))
 }
 
 func (c *Compiler) makeConstant(v value.Value) int {
 	i := c.currentChunk.AddConstant(v)
-	// Warning removed as we support OP_CONSTANT_LONG
 	return i
 }
 
@@ -647,8 +861,8 @@ func (c *Compiler) endScope() {
 	}
 }
 
-func (c *Compiler) addLocal(name string) {
-	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth})
+func (c *Compiler) addLocal(name string, t ast.NoxyType) {
+	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t})
 }
 
 func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
@@ -695,11 +909,42 @@ func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
 	return nil
 }
 
-func (c *Compiler) resolveLocal(name string) int {
+func (c *Compiler) resolveLocal(name string) (int, ast.NoxyType) {
 	for i := len(c.locals) - 1; i >= 0; i-- {
 		if c.locals[i].Name == name {
-			return i
+			return i, c.locals[i].Type
 		}
 	}
-	return -1
+	return -1, nil
+}
+
+func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
+	if expected == nil || actual == nil {
+		return true // Allow lenient check for now/unknowns
+	}
+	expStr := expected.String()
+	actStr := actual.String()
+
+	if expStr == actStr {
+		return true
+	}
+	// Allow any[] -> Any T[]
+	if actStr == "any[]" && strings.HasSuffix(expStr, "[]") {
+		return true
+	}
+	// Allow map[any, any] -> Any Map
+	if actStr == "map[any, any]" && strings.HasPrefix(expStr, "map[") {
+		return true
+	}
+	// Also ref any -> ref T (if nil ref?) - "ref any" handling
+	if actStr == "ref any" && strings.HasPrefix(expStr, "ref ") {
+		return true
+	}
+
+	// 'any' type compatibility (if we had it explicitly)
+	if expStr == "any" || actStr == "any" {
+		return true
+	}
+
+	return false
 }

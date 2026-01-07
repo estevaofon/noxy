@@ -105,7 +105,7 @@ func sha256(data_input: bytes) -> string
     let chunk_idx: int = 0
     
     // Buffer W (Schedule) de 64 ints
-    let W: int[] = zeros(64)
+    let W: int[64]
 
     while chunk_idx < num_chunks do
         let offset: int = chunk_idx * 64

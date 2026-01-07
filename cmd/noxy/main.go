@@ -13,6 +13,7 @@ import (
 	"noxy-vm/internal/vm"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 )
 
@@ -20,6 +21,7 @@ func main() {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
+			debug.PrintStack()
 		}
 	}()
 
@@ -156,7 +158,7 @@ func startREPL(showDisasm bool) {
 
 		// 3. Compile
 		c := compiler.New()
-		chunk, err := c.Compile(program)
+		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)
 			inputBuffer = "" // Reset
@@ -219,7 +221,7 @@ func runWithConfig(input string, rootPath string, showDisasm bool) {
 	}
 
 	c := compiler.New()
-	chunk, err := c.Compile(program)
+	chunk, _, err := c.Compile(program)
 	if err != nil {
 		fmt.Printf("Compiler error: %s\n", err)
 		os.Exit(1)

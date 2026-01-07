@@ -1,0 +1,7 @@
+func f() -> bool
+  return true
+end
+
+if f() && true then
+  print("ok")
+end

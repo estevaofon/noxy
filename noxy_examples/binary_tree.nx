@@ -11,7 +11,7 @@ end
 
 // Função para criar um novo array dinâmico
 func criar_array_dinamico() -> DynamicArray
-    let array: int[100] = zeros(100)  // Array fixo de 100 elementos
+    let array: int[100]  // Array fixo de 100 elementos
     return DynamicArray(array, 100, 0)  // Capacidade fixa de 100, tamanho inicial 0
 end
 

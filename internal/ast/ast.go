@@ -58,7 +58,12 @@ type ArrayType struct {
 	Size        int // 0 for dynamic
 }
 
-func (at *ArrayType) String() string { return at.ElementType.String() + "[]" }
+func (at *ArrayType) String() string {
+	if at.ElementType == nil {
+		return "any[]"
+	}
+	return at.ElementType.String() + "[]"
+}
 
 type MapType struct {
 	KeyType   NoxyType
@@ -66,14 +71,26 @@ type MapType struct {
 }
 
 func (mt *MapType) String() string {
-	return "map[" + mt.KeyType.String() + ", " + mt.ValueType.String() + "]"
+	k, v := "any", "any"
+	if mt.KeyType != nil {
+		k = mt.KeyType.String()
+	}
+	if mt.ValueType != nil {
+		v = mt.ValueType.String()
+	}
+	return "map[" + k + ", " + v + "]"
 }
 
 type RefType struct {
 	ElementType NoxyType
 }
 
-func (rt *RefType) String() string { return "ref " + rt.ElementType.String() }
+func (rt *RefType) String() string {
+	if rt.ElementType == nil {
+		return "ref any"
+	}
+	return "ref " + rt.ElementType.String()
+}
 
 type Parameter struct {
 	Name string
@@ -81,7 +98,11 @@ type Parameter struct {
 }
 
 func (p *Parameter) String() string {
-	return p.Name + ": " + p.Type.String()
+	t := "any"
+	if p.Type != nil {
+		t = p.Type.String()
+	}
+	return p.Name + ": " + t
 }
 
 // STATEMENTS
@@ -108,7 +129,11 @@ type LetStmt struct {
 func (ls *LetStmt) statementNode()       {}
 func (ls *LetStmt) TokenLiteral() string { return ls.Token.Literal }
 func (ls *LetStmt) String() string {
-	out := fmt.Sprintf("%s %s: %s", ls.TokenLiteral(), ls.Name.String(), ls.Type.String())
+	t := "any"
+	if ls.Type != nil {
+		t = ls.Type.String()
+	}
+	out := fmt.Sprintf("%s %s: %s", ls.TokenLiteral(), ls.Name.String(), t)
 	if ls.Value != nil {
 		out += " = " + ls.Value.String()
 	}

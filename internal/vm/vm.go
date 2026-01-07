@@ -3388,7 +3388,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 				return value.NewNull(), fmt.Errorf("parse error in embedded module %s: %v", name, p.Errors())
 			}
 			c := compiler.New()
-			chunk, err := c.Compile(prog)
+			chunk, _, err := c.Compile(prog)
 			if err != nil {
 				return value.NewNull(), err
 			}
@@ -3463,7 +3463,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 	}
 
 	c := compiler.New()
-	chunk, err := c.Compile(prog)
+	chunk, _, err := c.Compile(prog)
 	if err != nil {
 		return value.NewNull(), err
 	}
