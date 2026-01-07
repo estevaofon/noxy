@@ -59,6 +59,9 @@ func startREPL(showDisasm bool) {
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
 	scanner := bufio.NewScanner(os.Stdin)
 
+	// Persist globals across REPL lines
+	replGlobals := make(map[string]ast.NoxyType)
+
 	var inputBuffer string
 
 	for {
@@ -157,13 +160,16 @@ func startREPL(showDisasm bool) {
 		}
 
 		// 3. Compile
-		c := compiler.New()
+		c := compiler.NewWithState(replGlobals)
 		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)
 			inputBuffer = "" // Reset
 			continue
 		}
+
+		// Update globals
+		replGlobals = c.GetGlobals()
 
 		// 4. Disassembly (optional)
 		if showDisasm {

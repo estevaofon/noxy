@@ -29,14 +29,22 @@ type Compiler struct {
 }
 
 func New() *Compiler {
+	return NewWithState(make(map[string]ast.NoxyType))
+}
+
+func NewWithState(globals map[string]ast.NoxyType) *Compiler {
 	return &Compiler{
 		currentChunk: chunk.New(),
 		locals:       []Local{},
-		globals:      make(map[string]ast.NoxyType),
+		globals:      globals,
 		scopeDepth:   0,
 		loops:        []*Loop{},
 		currentLine:  1,
 	}
+}
+
+func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
+	return c.globals
 }
 
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
