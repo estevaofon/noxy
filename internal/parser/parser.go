@@ -1262,6 +1262,10 @@ func (p *Parser) parseForStatement() *ast.ForStatement {
 
 	stmt.Collection = p.parseExpression(LOWEST)
 
+	if !p.expectPeek(token.DO) {
+		return nil
+	}
+
 	// Optional newline before block
 	if p.peekTokenIs(token.NEWLINE) {
 		p.nextToken()

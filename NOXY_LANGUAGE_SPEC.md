@@ -242,21 +242,21 @@ Use `for ... in` to iterate over collections (arrays or maps).
 
 **Arrays** (Iterates over values):
 ```noxy
-for item in array
+for item in array do
     print(item)
 end
 ```
 
 **Maps** (Iterates over keys):
 ```noxy
-for key in map
+for key in map do
     print(map[key])
 end
 ```
 
 **Strings** (Iterates over characters):
 ```noxy
-for char in "hello"
+for char in "hello" do
     print(char)
 end
 ```

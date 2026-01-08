@@ -6,7 +6,7 @@ let sum: int = 0
 
 print("--- Array Int Test ---")
 let i: int = 0
-for n in nums
+for n in nums do
     print(f"num[{i}]: {n}")
     sum = sum + n
     i = i + 1
@@ -24,7 +24,7 @@ let words: string[] = ["Hello", " ", "World", "!"]
 let sentence: string = ""
 
 print("\n--- Array String Test ---")
-for w in words
+for w in words do
     sentence = sentence + w
 end
 print(f"Sentence: {sentence}")
@@ -41,7 +41,7 @@ let count: int = 0
 let alice_found: bool = false
 
 print("\n--- Map Test ---")
-for key in scores
+for key in scores do
     print(f"Key: {key}: {scores[key]}")
     count = count + 1
     if key == "Alice" then
@@ -67,7 +67,7 @@ let empty: int[] = []
 let iterations: int = 0
 
 print("\n--- Empty Test ---")
-for x in empty
+for x in empty do
     iterations = iterations + 1
 end
 
@@ -79,7 +79,7 @@ end
 
 let text: string = "ABC"
 print("\n--- String Test ---")
-for c in text
+for c in text do
     print(c)
 end
 // Commenting out string test until logic confirmed supported by OP_GET_INDEX
