@@ -1,0 +1,53 @@
+let array: int[10] = [34, 7, 23, 32, 5, 62, 32, 2, 12, 45]
+let scratch_array: int[10]
+
+print("Original array: ", array)
+print("Scratch array before merge sort: ", scratch_array)
+
+func mergersort(values: ref int[], scratch: ref int[], start: int, _end: int) -> void
+    // If the array has one or no elements, it's already sorted
+    if start == _end then
+        return
+    end
+
+    let midpoint: int = (start + _end) / 2
+
+    mergersort(values, scratch, start, midpoint)
+    mergersort(values, scratch, midpoint + 1, _end)
+
+    let left_index: int = start
+    let right_index: int = midpoint + 1
+    let scratch_index: int = left_index
+    while (left_index <= midpoint && right_index <= _end) do
+        if values[left_index] <= values[right_index] then
+            scratch[scratch_index] = values[left_index]
+            left_index = left_index + 1
+        else
+            scratch[scratch_index] = values[right_index]
+            right_index = right_index + 1
+        end
+        scratch_index = scratch_index + 1
+    end
+
+    // Finish copying whichever half in not empty
+    let i: int = left_index
+    while i <= midpoint do
+        scratch[scratch_index] = values[i]
+        scratch_index = scratch_index + 1
+        i = i + 1
+    end
+    let k: int = right_index
+    while k <= _end do
+        scratch[scratch_index] = values[k]
+        scratch_index = scratch_index + 1
+        k = k + 1
+    end
+    let j: int = start
+    while (_end - j) >= 0 do
+        values[j] = scratch[j]
+        j = j + 1
+    end
+end
+
+mergersort(ref array, ref scratch_array, 0, length(array) - 1)
+print("Sorted array: ", array)
