@@ -1,0 +1,42 @@
+use array_utils select *
+
+func merge_sort(arr: int[]) -> int[]
+    if length(arr) <= 1 then
+        return arr
+    end
+
+    let mid: int = length(arr) / 2
+    let left: int[] = merge_sort(slice(arr, 0, mid))
+    let right: int[] = merge_sort(slice(arr, mid, length(arr)))
+
+    return merge(left, right)
+end
+
+func merge(left: int[], right: int[]) -> int[]
+    let result: int[] = []
+    let i: int = 0
+    let j: int = 0
+
+    while i < length(left) && j < length(right) do
+        if left[i] <= right[j] then
+            append(result, left[i])
+            i = i + 1
+        else
+            append(result, right[j])
+            j = j + 1
+        end
+    end
+    while i < length(left) do
+        append(result, left[i])
+        i = i + 1
+    end
+    while j < length(right) do
+        append(result, right[j])
+        j = j + 1 end
+    return result
+end
+
+let unsorted: int[] = [38, 27, 43, 3, 9, 82, 10]
+let sorted: int[] = merge_sort(unsorted)
+print("Unsorted array:", unsorted)
+print("Sorted array:", sorted)
