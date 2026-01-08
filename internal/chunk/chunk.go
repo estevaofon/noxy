@@ -56,6 +56,7 @@ const (
 	OP_ARRAY
 	OP_MAP
 	OP_ZEROS
+	OP_LEN
 )
 
 func (op OpCode) String() string {
@@ -156,6 +157,8 @@ func (op OpCode) String() string {
 		return "OP_MAP"
 	case OP_ZEROS:
 		return "OP_ZEROS"
+	case OP_LEN:
+		return "OP_LEN"
 	default:
 		return fmt.Sprintf("OP_%d", op)
 	}
@@ -300,6 +303,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.constantInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:
 		return c.simpleInstruction("OP_ZEROS", offset)
+	case OP_LEN:
+		return c.simpleInstruction("OP_LEN", offset)
 	case OP_MODULO:
 		return c.simpleInstruction("OP_MODULO", offset)
 	case OP_MAP:

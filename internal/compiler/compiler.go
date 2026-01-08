@@ -631,6 +631,123 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.loops = c.loops[:len(c.loops)-1]
 		return c.currentChunk, nil, nil
 
+	case *ast.ForStatement:
+		c.setLine(n.Token.Line)
+
+		// 1. Wrapper Scope for iterator variables
+		c.beginScope()
+
+		// 2. Compile Collection
+		_, colType, err := c.Compile(n.Collection)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Handle Map: transform to keys array
+		isMap := false
+		if _, ok := colType.(*ast.MapType); ok {
+			isMap = true
+		}
+
+		if isMap {
+			// Convert Map to Keys Array
+			// Stack: [Map]
+			// We need to call keys(map).
+			// Emitting: keys(map).
+			// Problem: 'map' is on stack. 'keys' function not.
+			// Use local temp for map.
+			c.addLocal(" $map", colType) // Consumes Map from stack
+
+			// Get 'keys' global
+			nameConst := c.makeConstant(value.NewString("keys"))
+			c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConst))
+
+			// Get '$map' local
+			slot := len(c.locals) - 1 // The last local added
+			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
+
+			// Call keys(map)
+			c.emitBytes(byte(chunk.OP_CALL), 1)
+			// Stack: [KeysArray]
+
+			// Determine new type: Array of KeyType
+			// For simplicity, assume keys return strings (for now in Noxy maps are string keys?)
+			// Noxy Spec: map[Key, Value]. keys() returns Key[].
+			// If we can determine Map Key Type, we effectively have Array<KeyType>.
+			// For now, let's treat as Array (dynamic or inferred).
+		}
+
+		// 3. Store Collection in Local ($collection)
+		// Stack has Collection (or Keys Array)
+		c.addLocal(" $collection", nil) // Type? inferred or dyn
+
+		// 4. Init Index ($index = 0)
+		c.emitConstant(value.NewInt(0))
+		c.addLocal(" $index", &ast.PrimitiveType{Name: "int"})
+
+		// 5. Init Length ($len = len($collection))
+		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $collection is at -2 (since $index is at -1)
+		c.emitByte(byte(chunk.OP_LEN))
+		c.addLocal(" $len", &ast.PrimitiveType{Name: "int"})
+
+		// 6. Loop Setup
+		loopStart := len(c.currentChunk.Code)
+		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
+		c.loops = append(c.loops, loop)
+
+		// 7. Condition: $index < $len
+		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
+		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-1)) // $len
+		c.emitByte(byte(chunk.OP_LESS))
+
+		// Exit Jump
+		jumpToExit := c.emitJump(chunk.OP_JUMP_IF_FALSE)
+		c.emitByte(byte(chunk.OP_POP)) // Pop condition
+
+		// 8. Get Item -> User Variable
+		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-3)) // $collection
+		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
+		c.emitByte(byte(chunk.OP_GET_INDEX))
+
+		// Body Scope
+		c.beginScope()
+		c.addLocal(n.Identifier, nil) // User variable (consumes Item from stack)
+
+		// 9. Compile Body
+		_, _, err = c.Compile(n.Body)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		c.endScope() // Pops User Variable
+
+		// 10. Increment Index
+		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
+		c.emitConstant(value.NewInt(1))
+		c.emitByte(byte(chunk.OP_ADD))
+		c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(len(c.locals)-2)) // set $index
+		c.emitByte(byte(chunk.OP_POP))
+
+		// 11. Loop Back
+		c.emitLoop(loopStart)
+
+		// 12. Patch Exit
+		c.patchJump(jumpToExit)
+		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+
+		// Patch Break Jumps
+		for _, jump := range loop.BreakJumps {
+			c.patchJump(jump)
+		}
+
+		// Pop Loop info
+		c.loops = c.loops[:len(c.loops)-1]
+
+		// 13. End Wrapper Scope (pops iterator vars)
+		c.endScope()
+
+		return c.currentChunk, nil, nil
+
 	case *ast.BreakStmt:
 		if len(c.loops) == 0 {
 			return nil, nil, fmt.Errorf("break outside of loop")

@@ -372,6 +372,19 @@ func (ce *CallExpression) String() string {
 	return out
 }
 
+type ForStatement struct {
+	Token      token.Token // The 'for' token
+	Identifier string
+	Collection Expression
+	Body       *BlockStatement
+}
+
+func (fs *ForStatement) statementNode()       {}
+func (fs *ForStatement) TokenLiteral() string { return fs.Token.Literal }
+func (fs *ForStatement) String() string {
+	return "for " + fs.Identifier + " in " + fs.Collection.String() + " " + fs.Body.String()
+}
+
 type ArrayLiteral struct {
 	Token    token.Token // The '[' token
 	Elements []Expression

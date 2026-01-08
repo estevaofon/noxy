@@ -141,6 +141,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseIfStatement()
 	case token.WHILE:
 		return p.parseWhileStatement()
+	case token.FOR:
+		return p.parseForStatement()
 	case token.STRUCT:
 		return p.parseStructStatement()
 	case token.FUNC:
@@ -1241,4 +1243,41 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
 	}
 	p.errors = append(p.errors, msg)
+}
+
+func (p *Parser) parseForStatement() *ast.ForStatement {
+	stmt := &ast.ForStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.IDENTIFIER) {
+		return nil
+	}
+
+	stmt.Identifier = p.curToken.Literal
+
+	if !p.expectPeek(token.IN) {
+		return nil
+	}
+
+	p.nextToken() // eat IN
+
+	stmt.Collection = p.parseExpression(LOWEST)
+
+	// Optional newline before block
+	if p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
+	stmt.Body = p.parseBlockStatement()
+
+	if !p.curTokenIs(token.END) {
+		got := p.curToken.Literal
+		if p.curTokenIs(token.EOF) {
+			got = "EOF"
+		}
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end' after for loop, found %s",
+			p.curToken.Line, p.curToken.Column, got))
+		return nil
+	}
+
+	return stmt
 }

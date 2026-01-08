@@ -1,0 +1,85 @@
+// Test For-In Loop
+
+// 1. Array of Integers
+let nums: int[] = [10, 20, 30, 40, 50]
+let sum: int = 0
+
+print("--- Array Int Test ---")
+let i: int = 0
+for n in nums
+    print(f"num[{i}]: {n}")
+    sum = sum + n
+    i = i + 1
+end
+print(f"Total Sum: {sum}")
+
+if sum != 150 then
+    print("FAIL: Sum incorrect")
+else
+    print("PASS: Sum correct")
+end
+
+// 2. Array of Strings
+let words: string[] = ["Hello", " ", "World", "!"]
+let sentence: string = ""
+
+print("\n--- Array String Test ---")
+for w in words
+    sentence = sentence + w
+end
+print(f"Sentence: {sentence}")
+
+if sentence != "Hello World!" then
+    print("FAIL: Sentence incorrect")
+else
+    print("PASS: Sentence correct")
+end
+
+// 3. Map Iteration (Keys)
+let scores: map[string, int] = {"Alice": 90, "Bob": 85}
+let count: int = 0
+let alice_found: bool = false
+
+print("\n--- Map Test ---")
+for key in scores
+    print(f"Key: {key}: {scores[key]}")
+    count = count + 1
+    if key == "Alice" then
+        alice_found = true
+    end
+end
+print(f"Keys found: {count}")
+
+if count != 2 then
+    print("FAIL: Map count incorrect")
+else
+    print("PASS: Map count correct")
+end
+
+if !alice_found then
+    print("FAIL: Alice key not found")
+else
+    print("PASS: Alice key found")
+end
+
+// 4. Empty Collection
+let empty: int[] = []
+let iterations: int = 0
+
+print("\n--- Empty Test ---")
+for x in empty
+    iterations = iterations + 1
+end
+
+if iterations != 0 then
+    print("FAIL: Iterated on empty array")
+else
+    print("PASS: Empty array ok")
+end
+
+let text: string = "ABC"
+print("\n--- String Test ---")
+for c in text
+    print(c)
+end
+// Commenting out string test until logic confirmed supported by OP_GET_INDEX

@@ -31,6 +31,8 @@ const (
 	DO     TokenType = "DO"
 	RETURN TokenType = "RETURN"
 	BREAK  TokenType = "BREAK"
+	FOR    TokenType = "FOR"
+	IN     TokenType = "IN"
 
 	// Palavras-chave - Tipos
 	TYPE_INT    TokenType = "TYPE_INT"
@@ -137,6 +139,8 @@ var keywords = map[string]TokenType{
 	"as":     AS,
 	"zeros":  ZEROS,
 	"elif":   ELIF,
+	"for":    FOR,
+	"in":     IN,
 }
 
 func LookupIdent(ident string) TokenType {

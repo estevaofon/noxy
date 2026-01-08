@@ -2679,6 +2679,26 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
+		case chunk.OP_LEN:
+			val := vm.pop()
+			if val.Type == value.VAL_OBJ {
+				if arr, ok := val.Obj.(*value.ObjArray); ok {
+					vm.push(value.NewInt(int64(len(arr.Elements))))
+				} else if m, ok := val.Obj.(*value.ObjMap); ok {
+					vm.push(value.NewInt(int64(len(m.Data))))
+				} else if s, ok := val.Obj.(string); ok {
+					vm.push(value.NewInt(int64(len(s))))
+				} else {
+					vm.push(value.NewInt(0)) // Or error?
+				}
+			} else if val.Type == value.VAL_BYTES {
+				// Bytes stored as string in Obj
+				s := val.Obj.(string)
+				vm.push(value.NewInt(int64(len(s))))
+			} else {
+				vm.push(value.NewInt(0))
+			}
+
 		case chunk.OP_MODULO:
 			b := vm.pop()
 			a := vm.pop()

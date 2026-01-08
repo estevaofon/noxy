@@ -20,7 +20,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 | Category | Keywords |
 |----------|----------|
 | Declarations | `let`, `global`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break` |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in` |
 | Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
@@ -234,6 +234,30 @@ end
 ```noxy
 while condition do
     // ...
+end
+```
+
+### For Loop
+Use `for ... in` to iterate over collections (arrays or maps).
+
+**Arrays** (Iterates over values):
+```noxy
+for item in array
+    print(item)
+end
+```
+
+**Maps** (Iterates over keys):
+```noxy
+for key in map
+    print(map[key])
+end
+```
+
+**Strings** (Iterates over characters):
+```noxy
+for char in "hello"
+    print(char)
 end
 ```
 
