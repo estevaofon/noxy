@@ -316,6 +316,21 @@ print(f"Hello, {name}!")
 ### Utils
 - `zeros(n)`: create zeroed array.
 - `fmt(format, args...)`: printf-style formatting.
+  - `%s`: String
+  - `%d`: Integer (Base 10)
+  - `%x`, `%X`: Integer (Hex)
+  - `%b`: Integer (Binary)
+  - `%f`: Float
+  - `%.Nf`: Float with N decimal places
+  - `%e`: Float (Scientific notation)
+  - `%v`: Any value (Default representation)
+  - `%t`: Boolean
+  - `%q`: Quoted string/bytes
+
+```noxy
+let msg: string = fmt("Value: %d, Hex: %x", 255, 255)
+// "Value: 255, Hex: ff"
+```
 
 ---
 
