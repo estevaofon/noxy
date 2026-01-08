@@ -1,0 +1,19 @@
+use array_utils select *
+
+let nums: int[] = [10, 20, 30, 40, 50]
+let fatia: int[] = slice(nums, 1, 4)
+print("Slice result:")
+print(fatia)
+
+print("\nRange(0, 10, 1):")
+print(range(0, 10, 1))
+
+print("\nRange(0, 10, 2):")
+print(range(0, 10, 2))
+
+print("\nRange(10, 0, -1):")
+print(range(10, 0, -1))
+
+for n in range(0, 10, 1)
+    print(n)
+end

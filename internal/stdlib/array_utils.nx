@@ -1,0 +1,41 @@
+func slice(array: int[], start: int, _end: int) -> int[]
+    let result: int[] = []
+    let len: int = length(array)
+    
+    if start < 0 then
+        start = 0
+    end
+    
+    if _end > len then
+        _end = len
+    end
+
+    while start < _end do
+        append(result, array[start])
+        start = start + 1
+    end
+    return result
+end
+
+
+func range(start: int, stop: int, step: int) -> int[]
+    let result: int[] = []
+    
+    if step == 0 then
+        return result
+    end
+
+    if step > 0 then
+        while start < stop do
+            append(result, start)
+            start = start + step
+        end
+    else
+        while start > stop do
+            append(result, start)
+            start = start + step
+        end
+    end
+
+    return result
+end
