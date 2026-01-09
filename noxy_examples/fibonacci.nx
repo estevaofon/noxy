@@ -18,7 +18,7 @@ func imprimir_fibonacci(qtd: int) -> void
     end
 end
 
-imprimir_fibonacci(10)
+imprimir_fibonacci(30)
 let end_time: int = now_ms()
 let elapsed_time: int = end_time - start_time
 print(f"Tempo de execução: {elapsed_time} ms")

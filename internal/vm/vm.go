@@ -2628,9 +2628,14 @@ func (vm *VM) run(minFrameCount int) error {
 			}
 
 		case chunk.OP_ADD_INT:
-			b := vm.pop()
-			a := vm.pop()
-			vm.push(value.NewInt(a.AsInt + b.AsInt))
+			// Inline pop/pop/push for optimization
+			// b is at stackTop-1, a is at stackTop-2
+			// result replaces a (at stackTop-2)
+			// b (at stackTop-1) is cleared
+			// stackTop decrements by 1
+			vm.stack[vm.stackTop-2] = value.NewInt(vm.stack[vm.stackTop-2].AsInt + vm.stack[vm.stackTop-1].AsInt)
+			vm.stack[vm.stackTop-1] = value.Value{}
+			vm.stackTop--
 
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
@@ -2730,16 +2735,9 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewInt(a.AsInt % b.AsInt))
 			} else {
-				fmt.Printf("DEBUG OP_MODULO FAIL: a.Type=%v b.Type=%v a=%v b=%v\n", a.Type, b.Type, a, b)
 				return vm.runtimeError(c, ip, "operands for %% must be integers")
 			}
-		case chunk.OP_MOD_INT:
-			b := vm.pop()
-			a := vm.pop()
-			if b.AsInt == 0 {
-				return vm.runtimeError(c, ip, "modulo by zero")
-			}
-			vm.push(value.NewInt(a.AsInt % b.AsInt))
+			// OP_MOD_INT case removed as optimization was unstable
 
 		case chunk.OP_BIT_AND:
 			b := vm.pop()
@@ -2909,9 +2907,10 @@ func (vm *VM) run(minFrameCount int) error {
 				vm.push(value.NewBool(false))
 			}
 		case chunk.OP_LESS_INT:
-			b := vm.pop()
-			a := vm.pop()
-			vm.push(value.NewBool(a.AsInt < b.AsInt))
+			// Inline pop/pop/push
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsInt < vm.stack[vm.stackTop-1].AsInt)
+			vm.stack[vm.stackTop-1] = value.Value{}
+			vm.stackTop--
 		case chunk.OP_EQUAL:
 			b := vm.pop()
 			a := vm.pop()
