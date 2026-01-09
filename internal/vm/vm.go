@@ -2912,44 +2912,39 @@ func (vm *VM) run(minFrameCount int) error {
 			result := vm.pop()
 			calleeFrame := vm.currentFrame
 
-			// 2. Decrement frame count
+			// 2. Clear the stack range used by the function (args + locals)
+			// This is CRITICAL for GC. We must nullify the references.
+			// calleeFrame.Slots points to the function object itself.
+			// We iterate up to stackTop (which is where result WAS before pop).
+			for i := calleeFrame.Slots; i < vm.stackTop; i++ {
+				vm.stack[i] = value.Value{}
+			}
+
+			// 3. Decrement frame count
 			vm.frameCount--
 
-			// 3. Update current frame pointer (Always do this to keep state consistent)
+			// 4. Update current frame pointer
 			if vm.frameCount > 0 {
 				vm.currentFrame = vm.frames[vm.frameCount-1]
 			} else {
-				vm.currentFrame = nil // Or handle main return
+				vm.currentFrame = nil
 			}
 
-			// 4. Return from run() if we drop below call depth
+			// 5. Return from run() if we drop below call depth
 			if vm.frameCount < minFrameCount {
-				vm.pop() // Pop script function (effectively)
-				// Note: vm.push(result) ?
-				// Usually result is consumed by caller.
-				// If we return from run(), result is on stack?
-				// vm.pop() above removed result.
-				// We need to leave result on stack for caller if this is a nested run.
-				// Original code: vm.pop() -> result. vm.pop() -> func. return.
-				// Caller (OP_CALL) expects result pushed.
-				// If we return from run(), who pushes result?
-				// The caller of run()!
-				// vm.loadModule does: vm.pop() -> pops result.
-				// So we must PUSH result back before returning?
-				// NO. The stack must be balanced.
-				// OP_RETURN pops result.
-				// Then it pops CALLEE (script/func).
-				// Then it pushes result.
-
-				// If we return from run(), we should probably leave result on stack.
+				// We are exiting the run loop.
+				// We need to place result at the location expected by the caller.
+				// The caller expects the function and args to be consumed, and result pushed.
+				// calleeFrame.Slots is the start of the window (Function object).
+				vm.stackTop = calleeFrame.Slots
 				vm.push(result)
 				return nil
 			}
 
-			// 5. Restore execution context
+			// 6. Restore execution context
 			frame = vm.currentFrame
-			vm.stackTop = calleeFrame.Slots
-			vm.push(result)
+			vm.stackTop = calleeFrame.Slots // Drop args/locals/function from stackTop
+			vm.push(result)                 // Push result replacing the function
 
 			c = frame.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
@@ -3347,7 +3342,9 @@ func (vm *VM) push(v value.Value) {
 
 func (vm *VM) pop() value.Value {
 	vm.stackTop--
-	return vm.stack[vm.stackTop]
+	val := vm.stack[vm.stackTop]
+	vm.stack[vm.stackTop] = value.Value{} // Clear reference to help GC
+	return val
 }
 
 func (vm *VM) loadModule(name string) (value.Value, error) {
