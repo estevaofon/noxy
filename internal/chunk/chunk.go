@@ -57,6 +57,14 @@ const (
 	OP_MAP
 	OP_ZEROS
 	OP_LEN
+	OP_ADD_INT
+	OP_SUB_INT
+	OP_MUL_INT
+	OP_DIV_INT
+	OP_MOD_INT
+	OP_LESS_INT
+	OP_GREATER_INT
+	OP_EQUAL_INT
 )
 
 func (op OpCode) String() string {
@@ -155,6 +163,22 @@ func (op OpCode) String() string {
 		return "OP_ARRAY"
 	case OP_MAP:
 		return "OP_MAP"
+	case OP_ADD_INT:
+		return "OP_ADD_INT"
+	case OP_SUB_INT:
+		return "OP_SUB_INT"
+	case OP_MUL_INT:
+		return "OP_MUL_INT"
+	case OP_DIV_INT:
+		return "OP_DIV_INT"
+	case OP_MOD_INT:
+		return "OP_MOD_INT"
+	case OP_LESS_INT:
+		return "OP_LESS_INT"
+	case OP_GREATER_INT:
+		return "OP_GREATER_INT"
+	case OP_EQUAL_INT:
+		return "OP_EQUAL_INT"
 	case OP_ZEROS:
 		return "OP_ZEROS"
 	case OP_LEN:
@@ -315,6 +339,22 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_IMPORT_FROM_ALL", offset)
 	case OP_DUP:
 		return c.simpleInstruction("OP_DUP", offset)
+	case OP_ADD_INT:
+		return c.simpleInstruction("OP_ADD_INT", offset)
+	case OP_SUB_INT:
+		return c.simpleInstruction("OP_SUB_INT", offset)
+	case OP_MUL_INT:
+		return c.simpleInstruction("OP_MUL_INT", offset)
+	case OP_DIV_INT:
+		return c.simpleInstruction("OP_DIV_INT", offset)
+	case OP_MOD_INT:
+		return c.simpleInstruction("OP_MOD_INT", offset)
+	case OP_LESS_INT:
+		return c.simpleInstruction("OP_LESS_INT", offset)
+	case OP_GREATER_INT:
+		return c.simpleInstruction("OP_GREATER_INT", offset)
+	case OP_EQUAL_INT:
+		return c.simpleInstruction("OP_EQUAL_INT", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

@@ -2598,6 +2598,7 @@ func (vm *VM) run(minFrameCount int) error {
 				vm.push(value.NewFloat(a.AsFloat + b.AsFloat))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
 				vm.push(value.NewFloat(float64(a.AsInt) + b.AsFloat))
+
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
 				vm.push(value.NewFloat(a.AsFloat + float64(b.AsInt)))
 			} else if a.Type == value.VAL_OBJ && b.Type == value.VAL_OBJ {
@@ -2625,6 +2626,12 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers or strings or bytes")
 			}
+
+		case chunk.OP_ADD_INT:
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(value.NewInt(a.AsInt + b.AsInt))
+
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
 			a := vm.pop()
@@ -2639,6 +2646,10 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
+		case chunk.OP_SUB_INT:
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(value.NewInt(a.AsInt - b.AsInt))
 		case chunk.OP_MULTIPLY:
 			b := vm.pop()
 			a := vm.pop()
@@ -2653,6 +2664,10 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
+		case chunk.OP_MUL_INT:
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(value.NewInt(a.AsInt * b.AsInt))
 		case chunk.OP_DIVIDE:
 			b := vm.pop()
 			a := vm.pop()
@@ -2679,6 +2694,13 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
+		case chunk.OP_DIV_INT:
+			b := vm.pop()
+			a := vm.pop()
+			if b.AsInt == 0 {
+				return vm.runtimeError(c, ip, "division by zero")
+			}
+			vm.push(value.NewInt(a.AsInt / b.AsInt))
 		case chunk.OP_LEN:
 			val := vm.pop()
 			if val.Type == value.VAL_OBJ {
@@ -2708,8 +2730,16 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewInt(a.AsInt % b.AsInt))
 			} else {
+				fmt.Printf("DEBUG OP_MODULO FAIL: a.Type=%v b.Type=%v a=%v b=%v\n", a.Type, b.Type, a, b)
 				return vm.runtimeError(c, ip, "operands for %% must be integers")
 			}
+		case chunk.OP_MOD_INT:
+			b := vm.pop()
+			a := vm.pop()
+			if b.AsInt == 0 {
+				return vm.runtimeError(c, ip, "modulo by zero")
+			}
+			vm.push(value.NewInt(a.AsInt % b.AsInt))
 
 		case chunk.OP_BIT_AND:
 			b := vm.pop()
@@ -2866,6 +2896,10 @@ func (vm *VM) run(minFrameCount int) error {
 				// TODO: floats
 				vm.push(value.NewBool(false))
 			}
+		case chunk.OP_GREATER_INT:
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(value.NewBool(a.AsInt > b.AsInt))
 		case chunk.OP_LESS:
 			b := vm.pop()
 			a := vm.pop()
@@ -2874,10 +2908,18 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				vm.push(value.NewBool(false))
 			}
+		case chunk.OP_LESS_INT:
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(value.NewBool(a.AsInt < b.AsInt))
 		case chunk.OP_EQUAL:
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewBool(valuesEqual(a, b)))
+		case chunk.OP_EQUAL_INT:
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(value.NewBool(a.AsInt == b.AsInt))
 		case chunk.OP_PRINT:
 			// v := vm.pop()
 			// fmt.Println(v)

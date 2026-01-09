@@ -474,29 +474,78 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
+		// Check if both operands are INT for optimization
+		isInt := false
+		if leftType != nil && rightType != nil {
+			if leftType.String() == "int" && rightType.String() == "int" {
+				isInt = true
+			}
+		}
+
 		switch n.Operator {
 		case "+":
-			c.emitByte(byte(chunk.OP_ADD))
+			if isInt {
+				c.emitByte(byte(chunk.OP_ADD_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_ADD))
+			}
 		case "-":
-			c.emitByte(byte(chunk.OP_SUBTRACT))
+			if isInt {
+				c.emitByte(byte(chunk.OP_SUB_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_SUBTRACT))
+			}
 		case "*":
-			c.emitByte(byte(chunk.OP_MULTIPLY))
+			if isInt {
+				c.emitByte(byte(chunk.OP_MUL_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_MULTIPLY))
+			}
 		case "/":
-			c.emitByte(byte(chunk.OP_DIVIDE))
+			if isInt {
+				c.emitByte(byte(chunk.OP_DIV_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_DIVIDE))
+			}
 		case ">":
-			c.emitByte(byte(chunk.OP_GREATER))
+			if isInt {
+				c.emitByte(byte(chunk.OP_GREATER_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_GREATER))
+			}
 		case "<":
-			c.emitByte(byte(chunk.OP_LESS))
+			if isInt {
+				c.emitByte(byte(chunk.OP_LESS_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_LESS))
+			}
 		case "==":
-			c.emitByte(byte(chunk.OP_EQUAL))
+			if isInt {
+				c.emitByte(byte(chunk.OP_EQUAL_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_EQUAL))
+			}
 		case "!=": // != is NOT EQUAL
-			c.emitByte(byte(chunk.OP_EQUAL))
+			// Optimized != is !(==)
+			if isInt {
+				c.emitByte(byte(chunk.OP_EQUAL_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_EQUAL))
+			}
 			c.emitByte(byte(chunk.OP_NOT))
 		case ">=": // >= is NOT LESS
-			c.emitByte(byte(chunk.OP_LESS))
+			if isInt {
+				c.emitByte(byte(chunk.OP_LESS_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_LESS))
+			}
 			c.emitByte(byte(chunk.OP_NOT))
 		case "<=": // <= is NOT GREATER
-			c.emitByte(byte(chunk.OP_GREATER))
+			if isInt {
+				c.emitByte(byte(chunk.OP_GREATER_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_GREATER))
+			}
 			c.emitByte(byte(chunk.OP_NOT))
 		case "|":
 			c.emitByte(byte(chunk.OP_BIT_OR))
@@ -698,7 +747,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 7. Condition: $index < $len
 		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
 		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-1)) // $len
-		c.emitByte(byte(chunk.OP_LESS))
+		c.emitByte(byte(chunk.OP_LESS_INT))
 
 		// Exit Jump
 		jumpToExit := c.emitJump(chunk.OP_JUMP_IF_FALSE)
@@ -724,7 +773,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 10. Increment Index
 		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
 		c.emitConstant(value.NewInt(1))
-		c.emitByte(byte(chunk.OP_ADD))
+		c.emitByte(byte(chunk.OP_ADD_INT))
 		c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(len(c.locals)-2)) // set $index
 		c.emitByte(byte(chunk.OP_POP))
 
