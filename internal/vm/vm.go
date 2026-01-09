@@ -3295,24 +3295,14 @@ func (vm *VM) call(fn *value.ObjFunction, argCount int, c *chunk.Chunk, ip int) 
 		}
 	}
 
-	var frame *CallFrame
-	if vm.frames[vm.frameCount] != nil {
-		// Recycle frame
-		frame = vm.frames[vm.frameCount]
-		frame.Function = fn
-		frame.IP = 0
-		frame.Slots = vm.stackTop - argCount - 1
-		frame.Globals = fn.Globals
-	} else {
-		// New frame
-		frame = &CallFrame{
-			Function: fn,
-			IP:       0,
-			Slots:    vm.stackTop - argCount - 1, // Start of locals window (fn + args)
-			Globals:  fn.Globals,
-		}
-		vm.frames[vm.frameCount] = frame
+	frame := &CallFrame{
+		Function: fn,
+		IP:       0,
+		Slots:    vm.stackTop - argCount - 1, // Start of locals window (fn + args)
+		Globals:  fn.Globals,
 	}
+	// Push new frame
+	vm.frames[vm.frameCount] = frame
 	vm.frameCount++
 	vm.currentFrame = frame
 	return true, nil
