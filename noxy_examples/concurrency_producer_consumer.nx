@@ -1,0 +1,57 @@
+use time
+
+// Produtor: Gera números de 0 a count-1 e envia para o canal
+func producer(c: any, count: int)
+    print("Produtor: Iniciando...")
+    let i: int = 0
+    while i < count do
+        print(fmt("Produtor: Enviando %d", i))
+        send(c, i)
+        // Simula trabalho
+        time.sleep(50) 
+        i = i + 1
+    end
+    print("Produtor: Finalizado. Enviando sinal de parada (-1)")
+    send(c, -1) // Poison pill (sinal de fim)
+end
+
+// Consumidor: Lê do canal e processa
+func consumer(c: any)
+    print("Consumidor: Aguardando dados...")
+    while true do
+        let v: any = recv(c) // Bloqueia até receber
+        
+        // Verifica tipo para segurança
+        if fmt("%T", v) == "int" then
+            let val: int = to_int(v)
+            if val == -1 then
+                print("Consumidor: Sinal de parada recebido.")
+                break
+            end
+            print(fmt("Consumidor: Recebeu %d. Quadrado: %d", val, val * val))
+        else
+            print("Consumidor: Recebeu dado desconhecido")
+        end
+    end
+    print("Consumidor: Finalizado")
+end
+
+func main()
+    print("=== Exemplo Produtor-Consumidor ===")
+    
+    // Canal com buffer 0 (síncrono/bloqueante) ou pequeno
+    let channel: any = make_chan(0)
+    
+    // Inicia consumidor em thread separada
+    spawn(consumer, channel)
+    
+    // Inicia produtor em thread separada (ou poderia ser na main)
+    spawn(producer, channel, 5)
+    
+    // Main aguarda um pouco para não sair imediatamente (hack, pois não temos wg.Wait())
+    // Idealmente o consumidor avisaria a main que acabou por outro canal
+    time.sleep(1000)
+    print("Main: Fim")
+end
+
+main()

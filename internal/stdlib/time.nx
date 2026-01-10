@@ -41,6 +41,11 @@ func now_ms() -> int
     return time_now_ms()
 end
 
+// Pausa a execu??o por ms milissegundos
+func sleep(ms: int) -> void
+    time_sleep(ms)
+end
+
 // ============================================
 // Convers?o
 // ============================================

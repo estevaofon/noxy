@@ -1,0 +1,26 @@
+use time
+
+func worker(id: int, c: any)
+    print(fmt("Worker %d start", id))
+    time.sleep(100)
+    send(c, fmt("Result from %d", id))
+end
+
+func main()
+    print("Main start")
+    let c: any = make_chan(3)
+
+    spawn(worker, 1, c)
+    spawn(worker, 2, c)
+    spawn(worker, 3, c)
+
+    let i: int = 0
+    while i < 3 do
+        let msg: any = recv(c) // any because channel is untyped
+        print(fmt("Main received: %s", msg))
+        i = i + 1
+    end
+    print("Main done")
+end
+
+main()

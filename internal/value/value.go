@@ -13,6 +13,7 @@ const (
 	VAL_FUNCTION
 	VAL_NATIVE
 	VAL_BYTES
+	VAL_CHANNEL
 )
 
 type Value struct {
@@ -148,6 +149,25 @@ func (oi *ObjInstance) Format(f fmt.State, verb rune) {
 	}
 }
 
+type ObjChannel struct {
+	Chan chan Value
+}
+
+func (oc *ObjChannel) String() string {
+	return fmt.Sprintf("<channel %p>", oc.Chan)
+}
+
+func (oc *ObjChannel) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "channel")
+	case 's', 'v':
+		fmt.Fprint(f, oc.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjChannel=%s)", verb, oc.String())
+	}
+}
+
 func (v Value) String() string {
 	switch v.Type {
 	case VAL_BOOL:
@@ -182,6 +202,8 @@ func (v Value) String() string {
 		return fmt.Sprintf("<native fn %s>", v.Obj.(*ObjNative).Name)
 	case VAL_BYTES:
 		return fmt.Sprintf("b\"%s\"", v.Obj.(string))
+	case VAL_CHANNEL:
+		return v.Obj.(*ObjChannel).String()
 	default:
 		return "unknown"
 	}
@@ -248,6 +270,10 @@ func NewNative(name string, fn NativeFunc) Value {
 
 func NewBytes(v string) Value {
 	return Value{Type: VAL_BYTES, Obj: v}
+}
+
+func NewChannel(size int) Value {
+	return Value{Type: VAL_CHANNEL, Obj: &ObjChannel{Chan: make(chan Value, size)}}
 }
 
 type BytesWrapper struct {

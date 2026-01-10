@@ -1,0 +1,60 @@
+use time
+
+// Função is_prime simples e intensiva em CPU
+func is_prime(n: int) -> bool
+    if n <= 1 then return false end
+    if n <= 3 then return true end
+    if (n % 2 == 0) || (n % 3 == 0) then return false end
+    
+    let i: int = 5
+    while (i * i) <= n do
+        if (n % i == 0) || (n % (i + 2) == 0) then return false end
+        i = i + 6
+    end
+    return true
+end
+
+// Worker: Conta primos em um intervalo
+func worker(start_n: int, end_n: int, c: any)
+    let count: int = 0
+    let i: int = start_n
+    while i < end_n do
+        if is_prime(i) then
+            count = count + 1
+        end
+        i = i + 1
+    end
+    send(c, count)
+end
+
+func main()
+    print("Noxy Benchmark: Primes Parallel")
+    let start_time: int = time_now_ms()
+    
+    let limit: int = 1000000 // Número grande o suficiente para levar tempo
+    let num_threads: int = 4
+    let range_size: int = limit / num_threads
+    let c: any = make_chan(num_threads)
+    
+    let i: int = 0
+    while i < num_threads do
+        let s: int = i * range_size
+        let e: int = s + range_size
+        spawn(worker, s, e, c)
+        i = i + 1
+    end
+    
+    let total_primes: int = 0
+    let finished: int = 0
+    while finished < num_threads do
+        let partial: any = recv(c) // any
+        total_primes = total_primes + to_int(partial)
+        finished = finished + 1
+    end
+    
+    let end_time: int = time_now_ms()
+    print(fmt("Total Primes: %d", total_primes))
+    print(fmt("Time: %d ms", end_time - start_time))
+end
+
+main()

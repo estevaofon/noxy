@@ -18,8 +18,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -44,6 +46,12 @@ type CallFrame struct {
 	Globals  map[string]value.Value // Globals visible to this frame
 }
 
+type SharedState struct {
+	Globals     map[string]value.Value // Global variables/functions
+	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
+	GlobalsLock sync.RWMutex
+}
+
 type VM struct {
 	frames       [FramesMax]*CallFrame
 	frameCount   int
@@ -59,9 +67,8 @@ type VM struct {
 	stack    [StackMax]value.Value
 	stackTop int
 
-	globals map[string]value.Value // Global variables/functions
-	modules map[string]value.Value // Cached modules (Name -> ObjMap)
-	Config  VMConfig
+	shared *SharedState
+	Config VMConfig
 
 	// IO Management
 	openFiles map[int64]*os.File
@@ -92,9 +99,16 @@ func New() *VM {
 }
 
 func NewWithConfig(cfg VMConfig) *VM {
+	shared := &SharedState{
+		Globals: make(map[string]value.Value),
+		Modules: make(map[string]value.Value),
+	}
+	return NewWithShared(shared, cfg)
+}
+
+func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	vm := &VM{
-		globals:          make(map[string]value.Value),
-		modules:          make(map[string]value.Value),
+		shared:           shared,
 		Config:           cfg,
 		openFiles:        make(map[int64]*os.File),
 		nextFD:           1,
@@ -109,8 +123,9 @@ func NewWithConfig(cfg VMConfig) *VM {
 		netBufferedConns: make(map[int]net.Conn),
 		nextNetID:        1,
 	}
+
 	// Define 'print' native
-	vm.defineNative("print", func(args []value.Value) value.Value {
+	vm.DefineNative("print", func(args []value.Value) value.Value {
 		var parts []string
 		for _, arg := range args {
 			parts = append(parts, arg.String())
@@ -118,7 +133,111 @@ func NewWithConfig(cfg VMConfig) *VM {
 		fmt.Println(strings.Join(parts, " "))
 		return value.NewNull()
 	})
-	vm.defineNative("to_str", func(args []value.Value) value.Value {
+
+	// Concurrency Primitives
+	vm.DefineNative("spawn", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		fnVal := args[0]
+		if fnVal.Type != value.VAL_FUNCTION {
+			// For now only support script functions
+			// Native functions in spawn? Maybe later.
+			fmt.Println("Runtime Error: spawn expects a function")
+			return value.NewNull()
+		}
+
+		threadArgs := args[1:]
+
+		// Create new VM thread sharing state
+		threadVM := NewWithShared(vm.shared, vm.Config)
+
+		// Setup execution
+		// We manually set up the first frame as if called
+		fnObj := fnVal.Obj.(*value.ObjFunction)
+
+		// Check arity
+		if len(threadArgs) != fnObj.Arity {
+			fmt.Printf("Runtime Error: spawn expected %d args, got %d\n", fnObj.Arity, len(threadArgs))
+			return value.NewNull()
+		}
+
+		// Push Function (Stack slot 0)
+		threadVM.push(fnVal)
+
+		// Push Args
+		for _, arg := range threadArgs {
+			threadVM.push(arg)
+		}
+
+		// Create Frame
+		frame := &CallFrame{
+			Function: fnObj,
+			IP:       0,
+			Slots:    0,   // Function is at 0
+			Globals:  nil, // Use shared globals (or fnObj.Globals if closures supported fully)
+		}
+
+		// Map closure globals if present?
+		// If fnObj.Globals is likely module map or nil (for Main).
+		// We should respect it.
+		frame.Globals = fnObj.Globals
+
+		threadVM.frames[0] = frame
+		threadVM.frameCount = 1
+		threadVM.currentFrame = frame
+
+		// Launch Goroutine
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("Thread Panic: %v\n%s", r, debug.Stack())
+				}
+			}()
+			err := threadVM.run(1) // Run until finished (frame 0 popped)
+			if err != nil {
+				fmt.Printf("Thread Error: %v\n", err)
+			}
+		}()
+
+		return value.NewNull()
+	})
+
+	vm.DefineNative("make_chan", func(args []value.Value) value.Value {
+		size := 0
+		if len(args) > 0 {
+			if args[0].Type == value.VAL_INT {
+				size = int(args[0].AsInt)
+			}
+		}
+		return value.NewChannel(size)
+	})
+
+	vm.DefineNative("send", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewNull()
+		}
+		if args[0].Type != value.VAL_CHANNEL {
+			return value.NewNull()
+		}
+		ch := args[0].Obj.(*value.ObjChannel).Chan
+		ch <- args[1]
+		return args[1]
+	})
+
+	vm.DefineNative("recv", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		if args[0].Type != value.VAL_CHANNEL {
+			return value.NewNull()
+		}
+		ch := args[0].Obj.(*value.ObjChannel).Chan
+		val := <-ch
+		return val
+	})
+
+	vm.DefineNative("to_str", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			// Should return error or empty?
 			return value.NewString("")
@@ -128,7 +247,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(args[0].String())
 	})
-	vm.defineNative("to_int", func(args []value.Value) value.Value {
+	vm.DefineNative("to_int", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewInt(0)
 		}
@@ -151,7 +270,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewInt(0)
 	})
-	vm.defineNative("to_float", func(args []value.Value) value.Value {
+	vm.DefineNative("to_float", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewFloat(0.0)
 		}
@@ -171,13 +290,22 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewFloat(0.0)
 	})
-	vm.defineNative("time_now_ms", func(args []value.Value) value.Value {
+	vm.DefineNative("time_now_ms", func(args []value.Value) value.Value {
 		return value.NewInt(time.Now().UnixMilli())
 	})
-	vm.defineNative("time_now", func(args []value.Value) value.Value {
+	vm.DefineNative("time_now", func(args []value.Value) value.Value {
 		return value.NewInt(time.Now().Unix())
 	})
-	vm.defineNative("time_now_datetime", func(args []value.Value) value.Value {
+
+	vm.DefineNative("time_sleep", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		ms := args[0].AsInt
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		return value.NewNull()
+	})
+	vm.DefineNative("time_now_datetime", func(args []value.Value) value.Value {
 		// args[0] is DateTime struct def
 		if len(args) < 1 {
 			return value.NewNull()
@@ -201,7 +329,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("time_format", func(args []value.Value) value.Value {
+	vm.DefineNative("time_format", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -222,7 +350,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		t := time.Date(y, m, d, h, min, s, 0, time.Local)
 		return value.NewString(t.Format("2006-01-02 15:04:05"))
 	})
-	vm.defineNative("time_format_date", func(args []value.Value) value.Value {
+	vm.DefineNative("time_format_date", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -236,7 +364,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		t := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
 		return value.NewString(t.Format("2006-01-02"))
 	})
-	vm.defineNative("time_format_time", func(args []value.Value) value.Value {
+	vm.DefineNative("time_format_time", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -250,7 +378,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		t := time.Date(0, 1, 1, h, min, s, 0, time.Local)
 		return value.NewString(t.Format("15:04:05"))
 	})
-	vm.defineNative("time_make_datetime", func(args []value.Value) value.Value {
+	vm.DefineNative("time_make_datetime", func(args []value.Value) value.Value {
 		// args: structDef, y, m, d, h, min, s
 		if len(args) < 7 {
 			return value.NewNull()
@@ -282,7 +410,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("time_to_timestamp", func(args []value.Value) value.Value {
+	vm.DefineNative("time_to_timestamp", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewInt(0)
 		}
@@ -297,7 +425,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewInt(0)
 	})
-	vm.defineNative("time_from_timestamp", func(args []value.Value) value.Value {
+	vm.DefineNative("time_from_timestamp", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -321,7 +449,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("time_diff", func(args []value.Value) value.Value {
+	vm.DefineNative("time_diff", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
@@ -329,7 +457,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		ts2 := args[1].AsInt
 		return value.NewInt(ts1 - ts2)
 	})
-	vm.defineNative("time_add_days", func(args []value.Value) value.Value {
+	vm.DefineNative("time_add_days", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
@@ -337,26 +465,26 @@ func NewWithConfig(cfg VMConfig) *VM {
 		days := args[1].AsInt
 		return value.NewInt(ts + (days * 86400))
 	})
-	vm.defineNative("time_before", func(args []value.Value) value.Value {
+	vm.DefineNative("time_before", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
 		return value.NewBool(args[0].AsInt < args[1].AsInt)
 	})
-	vm.defineNative("time_after", func(args []value.Value) value.Value {
+	vm.DefineNative("time_after", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
 		return value.NewBool(args[0].AsInt > args[1].AsInt)
 	})
-	vm.defineNative("time_is_leap_year", func(args []value.Value) value.Value {
+	vm.DefineNative("time_is_leap_year", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
 		year := args[0].AsInt
 		return value.NewBool(year%4 == 0 && (year%100 != 0 || year%400 == 0))
 	})
-	vm.defineNative("time_days_in_month", func(args []value.Value) value.Value {
+	vm.DefineNative("time_days_in_month", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
@@ -366,7 +494,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		t := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
 		return value.NewInt(int64(t.Day()))
 	})
-	vm.defineNative("time_weekday_name", func(args []value.Value) value.Value {
+	vm.DefineNative("time_weekday_name", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -381,7 +509,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(wd.String())
 	})
-	vm.defineNative("time_month_name", func(args []value.Value) value.Value {
+	vm.DefineNative("time_month_name", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -397,7 +525,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(m.String())
 	})
-	vm.defineNative("io_open", func(args []value.Value) value.Value {
+	vm.DefineNative("io_open", func(args []value.Value) value.Value {
 		// args: path, mode, FileStructDef
 		if len(args) < 3 {
 			return value.NewNull()
@@ -439,7 +567,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("io_close", func(args []value.Value) value.Value {
+	vm.DefineNative("io_close", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
@@ -456,7 +584,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.defineNative("io_write", func(args []value.Value) value.Value {
+	vm.DefineNative("io_write", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -478,7 +606,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.defineNative("io_read", func(args []value.Value) value.Value {
+	vm.DefineNative("io_read", func(args []value.Value) value.Value {
 		// args: fileInst, IOResultStructDef
 		if len(args) < 2 {
 			return value.NewNull()
@@ -524,7 +652,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
-	vm.defineNative("io_read_bytes", func(args []value.Value) value.Value {
+	vm.DefineNative("io_read_bytes", func(args []value.Value) value.Value {
 		// args: fileInst, IOResultStructDef (reusing IOResult but data will be bytes)
 		// Or maybe we need a IOByteResult?
 		// Actually, IOResult.data is defined as string in io.nx.
@@ -582,7 +710,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		resInst.Fields["error"] = value.NewString(errorStr)
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
-	vm.defineNative("io_exists", func(args []value.Value) value.Value {
+	vm.DefineNative("io_exists", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -590,7 +718,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		_, err := os.Stat(path)
 		return value.NewBool(err == nil)
 	})
-	vm.defineNative("io_remove", func(args []value.Value) value.Value {
+	vm.DefineNative("io_remove", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -598,7 +726,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		err := os.Remove(path)
 		return value.NewBool(err == nil)
 	})
-	vm.defineNative("io_read_lines", func(args []value.Value) value.Value {
+	vm.DefineNative("io_read_lines", func(args []value.Value) value.Value {
 		// args: fileInst, IOLinesResultStructDef
 		if len(args) < 2 {
 			return value.NewNull()
@@ -660,7 +788,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		resInst.Fields["error"] = value.NewString(errorStr)
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
-	vm.defineNative("io_stat", func(args []value.Value) value.Value {
+	vm.DefineNative("io_stat", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -686,7 +814,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("io_mkdir", func(args []value.Value) value.Value {
+	vm.DefineNative("io_mkdir", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -695,7 +823,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewBool(err == nil)
 	})
 
-	vm.defineNative("time_format_custom", func(args []value.Value) value.Value {
+	vm.DefineNative("time_format_custom", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewString("")
 		}
@@ -725,7 +853,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.NewString(res)
 	})
-	vm.defineNative("time_parse", func(args []value.Value) value.Value {
+	vm.DefineNative("time_parse", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -753,7 +881,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("time_parse_date", func(args []value.Value) value.Value {
+	vm.DefineNative("time_parse_date", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -781,7 +909,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("time_add_seconds", func(args []value.Value) value.Value {
+	vm.DefineNative("time_add_seconds", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
@@ -789,7 +917,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		secs := args[1].AsInt
 		return value.NewInt(ts + secs)
 	})
-	vm.defineNative("time_diff_duration", func(args []value.Value) value.Value {
+	vm.DefineNative("time_diff_duration", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()
 		}
@@ -834,49 +962,49 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	// Strings Module
-	vm.defineNative("strings_contains", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_contains", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
 		return value.NewBool(strings.Contains(args[0].String(), args[1].String()))
 	})
-	vm.defineNative("strings_starts_with", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_starts_with", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
 		return value.NewBool(strings.HasPrefix(args[0].String(), args[1].String()))
 	})
-	vm.defineNative("strings_ends_with", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_ends_with", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
 		return value.NewBool(strings.HasSuffix(args[0].String(), args[1].String()))
 	})
-	vm.defineNative("strings_index_of", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_index_of", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(-1)
 		}
 		return value.NewInt(int64(strings.Index(args[0].String(), args[1].String())))
 	})
-	vm.defineNative("strings_count", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_count", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
 		return value.NewInt(int64(strings.Count(args[0].String(), args[1].String())))
 	})
-	vm.defineNative("strings_to_upper", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_to_upper", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
 		return value.NewString(strings.ToUpper(args[0].String()))
 	})
-	vm.defineNative("strings_to_lower", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_to_lower", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
 		return value.NewString(strings.ToLower(args[0].String()))
 	})
-	vm.defineNative("strings_trim", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_trim", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -884,7 +1012,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	// Input
-	vm.defineNative("input", func(args []value.Value) value.Value {
+	vm.DefineNative("input", func(args []value.Value) value.Value {
 		// args[0]: prompt (optional)
 		if len(args) > 0 {
 			fmt.Print(args[0].String())
@@ -895,7 +1023,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		text = strings.TrimRight(text, "\r\n")
 		return value.NewString(text)
 	})
-	vm.defineNative("strings_reverse", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_reverse", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -906,13 +1034,13 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(string(runes))
 	})
-	vm.defineNative("strings_repeat", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_repeat", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewString("")
 		}
 		return value.NewString(strings.Repeat(args[0].String(), int(args[1].AsInt)))
 	})
-	vm.defineNative("strings_substring", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_substring", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
@@ -930,19 +1058,19 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(s[start:end])
 	})
-	vm.defineNative("strings_replace", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_replace", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
 		return value.NewString(strings.ReplaceAll(args[0].String(), args[1].String(), args[2].String()))
 	})
-	vm.defineNative("strings_replace_first", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_replace_first", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
 		return value.NewString(strings.Replace(args[0].String(), args[1].String(), args[2].String(), 1))
 	})
-	vm.defineNative("strings_pad_left", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_pad_left", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
@@ -955,7 +1083,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		padding := totalLen - len(s)
 		return value.NewString(strings.Repeat(padChar, padding) + s)
 	})
-	vm.defineNative("strings_split", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_split", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()
 		}
@@ -979,7 +1107,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
-	vm.defineNative("strings_join_count", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_join_count", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
@@ -1002,7 +1130,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString("")
 	})
-	vm.defineNative("ord", func(args []value.Value) value.Value {
+	vm.DefineNative("ord", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewInt(0)
 		}
@@ -1012,7 +1140,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewInt(int64(s[0]))
 	})
-	vm.defineNative("strings_contains", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_contains", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
@@ -1020,7 +1148,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		substr := args[1].String()
 		return value.NewBool(strings.Contains(s, substr))
 	})
-	vm.defineNative("strings_replace", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_replace", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
@@ -1029,7 +1157,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		new := args[2].String()
 		return value.NewString(strings.ReplaceAll(s, old, new))
 	})
-	vm.defineNative("strings_substring", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_substring", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
 		}
@@ -1049,13 +1177,13 @@ func NewWithConfig(cfg VMConfig) *VM {
 
 		return value.NewString(s[start:end])
 	})
-	vm.defineNative("strings_is_empty", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_is_empty", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(true)
 		}
 		return value.NewBool(len(args[0].String()) == 0)
 	})
-	vm.defineNative("strings_is_digit", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_is_digit", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -1070,7 +1198,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBool(true)
 	})
-	vm.defineNative("strings_is_alpha", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_is_alpha", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -1085,7 +1213,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBool(true)
 	})
-	vm.defineNative("strings_is_alnum", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_is_alnum", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -1102,7 +1230,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBool(true)
 	})
-	vm.defineNative("strings_is_space", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_is_space", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
@@ -1117,7 +1245,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBool(true)
 	})
-	vm.defineNative("strings_char_at", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_char_at", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewString("")
 		}
@@ -1128,7 +1256,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewString(string(s[idx]))
 	})
-	vm.defineNative("strings_from_char_code", func(args []value.Value) value.Value {
+	vm.DefineNative("strings_from_char_code", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -1136,11 +1264,11 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	// Sys Module
-	vm.defineNative("sys_os", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_os", func(args []value.Value) value.Value {
 		return value.NewString(runtime.GOOS)
 	})
 
-	vm.defineNative("sys_exec", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_exec", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1183,7 +1311,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 
-	vm.defineNative("sys_exec_output", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_exec_output", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1226,7 +1354,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 
-	vm.defineNative("sys_getenv", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_getenv", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1245,7 +1373,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 
-	vm.defineNative("sys_setenv", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_setenv", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
@@ -1255,7 +1383,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewBool(err == nil)
 	})
 
-	vm.defineNative("sys_getcwd", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_getcwd", func(args []value.Value) value.Value {
 		dir, err := os.Getwd()
 		if err != nil {
 			return value.NewString("")
@@ -1263,7 +1391,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewString(dir)
 	})
 
-	vm.defineNative("sys_argv", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_argv", func(args []value.Value) value.Value {
 		// Convert os.Args to string[]
 		vals := make([]value.Value, len(os.Args))
 		for i, a := range os.Args {
@@ -1272,7 +1400,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewArray(vals)
 	})
 
-	vm.defineNative("sys_sleep", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_sleep", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
@@ -1281,7 +1409,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.defineNative("sys_exit", func(args []value.Value) value.Value {
+	vm.DefineNative("sys_exit", func(args []value.Value) value.Value {
 		code := 0
 		if len(args) > 0 {
 			code = int(args[0].AsInt)
@@ -1290,7 +1418,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.defineNative("length", func(args []value.Value) value.Value {
+	vm.DefineNative("length", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewInt(0)
 		}
@@ -1314,7 +1442,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewInt(0)
 	})
 
-	vm.defineNative("keys", func(args []value.Value) value.Value {
+	vm.DefineNative("keys", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewArray(nil)
 		}
@@ -1335,7 +1463,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewArray(nil)
 	})
 
-	vm.defineNative("delete", func(args []value.Value) value.Value {
+	vm.DefineNative("delete", func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
@@ -1358,7 +1486,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.defineNative("append", func(args []value.Value) value.Value {
+	vm.DefineNative("append", func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
@@ -1371,7 +1499,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.defineNative("pop", func(args []value.Value) value.Value {
+	vm.DefineNative("pop", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
@@ -1388,7 +1516,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.defineNative("slice", func(args []value.Value) value.Value {
+	vm.DefineNative("slice", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()
 		}
@@ -1447,7 +1575,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.defineNative("contains", func(args []value.Value) value.Value {
+	vm.DefineNative("contains", func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewBool(false)
 		}
@@ -1464,7 +1592,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBool(false)
 	})
-	vm.defineNative("has_key", func(args []value.Value) value.Value {
+	vm.DefineNative("has_key", func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewBool(false)
 		}
@@ -1490,7 +1618,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		}
 		return value.NewBool(false)
 	})
-	vm.defineNative("to_bytes", func(args []value.Value) value.Value {
+	vm.DefineNative("to_bytes", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}
@@ -1518,7 +1646,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	// Net Native Functions
-	vm.defineNative("net_listen", func(args []value.Value) value.Value {
+	vm.DefineNative("net_listen", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1551,7 +1679,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewMapWithData(socketFields)
 	})
 
-	vm.defineNative("net_accept", func(args []value.Value) value.Value {
+	vm.DefineNative("net_accept", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
@@ -1611,7 +1739,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewMapWithData(socketFields)
 	})
 
-	vm.defineNative("net_connect", func(args []value.Value) value.Value {
+	vm.DefineNative("net_connect", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1643,7 +1771,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewMapWithData(socketFields)
 	})
 
-	vm.defineNative("net_recv", func(args []value.Value) value.Value {
+	vm.DefineNative("net_recv", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1719,7 +1847,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewMapWithData(resultFields)
 	})
 
-	vm.defineNative("net_send", func(args []value.Value) value.Value {
+	vm.DefineNative("net_send", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -1762,7 +1890,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewMapWithData(resultFields)
 	})
 
-	vm.defineNative("net_close", func(args []value.Value) value.Value {
+	vm.DefineNative("net_close", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
@@ -1789,13 +1917,13 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.defineNative("net_setblocking", func(args []value.Value) value.Value {
+	vm.DefineNative("net_setblocking", func(args []value.Value) value.Value {
 		// For TCP in Go, blocking is handled at a different level
 		// This is a no-op for now, as Go handles timeouts via SetDeadline
 		return value.NewNull()
 	})
 
-	vm.defineNative("net_select", func(args []value.Value) value.Value {
+	vm.DefineNative("net_select", func(args []value.Value) value.Value {
 		// args: read, write (ignored), err (ignored), timeout
 		if len(args) < 4 {
 			return value.NewNull() // Or error map
@@ -1911,7 +2039,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 	})
 
 	// SQLite Native Functions
-	vm.defineNative("sqlite_open", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_open", func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		} // path, wrapper struct
@@ -1943,7 +2071,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 
-	vm.defineNative("sqlite_close", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_close", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
@@ -1961,7 +2089,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.defineNative("sqlite_exec", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_exec", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()
 		}
@@ -2005,7 +2133,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
-	vm.defineNative("sqlite_exec_params", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_exec_params", func(args []value.Value) value.Value {
 		if len(args) < 4 {
 			return value.NewNull()
 		}
@@ -2076,7 +2204,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
-	vm.defineNative("sqlite_prepare", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_prepare", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()
 		} // db, sql, stmt wrapper
@@ -2128,17 +2256,17 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	}
 
-	vm.defineNative("sqlite_bind_text", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_bind_text", func(args []value.Value) value.Value {
 		return bindFunc(args, args[2].String())
 	})
-	vm.defineNative("sqlite_bind_float", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_bind_float", func(args []value.Value) value.Value {
 		return bindFunc(args, args[2].AsFloat)
 	})
-	vm.defineNative("sqlite_bind_int", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_bind_int", func(args []value.Value) value.Value {
 		return bindFunc(args, args[2].AsInt)
 	})
 
-	vm.defineNative("sqlite_step_exec", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_step_exec", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -2194,7 +2322,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
-	vm.defineNative("sqlite_reset", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_reset", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
@@ -2209,7 +2337,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.defineNative("sqlite_finalize", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_finalize", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
@@ -2226,7 +2354,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.defineNative("sqlite_query", func(args []value.Value) value.Value {
+	vm.DefineNative("sqlite_query", func(args []value.Value) value.Value {
 		if len(args) < 4 {
 			return value.NewNull()
 		} // db, sql, tmplQueryResult, tmplRow
@@ -2327,7 +2455,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
 	})
 
-	vm.defineNative("hex", func(args []value.Value) value.Value {
+	vm.DefineNative("hex", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
@@ -2340,7 +2468,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewString(args[0].String())
 	})
 
-	vm.defineNative("hex_encode", func(args []value.Value) value.Value {
+	vm.DefineNative("hex_encode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewString("")
 		}
@@ -2354,7 +2482,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewString(hex.EncodeToString([]byte(data)))
 	})
 
-	vm.defineNative("hex_decode", func(args []value.Value) value.Value {
+	vm.DefineNative("hex_decode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}
@@ -2365,7 +2493,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewBytes(string(decoded))
 	})
 
-	vm.defineNative("base64_encode", func(args []value.Value) value.Value {
+	vm.DefineNative("base64_encode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewString("")
 		}
@@ -2379,7 +2507,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewString(base64.StdEncoding.EncodeToString([]byte(data)))
 	})
 
-	vm.defineNative("base64_decode", func(args []value.Value) value.Value {
+	vm.DefineNative("base64_decode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}
@@ -2398,7 +2526,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 	// Verb: [a-zA-Z%]
 	fmtVerbRe := regexp.MustCompile(`%([-+ #0]*)(?:(\d+|\*)?)(?:\.(\d+|\*))?([a-zA-Z%])`)
 
-	vm.defineNative("fmt", func(args []value.Value) value.Value {
+	vm.DefineNative("fmt", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
@@ -2556,13 +2684,39 @@ func NewWithConfig(cfg VMConfig) *VM {
 	return vm
 }
 
-func (vm *VM) defineNative(name string, fn value.NativeFunc) {
-	vm.globals[name] = value.NewNative(name, fn)
+func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
+	vm.SetGlobal(name, value.NewNative(name, fn))
+}
+
+func (vm *VM) SetGlobal(name string, val value.Value) {
+	vm.shared.GlobalsLock.Lock()
+	defer vm.shared.GlobalsLock.Unlock()
+	vm.shared.Globals[name] = val
+}
+
+func (vm *VM) GetGlobal(name string) (value.Value, bool) {
+	vm.shared.GlobalsLock.RLock()
+	defer vm.shared.GlobalsLock.RUnlock()
+	val, ok := vm.shared.Globals[name]
+	return val, ok
+}
+
+func (vm *VM) SetModule(name string, val value.Value) {
+	vm.shared.GlobalsLock.Lock()
+	defer vm.shared.GlobalsLock.Unlock()
+	vm.shared.Modules[name] = val
+}
+
+func (vm *VM) GetModule(name string) (value.Value, bool) {
+	vm.shared.GlobalsLock.RLock()
+	defer vm.shared.GlobalsLock.RUnlock()
+	val, ok := vm.shared.Modules[name]
+	return val, ok
 }
 
 func (vm *VM) Interpret(c *chunk.Chunk) error {
-	// Default to VM globals
-	return vm.InterpretWithGlobals(c, vm.globals)
+	// Pass nil to indicate using Shared State Globals
+	return vm.InterpretWithGlobals(c, nil)
 }
 
 func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) error {
@@ -2580,9 +2734,22 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 	frame := &CallFrame{
 		Function: scriptFn,
 		IP:       0,
-		Slots:    1, // Locals start at 1
-		Globals:  globals,
+		Slots:    1,   // Locals start at 1
+		Globals:  nil, // Use nil to force fallback to Shared VM Globals (Locked)
 	}
+	// If globals was specific (not shared), we might want to use it.
+	// But mostly we pass vm.shared.Globals.
+	// If we pass a custom map (e.g. module), we should set it.
+	// HACK: We can check if it's the shared map, but we don't have == on maps.
+	// For now, let's assume if it is NOT vm.shared.Globals (empty logic variables), we use it.
+	// Actually, Interpret passes vm.shared.Globals.
+	// Let's change Interpret to pass nil.
+	if globals != nil && len(globals) > 0 {
+		frame.Globals = globals
+	} else {
+		frame.Globals = nil
+	}
+
 	vm.frames[0] = frame
 	vm.frameCount = 1
 	vm.currentFrame = frame
@@ -2692,7 +2859,7 @@ func (vm *VM) run(minFrameCount int) error {
 			val, ok := frame.Globals[name]
 			if !ok {
 				// Try VM globals (Builtins / Shared)
-				val, ok = vm.globals[name]
+				val, ok = vm.GetGlobal(name)
 				if !ok {
 					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 				}
@@ -2708,7 +2875,7 @@ func (vm *VM) run(minFrameCount int) error {
 			if frame.Globals != nil {
 				frame.Globals[name] = vm.peek(0)
 			} else {
-				vm.globals[name] = vm.peek(0)
+				vm.SetGlobal(name, vm.peek(0))
 			}
 
 		case chunk.OP_GET_LOCAL:
@@ -3171,14 +3338,14 @@ func (vm *VM) run(minFrameCount int) error {
 			moduleName := nameConstant.Obj.(string)
 
 			// Check cache
-			if mod, ok := vm.modules[moduleName]; ok {
+			if mod, ok := vm.GetModule(moduleName); ok {
 				vm.push(mod)
 			} else {
 				mod, err := vm.loadModule(moduleName)
 				if err != nil {
 					return vm.runtimeError(c, ip, "failed to import module '%s': %v", moduleName, err)
 				}
-				vm.modules[moduleName] = mod
+				vm.SetModule(moduleName, mod)
 				vm.push(mod)
 			}
 
@@ -3198,7 +3365,7 @@ func (vm *VM) run(minFrameCount int) error {
 				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
 					for k, v := range modMap.Data {
 						if keyStr, ok := k.(string); ok {
-							vm.globals[keyStr] = v
+							vm.SetGlobal(keyStr, v)
 						}
 					}
 				} else {

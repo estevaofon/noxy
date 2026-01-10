@@ -1,0 +1,73 @@
+use time
+
+// Função Worker: Soma uma parte do array (simulada passando start/end indices? 
+// Não temos slice view barato, então vamos passar o array todo e indices)
+// Ou fatiar antes.
+func sum_worker(arr: int[], start_idx: int, end_idx: int, result_chan: any)
+    let partial_sum: int = 0
+    let i: int = start_idx
+    
+    print(fmt("Worker [%d-%d]: Iniciando soma...", start_idx, end_idx))
+    
+    while i < end_idx do
+        partial_sum = partial_sum + arr[i]
+        i = i + 1
+        // Simula processamento pesado
+        // time.sleep(1) 
+    end
+    
+    print(fmt("Worker [%d-%d]: Concluído. Soma: %d", start_idx, end_idx, partial_sum))
+    send(result_chan, partial_sum)
+end
+
+func main()
+    print("=== Exemplo Soma Paralela ===")
+    
+    // 1. Criar dados (Array de 100 números: 0..99)
+    let data: int[] = []
+    let total_size: int = 100
+    let i: int = 0
+    let expected_sum: int = 0
+    
+    while i < total_size do
+        append(data, i)
+        expected_sum = expected_sum + i
+        i = i + 1
+    end
+    
+    print(fmt("Dados preparados. Tamanho: %d. Soma esperada: %d", total_size, expected_sum))
+    
+    // 2. Preparar canal de resultados
+    let results: any = make_chan(2)
+    
+    // 3. Dividir trabalho em 2 threads
+    let mid: int = total_size / 2
+    
+    // Thread 1: 0 até mid
+    spawn(sum_worker, data, 0, mid, results)
+    
+    // Thread 2: mid até total_size
+    spawn(sum_worker, data, mid, total_size, results)
+    
+    // 4. Agregar resultados
+    let final_sum: int = 0
+    let parts_received: int = 0
+    
+    while parts_received < 2 do
+        let part: any = recv(results)
+        final_sum = final_sum + to_int(part)
+        parts_received = parts_received + 1
+    end
+    
+    // 5. Exibir Resultado
+    print("-------------------------")
+    print(fmt("Soma Paralela Final: %d", final_sum))
+    
+    if final_sum == expected_sum then
+        print("SUCESSO: O resultado está correto!")
+    else
+        print(fmt("ERRO: Esperado %d, obteve %d", expected_sum, final_sum))
+    end
+end
+
+main()
