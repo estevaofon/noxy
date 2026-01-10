@@ -100,14 +100,14 @@ func main()
 
     // Consumer loop
     while true do
+        // Note: is_closed returns true immediately after close, even if buffer has data.
+        // We continue receiving until we get null (EOF).
         let v: any = recv(c)
         if v == null then
-            // Use is_closed to verify if it's really the end of the stream
-            if is_closed(c) then
+             if is_closed(c) then
                 print("Channel closed and empty")
                 break
-            end
-            // Otherwise, it might be just a 'null' value sent
+             end
         end
         print("Received:", v)
     end
