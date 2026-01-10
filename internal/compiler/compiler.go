@@ -567,6 +567,20 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if n.Operator == "==" || n.Operator == "!=" || n.Operator == ">" || n.Operator == "<" || n.Operator == ">=" || n.Operator == "<=" {
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
+
+		// Arithmetic: if either is float, result is float
+		isFloatObj := false
+		if leftType != nil && leftType.String() == "float" {
+			isFloatObj = true
+		}
+		if rightType != nil && rightType.String() == "float" {
+			isFloatObj = true
+		}
+
+		if isFloatObj {
+			return c.currentChunk, &ast.PrimitiveType{Name: "float"}, nil
+		}
+
 		// Match left type (int/int -> int)
 		if c.areTypesCompatible(leftType, rightType) {
 			return c.currentChunk, leftType, nil

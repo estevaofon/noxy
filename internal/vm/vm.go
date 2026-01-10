@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -2389,35 +2390,167 @@ func NewWithConfig(cfg VMConfig) *VM {
 		return value.NewBytes(string(decoded))
 	})
 
+	// Precompile regex for fmt verbs
+	// Matches % [flags] [width] [.prec] verb
+	// Flags: [-+ #0]
+	// Width: \d+ or *
+	// Prec: \. followed by \d+ or *
+	// Verb: [a-zA-Z%]
+	fmtVerbRe := regexp.MustCompile(`%([-+ #0]*)(?:(\d+|\*)?)(?:\.(\d+|\*))?([a-zA-Z%])`)
+
 	vm.defineNative("fmt", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
 		formatStr := args[0].String()
-		fmtArgs := make([]interface{}, len(args)-1)
-		for i, val := range args[1:] {
-			switch val.Type {
-			case value.VAL_INT:
-				fmtArgs[i] = val.AsInt
-			case value.VAL_FLOAT:
-				fmtArgs[i] = val.AsFloat
-			case value.VAL_BOOL:
-				fmtArgs[i] = val.AsBool
-			case value.VAL_NULL:
-				fmtArgs[i] = nil
-			case value.VAL_OBJ:
-				if b, ok := val.Obj.(string); ok {
-					fmtArgs[i] = b
-				} else {
-					fmtArgs[i] = val.String()
-				}
-			case value.VAL_BYTES:
-				fmtArgs[i] = []byte(val.Obj.(string))
-			default:
-				fmtArgs[i] = val.String()
+
+		// Parse fmt string to handle %T specifically
+		// We need to rebuild args and format string
+
+		// Find all verbs
+		matches := fmtVerbRe.FindAllStringSubmatchIndex(formatStr, -1)
+
+		var newArgs []interface{}
+		var newFormatBuilder strings.Builder
+
+		argIdx := 0 // Index into args[1:]
+		lastPos := 0
+
+		argsData := args[1:]
+
+		for _, match := range matches {
+			// match indices: [start, end, f_start, f_end, w_start, w_end, p_start, p_end, v_start, v_end]
+			start, end := match[0], match[1]
+			// verb := formatStr[match[8]:match[9]]
+			// We can get verb char easily
+			verb := formatStr[match[8]] // byte
+
+			// Append text before match
+			newFormatBuilder.WriteString(formatStr[lastPos:start])
+
+			// Determine if we need to consume args
+			if verb == '%' {
+				newFormatBuilder.WriteString("%%")
+				lastPos = end
+				continue
 			}
+
+			// Check if width uses arg
+			// Groups are 1-indexed in concept, but indices array:
+			// 0,1 whole
+			// 2,3 flags (group 1)
+			// 4,5 width (group 2)
+			// 6,7 prec (group 3)
+			// 8,9 verb (group 4)
+
+			widthHasStar := false
+			if match[4] != -1 {
+				wStr := formatStr[match[4]:match[5]]
+				if strings.Contains(wStr, "*") {
+					widthHasStar = true
+				}
+			}
+
+			precHasStar := false
+			if match[6] != -1 {
+				pStr := formatStr[match[6]:match[7]]
+				if strings.Contains(pStr, "*") {
+					precHasStar = true
+				}
+			}
+
+			// Consume args for width/prec
+			if widthHasStar {
+				if argIdx < len(argsData) {
+					newArgs = append(newArgs, argsData[argIdx].AsInt) // Assume int for width
+					argIdx++
+				}
+			}
+			if precHasStar {
+				if argIdx < len(argsData) {
+					newArgs = append(newArgs, argsData[argIdx].AsInt) // Assume int for prec
+					argIdx++
+				}
+			}
+
+			// Now handle the verb and the main arg
+			if argIdx < len(argsData) {
+				val := argsData[argIdx]
+				argIdx++
+
+				if verb == 'T' {
+					// Replace %T with %s and supply type name string
+					newFormatBuilder.WriteString("%s")
+
+					typeName := "unknown"
+					switch val.Type {
+					case value.VAL_INT:
+						typeName = "int"
+					case value.VAL_FLOAT:
+						typeName = "float"
+					case value.VAL_BOOL:
+						typeName = "bool"
+					case value.VAL_NULL:
+						typeName = "null"
+					case value.VAL_BYTES:
+						typeName = "bytes"
+					case value.VAL_FUNCTION:
+						typeName = "function"
+					case value.VAL_NATIVE:
+						typeName = "function"
+					case value.VAL_OBJ:
+						// Determine specific object type
+						if _, ok := val.Obj.(*value.ObjArray); ok {
+							typeName = "array"
+						} else if _, ok := val.Obj.(*value.ObjMap); ok {
+							typeName = "map"
+						} else if inst, ok := val.Obj.(*value.ObjInstance); ok {
+							typeName = inst.Struct.Name
+						} else if _, ok := val.Obj.(*value.ObjStruct); ok {
+							typeName = "struct" // Class definition
+						} else if _, ok := val.Obj.(string); ok {
+							typeName = "string"
+						} else {
+							typeName = fmt.Sprintf("%T", val.Obj)
+						}
+					}
+					newArgs = append(newArgs, typeName)
+				} else {
+					// Keep original verb sequence (including flags/width/prec)
+					newFormatBuilder.WriteString(formatStr[start:end])
+
+					// Add argument, potentially wrapped or raw
+					switch val.Type {
+					case value.VAL_INT:
+						newArgs = append(newArgs, val.AsInt)
+					case value.VAL_FLOAT:
+						newArgs = append(newArgs, val.AsFloat)
+					case value.VAL_BOOL:
+						newArgs = append(newArgs, val.AsBool)
+					case value.VAL_NULL:
+						newArgs = append(newArgs, nil)
+					case value.VAL_OBJ:
+						// Pass raw object
+						newArgs = append(newArgs, val.Obj)
+					case value.VAL_BYTES:
+						newArgs = append(newArgs, value.BytesWrapper{Str: val.Obj.(string)})
+					default:
+						newArgs = append(newArgs, val.String())
+					}
+				}
+			} else {
+				// Not enough args? Just append remainder as literal?
+				// Or Go fmt will print %!(MISSING)
+				newFormatBuilder.WriteString(formatStr[start:end])
+			}
+
+			lastPos = end
 		}
-		return value.NewString(fmt.Sprintf(formatStr, fmtArgs...))
+
+		// Append remaining format
+		newFormatBuilder.WriteString(formatStr[lastPos:])
+
+		return value.NewString(fmt.Sprintf(newFormatBuilder.String(), newArgs...))
 	})
 
 	return vm

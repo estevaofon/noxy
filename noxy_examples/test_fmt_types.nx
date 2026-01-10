@@ -1,0 +1,79 @@
+
+print("--- TESTE DE TIPOS COM FMT (%T) ---")
+
+// 1. Arrays
+let arr: int[] = [1, 2, 3]
+let typeArr: string = fmt("%T", arr)
+print(fmt("Array: %s", typeArr))
+if typeArr != "array" then
+    print(fmt("ERRO: Esperado 'array', recebido '%s'", typeArr))
+    exit(1)
+end
+
+// 2. Maps
+let m: map[string, int]
+m["a"] = 1
+let typeMap: string = fmt("%T", m)
+print(fmt("Map: %s", typeMap))
+if typeMap != "map" then
+    print(fmt("ERRO: Esperado 'map', recebido '%s'", typeMap))
+    exit(1)
+end
+
+// 3. Structs / Instances
+struct Point
+    x: int
+    y: int
+end
+let p: Point = Point(10, 20)
+let typeInst: string = fmt("%T", p)
+print(fmt("Instance: %s", typeInst))
+if typeInst != "Point" then
+    print(fmt("ERRO: Esperado 'Point', recebido '%s'", typeInst))
+    exit(1)
+end
+
+// 4. Bytes
+let b: bytes = to_bytes("ABC")
+let typeBytes: string = fmt("%T", b)
+print(fmt("Bytes: %s", typeBytes))
+if typeBytes != "bytes" then
+    print(fmt("ERRO: Esperado 'bytes', recebido '%s'", typeBytes))
+    exit(1)
+end
+
+// 5. Primitives
+// Int
+let typeInt: string = fmt("%T", 123)
+print(fmt("Int: %s", typeInt))
+if typeInt != "int" then // Assuming "int" from my switch case logic
+    print(fmt("ERRO: Esperado 'int', recebido '%s'", typeInt))
+    exit(1)
+end
+
+// Float
+let typeFloat: string = fmt("%T", 12.34)
+print(fmt("Float: %s", typeFloat))
+if typeFloat != "float" then
+    print(fmt("ERRO: Esperado 'float', recebido '%s'", typeFloat))
+    exit(1)
+end
+
+// Bool
+let typeBool: string = fmt("%T", true)
+print(fmt("Bool: %s", typeBool))
+if typeBool != "bool" then
+    print(fmt("ERRO: Esperado 'bool', recebido '%s'", typeBool))
+    exit(1)
+end
+
+// Functions
+// Function type name might be 'function' based on my swtich case
+let typeFn: string = fmt("%T", print)
+print(fmt("Function: %s", typeFn))
+if typeFn != "function" then
+    print(fmt("ERRO: Esperado 'function', recebido '%s'", typeFn))
+    exit(1)
+end
+
+print("--- TODOS OS TESTES PASSARAM ---")

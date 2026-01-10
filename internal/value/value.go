@@ -68,6 +68,17 @@ func (oa *ObjArray) String() string {
 	return s
 }
 
+func (oa *ObjArray) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "array")
+	case 's', 'v':
+		fmt.Fprint(f, oa.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjArray=%s)", verb, oa.String())
+	}
+}
+
 type ObjMap struct {
 	Data map[interface{}]Value
 }
@@ -86,6 +97,17 @@ func (om *ObjMap) String() string {
 	return s
 }
 
+func (om *ObjMap) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "map")
+	case 's', 'v':
+		fmt.Fprint(f, om.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjMap=%s)", verb, om.String())
+	}
+}
+
 type ObjStruct struct {
 	Name   string
 	Fields []string
@@ -95,6 +117,17 @@ func (os *ObjStruct) String() string {
 	return fmt.Sprintf("<struct %s>", os.Name)
 }
 
+func (os *ObjStruct) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "struct definition") // Or just "struct"
+	case 's', 'v':
+		fmt.Fprint(f, os.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjStruct=%s)", verb, os.String())
+	}
+}
+
 type ObjInstance struct {
 	Struct *ObjStruct
 	Fields map[string]Value
@@ -102,6 +135,17 @@ type ObjInstance struct {
 
 func (oi *ObjInstance) String() string {
 	return fmt.Sprintf("<%s instance>", oi.Struct.Name)
+}
+
+func (oi *ObjInstance) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, oi.Struct.Name)
+	case 's', 'v':
+		fmt.Fprint(f, oi.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjInstance=%s)", verb, oi.String())
+	}
 }
 
 func (v Value) String() string {
@@ -204,4 +248,23 @@ func NewNative(name string, fn NativeFunc) Value {
 
 func NewBytes(v string) Value {
 	return Value{Type: VAL_BYTES, Obj: v}
+}
+
+type BytesWrapper struct {
+	Str string
+}
+
+func (bw BytesWrapper) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "bytes")
+	case 's', 'v':
+		fmt.Fprint(f, bw.Str)
+	case 'q':
+		fmt.Fprintf(f, "%q", bw.Str)
+	case 'x':
+		fmt.Fprintf(f, "%x", bw.Str)
+	default:
+		fmt.Fprintf(f, "%%!%c(bytes=%s)", verb, bw.Str)
+	}
 }
