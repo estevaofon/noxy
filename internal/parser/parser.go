@@ -48,7 +48,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.REF, p.parsePrefixExpression)
 	p.registerPrefix(token.BIT_NOT, p.parsePrefixExpression)
 	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
-	// p.registerPrefix(token.FUNC, p.parseFunctionLiteral) // Removed. Func is statement now.
+	p.registerPrefix(token.FUNC, p.parseFunctionLiteral)
 
 	p.registerPrefix(token.PERCENT, p.parseGroupedExpression) // Grouped expression logic for PERCENT? No.
 	// Oh wait, I registered PERCENT for infix above in previous steps.
@@ -589,6 +589,8 @@ func (p *Parser) parseType() ast.NoxyType {
 		t = &ast.PrimitiveType{Name: "bool"}
 	case token.TYPE_BYTES:
 		t = &ast.PrimitiveType{Name: "bytes"}
+	case token.FUNC:
+		t = &ast.PrimitiveType{Name: "func"} // Generic function type
 	case token.BYTES: // This is Literal 'b"..."'.
 		// Shouldn't be here in parseType.
 		// But wait, declaration says ": bytes".
@@ -964,12 +966,7 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	p.nextToken()
 
 	for !p.curTokenIs(token.END) && !p.curTokenIs(token.ELSE) && !p.curTokenIs(token.ELIF) && !p.curTokenIs(token.EOF) {
-		if p.curTokenIs(token.FUNC) || p.curTokenIs(token.STRUCT) {
-			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unexpected %q, expected 'end'",
-				p.curToken.Line, p.curToken.Column, p.curToken.Literal))
-			// Stop parsing this block to prevent consuming the next function
-			break
-		}
+		// Removed check for FUNC/STRUCT to allow nested definitions (closures)
 
 		stmt := p.parseStatement()
 		if stmt != nil {
@@ -1059,15 +1056,48 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 			p.curToken.Line, p.curToken.Column, got))
 		return nil
 	}
-	// Consume END
-	// p.nextToken() // Actually parseBlockStatement stops AT end.
-	// But `parseFunctionStatement` ends here.
-	// The next statement parsing will call `nextToken` at start of loop?
-	// `ParseProgram` loop: `p.nextToken()` at end of loop.
-	// So if we leave `curToken` as `END`, next iteration calls `nextToken` and gets whatever is next.
-	// That seems correct.
 
 	return stmt
+}
+
+func (p *Parser) parseFunctionLiteral() ast.Expression {
+	lit := &ast.FunctionLiteral{Token: p.curToken}
+
+	// Optional Name (e.g. func myName(...) ...)
+	if p.peekTokenIs(token.IDENTIFIER) {
+		p.nextToken()
+		lit.Name = p.curToken.Literal
+	}
+
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+
+	errCountBefore := len(p.errors)
+	lit.Parameters = p.parseFunctionParameters()
+
+	if lit.Parameters == nil && len(p.errors) > errCountBefore {
+		p.skipUntilEnd()
+		return nil
+	}
+
+	// Return type
+	if p.peekTokenIs(token.ARROW) {
+		p.nextToken() // eat )
+		p.nextToken() // eat ->
+		p.parseType()
+	}
+
+	lit.Body = p.parseBlockStatement()
+
+	if !p.curTokenIs(token.END) {
+		got := p.curToken.Literal
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', found %s",
+			p.curToken.Line, p.curToken.Column, got))
+		return nil
+	}
+
+	return lit
 }
 
 func (p *Parser) parseFunctionParameters() []*ast.Parameter {

@@ -1,0 +1,26 @@
+// Basic closure
+func makeCounter() -> func
+  let count: int = 0
+  return func() -> int
+    count = count + 1
+    return count
+  end
+end
+
+let c1: func = makeCounter()
+let c2: func = makeCounter()
+
+print(c1()) // 1
+print(c1()) // 2
+print(c2()) // 1
+print(c1()) // 3
+
+// Close upvalue test
+func outer()
+  let x: string = "outside"
+  func inner()
+    print(x)
+  end
+  inner()
+end
+outer()

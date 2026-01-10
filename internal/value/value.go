@@ -33,11 +33,32 @@ type ParamInfo struct {
 }
 
 type ObjFunction struct {
-	Name    string
-	Arity   int
-	Params  []ParamInfo
-	Chunk   interface{}
-	Globals map[string]Value // Module/Context globals
+	Name         string
+	Arity        int
+	UpvalueCount int // Added for Closures
+	Params       []ParamInfo
+	Chunk        interface{}
+	Globals      map[string]Value // Module/Context globals
+}
+
+type ObjUpvalue struct {
+	Location *Value // Pointer to stack variable or Closed field
+	Closed   Value  // The closed value
+	Next     *ObjUpvalue
+}
+
+type ObjClosure struct {
+	Function *ObjFunction
+	Upvalues []*ObjUpvalue
+	Globals  map[string]Value // Context globals
+}
+
+func (oc *ObjClosure) String() string {
+	return fmt.Sprintf("<fn %s>", oc.Function.Name)
+}
+
+func (oc *ObjClosure) Format(f fmt.State, verb rune) {
+	fmt.Fprint(f, oc.String())
 }
 
 type NativeFunc func(args []Value) Value
@@ -222,7 +243,14 @@ func (v Value) String() string {
 			return fmt.Sprintf("%v", v.Obj)
 		}
 	case VAL_FUNCTION:
-		return fmt.Sprintf("<fn %s>", v.Obj.(*ObjFunction).Name)
+		// Check if it's ObjFunction or ObjClosure (if we share tag)
+		if fn, ok := v.Obj.(*ObjFunction); ok {
+			return fmt.Sprintf("<fn %s>", fn.Name)
+		}
+		if cl, ok := v.Obj.(*ObjClosure); ok {
+			return fmt.Sprintf("<fn %s>", cl.Function.Name)
+		}
+		return "<fn unknown>"
 	case VAL_NATIVE:
 		return fmt.Sprintf("<native fn %s>", v.Obj.(*ObjNative).Name)
 	case VAL_BYTES:
@@ -281,12 +309,39 @@ func NewInstance(def *ObjStruct) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
-func NewFunction(name string, arity int, params []ParamInfo, chunk interface{}, globals map[string]Value) Value {
+func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, globals map[string]Value) Value {
 	return Value{
 		Type: VAL_FUNCTION,
-		Obj:  &ObjFunction{Name: name, Arity: arity, Params: params, Chunk: chunk, Globals: globals},
+		Obj:  &ObjFunction{Name: name, Arity: arity, UpvalueCount: upvalueCount, Params: params, Chunk: chunk, Globals: globals},
 	}
 }
+
+func NewClosure(fn *ObjFunction) Value {
+	return Value{
+		Type: VAL_FUNCTION, // Reuse VAL_FUNCTION to mean "Callable" (VM will assume ObjClosure or handle translation?)
+		// Wait, if I reuse VAL_FUNCTION, then Obj must be ObjClosure wrapper.
+		// But existing code expects ObjFunction.
+		// If I strictly wrap, I must update all casts.
+		// Alternatively, VAL_FUNCTION remains ObjFunction, and VAL_CLOSURE is new.
+		// But closures ARE the main way functions exist at runtime.
+		// Let's use VAL_CLOSURE for runtime closures.
+		// VAL_FUNCTION remains for compile-time constants (prototypes).
+		// When VM executes call, it expects CLOSURE? Or Both?
+		// Both is messy.
+		// Better: VM expects VAL_CLOSURE.
+		// When loading a function constant, we wrap it in a Closure if it has 0 upvalues?
+		// Or OP_CLOSURE instruction creates the closure.
+		// So runtime stack always has VAL_CLOSURE for user functions.
+		// 'spawn' expects function. Should handle closure.
+		Obj: &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount)},
+	}
+}
+
+// Note: If I reuse VAL_FUNCTION tag for ObjClosure, I MUST update all `v.Obj.(*ObjFunction)` casts.
+// This is a big refactor.
+// To minimize diff, I can keep VAL_FUNCTION as ObjFunction and add VAL_CLOSURE.
+// But calling logic needs to handle both or just one.
+// Let's TRY to add VAL_CLOSURE tag.
 
 func NewNative(name string, fn NativeFunc) Value {
 	return Value{

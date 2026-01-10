@@ -9,9 +9,10 @@ import (
 )
 
 type Local struct {
-	Name  string
-	Depth int
-	Type  ast.NoxyType
+	Name       string
+	Depth      int
+	Type       ast.NoxyType
+	IsCaptured bool
 }
 
 type Loop struct {
@@ -19,10 +20,17 @@ type Loop struct {
 	BreakJumps      []int
 }
 
+type Upvalue struct {
+	Index   uint8
+	IsLocal bool
+}
+
 type Compiler struct {
+	enclosing    *Compiler
 	currentChunk *chunk.Chunk
 	locals       []Local
 	globals      map[string]ast.NoxyType
+	upvalues     []Upvalue
 	scopeDepth   int
 	loops        []*Loop
 	currentLine  int // Track current source line for error messages
@@ -34,12 +42,27 @@ func New() *Compiler {
 
 func NewWithState(globals map[string]ast.NoxyType) *Compiler {
 	return &Compiler{
+		enclosing:    nil,
 		currentChunk: chunk.New(),
 		locals:       []Local{},
 		globals:      globals,
+		upvalues:     []Upvalue{},
 		scopeDepth:   0,
 		loops:        []*Loop{},
 		currentLine:  1,
+	}
+}
+
+func NewChild(parent *Compiler) *Compiler {
+	return &Compiler{
+		enclosing:    parent,
+		currentChunk: chunk.New(),
+		locals:       []Local{},
+		globals:      parent.globals, // Share globals (or copy? Share reference is correct for global scope)
+		upvalues:     []Upvalue{},
+		scopeDepth:   0,
+		loops:        []*Loop{},
+		currentLine:  parent.currentLine,
 	}
 }
 
@@ -149,6 +172,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 				}
 				c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+				c.emitByte(byte(chunk.OP_POP))
+			} else if arg := c.resolveUpvalue(ident.Value); arg != -1 {
+				// Upvalue Logic
+				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
 				// Global Logic
@@ -405,6 +432,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if arg, t := c.resolveLocal(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(arg))
 			return c.currentChunk, t, nil
+		} else if arg := c.resolveUpvalue(n.Value); arg != -1 {
+			c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(arg))
+			return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil // Types for upvalues not tracked yet
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Value))
@@ -1129,39 +1159,26 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.FunctionStatement:
 		c.setLine(n.Token.Line)
-		// Create new compiler
-		fnCompiler := New()
-		fnCompiler.scopeDepth = 1 // Inside function body
 
-		// Reserve slot 0 for function instance (recursion/closures)
-		fnCompiler.addLocal("", nil)
-
-		// Add parameters as locals
-		paramsInfo := []value.ParamInfo{}
-		for _, param := range n.Parameters {
-			fnCompiler.addLocal(param.Name, param.Type)
-			isRef := false
-			if _, ok := param.Type.(*ast.RefType); ok {
-				isRef = true
-			}
-			paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
-		}
-
-		_, _, err := fnCompiler.Compile(n.Body)
+		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// Implicit return null if end of function
-		fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
+		funcIndex := c.makeConstant(fnObj)
+		c.emitBytes(byte(chunk.OP_CLOSURE), byte(funcIndex))
 
-		// Create Function Object
-		fnObj := value.NewFunction(n.Name, len(n.Parameters), paramsInfo, fnCompiler.currentChunk, nil)
+		// Emit upvalue bytes
+		for _, up := range fnCompiler.upvalues {
+			isLocal := byte(0)
+			if up.IsLocal {
+				isLocal = 1
+			}
+			c.emitByte(isLocal)
+			c.emitByte(up.Index)
+		}
 
-		// Emit Constant for Function
-		c.emitConstant(fnObj)
-
-		funcType := &ast.PrimitiveType{Name: "func"} // Dummy
+		funcType := &ast.PrimitiveType{Name: "func"}
 
 		// Store in Global
 		c.globals[n.Name] = funcType
@@ -1171,6 +1188,33 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.emitByte(byte(chunk.OP_POP))
 
 		return c.currentChunk, nil, nil
+
+	case *ast.FunctionLiteral:
+		c.setLine(n.Token.Line)
+
+		fnName := n.Name
+		if fnName == "" {
+			fnName = "anonymous"
+		}
+
+		fnObj, fnCompiler, err := c.compileFunction(fnName, n.Parameters, n.Body)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		funcIndex := c.makeConstant(fnObj)
+		c.emitBytes(byte(chunk.OP_CLOSURE), byte(funcIndex))
+
+		for _, up := range fnCompiler.upvalues {
+			isLocal := byte(0)
+			if up.IsLocal {
+				isLocal = 1
+			}
+			c.emitByte(isLocal)
+			c.emitByte(up.Index)
+		}
+
+		return c.currentChunk, &ast.PrimitiveType{Name: "func"}, nil
 
 	case *ast.BlockStatement:
 		c.beginScope()
@@ -1280,7 +1324,11 @@ func (c *Compiler) endScope() {
 	c.scopeDepth--
 	// Pop locals from stack
 	for len(c.locals) > 0 && c.locals[len(c.locals)-1].Depth > c.scopeDepth {
-		c.emitByte(byte(chunk.OP_POP))
+		if c.locals[len(c.locals)-1].IsCaptured {
+			c.emitByte(byte(chunk.OP_CLOSE_UPVALUE))
+		} else {
+			c.emitByte(byte(chunk.OP_POP))
+		}
 		c.locals = c.locals[:len(c.locals)-1]
 	}
 }
@@ -1371,4 +1419,73 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	}
 
 	return false
+}
+
+func (c *Compiler) resolveUpvalue(name string) int {
+	if c.enclosing == nil {
+		return -1
+	}
+
+	// 1. Check immediate parent's locals
+	local, _ := c.enclosing.resolveLocal(name)
+	if local != -1 {
+		c.enclosing.locals[local].IsCaptured = true // Mark as captured!
+		return c.addUpvalue(uint8(local), true)
+	}
+
+	// 2. Check immediate parent's upvalues
+	upvalue := c.enclosing.resolveUpvalue(name)
+	if upvalue != -1 {
+		return c.addUpvalue(uint8(upvalue), false)
+	}
+
+	return -1
+}
+
+func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
+	// Check for existing upvalue
+	for i, u := range c.upvalues {
+		if u.Index == index && u.IsLocal == isLocal {
+			return i
+		}
+	}
+
+	if len(c.upvalues) >= 255 {
+		// Error: too many upvalues
+		// We'll panic or handle error gracefully?
+		// For now, simple return error index or panic for dev.
+		// Returning 255 might be safe if we check.
+	}
+
+	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal})
+	return len(c.upvalues) - 1
+}
+
+func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement) (value.Value, *Compiler, error) {
+	fnCompiler := NewChild(c)
+	fnCompiler.scopeDepth = 1    // Inside function body
+	fnCompiler.addLocal("", nil) // Reserve slot 0 for function instance
+
+	paramsInfo := []value.ParamInfo{}
+	for _, param := range params {
+		fnCompiler.addLocal(param.Name, param.Type)
+		isRef := false
+		if _, ok := param.Type.(*ast.RefType); ok {
+			isRef = true
+		}
+		paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
+	}
+
+	_, _, err := fnCompiler.Compile(body)
+	if err != nil {
+		return value.Value{}, nil, err
+	}
+
+	// Implicit return null
+	fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
+
+	upvalueCount := len(fnCompiler.upvalues)
+	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
+
+	return fnObj, fnCompiler, nil
 }

@@ -21,7 +21,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 |----------|----------|
 | Declarations | `let`, `global`, `func`, `struct` |
 | Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in` |
-| Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes` |
+| Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
 | Specials | `zeros` |
@@ -153,6 +153,18 @@ Variables can be reassigned, but the new value **MUST** be of the same type as d
 func name(param1: type1, param2: type2) -> returnType
     // body
     return value
+end
+
+// Anonymous Function / Closure
+let adder: func = func(x: int) -> int
+    return x + 1
+end
+
+// Nested Functions
+func makeAdder(x: int) -> func
+    return func(y: int) -> int
+        return x + y // Captures 'x'
+    end
 end
 ```
 

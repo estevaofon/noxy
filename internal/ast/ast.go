@@ -352,6 +352,23 @@ func (fs *FunctionStatement) String() string {
 	return "func " + fs.Name + "(" + strings.Join(params, ", ") + ") " + fs.Body.String()
 }
 
+type FunctionLiteral struct {
+	Token      token.Token // The 'func' token
+	Parameters []*Parameter
+	Body       *BlockStatement
+	Name       string // Optional, empty for anonymous
+}
+
+func (fl *FunctionLiteral) expressionNode()      {}
+func (fl *FunctionLiteral) TokenLiteral() string { return fl.Token.Literal }
+func (fl *FunctionLiteral) String() string {
+	var params []string
+	for _, p := range fl.Parameters {
+		params = append(params, p.String())
+	}
+	return "func(" + strings.Join(params, ", ") + ") " + fl.Body.String()
+}
+
 type CallExpression struct {
 	Token     token.Token // The '(' token
 	Function  Expression  // Identifier or FunctionStatement

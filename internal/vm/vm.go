@@ -41,10 +41,10 @@ func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interf
 }
 
 type CallFrame struct {
-	Function *value.ObjFunction
-	IP       int
-	Slots    int                    // Offset in stack where this frame's locals start
-	Globals  map[string]value.Value // Globals visible to this frame
+	Closure *value.ObjClosure
+	IP      int
+	Slots   int                    // Offset in stack where this frame's locals start
+	Globals map[string]value.Value // Globals visible to this frame
 }
 
 type SharedState struct {
@@ -89,6 +89,8 @@ type VM struct {
 	nextNetID        int
 
 	LastPopped value.Value
+
+	openUpvalues *value.ObjUpvalue // Head of linked list of open upvalues
 }
 
 type VMConfig struct {
@@ -154,8 +156,17 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		threadVM := NewWithShared(vm.shared, vm.Config)
 
 		// Setup execution
-		// We manually set up the first frame as if called
-		fnObj := fnVal.Obj.(*value.ObjFunction)
+		var closure *value.ObjClosure
+		if cl, ok := fnVal.Obj.(*value.ObjClosure); ok {
+			closure = cl
+		} else if fn, ok := fnVal.Obj.(*value.ObjFunction); ok {
+			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}}
+		} else {
+			fmt.Println("Runtime Error: spawn expects a function or closure")
+			return value.NewNull()
+		}
+
+		fnObj := closure.Function
 
 		// Check arity
 		if len(threadArgs) != fnObj.Arity {
@@ -173,10 +184,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		// Create Frame
 		frame := &CallFrame{
-			Function: fnObj,
-			IP:       0,
-			Slots:    0,   // Function is at 0
-			Globals:  nil, // Use shared globals (or fnObj.Globals if closures supported fully)
+			Closure: closure,
+			IP:      0,
+			Slots:   0,
+			Globals: nil,
 		}
 
 		// Map closure globals if present?
@@ -2813,14 +2824,15 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 	}
 
 	vm.stackTop = 0
-	vm.push(value.NewFunction("script", 0, nil, c, globals)) // Push script function to stack slot 0
+	vm.push(value.NewFunction("script", 0, 0, nil, c, globals)) // Push script function to stack slot 0
 
 	// Call frame for script
+	scriptClosure := &value.ObjClosure{Function: scriptFn, Upvalues: []*value.ObjUpvalue{}, Globals: globals}
 	frame := &CallFrame{
-		Function: scriptFn,
-		IP:       0,
-		Slots:    1,   // Locals start at 1
-		Globals:  nil, // Use nil to force fallback to Shared VM Globals (Locked)
+		Closure: scriptClosure,
+		IP:      0,
+		Slots:   1,   // Locals start at 1
+		Globals: nil, // Use nil to force fallback to Shared VM Globals (Locked)
 	}
 	// If globals was specific (not shared), we might want to use it.
 	// But mostly we pass vm.shared.Globals.
@@ -2845,7 +2857,7 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 func (vm *VM) run(minFrameCount int) error {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
-	c := frame.Function.Chunk.(*chunk.Chunk)
+	c := frame.Closure.Function.Chunk.(*chunk.Chunk)
 	ip := frame.IP
 
 	for {
@@ -3383,8 +3395,49 @@ func (vm *VM) run(minFrameCount int) error {
 			}
 			// Update cached frame
 			frame = vm.currentFrame // Switch to new frame
-			c = frame.Function.Chunk.(*chunk.Chunk)
+			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
+
+		case chunk.OP_CLOSURE:
+			idx := c.Code[ip]
+			ip++
+			fnVal := c.Constants[idx]
+			fn := fnVal.Obj.(*value.ObjFunction)
+
+			closure := &value.ObjClosure{
+				Function: fn,
+				Upvalues: make([]*value.ObjUpvalue, fn.UpvalueCount),
+				Globals:  frame.Globals,
+			}
+
+			for i := 0; i < fn.UpvalueCount; i++ {
+				isLocal := c.Code[ip]
+				ip++
+				index := c.Code[ip]
+				ip++
+
+				if isLocal == 1 {
+					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[frame.Slots+int(index)])
+				} else {
+					closure.Upvalues[i] = frame.Closure.Upvalues[index]
+				}
+			}
+			vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: closure})
+
+		case chunk.OP_GET_UPVALUE:
+			slot := c.Code[ip]
+			ip++
+			val := *frame.Closure.Upvalues[slot].Location
+			vm.push(val)
+
+		case chunk.OP_SET_UPVALUE:
+			slot := c.Code[ip]
+			ip++
+			*frame.Closure.Upvalues[slot].Location = vm.peek(0)
+
+		case chunk.OP_CLOSE_UPVALUE:
+			vm.closeUpvalue(&vm.stack[vm.stackTop-1])
+			vm.pop()
 
 		case chunk.OP_RETURN:
 			// Return from function
@@ -3398,6 +3451,7 @@ func (vm *VM) run(minFrameCount int) error {
 			// calleeFrame.Slots points to the function object itself.
 			// We iterate up to stackTop (which is where result WAS before pop).
 			for i := calleeFrame.Slots; i < vm.stackTop; i++ {
+				vm.closeUpvalue(&vm.stack[i]) // Close any upvalues pointing to this slot
 				vm.stack[i] = value.Value{}
 			}
 
@@ -3427,7 +3481,7 @@ func (vm *VM) run(minFrameCount int) error {
 			vm.stackTop = calleeFrame.Slots // Drop args/locals/function from stackTop
 			vm.push(result)                 // Push result replacing the function
 
-			c = frame.Function.Chunk.(*chunk.Chunk)
+			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
 
 		case chunk.OP_ARRAY:
@@ -3696,7 +3750,7 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 		}
 	}
 	if callee.Type == value.VAL_FUNCTION {
-		return vm.call(callee.Obj.(*value.ObjFunction), argCount, c, ip)
+		return vm.call(callee.Obj.(*value.ObjClosure), argCount, c, ip)
 	}
 	if callee.Type == value.VAL_NATIVE {
 		native := callee.Obj.(*value.ObjNative)
@@ -3710,8 +3764,10 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 	return false, vm.runtimeError(c, ip, "can only call functions and classes")
 }
 
-func (vm *VM) call(fn *value.ObjFunction, argCount int, c *chunk.Chunk, ip int) (bool, error) {
+func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	// fmt.Printf("Calling function %s, code len: %d\n", fn.Name, len(chunk.Code))
+
+	fn := closure.Function
 
 	if argCount != fn.Arity {
 		return false, vm.runtimeError(c, ip, "expected %d arguments but got %d", fn.Arity, argCount)
@@ -3736,10 +3792,10 @@ func (vm *VM) call(fn *value.ObjFunction, argCount int, c *chunk.Chunk, ip int) 
 	}
 
 	frame := &CallFrame{
-		Function: fn,
-		IP:       0,
-		Slots:    vm.stackTop - argCount - 1, // Start of locals window (fn + args)
-		Globals:  fn.Globals,
+		Closure: closure,
+		IP:      0,
+		Slots:   vm.stackTop - argCount - 1, // Start of locals window (fn + args)
+		Globals: closure.Globals,
 	}
 	// Push new frame
 	vm.frames[vm.frameCount] = frame
@@ -3897,7 +3953,8 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 				Chunk:   chunk,
 				Globals: moduleGlobals,
 			}
-			modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modFn}
+			modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Globals: moduleGlobals}
+			modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modClosure}
 			vm.push(modVal)
 			if ok, err := vm.callValue(modVal, 0, nil, 0); !ok {
 				return value.NewNull(), err
@@ -3976,7 +4033,8 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 		Chunk:   chunk,
 		Globals: moduleGlobals,
 	}
-	modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modFn}
+	modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Globals: moduleGlobals}
+	modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modClosure}
 
 	// Execute Module Synchronously
 	vm.push(modVal)
@@ -4001,5 +4059,49 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 
 func (vm *VM) peek(distance int) value.Value {
 	return vm.stack[vm.stackTop-1-distance]
+}
 
+// captureUpvalue finds or creates an open upvalue for the given stack slot.
+func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
+	// var prevUpvalue *value.ObjUpvalue // Unused for now
+	upvalue := vm.openUpvalues
+
+	// Walk list
+	for upvalue != nil && upvalue.Location != local {
+		// prevUpvalue = upvalue
+		upvalue = upvalue.Next
+	}
+
+	if upvalue != nil && upvalue.Location == local {
+		return upvalue
+	}
+
+	createdUpvalue := &value.ObjUpvalue{
+		Location: local,
+		Next:     vm.openUpvalues,
+	}
+	vm.openUpvalues = createdUpvalue
+
+	return createdUpvalue
+}
+
+func (vm *VM) closeUpvalue(slot *value.Value) {
+	var prev *value.ObjUpvalue
+	curr := vm.openUpvalues
+
+	for curr != nil {
+		if curr.Location == slot {
+			curr.Closed = *slot          // Copy value to heap
+			curr.Location = &curr.Closed // Point to heap
+
+			if prev == nil {
+				vm.openUpvalues = curr.Next
+			} else {
+				prev.Next = curr.Next
+			}
+			return
+		}
+		prev = curr
+		curr = curr.Next
+	}
 }
