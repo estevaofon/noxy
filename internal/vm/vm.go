@@ -3168,7 +3168,16 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				return vm.runtimeError(c, ip, "operands for %% must be integers")
 			}
-			// OP_MOD_INT case removed as optimization was unstable
+		case chunk.OP_MOD_INT:
+			// Inline pop/pop/push
+			b := vm.stack[vm.stackTop-1].AsInt
+			a := vm.stack[vm.stackTop-2].AsInt
+			if b == 0 {
+				return vm.runtimeError(c, ip, "modulo by zero")
+			}
+			vm.stack[vm.stackTop-2] = value.NewInt(a % b)
+			vm.stack[vm.stackTop-1] = value.Value{}
+			vm.stackTop--
 
 		case chunk.OP_BIT_AND:
 			b := vm.pop()

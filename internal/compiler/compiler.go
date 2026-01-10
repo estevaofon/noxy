@@ -558,7 +558,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		case ">>":
 			c.emitByte(byte(chunk.OP_SHIFT_RIGHT))
 		case "%":
-			c.emitByte(byte(chunk.OP_MODULO))
+			if isInt {
+				c.emitByte(byte(chunk.OP_MOD_INT))
+			} else {
+				c.emitByte(byte(chunk.OP_MODULO))
+			}
 		default:
 			return nil, nil, fmt.Errorf("unknown operator %s", n.Operator)
 		}

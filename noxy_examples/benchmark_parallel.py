@@ -1,6 +1,7 @@
 import time
 import threading
 import queue
+import sys
 
 def is_prime(n):
     if n <= 1: return False
@@ -23,7 +24,7 @@ def main():
     print("Python Benchmark: Primes Parallel (Threading)")
     start_time = time.time() * 1000
     
-    limit = 1000000
+    limit = 10000000
     num_threads = 4
     range_size = limit // num_threads
     q = queue.Queue()
@@ -49,3 +50,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+    if sys._is_gil_enabled():
+        print("GIL is enabled")
+    else:
+        print("GIL is disabled (free-threading build active)")
