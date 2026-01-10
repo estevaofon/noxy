@@ -76,6 +76,49 @@ func main()
 end
 ```
 
+### Closing Channels
+
+Closing a channel indicates that no more values will be sent. This is useful to signal completion to receivers.
+
+1.  **Sending**: You cannot send to a closed channel (it will panic or error).
+2.  **Receiving**:
+    *   Receivers can continuing reading values that were already sent (buffered).
+    *   Once the channel is empty and closed, `recv` returns `null`.
+    *   Looping over a channel often checks for `null` to exit.
+3.  **State**: Use `is_closed(ch)` to check the state safely.
+
+```noxy
+func producer(c: any)
+    send(c, 1)
+    send(c, 2)
+    close(c) // Signal end
+end
+
+func main()
+    let c: any = make_chan(2)
+    spawn(producer, c)
+
+    // Consumer loop
+    while true do
+        let v: any = recv(c)
+        if v == null then
+            // Use is_closed to verify if it's really the end of the stream
+            if is_closed(c) then
+                print("Channel closed and empty")
+                break
+            end
+            // Otherwise, it might be just a 'null' value sent
+        end
+        print("Received:", v)
+    end
+end
+```
+
+> [!NOTE]
+> Since `null` can be a valid value sent over a channel, `recv` returning `null` is ambiguous (it could be a value or EOF).
+> - If you send `null` values, consider wrapping them or using a unique sentinel object to distinguish data from EOF.
+> - `is_closed(c)` returns `true` as soon as `close` is called, even if the buffer still has data.
+
 ### Unbuffered vs Buffered
 
 *   **Unbuffered (`size=0`)**: The sender blocks until the receiver is ready to receive. The receiver blocks until the sender is ready to send. This provides implicit synchronization.

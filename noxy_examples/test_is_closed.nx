@@ -8,13 +8,15 @@ print("Closed initially?", is_closed(ch)) // Expected: false
 send(ch, 1)
 close(ch)
 
-print("Closed after close(ch)?", is_closed(ch)) // Expected: true
+print("Closed after close(ch) but with data?", is_closed(ch)) // Expected: true
 print("Double close safety test...")
-close(ch) // Should not panic
-print("Still closed?", is_closed(ch)) // Expected: true
+close(ch)
+print("Still true?", is_closed(ch)) // Expected: true
 
-// Recv still works?
+// Recv value
 print("Recv value:", recv(ch)) // 1
+print("Closed now (empty)?", is_closed(ch)) // Expected: true
+
 print("Recv closed:", recv(ch)) // null
 
 print("Testing is_closed passed.")
