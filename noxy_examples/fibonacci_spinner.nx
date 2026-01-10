@@ -1,0 +1,74 @@
+use time select *
+use sys
+
+// Fibonacci recursivo lento para simular carga
+func fibonacci(n: int) -> int
+    if n <= 1 then
+        return n
+    end
+    return fibonacci(n-1) + fibonacci(n-2) 
+end
+
+// Worker que calcula e envia o resultado para o canal
+func fibonacci_worker(n: int, out: any)
+    let res: int = fibonacci(n)
+    send(out, res)
+end
+
+// Spinner que roda até receber um sinal no stop_chan
+func spinner(stop_chan: any)
+    let dots: string = "-\|/"
+    let i: int = 0
+    
+    while true do
+        // Verifica se há sinal de parada sem bloquear se não houver (com default)
+        // Mas o "when" com default é perfeito para polling ou non-blocking check
+        // Se quisermos priorizar o stop, checamos antes de imprimir
+        
+        // Versão idiomatica com when
+        when
+            case recv(stop_chan) then
+                // Recebeu sinal de parada (qualquer valor)
+                return
+            default
+                // Não há sinal, continua girando
+        end
+
+        // Imprime o caractere atual e volta o cursor com \r
+        print(fmt("\rCalculando... %s", dots[i]))
+        
+        i = i + 1
+        if i >= length(dots) then
+            i = 0
+        end
+        sleep(100)
+        let r1: sys.SysResult = sys.exec("cls")
+    end
+end
+
+func main()
+    print("=== Fibonacci Spinner Demo ===")
+    
+    let n: int = 35 // Numero alto o suficiente para demorar um pouco
+    let result_chan: any = make_chan(1)
+    let stop_chan: any = make_chan(1)
+    
+    // Inicia o spinner
+    spawn(spinner, stop_chan)
+    
+    // Inicia o calculo
+    spawn(fibonacci_worker, n, result_chan)
+    
+    // Espera pelo resultado (bloqueante)
+    let res: int = recv(result_chan)
+    
+    // Para o spinner
+    send(stop_chan, true)
+    
+    // Limpa a linha do spinner (opcional)
+    print("\r                      \r") 
+    
+    print(fmt("Fibonacci(%d) = %d", n, res))
+end
+
+main()
