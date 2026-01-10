@@ -151,6 +151,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseBreakStatement()
 	case token.USE:
 		return p.parseUseStatement()
+	case token.WHEN:
+		return p.parseWhenStatement()
 	case token.NEWLINE:
 		return nil // Skip empty lines / separators
 	default:
@@ -172,10 +174,18 @@ func (p *Parser) parseStatement() ast.Statement {
 		}
 
 		// Check if it's an assignment
+		// Handle `case msg = recv` (ExpressionStmt vs AssignStmt logic correction in parseWhenStatement used parseExpression)
+		// But here in parseStatement generic:
 		if p.peekTokenIs(token.ASSIGN) {
-			p.nextToken() // eat ASSIGN
-			stmt := &ast.AssignStmt{Token: p.curToken, Target: expr}
+			p.nextToken() // eat ASSIGN -> curToken is ASSIGN
+			// stmt target is `expr`.
+			// But `expr` might be complicated tree? AssignStmt allows generic expression target?
+			// Typically only Identifier or Index/MemberAccess.
+			// AssignStmt struct has Target Expression. Valid.
+			// Logic is correct.
+			tokenAssign := p.curToken
 			p.nextToken() // move to value
+			stmt := &ast.AssignStmt{Token: tokenAssign, Target: expr}
 			stmt.Value = p.parseExpression(LOWEST)
 
 			if p.peekTokenIs(token.NEWLINE) {
@@ -401,6 +411,104 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 		p.nextToken()
 	}
 	return stmt
+}
+
+func (p *Parser) parseWhenStatement() *ast.WhenStatement {
+	stmt := &ast.WhenStatement{Token: p.curToken, Cases: []*ast.CaseClause{}}
+	p.nextToken() // eat 'when'
+
+	if p.curTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
+	for !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.CASE) {
+			cc := &ast.CaseClause{Token: p.curToken, IsDefault: false}
+			p.nextToken() // eat 'case'
+
+			// Condition statement (ExprStmt or AssignStmt)
+			// Problem: parseStatement eats newline?
+			// case recv(c) then ...
+			// If we call parseStatement, it might look for newline terminator.
+			// But 'then' is the terminator here.
+			// So we can parseExpression? Or Assignment?
+			// Assignments starts with Identifier?
+			// parseStatement handles choice.
+			// However custom case parsing:
+			// parseExpression(LOWEST) -> if '=' peek -> Assign. else ExprStmt.
+
+			expr := p.parseExpression(LOWEST)
+			if p.peekTokenIs(token.ASSIGN) {
+				// Assigment: case msg = ...
+				p.nextToken() // eat identifier (expr must be identifier)
+				ident, ok := expr.(*ast.Identifier)
+				if !ok {
+					p.errors = append(p.errors, "case assignment target must be identifier")
+					return nil
+				}
+				assignStmt := &ast.AssignStmt{Token: p.curToken, Target: ident}
+				p.nextToken() // eat '='
+				assignStmt.Value = p.parseExpression(LOWEST)
+				cc.Condition = assignStmt
+			} else {
+				// Expression statement: case send(...) or case recv(...)
+				// We don't have the start token of expr easily here without casting or capturing before.
+				// However, using p.curToken (which is probably THEN) is okay for now as it's just for error reporting location roughly.
+				// Or use token.Token{Type: token.ILLEGAL, Literal: expr.TokenLiteral()}? No.
+				// Let's blindly use p.curToken for now, or capture it before parsing expr if possible.
+				// Refactoring to capture start token:
+				// But wait, I can't restart parsing.
+				// Let's use p.curToken. It's close enough.
+				cc.Condition = &ast.ExpressionStmt{Token: p.curToken, Expression: expr}
+			}
+
+			if !p.expectPeek(token.THEN) {
+				return nil
+			}
+
+			cc.Body = p.parseCaseBody()
+			stmt.Cases = append(stmt.Cases, cc)
+		} else if p.curTokenIs(token.DEFAULT) {
+			cc := &ast.CaseClause{Token: p.curToken, IsDefault: true}
+			p.nextToken() // eat 'default'
+
+			cc.Body = p.parseCaseBody()
+			stmt.Cases = append(stmt.Cases, cc)
+		} else if p.curTokenIs(token.NEWLINE) {
+			p.nextToken()
+		} else {
+			// Error unexpected token
+			p.errors = append(p.errors, fmt.Sprintf("unexpected token in when block: %s", p.curToken.Literal))
+			p.nextToken()
+		}
+	}
+
+	if p.curTokenIs(token.END) {
+		p.nextToken()
+	}
+
+	return stmt
+}
+
+func (p *Parser) parseCaseBlock() *ast.BlockStatement {
+	block := &ast.BlockStatement{Token: p.curToken}
+	block.Statements = []ast.Statement{}
+
+	if p.curTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
+	for !p.curTokenIs(token.CASE) && !p.curTokenIs(token.DEFAULT) && !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+		if p.curTokenIs(token.NEWLINE) {
+			p.nextToken() // skip separators
+		}
+	}
+	return block
 }
 
 func (p *Parser) parseExpressionStatement() *ast.ExpressionStmt {
@@ -878,6 +986,35 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	// Discrepancy.
 
 	// Let's fix `parseIfExpression`.
+
+	return block
+}
+
+func (p *Parser) parseCaseBody() *ast.BlockStatement {
+	block := &ast.BlockStatement{Token: p.curToken}
+	block.Statements = []ast.Statement{}
+
+	// Optional newline handling if previous token was THEN/DEFAULT
+	if p.curTokenIs(token.THEN) {
+		p.nextToken()
+	}
+	if p.curTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
+	for !p.curTokenIs(token.END) && !p.curTokenIs(token.CASE) && !p.curTokenIs(token.DEFAULT) && !p.curTokenIs(token.EOF) {
+		if p.curTokenIs(token.FUNC) || p.curTokenIs(token.STRUCT) {
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unexpected %q, expected 'end', 'case' or 'default'",
+				p.curToken.Line, p.curToken.Column, p.curToken.Literal))
+			break
+		}
+
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+	}
 
 	return block
 }

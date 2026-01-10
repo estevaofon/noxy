@@ -1,0 +1,62 @@
+
+print("Testing Select (when) Statement...")
+
+let ch1: any = make_chan(1)
+let ch2: any = make_chan(1)
+
+// Helper to send after delay
+func sender(c: any, val: any, delay: int)
+    if delay > 0 then
+        time_sleep(delay)
+    end
+    send(c, val)
+    // print("Sent:", val)
+end
+
+// Test 1: Basic Selection (Non-blocking due to buffer or available data)
+send(ch1, "hello")
+when
+    case msg = recv(ch1) then
+        print("Received from ch1:", msg)
+    case recv(ch2) then
+        print("Received from ch2")
+    default
+        print("Default case (should not happen if ch1 ready)")
+end
+
+// Test 2: Default Case
+when
+    case recv(ch2) then
+        print("Received from ch2 (should not happen)")
+    default
+        print("Default case executed correctly")
+end
+
+// Test 3: Blocking Select with Goroutines
+let ch3: any = make_chan()
+let ch4: any = make_chan()
+
+spawn(sender, ch3, "delayed_msg_3", 100)
+spawn(sender, ch4, "delayed_msg_4", 50) // ch4 is faster
+
+print("Waiting for select...")
+when
+    case m1 = recv(ch3) then
+        print("Got from ch3:", m1)
+    case m2 = recv(ch4) then
+        print("Got from ch4:", m2)
+end
+
+// Test 4: Send Case
+print("Testing Send Case...")
+let ch5: any = make_chan(1)
+when
+    case send(ch5, "sent_val") then
+        print("Sent value to ch5")
+    default
+        print("Could not send")
+end
+print("Value in ch5:", recv(ch5))
+
+print("Select Tests Completed.")
+

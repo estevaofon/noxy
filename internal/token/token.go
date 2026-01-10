@@ -22,17 +22,20 @@ const (
 	STRUCT TokenType = "STRUCT"
 
 	// Palavras-chave - Controle de fluxo
-	IF     TokenType = "IF"
-	THEN   TokenType = "THEN"
-	ELSE   TokenType = "ELSE"
-	ELIF   TokenType = "ELIF"
-	END    TokenType = "END"
-	WHILE  TokenType = "WHILE"
-	DO     TokenType = "DO"
-	RETURN TokenType = "RETURN"
-	BREAK  TokenType = "BREAK"
-	FOR    TokenType = "FOR"
-	IN     TokenType = "IN"
+	IF      TokenType = "IF"
+	THEN    TokenType = "THEN"
+	ELSE    TokenType = "ELSE"
+	ELIF    TokenType = "ELIF"
+	END     TokenType = "END"
+	WHILE   TokenType = "WHILE"
+	DO      TokenType = "DO"
+	RETURN  TokenType = "RETURN"
+	BREAK   TokenType = "BREAK"
+	FOR     TokenType = "FOR"
+	IN      TokenType = "IN"
+	WHEN    TokenType = "WHEN"
+	CASE    TokenType = "CASE"
+	DEFAULT TokenType = "DEFAULT"
 
 	// Palavras-chave - Tipos
 	TYPE_INT    TokenType = "TYPE_INT"
@@ -110,37 +113,40 @@ const (
 )
 
 var keywords = map[string]TokenType{
-	"let":    LET,
-	"global": GLOBAL,
-	"func":   FUNC,
-	"struct": STRUCT,
-	"if":     IF,
-	"then":   THEN,
-	"else":   ELSE,
-	"end":    END,
-	"while":  WHILE,
-	"do":     DO,
-	"return": RETURN,
-	"break":  BREAK,
-	"int":    TYPE_INT,
-	"float":  TYPE_FLOAT,
-	"string": TYPE_STRING,
-	"str":    TYPE_STR,
-	"bool":   TYPE_BOOL,
-	"bytes":  TYPE_BYTES,
-	"void":   TYPE_VOID,
-	"ref":    REF,
-	"map":    MAP,
-	"true":   TRUE,
-	"false":  FALSE,
-	"null":   NULL,
-	"use":    USE,
-	"select": SELECT,
-	"as":     AS,
-	"zeros":  ZEROS,
-	"elif":   ELIF,
-	"for":    FOR,
-	"in":     IN,
+	"let":     LET,
+	"global":  GLOBAL,
+	"func":    FUNC,
+	"struct":  STRUCT,
+	"if":      IF,
+	"then":    THEN,
+	"else":    ELSE,
+	"end":     END,
+	"while":   WHILE,
+	"do":      DO,
+	"return":  RETURN,
+	"break":   BREAK,
+	"int":     TYPE_INT,
+	"float":   TYPE_FLOAT,
+	"string":  TYPE_STRING,
+	"str":     TYPE_STR,
+	"bool":    TYPE_BOOL,
+	"bytes":   TYPE_BYTES,
+	"void":    TYPE_VOID,
+	"ref":     REF,
+	"map":     MAP,
+	"true":    TRUE,
+	"false":   FALSE,
+	"null":    NULL,
+	"use":     USE,
+	"select":  SELECT,
+	"as":      AS,
+	"zeros":   ZEROS,
+	"elif":    ELIF,
+	"for":     FOR,
+	"in":      IN,
+	"when":    WHEN,
+	"case":    CASE,
+	"default": DEFAULT,
 }
 
 func LookupIdent(ident string) TokenType {

@@ -1,0 +1,27 @@
+use time
+
+func worker(id: int, wg: any)
+    print(fmt("Worker %d starting", id))
+    time.sleep(200)
+    print(fmt("Worker %d done", id))
+    wg_done(wg)
+end
+
+func main()
+    print("Main: Starting")
+    let wg: any = make_wg()
+    
+    // Spawn 3
+    let i: int = 1
+    while i <= 3 do
+        wg_add(wg, 1) // Add before spawn to avoid race
+        spawn(worker, i, wg)
+        i = i + 1
+    end
+    
+    print("Main: Waiting...")
+    wg_wait(wg)
+    print("Main: All done!")
+end
+
+main()

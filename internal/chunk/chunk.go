@@ -65,6 +65,7 @@ const (
 	OP_LESS_INT
 	OP_GREATER_INT
 	OP_EQUAL_INT
+	OP_SELECT
 )
 
 func (op OpCode) String() string {
@@ -183,6 +184,8 @@ func (op OpCode) String() string {
 		return "OP_ZEROS"
 	case OP_LEN:
 		return "OP_LEN"
+	case OP_SELECT:
+		return "OP_SELECT"
 	default:
 		return fmt.Sprintf("OP_%d", op)
 	}
@@ -355,6 +358,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_GREATER_INT", offset)
 	case OP_EQUAL_INT:
 		return c.simpleInstruction("OP_EQUAL_INT", offset)
+	case OP_SELECT:
+		return c.byteInstruction("OP_SELECT", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

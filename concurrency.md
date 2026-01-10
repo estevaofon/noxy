@@ -144,6 +144,80 @@ func main()
 end
 ```
 
+## Multi-Channel Selection (`when`)
+
+The `when` statement (similar to Go's `select`) allows a routine to wait on multiple channel operations simultaneously.
+
+### Syntax
+
+```noxy
+when
+    case msg = recv(ch1) then
+        print("Received: " + msg)
+    case send(ch2, "data") then
+        print("Sent data")
+    default
+        print("No channel ready (non-blocking)")
+end
+```
+
+### Behavior
+- **Fairness**: If multiple cases are ready, one is chosen at random.
+- **Blocking**: If no `default` case is present, `when` blocks until one of the operations can proceed.
+- **Default**: If present and no channel is ready, `default` executes immediately.
+
+### Timeouts (Pattern)
+You can implement timeouts by spawning a sleeper routine:
+
+```noxy
+let ch: any = make_chan()
+let timeout: any = make_chan()
+
+spawn(func(c: any)
+    time_sleep(1000)
+    send(c, true)
+end, timeout)
+
+when
+    case msg = recv(ch) then
+        print("Received message")
+    case recv(timeout) then
+        print("Timed out!")
+end
+```
+
+---
+
+## Synchronization with WaitGroup
+
+While channels are great for communication, sometimes you just want to wait for a set of routines to finish. Noxy provides `WaitGroup` for this pattern.
+
+### Usage
+
+1.  Create with `make_wg()`.
+2.  Add work count with `wg_add(wg, n)`.
+3.  Routine calls `wg_done(wg)` when finished.
+4.  Main calls `wg_wait(wg)` to block.
+
+```noxy
+func worker(id: int, wg: any)
+    print("Working...")
+    wg_done(wg)
+end
+
+func main()
+    let wg: any = make_wg()
+    
+    wg_add(wg, 3)
+    spawn(worker, 1, wg)
+    spawn(worker, 2, wg)
+    spawn(worker, 3, wg)
+    
+    wg_wait(wg) // Main waits here
+    print("All tasks finished.")
+end
+```
+
 ## Performance
 Noxy routines utilize Go's underlying goroutines. This means:
 - Noxy can utilize **all CPU cores** automatically.

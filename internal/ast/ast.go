@@ -480,3 +480,35 @@ func (mae *MemberAccessExpression) TokenLiteral() string { return mae.Token.Lite
 func (mae *MemberAccessExpression) String() string {
 	return "(" + mae.Left.String() + "." + mae.Member + ")"
 }
+
+type CaseClause struct {
+	Token     token.Token // 'case' or 'default'
+	IsDefault bool
+	Condition Statement       // For 'case msg = recv(ch)' or 'case send(ch, v)'. Note: send is expr, assign is stmt.
+	Body      *BlockStatement // 'then ...'
+}
+
+type WhenStatement struct {
+	Token token.Token // 'when'
+	Cases []*CaseClause
+}
+
+func (ws *WhenStatement) statementNode()       {}
+func (ws *WhenStatement) TokenLiteral() string { return ws.Token.Literal }
+func (ws *WhenStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("when ")
+	for _, c := range ws.Cases {
+		if c.IsDefault {
+			out.WriteString("default ")
+		} else {
+			out.WriteString("case ")
+			if c.Condition != nil {
+				out.WriteString(c.Condition.String() + " then ")
+			}
+		}
+		out.WriteString(c.Body.String())
+	}
+	out.WriteString("end")
+	return out.String()
+}

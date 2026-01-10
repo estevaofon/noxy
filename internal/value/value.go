@@ -1,6 +1,9 @@
 package value
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 type ValueType int
 
@@ -14,6 +17,7 @@ const (
 	VAL_NATIVE
 	VAL_BYTES
 	VAL_CHANNEL
+	VAL_WAITGROUP
 )
 
 type Value struct {
@@ -168,6 +172,25 @@ func (oc *ObjChannel) Format(f fmt.State, verb rune) {
 	}
 }
 
+type ObjWaitGroup struct {
+	Wg *sync.WaitGroup
+}
+
+func (ow *ObjWaitGroup) String() string {
+	return fmt.Sprintf("<waitgroup %p>", ow.Wg)
+}
+
+func (ow *ObjWaitGroup) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "waitgroup")
+	case 's', 'v':
+		fmt.Fprint(f, ow.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjWaitGroup=%s)", verb, ow.String())
+	}
+}
+
 func (v Value) String() string {
 	switch v.Type {
 	case VAL_BOOL:
@@ -204,6 +227,8 @@ func (v Value) String() string {
 		return fmt.Sprintf("b\"%s\"", v.Obj.(string))
 	case VAL_CHANNEL:
 		return v.Obj.(*ObjChannel).String()
+	case VAL_WAITGROUP:
+		return v.Obj.(*ObjWaitGroup).String()
 	default:
 		return "unknown"
 	}
@@ -278,6 +303,10 @@ func NewChannel(size int) Value {
 
 type BytesWrapper struct {
 	Str string
+}
+
+func NewWaitGroup() Value {
+	return Value{Type: VAL_WAITGROUP, Obj: &ObjWaitGroup{Wg: &sync.WaitGroup{}}}
 }
 
 func (bw BytesWrapper) Format(f fmt.State, verb rune) {

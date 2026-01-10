@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -235,6 +236,53 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		ch := args[0].Obj.(*value.ObjChannel).Chan
 		val := <-ch
 		return val
+	})
+
+	vm.DefineNative("make_wg", func(args []value.Value) value.Value {
+		return value.NewWaitGroup()
+	})
+
+	vm.DefineNative("wg_add", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		if args[0].Type != value.VAL_WAITGROUP {
+			return value.NewNull()
+		}
+		delta := int(0)
+		if args[1].Type == value.VAL_INT {
+			delta = int(args[1].AsInt)
+		}
+		if delta == 0 {
+			return value.NewNull()
+		}
+		wg := args[0].Obj.(*value.ObjWaitGroup).Wg
+		wg.Add(delta)
+		return value.NewNull()
+	})
+
+	vm.DefineNative("wg_done", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		if args[0].Type != value.VAL_WAITGROUP {
+			return value.NewNull()
+		}
+		wg := args[0].Obj.(*value.ObjWaitGroup).Wg
+		wg.Done()
+		return value.NewNull()
+	})
+
+	vm.DefineNative("wg_wait", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		if args[0].Type != value.VAL_WAITGROUP {
+			return value.NewNull()
+		}
+		wg := args[0].Obj.(*value.ObjWaitGroup).Wg
+		wg.Wait()
+		return value.NewNull()
 	})
 
 	vm.DefineNative("to_str", func(args []value.Value) value.Value {
@@ -3025,6 +3073,52 @@ func (vm *VM) run(minFrameCount int) error {
 			} else {
 				vm.push(value.NewInt(0))
 			}
+
+		case chunk.OP_SELECT:
+			count := int(c.Code[ip])
+			ip++
+			cases := make([]reflect.SelectCase, count)
+			// Stack layout: [... Case0_Chan, Case0_Val, Case0_Mode ... CaseN_Chan, CaseN_Val, CaseN_Mode]
+			// Top is CaseN_Mode.
+			// Iterating i from count-1 down to 0:
+			for i := count - 1; i >= 0; i-- {
+				mode := vm.pop().AsInt
+				val := vm.pop()
+				chVal := vm.pop()
+
+				if mode == 2 { // Default
+					cases[i] = reflect.SelectCase{Dir: reflect.SelectDefault}
+				} else if mode == 1 { // Send
+					if chVal.Type != value.VAL_CHANNEL {
+						return vm.runtimeError(c, ip, "select case expects channel")
+					}
+					ch := chVal.Obj.(*value.ObjChannel).Chan
+					cases[i] = reflect.SelectCase{Dir: reflect.SelectSend, Chan: reflect.ValueOf(ch), Send: reflect.ValueOf(val)}
+				} else { // Recv
+					if chVal.Type != value.VAL_CHANNEL {
+						return vm.runtimeError(c, ip, "select case expects channel")
+					}
+					ch := chVal.Obj.(*value.ObjChannel).Chan
+					cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
+				}
+			}
+
+			chosenIndex, recvVal, recvOK := reflect.Select(cases)
+
+			vm.push(value.NewInt(int64(chosenIndex)))
+
+			var valToPush value.Value
+			if recvOK {
+				if v, ok := recvVal.Interface().(value.Value); ok {
+					valToPush = v
+				} else {
+					valToPush = value.NewNull()
+				}
+			} else {
+				valToPush = value.NewNull()
+			}
+			vm.push(valToPush)
+			vm.push(value.NewBool(recvOK))
 
 		case chunk.OP_MODULO:
 			b := vm.pop()

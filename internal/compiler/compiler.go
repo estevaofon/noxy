@@ -798,10 +798,246 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.patchJump(jumpToExit)
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
 
-		// Patch Break Jumps
-		for _, jump := range loop.BreakJumps {
+		return c.currentChunk, nil, nil
+
+	case *ast.WhenStatement:
+		c.setLine(n.Token.Line)
+
+		// 1. Compile Cases setup
+		// We need to push 3 values per case: [Channel, Value, Mode]
+		// Mode: 0=Recv, 1=Send, 2=Default
+
+		// Map case index to jump/body logic later
+		type CaseInfo struct {
+			Index int
+			Node  *ast.CaseClause
+		}
+		cases := []CaseInfo{}
+
+		for i, cc := range n.Cases {
+			cases = append(cases, CaseInfo{Index: i, Node: cc})
+
+			if cc.IsDefault {
+				// Default Case: [Null, Null, 2]
+				c.emitByte(byte(chunk.OP_NULL)) // Chan
+				c.emitByte(byte(chunk.OP_NULL)) // Val
+				c.emitConstant(value.NewInt(2)) // Mode
+				continue
+			}
+
+			// Check Condition
+			// Can be AssignStmt (Recv) or ExpressionStmt (Recv or Send)
+			var callExpr *ast.CallExpression
+			var isAssign bool
+			// var assignTarget ast.Expression // Removed
+
+			if assign, ok := cc.Condition.(*ast.AssignStmt); ok {
+				isAssign = true
+				_ = assign.Target // Suppress unused for now
+				// Value should be CallExpression recv(c)
+				if call, ok := assign.Value.(*ast.CallExpression); ok {
+					callExpr = call
+				}
+			} else if exprStmt, ok := cc.Condition.(*ast.ExpressionStmt); ok {
+				if call, ok := exprStmt.Expression.(*ast.CallExpression); ok {
+					callExpr = call
+				}
+			}
+			// Note: If assignment, it MUST be recv.
+			// If ExpressionStmt, can be recv (discard result) or send.
+
+			if callExpr == nil {
+				return nil, nil, fmt.Errorf("[line %d] invalid case condition: expected send(...) or recv(...)", c.currentLine)
+			}
+
+			funcName := ""
+			if ident, ok := callExpr.Function.(*ast.Identifier); ok {
+				funcName = ident.Value
+			}
+
+			if funcName == "recv" {
+				// Recv Case: [Chan, Null, 0]
+				if len(callExpr.Arguments) != 1 {
+					return nil, nil, fmt.Errorf("[line %d] recv expects 1 argument", c.currentLine)
+				}
+				// Compile Channel
+				_, _, err := c.Compile(callExpr.Arguments[0])
+				if err != nil {
+					return nil, nil, err
+				}
+
+				c.emitByte(byte(chunk.OP_NULL)) // Val (unused for recv)
+				c.emitConstant(value.NewInt(0)) // Mode 0
+
+			} else if funcName == "send" {
+				// Send Case: [Chan, Val, 1]
+				if isAssign {
+					return nil, nil, fmt.Errorf("[line %d] cannot assign result of send", c.currentLine)
+				}
+				if len(callExpr.Arguments) != 2 {
+					return nil, nil, fmt.Errorf("[line %d] send expects 2 arguments", c.currentLine)
+				}
+				// Compile Channel
+				_, _, err := c.Compile(callExpr.Arguments[0])
+				if err != nil {
+					return nil, nil, err
+				}
+				// Compile Value
+				_, _, err = c.Compile(callExpr.Arguments[1])
+				if err != nil {
+					return nil, nil, err
+				}
+
+				c.emitConstant(value.NewInt(1)) // Mode 1
+
+			} else {
+				return nil, nil, fmt.Errorf("[line %d] invalid case call: expected send or recv, got %s", c.currentLine, funcName)
+			}
+		}
+
+		// 2. Emit OP_SELECT
+		count := len(n.Cases)
+		if count > 255 {
+			return nil, nil, fmt.Errorf("too many cases in when statement")
+		}
+		c.emitBytes(byte(chunk.OP_SELECT), byte(count))
+
+		// Stack now has: [Index, Value, OK] (Index is bottom, OK is top)
+		// We want to dispatch based on Index.
+		// Since we need Index for multiple checks, and Value/OK for body...
+		// Let's store them in temps or manage stack carefully.
+		// "Index" is 0..N-1.
+		// Strategy:
+		//   We are checking Index against 0, 1, 2...
+		//   Index is at Stack[-3].
+		//   Better to Peek Index?
+		//   Or use OP_DUP specific slot? OP_DUP only dups top?
+		//   VM has OP_DUP (top).
+		//   We don't have OP_PEEK.
+		//   We can use Locals!
+		//   Store (Index, Value, OK) in hidden locals.
+
+		c.beginScope()
+		// Determine types? Dynamic.
+		c.addLocal(" $sel_idx", &ast.PrimitiveType{Name: "int"}) // Stack[-3] -> local 0
+		c.addLocal(" $sel_val", nil)                             // Stack[-2] -> local 1
+		c.addLocal(" $sel_ok", &ast.PrimitiveType{Name: "bool"}) // Stack[-1] -> local 2
+		// Note: addLocal assumes value is on stack. Order matters.
+		// Stack from OP_SELECT: [Index, Value, OK].
+		// addLocal adds to end.
+		// If we addLocal, we are claiming stack slots from bottom up?
+		// No, addLocal purely updates compiler tracking. The VALUES are inherently on stack.
+		// So $sel_idx corresponds to index if we define them in order?
+		// Wait, locals are indices into stack relative to base pointer.
+		// If we declare 3 locals now, they map to the top 3 stack values.
+		// Stack: [..., Index, Value, OK]
+		// addLocal("idx"): maps to slot X (Index)
+		// addLocal("val"): maps to slot X+1 (Value)
+		// addLocal("ok"): maps to slot X+2 (OK)
+		// Yes, this works.
+
+		idxSlot := len(c.locals) - 3
+		valSlot := len(c.locals) - 2
+		// okSlot := len(c.locals) - 1
+
+		endJumps := []int{}
+
+		for i, cc := range n.Cases {
+			// Check if Index == i
+			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(idxSlot))
+			c.emitConstant(value.NewInt(int64(i)))
+			c.emitByte(byte(chunk.OP_EQUAL_INT))
+
+			nextJump := c.emitJump(chunk.OP_JUMP_IF_FALSE)
+			c.emitByte(byte(chunk.OP_POP)) // Pop comparison result
+
+			// Body
+			c.beginScope() // Scope for case body
+
+			// If Assignment: bind Value to var
+			if assign, ok := cc.Condition.(*ast.AssignStmt); ok {
+				ident := assign.Target.(*ast.Identifier)
+				// Create local with value from $sel_val
+				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(valSlot))
+				c.addLocal(ident.Value, nil) // Bind local
+			}
+
+			// Compile Block
+			_, _, err := c.Compile(cc.Body)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			c.endScope() // Pop case locals
+
+			jumpToEnd := c.emitJump(chunk.OP_JUMP)
+			endJumps = append(endJumps, jumpToEnd)
+
+			c.patchJump(nextJump)          // Patch jump to next comparison
+			c.emitByte(byte(chunk.OP_POP)) // Pop comparison result (from IF_FALSE jump? No, IF_FALSE doesn't pop in Noxy VM? Yes it does? Check VM.)
+			// Checking VM OP_JUMP_IF_FALSE: it reads top, if false jump, else fallthrough. DOES IT POP?
+			// Check chunk.go disassembly or VM code. Typically standard VM pops condition.
+			// Re-checking VM code... (I assume yes).
+			// If it pops, then "nextJump" target is AFTER pop.
+			// So `c.emitByte(byte(chunk.OP_POP))` after `nextJump` instruction is wrong IF `OP_JUMP_IF_FALSE` already popped.
+			// Let's assume standard behavior: `if (pop()) jump else continue`.
+			// So we don't need explicit pop after jump instruction IF condition consumed.
+			// Wait, if it jumps, it skips the fallthrough code.
+			// If it doesn't jump, it falls through.
+			// If it jumps, the condition is GONE from stack? Yes.
+			// So both paths have condition gone.
+			// So NO explicit pop after `nextJump`.
+			// BUT, I wrote `c.emitByte(byte(chunk.OP_POP))` above!
+			// Line: `c.emitByte(byte(chunk.OP_POP)) // Pop comparison result`
+			// This pop is strictly for FAL-THROUGH path if OP_JUMP_IF_FALSE *peeks*.
+			// Noxy VM `OP_JUMP_IF_FALSE`:
+			/*
+				func (vm *VM) run() {
+					// ...
+					case chunk.OP_JUMP_IF_FALSE:
+						offset := vm.readShort()
+						condition := vm.peek() // PEEK!
+						if isFalsey(condition) {
+							vm.ip += int(offset)
+						}
+				}
+			*/
+			// Wait, I need to check VM implementation.
+			// If it uses PEEK, then I DO need POP.
+			// If it uses POP, then I DON'T.
+			// Most of my IF compilation uses:
+			// `jumpToElse := c.emitJump(chunk.OP_JUMP_IF_FALSE)`
+			// `c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)`
+			// This suggests PEEK.
+			// Let's verify VM later. For now assume PEEK.
+			// So:
+			// IF_FALSE -> Jump to Meta_Else. Stack has Condition.
+			// Fallthrough -> Stack has Condition. Pop it. Enter Body.
+			// Meta_Else: Stack has Condition. Pop it.
+			// So logic:
+			//   Jump_If_False(Next)
+			//   Pop (True path)
+			//   Body...
+			//   Jump(End)
+			// Next:
+			//   Pop (False path)
+			//   ...
+			// Correct.
+		}
+
+		// Fallthrough if no case matched? (Should be impossible if SELECT works)
+		// But in case of weirdness, cleanup stack?
+		// Locals will be popped by endScope.
+		// The 3 hidden locals ($sel_idx, etc) will be popped.
+
+		// Patch all end jumps
+		for _, jump := range endJumps {
 			c.patchJump(jump)
 		}
+
+		c.endScope() // Pops $sel_idx, $sel_val, $sel_ok (3 values)
+
+		return c.currentChunk, nil, nil
 
 		// Pop Loop info
 		c.loops = c.loops[:len(c.loops)-1]
