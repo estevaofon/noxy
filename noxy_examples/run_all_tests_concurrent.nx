@@ -1,0 +1,204 @@
+use sys select *
+use time
+
+// ============================================
+// Concurrent Test Runner
+// ============================================
+
+// Helpers (Duplicates from run_all_tests.nx)
+func ends_with_nx(s: string) -> bool
+    let len_s: int = strlen(s)
+    if len_s < 3 then 
+        return false 
+    end
+    if s[len_s - 1] != "x" then 
+        return false 
+    end
+    if s[len_s - 2] != "n" then 
+        return false 
+    end
+    if s[len_s - 3] != "." then 
+        return false 
+    end
+    return true
+end
+
+func should_ignore(s: string) -> bool
+    let exclusions: string[] = ["run_all_tests.nx", "run_all_tests_concurrent.nx", "http_server.nx", "simple_client.nx", 
+    "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", 
+    "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx", "md2html.nx",
+    "watch_file.nx", "stress_test.nx", "division_error.nx", "error_type.nx", "error_arity.nx", "test_let_error.nx", "error_index.nx",
+    "test_let_error_function.nx", "test_unclosed.nx", "benchmark_parallel.nx", "concurrency.nx", "concurrency_parallel_sum.nx", "concurrency_producer_consumer.nx", "run_all_tests.nx"]
+    
+    if contains(exclusions, s) then 
+        return true 
+    end
+    return false
+end
+
+// Worker Function
+func worker(id: int, jobs: any, results: any, noxy_bin: string)
+    while true do
+        let file_any: any = recv(jobs)
+        let file: string = to_str(file_any)
+        
+        if file == "-1" then 
+            break 
+        end
+        
+        // Execute test
+        let cmd: string = noxy_bin + " noxy_examples/" + file
+        let res: SysResult = exec_output(cmd)
+        
+        if res.ok then
+            send(results, "PASS:" + file)
+        else
+            send(results, "FAIL:" + file + ":" + to_str(res.exit_code))
+        end
+    end
+end
+
+func main()
+    let start: int = time_now_ms()
+    print("=== NOXY CONCURRENT TEST RUNNER ===")
+    
+    // 1. Detect Environment
+    let os_name: string = os()
+    let list_cmd: string = ""
+    let noxy_bin: string = ""
+    
+    if os_name == "windows" then
+        list_cmd = "dir /B noxy_examples"
+        noxy_bin = "noxy.exe"
+    else
+        list_cmd = "ls noxy_examples"
+        noxy_bin = "./noxy"
+    end
+    
+    // 2. List Files
+    let cmd_res: SysResult = exec_output(list_cmd)
+    if !cmd_res.ok then
+        print("Erro ao listar diretório: " + cmd_res.output)
+        exit(1)
+    end
+    
+    // 3. Parse Files
+    let raw_list: string = cmd_res.output
+    let len_list: int = strlen(raw_list)
+    let current_file: string = ""
+    let i: int = 0
+    let files_to_run: string[] = []
+    
+    // Loop de parsing manual
+    while i < len_list do
+        let char: string = raw_list[i]
+        
+        if char == "\n" then
+            if strlen(current_file) > 0 then
+                // Check excludes
+                if ends_with_nx(current_file) then
+                    if !should_ignore(current_file) then
+                        // Hacky clean (skip \r in accumulation)
+                        append(files_to_run, current_file)
+                    end
+                end
+                current_file = ""
+            end
+        else
+            if char != "\r" then
+                current_file = current_file + char
+            end
+        end
+        i = i + 1
+    end
+    
+    // Last file
+    if strlen(current_file) > 0 then
+        if ends_with_nx(current_file) then
+            if !should_ignore(current_file) then
+                append(files_to_run, current_file)
+            end
+        end
+    end
+    
+    let total_files: int = length(files_to_run)
+    print(fmt("Encontrados %d arquivos de teste.", total_files))
+    
+    // 4. Setup Concurrency
+    let num_workers: int = 8
+    let jobs: any = make_chan(total_files + num_workers) 
+    let results: any = make_chan(total_files)
+    
+    print(fmt("Iniciando %d workers...", num_workers))
+    
+    let w: int = 0
+    while w < num_workers do
+        spawn(worker, w, jobs, results, noxy_bin)
+        w = w + 1
+    end
+    
+    // 5. Send Jobs
+    let f: int = 0
+    while f < total_files do
+        send(jobs, files_to_run[f])
+        f = f + 1
+    end
+    
+    // Send Poison Pills
+    let p: int = 0
+    while p < num_workers do
+        send(jobs, "-1")
+        p = p + 1
+    end
+    
+    // 6. Collect Results
+    let passed: int = 0
+    let failed: int = 0
+    let failed_files: string[] = []
+    
+    let received: int = 0
+    while received < total_files do
+        let res_str: string = to_str(recv(results))
+        // Format: PASS:filename OR FAIL:filename:code
+        
+        if strlen(res_str) >= 5 then
+             if res_str[0] == "P" then
+                // PASS
+                print("  [PASS] " + res_str) 
+                passed = passed + 1
+             else
+                // FAIL
+                print("  [FAIL] " + res_str)
+                failed = failed + 1
+                append(failed_files, res_str)
+             end
+        else
+             print("  [ERROR] Invalid result: " + res_str)
+        end
+        
+        received = received + 1
+    end
+    
+    // 7. Report
+    print("")
+    print("=== RELATÓRIO ===")
+    print(fmt("Total: %d", total_files))
+    print(fmt("Passou: %d", passed))
+    print(fmt("Falhou: %d", failed))
+    let end_time: int = time_now_ms()
+    print(fmt("Tempo Total: %d ms", end_time - start))
+    
+    if failed > 0 then
+        print("ALGUNS TESTES FALHARAM:")
+        let idx: int = 0
+        while idx < length(failed_files) do
+            print(failed_files[idx])
+            idx = idx + 1
+        end
+        exit(1)
+    else
+        print("TODOS TESTES PASSARAM.")
+    end
+end
+
+main()
