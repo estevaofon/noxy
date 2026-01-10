@@ -387,7 +387,7 @@ Noxy comes with a comprehensive standard library. Available modules include:
 
 ---
 
-## 12. Implementation Notes
+## 13. Implementation Notes
 
 - **VM**: Stack-based Virtual Machine.
 - **Language**: Go.
