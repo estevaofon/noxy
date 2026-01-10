@@ -1,0 +1,55 @@
+// result_pattern.nx - Demonstrating the Standard Result Pattern
+use result
+
+// Simulating a database query
+func get_user_age(user_id: int) -> result.Result
+    if user_id == 1 then
+        return result.Ok(30)
+    elif user_id == 2 then
+        return result.Ok(25)
+    else
+        return result.Err(404, "User not found")
+    end
+end
+
+// Simulating division
+func safe_div(a: float, b: float) -> result.Result
+    if b == 0.0 then
+        return result.Err(1, "Division by zero")
+    end
+    return result.Ok(a / b)
+end
+
+print("=== Testing Result Pattern ===")
+
+// Test Case 1: Success
+let res1: result.Result = get_user_age(1)
+if result.is_ok(res1) then
+    let age: int = to_int(result.unwrap(res1))
+    print(f"User 1 Age: {age}")
+end
+
+// Test Case 2: Failure
+let res2: result.Result = get_user_age(99)
+if result.is_err(res2) then
+    let err: ref result.Error = result.unwrap_err(res2)
+    print(f"User 99 Error: {err.msg} (Code: {err.code})")
+end
+
+// Test Case 3: Math with Result
+let val1: result.Result = safe_div(10.0, 2.0)
+let val2: result.Result = safe_div(20.0, 4.0)
+let val3: result.Result = safe_div(20.0, 0.0)
+
+if result.is_ok(val1) && result.is_ok(val2) then
+    let v1: float = to_float(result.unwrap(val1))
+    let v2: float = to_float(result.unwrap(val2))
+    print(f"Calculation: {v1} + {v2} = {v1 + v2}")
+end
+
+if result.is_err(val3) then
+    let err: ref result.Error = result.unwrap_err(val3)
+    print(f"Error: {err.msg} (Code: {err.code})")
+end
+
+print("=== Tests Completed ===")

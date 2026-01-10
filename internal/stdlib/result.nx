@@ -1,0 +1,44 @@
+// result.nx - Standard Result and Error Pattern for Noxy
+
+struct Error
+    code: int,
+    msg: string
+end
+
+struct Result
+    value: any,
+    err: ref Error
+end
+
+// Factory function to create a successful Result
+func Ok(v: any) -> Result
+    return Result(v, null)
+end
+
+// Factory function to create an error Result
+func Err(code: int, msg: string) -> Result
+    let e: Error = Error(code, msg)
+    return Result(null, e)
+end
+
+// Check if a Result is an error
+func is_err(r: Result) -> bool
+    return r.err != null
+end
+
+// Check if a Result is success
+func is_ok(r: Result) -> bool
+    return r.err == null
+end
+
+// Unwrap the value from a Result (panics/returns null if error - basic version)
+// Note: In Noxy's current state, we don't have panic/unwrap safely, so we just return value.
+// Caller should check is_err().
+func unwrap(r: Result) -> any
+    return r.value
+end
+
+// Unwrap the error from a Result
+func unwrap_err(r: Result) -> ref Error
+    return r.err
+end
