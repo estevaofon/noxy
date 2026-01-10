@@ -1,0 +1,35 @@
+// Test First-Class Functions in Noxy
+
+// 1. Assign to variable (Already verified, but good to have)
+let double: func = func(x: int) -> int
+    return x * 2
+end
+
+// 2. Pass as argument
+func apply(f: func, val: int) -> int
+    return f(val)
+end
+
+print(apply(double, 5)) // Expect: 10
+
+// 3. Return from function (Higher-order)
+func makeAdder(n: int) -> func
+    return func(x: int) -> int
+        return x + n
+    end
+end
+
+let add10: func = makeAdder(10)
+print(add10(5)) // Expect: 15
+
+// 4. Store in Array
+let funcs: func[] = [double, add10]
+// Note: Noxy arrays might need casting if typed? 
+// For now, let's assume loose typing or correct indexing
+print(funcs[0](5)) // Expect: 10
+print(funcs[1](5)) // Expect: 15
+
+// 5. Store in Map
+let fmap: map[string, func] = {"d": double, "a": add10}
+print(fmap["d"](20)) // Expect: 40
+print(fmap["a"](20)) // Expect: 30

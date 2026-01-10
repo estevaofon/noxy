@@ -1,0 +1,82 @@
+// Exemplos de Closures em Noxy
+
+print("=== Exemplo 1: Encapsulamento de Estado (Conta Bancária) ===")
+// Cria uma "conta" que mantém seu saldo privado
+func makeAccount(initialBalance: int) -> func
+    let balance: int = initialBalance
+    
+    // Retorna uma função que movimenta a conta
+    return func(amount: int) -> int
+        balance = balance + amount
+        if amount > 0 then
+            print("Depositado: " + to_str(amount))
+        else
+            print("Sacado: " + to_str(-amount))
+        end
+        return balance
+    end
+end
+
+let myAcc: func = makeAccount(100)
+print("Saldo inicial: 100")
+print("Saldo atual: " + to_str(myAcc(50)))  // 150
+print("Saldo atual: " + to_str(myAcc(-30))) // 120
+print("Saldo atual: " + to_str(myAcc(-10))) // 110
+
+
+print("\n=== Exemplo 2: Fábrica de Funções (Configuração) ===")
+// Cria funções multiplicadoras com fator fixo
+func makeMultiplier(factor: int) -> func
+    return func(n: int) -> int
+        return n * factor
+    end
+end
+
+let double: func = makeMultiplier(2)
+let triple: func = makeMultiplier(3)
+
+print("Double 5: " + to_str(double(5))) // 10
+print("Triple 5: " + to_str(triple(5))) // 15
+
+
+print("\n=== Exemplo 3: Memoization Simples (Cache) ===")
+// Cacheia o resultado de uma operação pesada
+func heavyCompute() -> func
+    let cache: map[int, any] = {}
+    
+    return func(x: int) -> int
+        let cached: any = cache[x]
+        if cached != null then
+            print("Cache hit para " + to_str(x))
+            return cached
+        end
+        
+        print("Calculando para " + to_str(x) + "...")
+        let result: int = x * x
+        cache[x] = result
+        return result
+    end
+end
+
+// Vamos usar um exemplo de contador de chamadas para demonstrar estado compartilhado
+func createRunner(name: string) -> func
+    let calls: int = 0
+    return func() -> void
+        calls = calls + 1
+        print("Runner " + name + " executado " + to_str(calls) + " vezes.")
+    end
+end
+
+let runnerA: func = createRunner("A")
+runnerA()
+runnerA()
+runnerA()
+
+let runnerB: func = createRunner("B")
+runnerB() // Independente de A
+// Append verification calls for heavyCompute
+let memoized: func = heavyCompute()
+print("1a chamada: " + to_str(memoized(5))) // Calculando...
+print("2a chamada: " + to_str(memoized(5))) // Cache hit...
+print("3a chamada: " + to_str(memoized(10))) // Calculando...
+print("4a chamada: " + to_str(memoized(5))) // Cache hit...

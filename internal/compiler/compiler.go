@@ -242,8 +242,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				}
 			} else {
 				// Dynamic or error?
-				// If leftType is known and not array/map, error?
-				if leftType != nil {
+				// Allow if 'any'
+				if leftType != nil && leftType.String() != "any" {
 					return nil, nil, fmt.Errorf("[line %d] index assignment on non-array/map type: %s", c.currentLine, leftType.String())
 				}
 			}
