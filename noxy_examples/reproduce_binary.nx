@@ -1,0 +1,7 @@
+let x: int = 0b1010
+print(fmt("Binary: %d", x))
+print(fmt("As Binary String: %b", x))
+
+let flags: int = 0b1101010000010011110011001100111
+print(fmt("Flags decimal: %d", flags))
+print(fmt("Flags binary: %b", flags))

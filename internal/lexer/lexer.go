@@ -265,13 +265,23 @@ func (l *Lexer) readIdentifier() string {
 func (l *Lexer) readNumber() (token.TokenType, string) {
 	position := l.position
 
-	if l.ch == '0' && (l.peekChar() == 'x' || l.peekChar() == 'X') {
-		l.readChar() // 0
-		l.readChar() // x
-		for isHexDigit(l.ch) {
-			l.readChar()
+	if l.ch == '0' {
+		if l.peekChar() == 'x' || l.peekChar() == 'X' {
+			l.readChar() // 0
+			l.readChar() // x
+			for isHexDigit(l.ch) {
+				l.readChar()
+			}
+			return token.INT, l.input[position:l.position]
 		}
-		return token.INT, l.input[position:l.position]
+		if l.peekChar() == 'b' || l.peekChar() == 'B' {
+			l.readChar() // 0
+			l.readChar() // b
+			for isBinaryDigit(l.ch) {
+				l.readChar()
+			}
+			return token.INT, l.input[position:l.position]
+		}
 	}
 
 	isFloat := false
@@ -289,6 +299,10 @@ func (l *Lexer) readNumber() (token.TokenType, string) {
 		return token.FLOAT, l.input[position:l.position]
 	}
 	return token.INT, l.input[position:l.position]
+}
+
+func isBinaryDigit(ch byte) bool {
+	return ch == '0' || ch == '1'
 }
 
 func isHexDigit(ch byte) bool {
