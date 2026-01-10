@@ -162,6 +162,14 @@ print("Product: " + product.name)</code></pre>
                     <h3>Concurrency</h3>
                     <p>Go-style concurrency with spawn and channels for parallel execution on multiple cores.</p>
                 </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-code-branch"></i>
+                    </div>
+                    <h3>First-Class Functions</h3>
+                    <p>Support for anonymous functions, closures with captured variables, and passing functions as
+                        arguments.</p>
+                </div>
             </div>
         </div>
     </section>
@@ -203,6 +211,12 @@ end
 
 func greet(name: string)
     print("Hello, " + name + "!")
+end
+
+// Closure
+let multiplier: int = 2
+let double: func = func(x: int) -> int
+    return x * multiplier
 end</code></pre>
                 </div>
                 <div class="syntax-card">
@@ -288,6 +302,8 @@ let msg: any = recv(c)</code></pre>
                 <button class="tab-btn" data-tab="linked-list">Linked List</button>
                 <button class="tab-btn" data-tab="hashmap">HashMap</button>
                 <button class="tab-btn" data-tab="safe-division">Safe Division</button>
+                <button class="tab-btn" data-tab="closures">Closures</button>
+                <button class="tab-btn" data-tab="http-server">HTTP Server</button>
                 <button class="tab-btn" data-tab="concurrency">Concurrency</button>
             </div>
             <div class="examples-content">

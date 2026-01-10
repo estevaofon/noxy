@@ -36,6 +36,21 @@ func should_ignore(s: string) -> bool
     return false
 end
 
+func strip_result_prefix(s: string) -> string
+    let len: int = strlen(s)
+    if len <= 5 then
+        return ""
+    end
+    
+    let res: string = ""
+    let i: int = 5
+    while i < len do
+        res = res + s[i]
+        i = i + 1
+    end
+    return res
+end
+
 // Worker Function
 func worker(id: int, jobs: any, results: any, noxy_bin: string)
     while true do
@@ -164,11 +179,11 @@ func main()
         if strlen(res_str) >= 5 then
              if res_str[0] == "P" then
                 // PASS
-                print("  [PASS] " + res_str) 
+                print("  [PASS] " + strip_result_prefix(res_str)) 
                 passed = passed + 1
              else
                 // FAIL
-                print("  [FAIL] " + res_str)
+                print("  [FAIL] " + strip_result_prefix(res_str))
                 failed = failed + 1
                 append(failed_files, res_str)
              end
