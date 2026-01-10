@@ -226,6 +226,40 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return args[1]
 	})
 
+	vm.DefineNative("close", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		if args[0].Type != value.VAL_CHANNEL {
+			return value.NewNull()
+		}
+		chObj := args[0].Obj.(*value.ObjChannel)
+
+		chObj.Lock.Lock()
+		defer chObj.Lock.Unlock()
+
+		if !chObj.Closed {
+			close(chObj.Chan)
+			chObj.Closed = true
+		}
+		return value.NewNull()
+	})
+
+	vm.DefineNative("is_closed", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewBool(false)
+		}
+		if args[0].Type != value.VAL_CHANNEL {
+			return value.NewBool(false)
+		}
+		chObj := args[0].Obj.(*value.ObjChannel)
+
+		chObj.Lock.Lock()
+		defer chObj.Lock.Unlock()
+
+		return value.NewBool(chObj.Closed)
+	})
+
 	vm.DefineNative("recv", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
@@ -234,7 +268,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewNull()
 		}
 		ch := args[0].Obj.(*value.ObjChannel).Chan
-		val := <-ch
+		val, ok := <-ch
+		if !ok {
+			return value.NewNull()
+		}
 		return val
 	})
 

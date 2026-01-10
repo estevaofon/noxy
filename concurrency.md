@@ -58,10 +58,13 @@ let c_buf: any = make_chan(10)
 
 - **Send**: `send(channel, value)`
 - **Receive**: `recv(channel)`
+- **Close**: `close(channel)`
+- **Check Closed**: `is_closed(channel)` -> `bool`
 
 ```noxy
 func sender(c: any)
     send(c, "Hello from Routine!")
+    close(c)
 end
 
 func main()

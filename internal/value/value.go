@@ -154,7 +154,9 @@ func (oi *ObjInstance) Format(f fmt.State, verb rune) {
 }
 
 type ObjChannel struct {
-	Chan chan Value
+	Chan   chan Value
+	Closed bool
+	Lock   sync.Mutex
 }
 
 func (oc *ObjChannel) String() string {

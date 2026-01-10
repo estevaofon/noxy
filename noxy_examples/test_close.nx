@@ -1,0 +1,49 @@
+
+print("Testing Channel Close...")
+
+let ch: any = make_chan(2)
+
+// Test 1: Send and Close
+print("Sending 1, 2...")
+send(ch, 1)
+send(ch, 2)
+print("Closing channel...")
+close(ch)
+
+// Test 2: Recv from closed channel
+print("Receiving...")
+let v1: any = recv(ch)
+print("Got v1:", v1) // Should be 1
+
+let v2: any = recv(ch)
+print("Got v2:", v2) // Should be 2
+
+let v3: any = recv(ch)
+print("Got v3 (expected null):", v3) // Should be null (closed)
+
+if v3 == null then
+    print("Verified: Received null from closed channel")
+end
+
+// Test 3: Loop recv until null
+let ch2: any = make_chan()
+
+func sender_worker(c: any)
+    send(c, "A")
+    send(c, "B")
+    close(c)
+end
+
+spawn(sender_worker, ch2)
+
+print("Looping over channel...")
+while true do
+    let val: any = recv(ch2)
+    if val == null then
+        print("Channel closed, breaking loop")
+        break
+    end
+    print("Received:", val)
+end
+
+print("Close Tests Completed.")

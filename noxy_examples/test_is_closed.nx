@@ -1,0 +1,20 @@
+
+print("Testing Channel is_closed...")
+
+let ch: any = make_chan(2)
+
+print("Closed initially?", is_closed(ch)) // Expected: false
+
+send(ch, 1)
+close(ch)
+
+print("Closed after close(ch)?", is_closed(ch)) // Expected: true
+print("Double close safety test...")
+close(ch) // Should not panic
+print("Still closed?", is_closed(ch)) // Expected: true
+
+// Recv still works?
+print("Recv value:", recv(ch)) // 1
+print("Recv closed:", recv(ch)) // null
+
+print("Testing is_closed passed.")
