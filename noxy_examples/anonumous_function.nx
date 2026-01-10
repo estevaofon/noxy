@@ -1,0 +1,5 @@
+let adder: func = func(x: int) -> int
+    return x + 1
+end
+
+print(adder(5))

@@ -1092,6 +1092,9 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 
 	if !p.curTokenIs(token.END) {
 		got := p.curToken.Literal
+		if p.curTokenIs(token.EOF) {
+			got = "EOF"
+		}
 		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected 'end', found %s",
 			p.curToken.Line, p.curToken.Column, got))
 		return nil
