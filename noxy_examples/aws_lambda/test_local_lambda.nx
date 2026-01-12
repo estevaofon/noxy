@@ -1,0 +1,46 @@
+// Test Local Lambda Integration
+use mock_lambda_api select *
+use runtime select *
+use http_client select *
+use sys select *
+use strings select *
+
+func main()
+    print("=== Testing AWS Lambda Runtime Locally ===")
+    
+    // 1. Start Mock API
+    // spawn(run_mock) 
+    // Wait, run_mock uses 'serve' which blocks.
+    spawn(run_mock)
+    
+    sleep(1000) // Wait for server start
+    
+    // 2. Start Runtime
+    // spawn(run_runtime) 
+    // Runtime blocks on get(/next)
+    spawn(run_runtime)
+    
+    sleep(1000) // Wait for runtime to poll
+    
+    // 3. Trigger Event
+    print("[TEST] Sending Trigger...")
+    let trigger_body: string = "{\"body\": \"Hello Local Lambda\"}"
+    let res: ClientResponse = post("http://127.0.0.1:8080/trigger", to_bytes(trigger_body))
+    
+    if res.ok then
+        print("[TEST] Trigger Sent: " + to_str(res.status_code))
+    else
+        print("[TEST] Trigger Failed: " + res.error)
+    end
+    
+    // 4. Wait for processing
+    sleep(2000)
+    
+    print("=== Test Complete ===")
+    print("Check logs above for '[MOCK API] Received execution result'")
+    
+    // Force exit (since mock/Runtime loops run forever)
+    sys_exit(0)
+end
+
+main()

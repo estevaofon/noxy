@@ -1,150 +1,90 @@
 // noxy_examples/aws_lambda/runtime.nx
-// Pure Noxy AWS Lambda Runtime
+// Pure Noxy AWS Lambda Runtime (Native HTTP Client)
 
-use sys select *
 use http_client select *
+use http_parser select *
 use json_parser select *
 use json_helpers select *
+use sys select *
+use strings select *
 use function select * // The user handler
 
 // ============================================
 // Config
 // ============================================
 
-
-
-use strings select *
-use net select *
-use io select *
-
 func get_runtime_api() -> string
     let api: EnvResult = getenv("AWS_LAMBDA_RUNTIME_API")
-    if !api.ok then
+    if !api.ok || api.value == "" then
         return "127.0.0.1:8080" // Local fallback
     end
-    if api.value == "" then
-        return "127.0.0.1:8080"
-    end
-    // Trim to avoid newlines from shell
-    let val: string = api.value
-    // Manual trim if strings_trim not imported or available?
-    // We imported strings.
-    return strings_trim(val)
+    return strings_trim(api.value)
 end
 
 let RUNTIME_API: string = get_runtime_api()
 let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation/"
 
-// ============================================
-// Loop
-// ============================================
-
-func main() -> void
-    print("Noxy Runtime starting... (v25 - Handler Logging)")
+func run_runtime() -> void
+    print("Noxy Runtime starting... (Native HTTP)")
     print("Runtime API: " + RUNTIME_API)
-    
-    // v18: Curl Runtime Implementation
-    use sys select *
-    use http_parser select *
-    // We already have use sys, json_parser, json_helpers, function, strings from top
-    
-    // Config for Curl
-    let CURL_TIMEOUT: string = "0" // No timeout for GET /next (it blocks)
-    // Actually /next can block forever, so max-time 0 or very large.
-    // However, exec might block.
     
     while true do
         // 1. Next Invocation (GET)
-        // curl -i -s http://.../next
-        // curl -i -s http://.../next > /tmp/next_resp.txt
+        // Blocks until an event is available
         let next_url: string = BASE_URL + "next"
-        let tmp_resp: string = "/tmp/next_resp.txt"
-        let get_cmd: string = "curl -i -s " + next_url + " > " + tmp_resp
+        // print("Polling: " + next_url)
         
-        // print("Polling: " + get_cmd)
-        let get_res: SysResult = exec(get_cmd)
+        let res: ClientResponse = get(next_url)
         
-        if get_res.exit_code != 0 then
-             print("Runtime Error: Curl exited with " + to_str(get_res.exit_code))
+        if !res.ok then
+             print("Runtime Network Error: " + res.error)
              sleep(1000)
+             // continue // Noxy doesn't support continue? use 'else' nesting or loop structure
         else
-             // Parse Response from File
-             let f_resp: File = open(tmp_resp, "r")
-             if !f_resp.open then
-                 print("Error: Could not open " + tmp_resp)
+            if res.status_code != 200 then
+                 print("Runtime API Error: Status " + to_str(res.status_code))
+                 print("Body: " + to_str(res.body))
                  sleep(1000)
-             else
-                 let b_res: IOBytesResult = read_bytes(f_resp)
-                 close(f_resp)
+            else
+                 // 2. Extract Request ID and Process
+                 let req_id: string = ""
+                 let i: int = 0
                  
-                 if !b_res.ok then
-                     print("Error: Could not read " + tmp_resp + ": " + b_res.error)
-                     sleep(1000)
-                 else
-                     // Success getting bytes
-                     let http_res: HttpResponse = parse_response(b_res.data, length(b_res.data))
-                     
-                     if http_res.status_code != 200 then
-                         print("Runtime Error: API returned " + to_str(http_res.status_code))
-                         print("Body: " + to_str(http_res.body))
-                         sleep(1000)
-                     else
-                         // 2. Extract Request ID and Process
-                         let req_id: string = ""
-                         let i: int = 0
-                         
-                     // Debug: Check what we parsed
-                         // print("DEBUG HEADER COUNT: " + to_str(http_res.header_count))
-                         
-                         while i < http_res.header_count do
-                                 let h: string = http_res.headers[i]
-                                 // print("DEBUG HDR[" + to_str(i) + "]: " + h)
-                                 
-                                 if strings_contains(h, "Lambda-Runtime-Aws-Request-Id") then
-                                     let parts: SplitResult = split(h, ":")
-                                     if parts.count >= 2 then
-                                         req_id = strings_trim(parts.parts[1])
-                                     end
-                                 end
-                                 i = i + 1
+                 // Scan headers
+                 while i < res.header_count do
+                     let h: string = res.headers[i]
+                     // Basic header parsing (case insensitive check needed ideally)
+                     if strings_contains(h, "Lambda-Runtime-Aws-Request-Id") then
+                         let parts: SplitResult = split(h, ":")
+                         if parts.count >= 2 then
+                             req_id = strings_trim(parts.parts[1])
                          end
-                         
-                         if req_id == "" then
-                             print("Error: No Request ID found in headers")
-                         else
-                             // 3. Invoke Handler
-                             let event_body: string = to_str(http_res.body)
-                             
-                             print("Calling handler...")
-                             let resp_body: string = handler(event_body)
-                             print("Handler returned.")
-                             
-                             // 4. Send Response (POST)
-                             let tmp_file: string = "/tmp/response.json"
-                             
-                             let f: File = open(tmp_file, "w")
-                             if f.open then
-                                 write(f, resp_body)
-                                 close(f)
-                             else
-                                 print("Error: Could not open temp file " + tmp_file)
-                             end
-                             
-                             let resp_url: string = BASE_URL + req_id + "/response"
-                             let post_cmd: string = "curl -X POST -s -H \"Content-Type: application/json\" --data-binary @" + tmp_file + " " + resp_url
-                             
-                             let post_res: SysResult = exec(post_cmd)
-                             
-                             if post_res.exit_code != 0 then
-                                 print("Error POSTing response: " + to_str(post_res.exit_code))
-                             end
+                     end
+                     i = i + 1
+                 end
+                 
+                 if req_id == "" then
+                     print("Error: No Request ID found in headers")
+                 else
+                     // 3. Invoke Handler
+                     let event_body: string = to_str(res.body)
+                     
+                     // print("Invoking handler for ID: " + req_id)
+                     let handler_resp: string = handler(event_body)
+                     
+                     // 4. Send Response (POST)
+                     let resp_url: string = BASE_URL + req_id + "/response"
+                     let post_res: ClientResponse = post(resp_url, to_bytes(handler_resp))
+                     
+                     if !post_res.ok then
+                         print("Error sending response: " + post_res.error)
+                     else
+                         if post_res.status_code >= 300 then
+                             print("API rejected response: " + to_str(post_res.status_code))
                          end
                      end
                  end
-             end
+            end
+        end
     end
-    end
-    end
-
-
-main()
+end

@@ -1,158 +1,87 @@
 // noxy_examples/aws_lambda/mock_lambda_api.nx
 // Simulates the AWS Lambda Runtime API for local testing
+// Uses channels for thread-safe event queuing.
 
-use net select *
-use io select *
-use http_parser select *
 use http_server select *
+use http_parser select *
 use json_parser select *
 use json_helpers select *
-use time select *
-use sys select *
+use strings select *
 
+// Global Event Queue (Channel)
+// Capacity 64 events
+let event_queue: any = make_chan(64)
 
-// ============================================
-// Queue Logic (Simple Array Queue)
-// ============================================
-
-struct EventQueue
-    events: string[64], // Array of JSON strings
-    head: int,
-    tail: int,
-    count: int
-end
-
-let empty_events: string[64]
-let queue: EventQueue = EventQueue(empty_events, 0, 0, 0)
-
-func enqueue(body: string) -> bool
-    if queue.count >= 64 then
-        return false // Full
-    end
-    queue.events[queue.tail] = body
-    queue.tail = (queue.tail + 1) % 64
-    queue.count = queue.count + 1
-    return true
-end
-
-func dequeue() -> string
-    if queue.count == 0 then
-        return ""
-    end
-    let item: string = queue.events[queue.head]
-    queue.head = (queue.head + 1) % 64
-    queue.count = queue.count - 1
-    return item
-end
-
-// Safe send with sleep to ensure flush
-func safe_server_send(server: ref HttpServer, client_index: int, resp: HttpResponse) -> void
-    if (client_index >= 0) && (client_index < 64) then
-        let sock: Socket = server.client_sockets[client_index]
-        if sock != null then
-            if sock.open then
-                let resp_bytes: bytes = build_response(resp.status_code, resp.status_text, resp.headers, resp.header_count, resp.body)
-                let res: NetResult = send(sock, resp_bytes)
-                print("SENT: " + to_str(res.count) + " / " + to_str(length(resp_bytes)))
-                
-                // Hack: Sleep to flush
-                sleep(500)
-                
-                net_close(sock)
-                server.client_sockets[client_index] = null
-            end
-        end
-    end
-end
+// Responses Channel (to verify test results)
+// Only for "response" endpoint
+let result_queue: any = make_chan(64)
 
 // ============================================
-// Server Handler
+// Handler
 // ============================================
 
-func handle_request(req_event: RequestEvent) -> void
-    let req: HttpRequest = req_event.request
-    let method: string = req.method
-    let path: string = req.path
-    
-    print("DEBUG: method=|" + method + "|")
-    print("DEBUG: path=|" + path + "|")
-    
-    // Sanitize method if needed (remove b" prefix)
-    let final_method: string = method
-    if strings_starts_with(method, "b\"") then
-        final_method = substring(method, 2, length(method))
-    end
-    print("DEBUG: final_method=|" + final_method + "|")
+func api_handler(req: HttpRequest) -> HttpResponse
+    print("[MOCK API] " + req.method + " " + req.path)
     
     // 1. POST /trigger - External (User) pushes an event
-    if path == "/trigger" && final_method == "POST" then
+    if req.method == "POST" && req.path == "/trigger" then
         let body_str: string = to_str(req.body)
-        if enqueue(body_str) then
-            print("Event enqueued: " + body_str)
-            safe_server_send(server, req_event.client_index, response_ok(b"Event Queued", "text/plain"))
-        else
-            safe_server_send(server, req_event.client_index, response_error(500, "Queue Full"))
-        end
-        return
+        print("[MOCK API] Enqueueing event: " + body_str)
+        send(event_queue, body_str)
+        return response_text("Event Queued")
     end
     
     // 2. GET /2018-06-01/runtime/invocation/next - Runtime polls for event
-    if strings_contains(path, "/runtime/invocation/next") && method == "GET" then
-        // ...
-        if queue.count > 0 then
-            // ...
-            let res: HttpResponse = response_json(event_body)
-            res.headers[res.header_count] = "Lambda-Runtime-Aws-Request-Id: " + req_id
-            res.header_count = res.header_count + 1
-            
-            safe_server_send(server, req_event.client_index, res)
-        else
-            safe_server_send(server, req_event.client_index, response_error(500, "Queue Empty")) 
-        end
-        return
+    // This blocks until an event is available in the channel!
+    if req.method == "GET" && strings_contains(req.path, "/runtime/invocation/next") then
+        print("[MOCK API] Runtime waiting for event...")
+        let event_body: string = to_str(recv(event_queue))
+        print("[MOCK API] Sending event to runtime")
+        
+        let req_id: string = "req-" + to_str(time_now()) // Simple ID
+        
+        // Build JSON response with event body
+        // Lambda runtime returns the event object as the body
+        let res: HttpResponse = response_json(event_body)
+        
+        // Add headers
+        res.headers[res.header_count] = "Lambda-Runtime-Aws-Request-Id: " + req_id
+        res.header_count = res.header_count + 1
+        res.headers[res.header_count] = "Lambda-Runtime-Deadline-Ms: " + to_str(time_now() + 5000)
+        res.header_count = res.header_count + 1
+        
+        return res
     end
     
     // 3. POST /2018-06-01/runtime/invocation/{AwsRequestId}/response
-    if strings_contains(path, "/response") && method == "POST" then
-        // ...
-        safe_server_send(server, req_event.client_index, response_ok(b"Accepted", "text/plain"))
-        return
+    if req.method == "POST" && strings_contains(req.path, "/response") then
+        let result: string = to_str(req.body)
+        print("[MOCK API] Received execution result: " + result)
+        // Store for verification
+        send(result_queue, result)
+        return response_error(202, "Accepted")
     end
     
     // 4. POST /2018-06-01/runtime/invocation/{AwsRequestId}/error
-    if strings_contains(path, "/error") && method == "POST" then
-        // ...
-        safe_server_send(server, req_event.client_index, response_ok(b"Accepted", "text/plain"))
-        return
+    if req.method == "POST" && strings_contains(req.path, "/error") then
+        let err: string = to_str(req.body)
+        print("[MOCK API] Received execution error: " + err)
+        send(result_queue, "ERROR: " + err)
+        return response_error(202, "Accepted")
     end
 
-    safe_server_send(server, req_event.client_index, response_error(404, "Not Found"))
+    return response_404()
 end
 
 // ============================================
 // Main
 // ============================================
 
-let server: HttpServer = new_server("0.0.0.0", 8080)
-
-func main() -> void
-    if !start(server) then
-        print("Failed to start Mock Lambda API on port 8080")
-        return
-    end
+func run_mock()
+    let host: string = "127.0.0.1"
+    let port: int = 8080 // Standard Lambda Runtime Interface Emulator port
     
-    print("Mock Lambda API running on http://localhost:8080")
-    print("Endpoints:")
-    print("  POST /trigger")
-    print("  GET /2018-06-01/runtime/invocation/next")
-    
-    while server.running do
-        let ev: RequestEvent = server_poll(server)
-        if ev.type == "REQUEST" then
-            handle_request(ev)
-        end
-        // Small sleep to prevent CPU spin if desired, but poll() already has timeout
-    end
+    print("Mock Lambda API starting on " + host + ":" + to_str(port))
+    let s: HttpServer = new_server(host, port)
+    serve(s, api_handler)
 end
-
-main()
