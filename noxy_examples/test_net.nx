@@ -19,7 +19,7 @@ end
 // Vamos apenas fechar o servidor.
 
 print("Closing server...")
-net.close(server)
+net.socket_close(server)
 print("Server closed")
 
 // Teste de conexão (vai falhar pois não tem ninguem ouvindo agora, mas verifica a API)
@@ -27,7 +27,7 @@ print("Testing connect (expected failure)...")
 let client: Socket = net.connect("127.0.0.1", 9999)
 if client.open then
     print("Connected? Unexpected!")
-    net.close(client)
+    net.socket_close(client)
 else
     print("Connection failed as expected")
 end

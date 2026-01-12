@@ -1,23 +1,14 @@
-// ============================================
-// NOXY STDLIB - JSON Helpers
-// ============================================
-// Fun??es utilit?rias para trabalhar com JSON parseado
+// stdlib/json_helpers.nx
+// Helper functions for JsonNode
 
 use json_parser select *
 
-// Constantes de tipo JSON
-let TYPE_NULL: int = 0
-let TYPE_BOOL: int = 1
-let TYPE_NUMBER: int = 2
-let TYPE_STRING: int = 3
-let TYPE_ARRAY: int = 4
-let TYPE_OBJECT: int = 5
+// Note: TYPE_* constants are imported from json_parser
 
 // ============================================
-// Fun??es de Extra??o de Dados
+// Accessors
 // ============================================
 
-// Extrai valor string de uma chave
 func get_string(node: ref JsonNode, key: string) -> string
     if node == null then return "" end
     if node.type != TYPE_OBJECT then return "" end
@@ -28,6 +19,7 @@ func get_string(node: ref JsonNode, key: string) -> string
             if current.type == TYPE_STRING then
                 return current.string_val
             end
+            // Auto-convert? No, strict.
             return ""
         end
         current = current.next
@@ -35,25 +27,6 @@ func get_string(node: ref JsonNode, key: string) -> string
     return ""
 end
 
-// Extrai sub-objeto de uma chave
-func get_object(node: ref JsonNode, key: string) -> ref JsonNode
-    if node == null then return null end
-    if node.type != TYPE_OBJECT then return null end
-    
-    let current: ref JsonNode = node.child
-    while current != null do
-        if current.key == key then
-            if current.type == TYPE_OBJECT then
-                return current
-            end
-            return null
-        end
-        current = current.next
-    end
-    return null
-end
-
-// Extrai valor inteiro de uma chave (convertendo float -> int)
 func get_int(node: ref JsonNode, key: string) -> int
     if node == null then return 0 end
     if node.type != TYPE_OBJECT then return 0 end
@@ -71,7 +44,6 @@ func get_int(node: ref JsonNode, key: string) -> int
     return 0
 end
 
-// Extrai valor float de uma chave
 func get_float(node: ref JsonNode, key: string) -> float
     if node == null then return 0.0 end
     if node.type != TYPE_OBJECT then return 0.0 end
@@ -89,7 +61,6 @@ func get_float(node: ref JsonNode, key: string) -> float
     return 0.0
 end
 
-// Extrai valor booleano de uma chave
 func get_bool(node: ref JsonNode, key: string) -> bool
     if node == null then return false end
     if node.type != TYPE_OBJECT then return false end
@@ -107,7 +78,23 @@ func get_bool(node: ref JsonNode, key: string) -> bool
     return false
 end
 
-// Extrai array de uma chave
+func get_object(node: ref JsonNode, key: string) -> ref JsonNode
+    if node == null then return null end
+    if node.type != TYPE_OBJECT then return null end
+    
+    let current: ref JsonNode = node.child
+    while current != null do
+        if current.key == key then
+            if current.type == TYPE_OBJECT then
+                return current
+            end
+            return null
+        end
+        current = current.next
+    end
+    return null
+end
+
 func get_array(node: ref JsonNode, key: string) -> ref JsonNode
     if node == null then return null end
     if node.type != TYPE_OBJECT then return null end
@@ -125,16 +112,13 @@ func get_array(node: ref JsonNode, key: string) -> ref JsonNode
     return null
 end
 
-// Verifica se uma chave existe
 func has_key(node: ref JsonNode, key: string) -> bool
     if node == null then return false end
     if node.type != TYPE_OBJECT then return false end
     
     let current: ref JsonNode = node.child
     while current != null do
-        if current.key == key then
-            return true
-        end
+        if current.key == key then return true end
         current = current.next
     end
     return false

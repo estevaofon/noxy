@@ -1,271 +1,181 @@
-// stdlib/http_client.nx - Cliente HTTP
-
+// stdlib/http_client.nx - Debug
 use net select *
-use sys select *
+use strings select * 
 use http_parser select *
 
-// ============================================
-// Estruturas
-// ============================================
-
 struct HttpClient
-    timeout_ms: int,          // Timeout em milissegundos
-    max_redirects: int,       // M?ximo de redirects
-    user_agent: string,       // User-Agent header
-    follow_redirects: bool    // Seguir 3xx automaticamente
+    timeout_ms: int,
+    user_agent: string
 end
 
 struct ClientResponse
-    ok: bool,                 // true se 2xx
-    status_code: int,         // 200, 404, etc
+    ok: bool,
+    status_code: int,
     headers: string[64],
     header_count: int,
     body: bytes,
     error: string
 end
 
-// ============================================
-// Factory
-// ============================================
-
 func new_client() -> HttpClient
-    return HttpClient(30000, 5, "Noxy-HTTP/1.1", true)
+    return HttpClient(30000, "Noxy-HTTP/1.1")
 end
 
-// Globais para simular "inst?ncia default" se necess?rio, 
-// mas fun??es get/post criam cliente tempor?rio ou usam global?
-// O spec sugere: get(url) -> ClientResponse. Internamente pode criar um client default.
 let default_client: HttpClient = new_client()
 
+func merge_headers(u: HttpUrl, method: string, user_headers: string[64], count: int, body_len: int, ua: string) -> string[64]
+    let final: string[64]
+    let idx: int = 0
+    let i: int = 0
+    while i < count do
+        if idx < 64 then
+            final[idx] = user_headers[i]
+            idx = idx + 1
+        end
+        i = i + 1
+    end
+    let host_val: string = u.host
+    if (u.scheme == "http" && u.port != 80) || (u.scheme == "https" && u.port != 443) then
+        host_val = host_val + ":" + to_str(u.port)
+    end
+    if idx < 64 then
+        final[idx] = "Host: " + host_val
+        idx = idx + 1
+    end
+    if idx < 64 then
+        final[idx] = "User-Agent: " + ua
+        idx = idx + 1
+    end
+    if body_len > 0 then
+        if idx < 64 then
+            final[idx] = "Content-Length: " + to_str(body_len)
+            idx = idx + 1
+        end
+    end
+    if idx < 64 then
+        final[idx] = "Accept: */*"
+        idx = idx + 1
+    end
+    if idx < 64 then
+        final[idx] = "Connection: close"
+        idx = idx + 1
+    end
+    return final
+end
 
-// ============================================
-// Core Request Logic
-// ============================================
+func read_all(sock: Socket, timeout_ms: int) -> NetResult
+    let buffer: bytes = b""
+    let total: int = 0
+    while true do
+        let res: NetResult = socket_recv(sock, 8192)
+        
+        if !res.ok then
+            return NetResult(false, buffer, total, res.error)
+        end
+        
+        if res.count == 0 then
+             break
+        end
+        
+        buffer = buffer + slice(res.data, 0, res.count)
+        total = total + res.count
+    end
+    return NetResult(true, buffer, total, "")
+end
 
 func request(client: ref HttpClient, method: string, url: string, headers: string[64], header_count: int, body: bytes) -> ClientResponse
-    let empty_res: ClientResponse = ClientResponse(false, 0, [], 0, b"", "")
-    
-    // 1. Parse URL
+    print("Debug: request start " + url)
+    let empty_h: string[64]
+    let empty_res: ClientResponse = ClientResponse(false, 0, empty_h, 0, b"", "")
+
     let u: HttpUrl = parse_url(url)
     if !u.valid then
         empty_res.error = "Invalid URL"
         return empty_res
     end
     
-    if u.host == "" then
-        empty_res.error = "Host not found in URL"
-        return empty_res
+    let final_headers: string[64] = merge_headers(u, method, headers, header_count, length(body), client.user_agent)
+    
+    let path_with_query: string = u.path
+    if length(u.query) > 0 then
+        path_with_query = path_with_query + "?" + u.query
     end
     
-    // 2. Conectar
+    let final_count: int = 0
+    while final_count < 64 do
+        if final_headers[final_count] == "" then
+            break
+        end
+        final_count = final_count + 1
+    end
+    
+    let req_data: bytes = build_request(method, path_with_query, final_headers, final_count, body)
+    
     let sock: Socket = connect(u.host, u.port)
     if !sock.open then
-        empty_res.error = "Connection failed to " + u.host + ":" + to_str(u.port)
+        empty_res.error = "Connection failed to " + u.host
         return empty_res
     end
     
-    // 3. Preparar Headers autom?ticos
-    // Adiciona Host e User-Agent se n?o existirem
-    // Copia headers do usu?rio para um novo array (mut?vel)
-    // Devido ? limita??o de tamanho fixo e falta de m?todos de array din?mico,
-    // vamos usar uma estrat?gia simples: copiar e adicionar.
-    
-    let final_headers: string[64]
-    let final_count: int = 0
-    let has_host: bool = false
-    let has_ua: bool = false
-    let has_len: bool = false
-    let has_type: bool = false
-    
-    let k: int = 0
-    while k < header_count do
-        final_headers[final_count] = headers[k]
-        final_count = final_count + 1
-        
-        // Verifica headers existentes (busca simples stick)
-        // Isso ? meio fr?gil sem lowercase, mas ok pro MVP
-        // Ideal: usar helper starts_with_ignore_case
-        k = k + 1
-    end
-    
-    // Adiciona Host
-    // [RESTORED]: Host is mandatory for HTTP/1.1
-    if final_count < 64 then
-        let host_header: string = u.host
-        if (u.scheme == "http" && u.port != 80) || (u.scheme == "https" && u.port != 443) then
-            host_header = host_header + ":" + to_str(u.port)
-        end
-        final_headers[final_count] = "Host: " + host_header
-        final_count = final_count + 1
-    end
-    
-    // Adiciona User-Agent
-    if final_count < 64 then
-        // Use a standard-looking UA
-        final_headers[final_count] = "User-Agent: aws-lambda-noxy/0.1"
-        final_count = final_count + 1
-    end
-    
-    // Connection: Keep-Alive is default in 1.1, so we remove "close".
-    // if final_count < 64 then
-    //    final_headers[final_count] = "Connection: close"
-    //    final_count = final_count + 1
-    // end
-    
-    // Add Accept: */*
-    if final_count < 64 then
-        final_headers[final_count] = "Accept: */*"
-        final_count = final_count + 1
-    end
-    
-    // Adiciona Content-Length se tiver body e metodo pede
-    // TODO: verificar se j? existe
-    if length(body) > 0 then
-        if final_count < 64 then
-            final_headers[final_count] = "Content-Length: " + to_str(length(body))
-            final_count = final_count + 1
-        end
-    end
-    
-    if method == "POST" || method == "PUT" || method == "PATCH" then
-        // Adiciona Content-Type default se n?o tiver?
-        // Vamos deixar pro usu?rio ou spec. Spec diz: post autom?gico application/json
-        // Mas aqui ? a fun??o gen?rica request()
-    end
-    
-    // 4. Build Request
-    let req_bytes: bytes = build_request(method, u.path + "?" + u.query, final_headers, final_count, body)
-    // query precisa ser tratada: se vazia, n?o poe ?
-    // Corre??o: u.path j? tem barra? Sim
-    // Se query tem algo: path + "?" + query
-    // Mas parse_url retorna query sem '?'
-    let full_path: string = u.path
-    if length(u.query) > 0 then
-        full_path = full_path + "?" + u.query
-    end
-    
-    // Reconstr?i com path certo
-    req_bytes = build_request(method, full_path, final_headers, final_count, body)
-    
-    // 5. Enviar
-    // DEBUG: Imprimir request cru (Compacto)
-    print("DEBUG REQ: " + method + " " + full_path)
-    // print("DEBUG RAW REQUEST:\n" + to_str(req_bytes))
-    // print("HEX DUMP removed for brevity")
-    // print("--------------------------------------------------")
+    let sent: NetResult = socket_send(sock, req_data)
 
-    let sent: int = send(sock, req_bytes)
-    if sent < length(req_bytes) then
-        close(sock)
-        empty_res.error = "Failed to send full request"
+    if !sent.ok then
+        socket_close(sock)
+        empty_res.error = "Failed to send request: " + sent.error
         return empty_res
     end
     
-    // 6. Receber Loop
-    let buffer: bytes = b""
-    let total_received: int = 0
-    let MAX_SIZE: int = 10485760  // 10MB limite
+    let read_res: NetResult = read_all(sock, client.timeout_ms)
+    socket_close(sock)
     
-    let loop_active: bool = true
-    while loop_active do
-        let result: NetResult = recv(sock, 8192)
-        // print("DEBUG CLIENT RECV: c=" + to_str(result.count) + " ok=" + to_str(result.ok))
-        
-        if !result.ok then
-            // Check for timeout
-            if strings_contains(result.error, "timeout") then
-                // Continue loop but sleep briefly to yield CPU
-                sleep(10)
-            else
-                loop_active = false
-                if total_received == 0 then
-                    empty_res.error = result.error
-                    return empty_res
-                end
-            end
-        else
-            if result.count == 0 then
-                // EOF
-                loop_active = false
-                if total_received == 0 then
-                   empty_res.error = "Empty response (EOF)"
-                   return empty_res
-                end
-            else
-                buffer = buffer + slice(result.data, 0, result.count)
-                total_received = total_received + result.count
-                if total_received >= MAX_SIZE then
-                    loop_active = false
-                end
-            end
-        end
-    end
-    
-    close(sock)
-    
-    if total_received == 0 then
-        empty_res.error = "Empty response"
+    if !read_res.ok && read_res.count == 0 then
+        empty_res.error = "Failed to read response: " + read_res.error
         return empty_res
     end
     
-    // 7. Parse Response
-    let http_res: HttpResponse = parse_response(buffer, total_received)
-    
-    // 8. Converter para ClientResponse
-    let client_res: ClientResponse = ClientResponse(false, http_res.status_code, http_res.headers, http_res.header_count, http_res.body, "")
-    
-    if http_res.status_code >= 200 && http_res.status_code < 300 then
-        client_res.ok = true
-    else
-        client_res.ok = false
-        client_res.error = http_res.status_text
-        if client_res.error == "" then
-             client_res.error = "Request failed with status " + to_str(http_res.status_code)
-        end
-        
-        // DEBUG: Imprimir headers da resposta em caso de erro
-        print("DEBUG RESPONSE HEADERS:")
-        let h_idx: int = 0
-        while h_idx < http_res.header_count do
-            print("  " + http_res.headers[h_idx])
-            h_idx = h_idx + 1
-        end
-        print("--------------------------------------------------")
+    if read_res.count == 0 then
+        empty_res.error = "Empty response from server"
+        return empty_res
     end
     
-    return client_res
+    let http_res: HttpResponse = parse_response(read_res.data, read_res.count)
+    
+    let ok: bool = http_res.status_code >= 200 && http_res.status_code < 300
+    let err_msg: string = ""
+    if !ok then
+        err_msg = http_res.status_text
+        if err_msg == "" then
+            err_msg = "HTTP Status " + to_str(http_res.status_code)
+        end
+    end
+    
+    return ClientResponse(ok, http_res.status_code, http_res.headers, http_res.header_count, http_res.body, err_msg)
 end
 
-
-// ============================================
-// Helper Methods (Shortcuts)
-// ============================================
-
 func get(url: string) -> ClientResponse
-    let headers: string[64]
-    return request(default_client, "GET", url, headers, 0, b"")
+    let h: string[64]
+    return request(default_client, "GET", url, h, 0, b"")
 end
 
 func post(url: string, body: bytes) -> ClientResponse
-    let headers: string[64]
-    // Default application/json for post shortcut
-    headers[0] = "Content-Type: application/json"
-    return request(default_client, "POST", url, headers, 1, body)
+    let h: string[64]
+    h[0] = "Content-Type: application/json"
+    return request(default_client, "POST", url, h, 1, body)
 end
 
 func put(url: string, body: bytes) -> ClientResponse
-    let headers: string[64]
-    headers[0] = "Content-Type: application/json"
-    return request(default_client, "PUT", url, headers, 1, body)
+    let h: string[64]
+    h[0] = "Content-Type: application/json"
+    return request(default_client, "PUT", url, h, 1, body)
 end
 
 func delete(url: string) -> ClientResponse
-    let headers: string[64]
-    return request(default_client, "DELETE", url, headers, 0, b"")
+    let h: string[64]
+    return request(default_client, "DELETE", url, h, 0, b"")
 end
 
 func patch(url: string, body: bytes) -> ClientResponse
-    let headers: string[64]
-    headers[0] = "Content-Type: application/json"
-    return request(default_client, "PATCH", url, headers, 1, body)
+    let h: string[64]
+    h[0] = "Content-Type: application/json"
+    return request(default_client, "PATCH", url, h, 1, body)
 end

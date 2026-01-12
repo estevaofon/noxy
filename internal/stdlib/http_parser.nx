@@ -1,60 +1,46 @@
-// stdlib/http_parser.nx - Parser HTTP/1.1
-
+// stdlib/http_parser.nx - Optimal HTTP Parser
 use strings select *
 
 // ============================================
-// Estruturas de Dados
+// Structures
 // ============================================
 
 struct HttpRequest
-    method: string,           // "GET", "POST", etc
-    path: string,             // "/api/users"
-    query: string,            // "id=123&&name=test" (sem o '?')
-    version: string,          // "HTTP/1.1"
-    headers: string[64],      // Array de headers "Name: Value"
-    header_count: int,        // Numero de headers validos
-    body: bytes               // Corpo da requisicao
+    method: string,
+    path: string,
+    query: string,
+    version: string,
+    headers: string[64],
+    header_count: int,
+    body: bytes
 end
 
 struct HttpResponse
-    version: string,          // "HTTP/1.1"
-    status_code: int,         // 200, 404, 500, etc
-    status_text: string,      // "OK", "Not Found", etc
-    headers: string[64],      // Array de headers
+    version: string,
+    status_code: int,
+    status_text: string,
+    headers: string[64],
     header_count: int,
     body: bytes
 end
 
 struct HttpUrl
-    scheme: string,           // "http" ou "https"
-    host: string,             // "api.example.com"
-    port: int,                // 80, 443, 8080, etc
-    path: string,             // "/api/users"
-    query: string,            // "id=123" (sem o '?')
-    fragment: string,         // "section1" (sem o '#')
-    valid: bool               // true se parse OK
+    scheme: string,
+    host: string,
+    port: int,
+    path: string,
+    query: string,
+    fragment: string,
+    valid: bool
 end
 
 // ============================================
-// Constantes e Helpers
+// Constants
 // ============================================
 
-// Status codes comuns
 let HTTP_200_OK: int = 200
-let HTTP_201_CREATED: int = 201
-let HTTP_204_NO_CONTENT: int = 204
-let HTTP_400_BAD_REQUEST: int = 400
 let HTTP_404_NOT_FOUND: int = 404
 let HTTP_500_INTERNAL_ERROR: int = 500
-
-// Content-Type comuns
-let CONTENT_TYPE_JSON: string = "application/json"
-let CONTENT_TYPE_HTML: string = "text/html"
-let CONTENT_TYPE_TEXT: string = "text/plain"
-let CONTENT_TYPE_CSS: string = "text/css"
-let CONTENT_TYPE_JS: string = "application/javascript"
-let CONTENT_TYPE_PNG: string = "image/png"
-let CONTENT_TYPE_JPEG: string = "image/jpeg"
 
 func get_status_text(code: int) -> string
     if code == 200 then return "OK" end
@@ -65,66 +51,40 @@ func get_status_text(code: int) -> string
     if code == 403 then return "Forbidden" end
     if code == 404 then return "Not Found" end
     if code == 500 then return "Internal Server Error" end
-    if code == 502 then return "Bad Gateway" end
-    if code == 503 then return "Service Unavailable" end
     return "Unknown"
 end
 
-// Encontra proxima ocorrencia de \r\n (13, 10 bytes)
-// Retorna -1 se nao encontrar
-func find_crlf(data: bytes, start: int, len: int) -> int
-    let i: int = start
-    while i < len do
-        // Checando manualmente os bytes para CR (13) e LF (10)
-        
-        // Strict CRLF
-        if i < len - 1 then
-            if data[i] == 13 && data[i+1] == 10 then
-                return i
+// ============================================
+// Parse Helpers
+// ============================================
+
+// Scan for \r\n\r\n (13, 10, 13, 10)
+func find_header_end(data: bytes, len: int) -> int
+    let i: int = 0
+    let limit: int = len - 3
+    
+    while i < limit do
+        if data[i] == 13 then
+            if data[i+1] == 10 then
+                if data[i+2] == 13 then
+                    if data[i+3] == 10 then
+                        return i
+                    end
+                end
             end
         end
-        
-        // LF Fallback (for curl output or relaxed servers)
-        if data[i] == 10 then
-            return i
-        end
-        
         i = i + 1
     end
     return -1
 end
 
-// Helper para converter sub-sequencia de bytes para string
-// Assumindo to_str converte bytes inteiros, entao vamos fatiar
-func bytes_to_string(data: bytes, start: int, end_idx: int) -> string
-    // slice(bytes, start, end) -> bytes
-    // to_str(bytes) -> string (decodifica)
-    let sub: bytes = slice(data, start, end_idx)
-    return to_str(sub)
-end
-
-// Helper para converter string para bytes
-func string_to_bytes(s: string) -> bytes
-    return to_bytes(s)
-end
-
-// Helper para trim de espacos (simplificado)
-func trim(s: string) -> string
-    if length(s) == 0 then return "" end
-    
-    // Simplificacao: apenas retorna a string por enquanto
-    // Noxy nao tem suporte facil a checar isspace char a char ainda
-    // Se necessario, implementar checagem de ' ' e '\t'
-    return s
-end
-
 // ============================================
-// Parse de URL
+// URL Parser
 // ============================================
 
 func parse_url(url: string) -> HttpUrl
+    // Default
     let res: HttpUrl = HttpUrl("http", "", 80, "/", "", "", false)
-    
     if length(url) == 0 then return res end
     
     let current: string = url
@@ -136,12 +96,7 @@ func parse_url(url: string) -> HttpUrl
         current = split_scheme.parts[1]
     end
     
-    // Define porta padrao baseada no scheme
-    if res.scheme == "https" then
-        res.port = 443
-    else
-        res.port = 80
-    end
+    if res.scheme == "https" then res.port = 443 end
     
     // 2. Fragment (#)
     let split_frag: SplitResult = split(current, "#")
@@ -157,10 +112,8 @@ func parse_url(url: string) -> HttpUrl
         current = split_query.parts[0]
     end
     
-    // 4. Path e Authority
-    // A string restante em 'current' tem formato "host:port/path" ou "host/path"
-    
-    // Separa no primeiro '/' usando index_of para nao quebrar paths longos
+    // 4. Authority vs Path
+    // Find first /
     let slash_idx: int = index_of(current, "/")
     let authority: string = ""
     
@@ -172,7 +125,7 @@ func parse_url(url: string) -> HttpUrl
         res.path = substring(current, slash_idx, length(current))
     end
     
-    // 5. Host e Port (Authority)
+    // 5. Host:Port
     let split_port: SplitResult = split(authority, ":")
     if split_port.count > 1 then
         res.host = split_port.parts[0]
@@ -186,250 +139,185 @@ func parse_url(url: string) -> HttpUrl
 end
 
 // ============================================
-// Parse Request/Response
+// Request Parser
 // ============================================
 
-func parse_headers(raw_str: string) -> string[64]
-    let headers: string[64]
-    // Nao temos split_lines facil, vamos processar linha a linha manualmente ou assumir que ja temos vetor?
-    // A funcao parse_request vai processar linha a linha a partir dos bytes.
-    return headers
-end
-
-func parse_request(raw_data: bytes, data_len: int) -> HttpRequest
-    let req: HttpRequest = HttpRequest("GET", "/", "", "HTTP/1.1", [], 0, b"")
+func parse_request(data: bytes, len: int) -> HttpRequest
+    // Strategy: Find Double CRLF. Split everything before into lines. Everything after is body.
+    let end_headers: int = find_header_end(data, len)
+    let body_start: int = 0
+    let header_bytes: bytes = b""
     
-    // 1. Processar Request Line e Headers
-    // Vamos iterar procurando CRLF
+    if end_headers == -1 then
+        // Strict: No headers end found. Maybe incomplete? 
+        // Fallback: Assume all is header if small? Or invalid.
+        // For robustness, if no body separator, try to parse what we have as lines.
+        header_bytes = data
+        body_start = len
+    else
+        header_bytes = slice(data, 0, end_headers)
+        body_start = end_headers + 4
+    end
     
-    let cursor: int = 0
-    let line_start: int = 0
-    let is_body: bool = false
-    let line_count: int = 0
+    let empty_h: string[64]
+    let req: HttpRequest = HttpRequest("GET", "/", "", "HTTP/1.1", empty_h, 0, b"")
     
-    let empty_headers: string[64] // Inicializa array vazio
-    req.headers = empty_headers
+    if body_start < len then
+        req.body = slice(data, body_start, len)
+    end
     
-    while cursor < data_len do
-        let crlf_pos: int = find_crlf(raw_data, cursor, data_len)
+    // Bytes -> String for headers
+    // Warning: Binary data in headers is illegal anyway, so safe to convert.
+    let header_str: string = to_str(header_bytes)
+    
+    // Split by \r\n
+    // Note: 'split' consumes memory for array. 
+    let lines: SplitResult = split(header_str, "\r\n")
+    
+    if lines.count > 0 then
+        // Request Line
+        let req_line: string = lines.parts[0]
+        let req_parts: SplitResult = split(req_line, " ")
+        if req_parts.count > 0 then req.method = req_parts.parts[0] end
+        if req_parts.count > 1 then 
+            let full_path: string = req_parts.parts[1]
+            let q_split: SplitResult = split(full_path, "?")
+            req.path = q_split.parts[0]
+            if q_split.count > 1 then req.query = q_split.parts[1] end
+        end
+        if req_parts.count > 2 then req.version = req_parts.parts[2] end
         
-        if crlf_pos == -1 then
-            // Sem mais CRLF, o resto e body ou fim
-            if !is_body then
-                // Se ainda estavamos nos headers, algo errado ou fim abrupto
-                // Assumimos resto como body se tiver algo
-                if cursor < data_len then
-                   req.body = slice(raw_data, cursor, data_len) 
+        // Headers
+        let i: int = 1
+        while i < lines.count do
+            let line: string = lines.parts[i]
+            if length(line) > 0 then
+                if req.header_count < 64 then
+                    req.headers[req.header_count] = line
+                    req.header_count = req.header_count + 1
                 end
             end
-            break // Sai do loop
+            i = i + 1
         end
-        
-        // Temos uma linha de cursor ate crlf_pos
-        
-        // Verifica linha vazia (fim dos headers)
-        if crlf_pos == cursor then
-            is_body = true
-            // Pula o CRLF
-            cursor = crlf_pos + 2
-            // O resto e body
-            if cursor < data_len then
-                req.body = slice(raw_data, cursor, data_len)
-            end
-            break // Terminou parse
-        end
-        
-        // Processa linha
-        let line_str: string = bytes_to_string(raw_data, cursor, crlf_pos)
-        
-        if line_count == 0 then
-            // Request Line: GET /path HTTP/1.1
-            let split1: SplitResult = split(line_str, " ")
-            req.method = split1.parts[0]
-            
-            let remainder: string = ""
-            if split1.count > 1 then remainder = split1.parts[1] end
-            let split2: SplitResult = split(remainder, " ")
-            let full_path: string = split2.parts[0]
-            if split2.count > 1 then
-                req.version = split2.parts[1]
-            else
-                req.version = "HTTP/1.1"
-            end
-            
-            // Separa path e query
-            let split_q: SplitResult = split(full_path, "?")
-            req.path = split_q.parts[0]
-            if split_q.count > 1 then
-                req.query = split_q.parts[1]
-            else
-                req.query = ""
-            end
-            
-        else
-            // Header: Name: Value
-            // Armazena string inteira por enquanto, conforme struct "Name: Value"
-            if req.header_count < 64 then
-                req.headers[req.header_count] = line_str
-                req.header_count = req.header_count + 1
-            end
-        end
-        
-        line_count = line_count + 1
-        cursor = crlf_pos + 2 // Avanca apos \r\n
     end
     
     return req
 end
 
-func parse_response(raw_data: bytes, data_len: int) -> HttpResponse
-    let resp: HttpResponse = HttpResponse("HTTP/1.1", 200, "OK", [], 0, b"")
+func parse_response(data: bytes, len: int) -> HttpResponse
+    let empty_h: string[64]
+    let end_headers: int = find_header_end(data, len)
+    let body_start: int = 0
+    let header_bytes: bytes = b""
     
-    let cursor: int = 0
-    let is_body: bool = false
-    let line_count: int = 0
+    if end_headers == -1 then
+        header_bytes = data
+        body_start = len
+    else
+        header_bytes = slice(data, 0, end_headers)
+        body_start = end_headers + 4
+    end
     
-    let empty_headers: string[64]
-    resp.headers = empty_headers
+    let resp: HttpResponse = HttpResponse("HTTP/1.1", 200, "OK", empty_h, 0, b"")
     
-    while cursor < data_len do
-        let crlf_pos: int = find_crlf(raw_data, cursor, data_len)
+    if body_start < len then
+        resp.body = slice(data, body_start, len)
+    end
+    
+    let header_str: string = to_str(header_bytes)
+    let lines: SplitResult = split(header_str, "\r\n")
+    
+    if lines.count > 0 then
+        // Status Line: HTTP/1.1 200 OK
+        let status_line: string = lines.parts[0]
+        let s_parts: SplitResult = split(status_line, " ")
+        if s_parts.count > 0 then resp.version = s_parts.parts[0] end
+        if s_parts.count > 1 then resp.status_code = to_int(s_parts.parts[1]) end
         
-        if crlf_pos == -1 then
-            if !is_body && (cursor < data_len) then
-                resp.body = slice(raw_data, cursor, data_len)
-            end
-            break
+        // Status text is the rest... difficult with simple split.
+        // Reconstruct or custom parse.
+        // "HTTP/1.1 200 OK" -> parts: ["HTTP/1.1", "200", "OK"]
+        // "HTTP/1.1 404 Not Found" -> parts: ["...", "404", "Not", "Found"]
+        if s_parts.count > 2 then
+             // Join from 2 to end
+             // Or simple find first 2 spaces logic on original string?
+             // Let's use join if available or iteration.
+             // We don't have join_slice, so loop.
+             let txt: string = ""
+             let k: int = 2
+             while k < s_parts.count do
+                 if k > 2 then txt = txt + " " end
+                 txt = txt + s_parts.parts[k]
+                 k = k + 1
+             end
+             resp.status_text = txt
         end
         
-        if crlf_pos == cursor then
-            is_body = true
-            cursor = crlf_pos + 2
-            if cursor < data_len then
-                resp.body = slice(raw_data, cursor, data_len)
-            end
-            break
+        // Headers
+        let i: int = 1
+        while i < lines.count do
+             let line: string = lines.parts[i]
+             if length(line) > 0 then
+                 if resp.header_count < 64 then
+                     resp.headers[resp.header_count] = line
+                     resp.header_count = resp.header_count + 1
+                 end
+             end
+             i = i + 1
         end
-        
-        let line_str: string = bytes_to_string(raw_data, cursor, crlf_pos)
-        
-        if line_count == 0 then
-            // Status Line: HTTP/1.1 200 OK
-            let split1: SplitResult = split(line_str, " ")
-            resp.version = split1.parts[0]
-            
-            let remainder: string = ""
-            if split1.count > 1 then remainder = split1.parts[1] end
-            let split2: SplitResult = split(remainder, " ")
-            
-            // O codigo pode nao ter texto depois
-            resp.status_code = to_int(split2.parts[0])
-            // Fix: Reconstruct rest of line or parse better. 
-            // remainder was "200 OK" -> split2 parts [200, OK]
-            // If "400 Bad Request" -> remainder "400 Bad Request" -> split2 parts [400, Bad, Request]
-            // split2.parts[1] is just "Bad".
-            
-            if split2.count > 1 then
-                // Manual join or substring logic would be better.
-                // Let's find first space in remainder.
-                let first_space: int = index_of(remainder, " ")
-                if first_space != -1 then
-                   resp.status_text = substring(remainder, first_space + 1, length(remainder))
-                else
-                   resp.status_text = ""
-                end
-            else
-                resp.status_text = ""
-            end
-            
-        else
-            if resp.header_count < 64 then
-                resp.headers[resp.header_count] = line_str
-                resp.header_count = resp.header_count + 1
-            end
-        end
-        
-        line_count = line_count + 1
-        cursor = crlf_pos + 2
     end
     
     return resp
 end
 
 // ============================================
-// Build Request/Response
+// Builders
 // ============================================
 
-func build_request(method: string, path: string, headers: string[64], header_count: int, body: bytes) -> bytes
-    let req_str: string = method + " " + path + " HTTP/1.1\r\n"
-    
+func build_request(method: string, path: string, headers: string[64], count: int, body: bytes) -> bytes
+    let head: string = method + " " + path + " HTTP/1.1\r\n"
     let i: int = 0
-    while i < header_count do
-        req_str = req_str + headers[i] + "\r\n"
+    while i < count do
+        head = head + headers[i] + "\r\n"
         i = i + 1
     end
-    
-    req_str = req_str + "\r\n"
-    
-    let head_bytes: bytes = to_bytes(req_str)
-    
-    // Concatena head e body
-    return head_bytes + body
+    head = head + "\r\n"
+    return to_bytes(head) + body
 end
 
-func build_response(status_code: int, status_text: string, headers: string[64], header_count: int, body: bytes) -> bytes
-    let status_line: string = "HTTP/1.1 " + to_str(status_code) + " " + status_text + "\r\n"
-    let resp_str: string = status_line
-    
+func build_response(code: int, text: string, headers: string[64], count: int, body: bytes) -> bytes
+    let head: string = "HTTP/1.1 " + to_str(code) + " " + text + "\r\n"
     let i: int = 0
-    while i < header_count do
-        resp_str = resp_str + headers[i] + "\r\n"
+    while i < count do
+        head = head + headers[i] + "\r\n"
         i = i + 1
     end
-    
-    resp_str = resp_str + "\r\n"
-    
-    let head_bytes: bytes = to_bytes(resp_str)
-    return head_bytes + body
+    head = head + "\r\n"
+    return to_bytes(head) + body
 end
 
 // ============================================
-// Header Manipulation
+// Header Utils
 // ============================================
 
-func get_header(req: ref HttpRequest, name: string) -> string
-    let search: string = name + ":"
-    // Simplificado: case sensitive por enquanto no prefixo, 
-    // mas ideal seria case-insensitive
-    
+func get_header(headers: string[64], count: int, name: string) -> string
+    let search: string = strings_to_lower(name) + ":"
     let i: int = 0
-    while i < req.header_count do
-        // Checagem "contains" ou starts with manual?
-        // Vamos usar uma abordagem simples: name + ":"
-        // Deveria normalizar para lower case
-        
-        let header_line: string = req.headers[i]
-        
-        // Verifica se comeca com name:
-        // Como nao temos starts_with ainda ou lower(), vamos fazer um check manual basico
-        // ou usar substring
-        if length(header_line) > length(search) then
-            let prefix: string = substring(header_line, 0, length(search))
-            // Se for igual (case sensitive aqui :/) 
-            if prefix == search then
-                let split_h: SplitResult = split(header_line, ":")
-                if split_h.count > 1 then return trim(split_h.parts[1]) end
+    while i < count do
+        let h: string = strings_to_lower(headers[i])
+        if strings_starts_with(h, search) then
+            // Found. Now need original value.
+            // Split original string
+            let orig: string = headers[i]
+            let parts: SplitResult = split(orig, ":")
+            if parts.count > 1 then
+                // Value is parts[1] (maybe + parts[2] if val has :)
+                // Simple assumption: one :
+                // Trim logic needed
+                return strings_trim(parts.parts[1]) 
             end
         end
         i = i + 1
     end
-    
     return ""
-end
-
-func set_header(headers: ref string[64], header_count: ref int, name: string, value: string) -> void
-    if header_count < 64 then
-        headers[header_count] = name + ": " + value
-        header_count = header_count + 1
-    end
 end

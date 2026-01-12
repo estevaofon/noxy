@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
+	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
@@ -33,11 +35,15 @@ const FramesMax = 64
 
 func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interface{}) error {
 	line := 0
-	if c != nil && ip > 0 && ip <= len(c.Lines) {
-		line = c.Lines[ip-1]
+	file := "?"
+	if c != nil {
+		file = c.FileName
+		if ip > 0 && ip <= len(c.Lines) {
+			line = c.Lines[ip-1]
+		}
 	}
 	msg := fmt.Sprintf(format, args...)
-	return fmt.Errorf("[line %d] %s", line, msg)
+	return fmt.Errorf("[%s:line %d] %s", file, line, msg)
 }
 
 type CallFrame struct {
@@ -51,6 +57,12 @@ type SharedState struct {
 	Globals     map[string]value.Value // Global variables/functions
 	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
 	GlobalsLock sync.RWMutex
+
+	// Shared Network Resources
+	NetListeners map[int]net.Listener
+	NetConns     map[int]net.Conn
+	NextNetID    int
+	NetLock      sync.Mutex
 }
 
 type VM struct {
@@ -60,10 +72,6 @@ type VM struct {
 
 	chunk *chunk.Chunk // Removed, accessed via frame
 	ip    int          // Removed, accessed via frame (or cached)
-
-	// We need to keep direct ip access for performance, but sync with frame on call/return.
-	// For simplicity first: Access via currentFrame? Or Cache?
-	// Let's stick to: VM has ip/chunk, they are loaded from frame on Return/Call.
 
 	stack    [StackMax]value.Value
 	stackTop int
@@ -81,12 +89,10 @@ type VM struct {
 	nextDbID    int
 	nextStmtID  int
 
-	// Net Management
-	netListeners     map[int]net.Listener
-	netConns         map[int]net.Conn
-	netBufferedData  map[int][]byte   // For peeked data during select
-	netBufferedConns map[int]net.Conn // For peeked accepts
-	nextNetID        int
+	// Net Management (Moved to SharedState)
+	netBufferedData  map[int][]byte   // For peeked data during select (Local to thread/VM?)
+	netBufferedConns map[int]net.Conn // For peeked accepts (Local to thread/VM?)
+	// netListeners, netConns, nextNetID removed from VM
 
 	LastPopped value.Value
 
@@ -103,8 +109,11 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	shared := &SharedState{
-		Globals: make(map[string]value.Value),
-		Modules: make(map[string]value.Value),
+		Globals:      make(map[string]value.Value),
+		Modules:      make(map[string]value.Value),
+		NetListeners: make(map[int]net.Listener),
+		NetConns:     make(map[int]net.Conn),
+		NextNetID:    1,
 	}
 	return NewWithShared(shared, cfg)
 }
@@ -120,11 +129,8 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		stmtParams:       make(map[int]map[int]interface{}),
 		nextDbID:         1,
 		nextStmtID:       1,
-		netListeners:     make(map[int]net.Listener),
-		netConns:         make(map[int]net.Conn),
 		netBufferedData:  make(map[int][]byte),
 		netBufferedConns: make(map[int]net.Conn),
-		nextNetID:        1,
 	}
 
 	// Define 'print' native
@@ -1762,9 +1768,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewMapWithData(socketFields)
 		}
 
-		id := vm.nextNetID
-		vm.nextNetID++
-		vm.netListeners[id] = listener
+		vm.shared.NetLock.Lock()
+		id := vm.shared.NextNetID
+		vm.shared.NextNetID++
+		vm.shared.NetListeners[id] = listener
+		vm.shared.NetLock.Unlock()
 
 		socketFields := map[string]value.Value{
 			"fd":   value.NewInt(int64(id)),
@@ -1789,7 +1797,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		fd := int(fdVal.AsInt)
 
-		listener, ok := vm.netListeners[fd]
+		vm.shared.NetLock.Lock()
+		listener, ok := vm.shared.NetListeners[fd]
+		vm.shared.NetLock.Unlock()
+
 		if !ok {
 			socketFields := map[string]value.Value{
 				"fd":   value.NewInt(-1),
@@ -1808,6 +1819,8 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			conn = bufferedConn
 			delete(vm.netBufferedConns, fd)
 		} else {
+			// Accept blocks. We should UNLOCK before accepting?
+			// Yes, we unlocked above.
 			conn, err = listener.Accept()
 		}
 
@@ -1821,9 +1834,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewMapWithData(socketFields)
 		}
 
-		id := vm.nextNetID
-		vm.nextNetID++
-		vm.netConns[id] = conn
+		vm.shared.NetLock.Lock()
+		id := vm.shared.NextNetID
+		vm.shared.NextNetID++
+		vm.shared.NetConns[id] = conn
+		vm.shared.NetLock.Unlock()
 
 		remoteAddr := conn.RemoteAddr().String()
 		socketFields := map[string]value.Value{
@@ -1854,9 +1869,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewMapWithData(socketFields)
 		}
 
-		id := vm.nextNetID
-		vm.nextNetID++
-		vm.netConns[id] = conn
+		vm.shared.NetLock.Lock()
+		id := vm.shared.NextNetID
+		vm.shared.NextNetID++
+		vm.shared.NetConns[id] = conn
+		vm.shared.NetLock.Unlock()
 
 		socketFields := map[string]value.Value{
 			"fd":   value.NewInt(int64(id)),
@@ -1879,7 +1896,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		fd := int(fdVal.AsInt)
 		size := int(args[1].AsInt)
 
-		conn, ok := vm.netConns[fd]
+		vm.shared.NetLock.Lock()
+		conn, ok := vm.shared.NetConns[fd]
+		vm.shared.NetLock.Unlock()
+
 		if !ok {
 			resultFields := map[string]value.Value{
 				"ok":    value.NewBool(false),
@@ -1903,25 +1923,27 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		// Try to read more if space available
 		if n < size {
-			// Set short deadline to avoid blocking event loop
-			conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+			// Blocking read (no deadline)
 			n2, err2 := conn.Read(buf[n:])
 			if n2 > 0 {
 				n += n2
 			}
-			// Reset deadline
-			conn.SetReadDeadline(time.Time{})
 
 			// Ignore timeout errors if we have at least some data
 			if err2 != nil {
-				// If we have data, we return it. If we have no data (n==0), we might return error.
-				// But buffer might have given us data.
-				// If err2 is EOF, we still want to return data we have.
 				if n == 0 {
 					// Only return error if we really got nothing
 					if err2 != nil && n2 == 0 {
-						// If it's just timeout and n=0? Logic above handles buffer.
-						// If n=0 and read failed, return failure.
+						if err2 == io.EOF {
+							// Return ok=true, count=0 for EOF
+							resultFields := map[string]value.Value{
+								"ok":    value.NewBool(true),
+								"data":  value.NewBytes(""),
+								"count": value.NewInt(0),
+								"error": value.NewString(""),
+							}
+							return value.NewMapWithData(resultFields)
+						}
 						resultFields := map[string]value.Value{
 							"ok":    value.NewBool(false),
 							"data":  value.NewBytes(""),
@@ -1949,13 +1971,22 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		sockMap, ok := args[0].Obj.(*value.ObjMap)
 		if !ok {
+			fmt.Printf("DEBUG: net_send args[0] not map: %T %v\n", args[0].Obj, args[0].Obj)
 			return value.NewNull()
 		}
 		fdVal, _ := sockMap.Data["fd"]
 		fd := int(fdVal.AsInt)
-		data := args[1].String() // bytes are stored as strings internally
+		var data string
+		if args[1].Type == value.VAL_BYTES {
+			data = args[1].Obj.(string)
+		} else {
+			data = args[1].String()
+		}
 
-		conn, ok := vm.netConns[fd]
+		vm.shared.NetLock.Lock()
+		conn, ok := vm.shared.NetConns[fd]
+		vm.shared.NetLock.Unlock()
+
 		if !ok {
 			resultFields := map[string]value.Value{
 				"ok":    value.NewBool(false),
@@ -1990,24 +2021,36 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
-		sockMap, ok := args[0].Obj.(*value.ObjMap)
-		if !ok {
+
+		var fd int
+		// Check if arg is int (new style) or map (old style compatibility if needed, but we changed net.nx)
+		if args[0].Type == value.VAL_INT {
+			fd = int(args[0].AsInt)
+		} else if args[0].Type == value.VAL_OBJ {
+			// Fallback for old calls? Or just error.
+			if sockMap, ok := args[0].Obj.(*value.ObjMap); ok {
+				if fdVal, found := sockMap.Data["fd"]; found {
+					fd = int(fdVal.AsInt)
+				}
+			}
+		} else {
 			return value.NewNull()
 		}
-		fdVal, _ := sockMap.Data["fd"]
-		fd := int(fdVal.AsInt)
+
+		vm.shared.NetLock.Lock()
+		defer vm.shared.NetLock.Unlock()
 
 		// Try closing as listener
-		if listener, ok := vm.netListeners[fd]; ok {
+		if listener, ok := vm.shared.NetListeners[fd]; ok {
 			listener.Close()
-			delete(vm.netListeners, fd)
+			delete(vm.shared.NetListeners, fd)
 			return value.NewNull()
 		}
 
 		// Try closing as connection
-		if conn, ok := vm.netConns[fd]; ok {
+		if conn, ok := vm.shared.NetConns[fd]; ok {
 			conn.Close()
-			delete(vm.netConns, fd)
+			delete(vm.shared.NetConns, fd)
 		}
 
 		return value.NewNull()
@@ -2064,7 +2107,12 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 								isReady = true
 							} else {
 								// 2. Poll
-								if l, ok := vm.netListeners[id]; ok {
+								vm.shared.NetLock.Lock()
+								l, isListener := vm.shared.NetListeners[id]
+								c, isConn := vm.shared.NetConns[id]
+								vm.shared.NetLock.Unlock()
+
+								if isListener {
 									// Set short deadline to peek
 									// Cast to TCPListener to set deadline
 									// net.Listener interface doesn't have SetDeadline, specific implementations do.
@@ -2081,7 +2129,8 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 										// Reset deadline?
 										tcpL.SetDeadline(time.Time{})
 									}
-								} else if conn, ok := vm.netConns[id]; ok {
+								} else if isConn {
+									conn := c
 									conn.SetReadDeadline(time.Now().Add(time.Millisecond * time.Duration(timeoutMs)))
 									buf := make([]byte, 1) // Peek 1 byte
 									n, err := conn.Read(buf)
@@ -3941,7 +3990,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 			if len(p.Errors()) > 0 {
 				return value.NewNull(), fmt.Errorf("parse error in embedded module %s: %v", name, p.Errors())
 			}
-			c := compiler.New()
+			c := compiler.NewWithState(make(map[string]ast.NoxyType), embedPath)
 			chunk, _, err := c.Compile(prog)
 			if err != nil {
 				return value.NewNull(), err
@@ -4017,7 +4066,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 		return value.NewNull(), fmt.Errorf("parse error in module %s: %v", name, p.Errors())
 	}
 
-	c := compiler.New()
+	c := compiler.NewWithState(make(map[string]ast.NoxyType), path)
 	chunk, _, err := c.Compile(prog)
 	if err != nil {
 		return value.NewNull(), err

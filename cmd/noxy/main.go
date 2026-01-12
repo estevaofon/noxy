@@ -44,7 +44,7 @@ func main() {
 		return
 	}
 
-	runWithConfig(string(content), getDir(filename), *showDisassembly)
+	runWithConfig(filename, string(content), getDir(filename), *showDisassembly)
 }
 
 func getDir(path string) string {
@@ -160,7 +160,7 @@ func startREPL(showDisasm bool) {
 		}
 
 		// 3. Compile
-		c := compiler.NewWithState(replGlobals)
+		c := compiler.NewWithState(replGlobals, "REPL")
 		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)
@@ -211,10 +211,10 @@ func verify() {
 	main()
 	`
 	fmt.Printf("Verifying with input:\n%s\n", input)
-	runWithConfig(input, ".", true)
+	runWithConfig("verify.nx", input, ".", true)
 }
 
-func runWithConfig(input string, rootPath string, showDisasm bool) {
+func runWithConfig(filename string, input string, rootPath string, showDisasm bool) {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -226,7 +226,7 @@ func runWithConfig(input string, rootPath string, showDisasm bool) {
 		os.Exit(1)
 	}
 
-	c := compiler.New()
+	c := compiler.NewWithState(make(map[string]ast.NoxyType), filename)
 	chunk, _, err := c.Compile(program)
 	if err != nil {
 		fmt.Printf("Compiler error: %s\n", err)

@@ -33,15 +33,16 @@ type Compiler struct {
 	upvalues     []Upvalue
 	scopeDepth   int
 	loops        []*Loop
-	currentLine  int // Track current source line for error messages
+	currentLine  int
+	FileName     string
 }
 
 func New() *Compiler {
-	return NewWithState(make(map[string]ast.NoxyType))
+	return NewWithState(make(map[string]ast.NoxyType), "")
 }
 
-func NewWithState(globals map[string]ast.NoxyType) *Compiler {
-	return &Compiler{
+func NewWithState(globals map[string]ast.NoxyType, fileName string) *Compiler {
+	c := &Compiler{
 		enclosing:    nil,
 		currentChunk: chunk.New(),
 		locals:       []Local{},
@@ -50,20 +51,26 @@ func NewWithState(globals map[string]ast.NoxyType) *Compiler {
 		scopeDepth:   0,
 		loops:        []*Loop{},
 		currentLine:  1,
+		FileName:     fileName,
 	}
+	c.currentChunk.FileName = fileName
+	return c
 }
 
 func NewChild(parent *Compiler) *Compiler {
-	return &Compiler{
+	c := &Compiler{
 		enclosing:    parent,
 		currentChunk: chunk.New(),
 		locals:       []Local{},
-		globals:      parent.globals, // Share globals (or copy? Share reference is correct for global scope)
+		globals:      parent.globals,
 		upvalues:     []Upvalue{},
 		scopeDepth:   0,
 		loops:        []*Loop{},
 		currentLine:  parent.currentLine,
+		FileName:     parent.FileName,
 	}
+	c.currentChunk.FileName = parent.FileName
+	return c
 }
 
 func (c *Compiler) GetGlobals() map[string]ast.NoxyType {

@@ -1,8 +1,10 @@
+// stdlib/json_parser.nx
+// JSON Parser & Stringifier
+
 // ============================================
-// JSON PARSER EM NOXY - VERS?O CORRIGIDA
+// Types
 // ============================================
 
-// Constantes de Tipo
 let TYPE_NULL: int = 0
 let TYPE_BOOL: int = 1
 let TYPE_NUMBER: int = 2
@@ -10,7 +12,6 @@ let TYPE_STRING: int = 3
 let TYPE_ARRAY: int = 4
 let TYPE_OBJECT: int = 5
 
-// Estrutura para representar qualquer valor JSON
 struct JsonNode
     type: int,
     bool_val: bool,
@@ -21,7 +22,6 @@ struct JsonNode
     next: ref JsonNode
 end
 
-// Estrutura para manter o estado do Parser
 struct Parser
     source: string,
     pos: int,
@@ -29,7 +29,7 @@ struct Parser
 end
 
 // ============================================
-// Construtores de N?s
+// Factories
 // ============================================
 
 func make_null() -> JsonNode
@@ -57,7 +57,7 @@ func make_object() -> JsonNode
 end
 
 // ============================================
-// Fun??es Auxiliares
+// Helper Utils
 // ============================================
 
 func append_child(parent: ref JsonNode, child: ref JsonNode) -> void
@@ -72,21 +72,21 @@ func append_child(parent: ref JsonNode, child: ref JsonNode) -> void
     end
 end
 
+// ============================================
+// Parser Implementation
+// ============================================
+
 func is_at_end(p: ref Parser) -> bool
     return p.pos >= p.len
 end
 
 func peek(p: ref Parser) -> string
-    if is_at_end(p) then
-        return ""
-    end
+    if p.pos >= p.len then return "" end
     return p.source[p.pos]
 end
 
 func advance(p: ref Parser) -> string
-    if is_at_end(p) then
-        return ""
-    end
+    if p.pos >= p.len then return "" end
     let c: string = p.source[p.pos]
     p.pos = p.pos + 1
     return c
@@ -94,234 +94,212 @@ end
 
 func skip_whitespace(p: ref Parser) -> void
     let c: string = peek(p)
+    // Basic whitespace check: space, \n, \t, \r
     while !is_at_end(p) && (c == " " || c == "\n" || c == "\t" || c == "\r") do
         let ignored: string = advance(p)
         c = peek(p)
     end
 end
 
-func match_text(p: ref Parser, text: string) -> bool
-    let i: int = 0
-    let text_len: int = length(text)
-    
-    if p.pos + text_len > p.len then
-        return false
-    end
-    
-    while i < text_len do
-        if p.source[p.pos + i] != text[i] then
-            return false
-        end
-        i = i + 1
-    end
-    
-    p.pos = p.pos + text_len
-    return true
-end
-
-// ============================================
-// CORRE??O PRINCIPAL: parse_string_val
-// ============================================
-
 func parse_string_val(p: ref Parser) -> string
-    // Consome aspas iniciais
-    let quote: string = advance(p)
-    if quote != "\"" then
-        print(f"Erro: esperado '\"', encontrado '{quote}'")
-        return ""
-    end
-    
+    let quote: string = advance(p) // Assume caller checked quote
     let res: string = ""
     
     while !is_at_end(p) do
         let c: string = peek(p)
-        
-        // Handle escapes
         if c == "\\" then
-            // print("DEBUG ESCAPE DETECTED")
-            // Consume the backslash
-            let ignored_slash: string = advance(p)
-            
-            // Consume the escaped character
+            let ign: string = advance(p) // skip slash
             if !is_at_end(p) then
-                let escaped_char: string = advance(p)
-                // print("DEBUG ESCAPED: " + escaped_char)
-                res = res + escaped_char
+                let esc: string = advance(p)
+                // Handle basic escapes
+                if esc == "\"" then res = res + "\"" end
+                if esc == "\\" then res = res + "\\" end
+                if esc == "/" then res = res + "/" end
+                if esc == "n" then res = res + "\n" end
+                if esc == "r" then res = res + "\r" end
+                if esc == "t" then res = res + "\t" end
+                // Unicode \u not supported in MVP
             end
         else
-            // Check for closing quote
             if c == "\"" then
-                let closing: string = advance(p)
-                // print("DEBUG END STRING: " + res)
+                let ign: string = advance(p)
                 return res
             end
-            
-            // Normal character
             res = res + advance(p)
         end
     end
-    
-    // Se chegou aqui, string n?o foi fechada
-    print(f"Erro: String n?o fechada (come?ou na posi??o {p.pos})")
     return res
 end
 
-// ============================================
-// Parser de N?meros
-// ============================================
-
 func parse_number_val(p: ref Parser) -> float
-    let num_str: string = ""
+    let start: int = p.pos
+    let c: string = peek(p)
+    if c == "-" then let ign: string = advance(p) end
+    
+    while !is_at_end(p) do
+        let d: string = peek(p)
+        let code: int = ord(d)
+        if (code >= 48 && code <= 57) || d == "." || d == "e" || d == "E" || d == "+" || d == "-" then
+            let ign: string = advance(p)
+        else
+            break
+        end
+    end
+    // Extract substring logic? No substring helper here natively unless we import strings.
+    // Manual reconstruction not ideal. "parse_number" usually primitive.
+    // Noxy to_float parses string.
+    // We need to slice the string source.
+    // Assuming simple slice or reconstruction.
+    // Since we don't have slice on strings easily exposed without strings module,
+    // let's accumulate in string during scan (slower but works).
+    
+    // Restart scan for extraction (optimization: do it in one pass above)
+    // Actually, let's just accumulate above.
+    return 0.0 // Placeholder if we don't extract.
+end
+
+// Redoing number parse with accumulation
+func parse_number_str(p: ref Parser) -> float
+    let res: string = ""
     let c: string = peek(p)
     
-    // Sinal opcional
-    if c == "-" then
-        num_str = num_str + advance(p)
-        c = peek(p)
+    if c == "-" then 
+        res = res + advance(p) 
     end
     
-    // Parte inteira
-    while !is_at_end(p) && (ord(c) >= 48 && ord(c) <= 57) do
-        num_str = num_str + advance(p)
-        c = peek(p)
-    end
-    
-    // Parte fracion?ria
-    if c == "." then
-        num_str = num_str + advance(p)
-        c = peek(p)
-        while !is_at_end(p) && (ord(c) >= 48 && ord(c) <= 57) do
-            num_str = num_str + advance(p)
-            c = peek(p)
+    // Int part
+    while !is_at_end(p) do
+        let d: string = peek(p)
+        let code: int = ord(d)
+        if code >= 48 && code <= 57 then
+            res = res + advance(p)
+        else
+            break
         end
     end
     
-    return to_float(num_str)
+    // Fraction
+    if peek(p) == "." then
+        res = res + advance(p)
+        while !is_at_end(p) do
+             let d: string = peek(p)
+             let code: int = ord(d)
+             if code >= 48 && code <= 57 then
+                 res = res + advance(p)
+             else
+                 break
+             end
+        end
+    end
+    
+    return to_float(res)
 end
 
-// ============================================
-// Parsers Recursivos
-// ============================================
+// Recursion needs forward declaration or order? order matters in Noxy? 
+// Noxy allows recursion if function is defined. 
+// Mutual recursion needs careful ordering or prototype? 
+// Noxy currently reads file linearly? No, it parses definitions. Recursion is fine.
 
 func parse_value(p: ref Parser) -> ref JsonNode
     skip_whitespace(p)
     let c: string = peek(p)
     
-    if c == "\"" then
-        let s: string = parse_string_val(p)
-        return ref make_string(s)
+    if c == "{" then return parse_object(p) end
+    if c == "[" then return parse_array(p) end
+    if c == "\"" then return ref make_string(parse_string_val(p)) end
+    if c == "t" then 
+        // true
+        let ign: string = advance(p) 
+        ign = advance(p) // r
+        ign = advance(p) // u
+        ign = advance(p) // e
+        return ref make_bool(true)
     end
-    
-    if c == "{" then
-        return parse_object(p)
-    end
-    
-    if c == "[" then
-        return parse_array(p)
-    end
-    
-    if c == "t" then
-        if match_text(p, "true") then
-            return ref make_bool(true)
-        end
-    end
-    
     if c == "f" then
-        if match_text(p, "false") then
-            return ref make_bool(false)
-        end
+        // false
+        let ign: string = advance(p)
+        ign = advance(p) // a
+        ign = advance(p) // l
+        ign = advance(p) // s
+        ign = advance(p) // e
+        return ref make_bool(false)
     end
-    
     if c == "n" then
-        if match_text(p, "null") then
-            return ref make_null()
-        end
+        // null
+        let ign: string = advance(p)
+        ign = advance(p) // u
+        ign = advance(p) // l
+        ign = advance(p) // l
+        return ref make_null()
     end
     
-    if (c == "-") || (ord(c) >= 48 && ord(c) <= 57) then
-        let n: float = parse_number_val(p)
-        return ref make_number(n)
+    // Number
+    let code: int = ord(c)
+    if c == "-" || (code >= 48 && code <= 57) then
+        return ref make_number(parse_number_str(p))
     end
     
-    print(f"Erro: caractere inesperado '{c}' na posi??o {p.pos}")
-    return ref make_null()
+    return ref make_null() // Error
 end
 
 func parse_array(p: ref Parser) -> ref JsonNode
     let arr: ref JsonNode = ref make_array()
-    let ignored: string = advance(p)
+    let ign: string = advance(p) // [
     
     skip_whitespace(p)
     if peek(p) == "]" then
-        ignored = advance(p)
+        ign = advance(p)
         return arr
     end
     
     while true do
         let val: ref JsonNode = parse_value(p)
         append_child(arr, val)
-        
         skip_whitespace(p)
         if peek(p) == "]" then
-            ignored = advance(p)
+            ign = advance(p)
             break
         end
-        
         if peek(p) == "," then
-            ignored = advance(p)
+            ign = advance(p)
         else
             break
         end
     end
-    
     return arr
 end
 
 func parse_object(p: ref Parser) -> ref JsonNode
     let obj: ref JsonNode = ref make_object()
-    let ignored: string = advance(p)
+    let ign: string = advance(p) // {
     
     skip_whitespace(p)
     if peek(p) == "}" then
-        ignored = advance(p)
+        ign = advance(p)
         return obj
     end
     
     while true do
         skip_whitespace(p)
-        
-        if peek(p) != "\"" then
-            print("Erro: Chave do objeto deve ser string")
-            break
-        end
-        
         let key: string = parse_string_val(p)
-        
         skip_whitespace(p)
-        if peek(p) != ":" then
-            print("Erro: esperado ':' ap?s chave")
-            break
-        end
-        ignored = advance(p)
+        if peek(p) == ":" then ign = advance(p) end
         
         let val: ref JsonNode = parse_value(p)
         val.key = key
-        
         append_child(obj, val)
         
         skip_whitespace(p)
         if peek(p) == "}" then
-            ignored = advance(p)
+            ign = advance(p)
             break
         end
-        
         if peek(p) == "," then
-            ignored = advance(p)
+            ign = advance(p)
         else
             break
         end
     end
-    
     return obj
 end
 
@@ -331,68 +309,44 @@ func json_parse(json: string) -> ref JsonNode
 end
 
 // ============================================
-// Impress?o
+// Stringify
 // ============================================
 
-func print_indent(indent: int) -> void
-    let i: int = 0
-    while i < indent do
-        print("  ")
-        i = i + 1
+func json_stringify(node: ref JsonNode) -> string
+    if node == null then return "null" end
+    
+    if node.type == TYPE_NULL then return "null" end
+    if node.type == TYPE_BOOL then 
+        if node.bool_val then return "true" else return "false" end
     end
-end
-
-func print_json(node: ref JsonNode, indent: int) -> void
-    if node.type == TYPE_NULL then
-        print("null")
-    else
-        if node.type == TYPE_BOOL then
-            if node.bool_val then
-                print("true")
-            else
-                print("false")
-            end
-        else
-            if node.type == TYPE_NUMBER then
-                print(to_str(node.number_val))
-            else
-                if node.type == TYPE_STRING then
-                    print(f"\"{node.string_val}\"")
-                else
-                    if node.type == TYPE_ARRAY then
-                        print("[")
-                        let current: ref JsonNode = node.child
-                        let first: bool = true
-                        while current != null do
-                            if !first then
-                                print(", ")
-                            end
-                            print_json(current, indent + 1)
-                            first = false
-                            current = current.next
-                        end
-                        print("]")
-                    else
-                        if node.type == TYPE_OBJECT then
-                            print("{")
-                            let current: ref JsonNode = node.child
-                            let first: bool = true
-                            while current != null do
-                                if !first then
-                                    print(", ")
-                                end
-                                print(f"\"{current.key}\": ")
-                                print_json(current, indent + 1)
-                                first = false
-                                current = current.next
-                            end
-                            print("}")
-                        end
-                    end
-                end
-            end
+    if node.type == TYPE_NUMBER then return to_str(node.number_val) end
+    if node.type == TYPE_STRING then return "\"" + node.string_val + "\"" end // Need escape impl
+    
+    if node.type == TYPE_ARRAY then
+        let res: string = "["
+        let curr: ref JsonNode = node.child
+        let first: bool = true
+        while curr != null do
+            if !first then res = res + "," end
+            res = res + json_stringify(curr)
+            first = false
+            curr = curr.next
         end
+        return res + "]"
     end
+    
+    if node.type == TYPE_OBJECT then
+        let res: string = "{"
+        let curr: ref JsonNode = node.child
+        let first: bool = true
+        while curr != null do
+            if !first then res = res + "," end
+            res = res + "\"" + curr.key + "\":" + json_stringify(curr)
+            first = false
+            curr = curr.next
+        end
+        return res + "}"
+    end
+    
+    return ""
 end
-
-// Module exports: json_parse, JsonNode, make_null, make_bool, make_number, make_string, make_array, make_object

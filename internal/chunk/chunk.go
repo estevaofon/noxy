@@ -201,6 +201,7 @@ type Chunk struct {
 	Code      []byte
 	Constants []value.Value
 	Lines     []int
+	FileName  string
 }
 
 func New() *Chunk {
@@ -208,6 +209,7 @@ func New() *Chunk {
 		Code:      []byte{},
 		Constants: []value.Value{},
 		Lines:     []int{},
+		FileName:  "",
 	}
 }
 

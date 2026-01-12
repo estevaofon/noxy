@@ -37,16 +37,16 @@ func connect(host: string, port: int) -> Socket
     return net_connect(host, port)
 end
 
-func recv(sock: Socket, size: int) -> NetResult
+func socket_recv(sock: Socket, size: int) -> NetResult
     return net_recv(sock, size)
 end
 
-func send(sock: Socket, data: bytes) -> NetResult
+func socket_send(sock: Socket, data: bytes) -> NetResult
     return net_send(sock, data)
 end
 
-func close(sock: Socket) -> void
-    net_close(sock)
+func socket_close(sock: Socket) -> void
+    net_close(sock.fd)
 end
 
 func setblocking(sock: Socket, blocking: bool) -> void

@@ -1,0 +1,46 @@
+use http_server select *
+use json_parser select *
+
+// Request Handler
+func handler(req: HttpRequest) -> HttpResponse
+    print("[LOG] " + req.method + " " + req.path)
+    
+    // GET Endpoints
+    if req.method == "GET" then
+        if req.path == "/" then
+            return response_text("Welcome to the Noxy Web Server!")
+        end
+        
+        if req.path == "/json" then
+            return response_json("{\"status\": \"ok\", \"message\": \"Hello from JSON\"}")
+        end
+    end
+    
+    // POST Endpoints
+    if req.method == "POST" && req.path == "/echo" then
+        // Echo the received body
+        return response_text(to_str(req.body))
+    end
+    
+    return response_404()
+end
+
+func main()
+    let host: string = "127.0.0.1"
+    let port: int = 8080
+    
+    print("=======================================")
+    print("Noxy HTTP Server Running")
+    print("Address: http://" + host + ":" + to_str(port))
+    print("=======================================")
+    print("Try the following commands in another terminal:")
+    print("  curl http://" + host + ":" + to_str(port) + "/")
+    print("  curl http://" + host + ":" + to_str(port) + "/json")
+    print("  curl -X POST -d \"Hello Noxy\" http://" + host + ":" + to_str(port) + "/echo")
+    print("=======================================")
+    
+    let s: HttpServer = new_server(host, port)
+    serve(s, handler) // Blocking call
+end
+
+main()
