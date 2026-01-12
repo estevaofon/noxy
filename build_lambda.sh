@@ -20,6 +20,7 @@ mkdir -p lambda_dist
 cp noxy lambda_dist/
 cp noxy_examples/aws_lambda/bootstrap lambda_dist/
 cp noxy_examples/aws_lambda/runtime.nx lambda_dist/
+cp noxy_examples/aws_lambda/exec_runtime.nx lambda_dist/
 cp noxy_examples/aws_lambda/function.nx lambda_dist/
 
 # 3. Set Permissions (Critical for AWS Lambda)
