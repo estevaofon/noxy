@@ -1,0 +1,12 @@
+// noxy_examples/aws_lambda/lambda_types.nx
+
+struct LambdaContext
+    request_id: string,
+    deadline_ms: int,
+    invoked_function_arn: string,
+    trace_id: string,
+    function_name: string,
+    memory_limit_mb: int,
+    log_group_name: string,
+    log_stream_name: string
+end

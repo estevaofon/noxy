@@ -4,7 +4,9 @@
 use json_parser select *
 use json_helpers select *
 
-func handler(event: string) -> string
+use lambda_types select *
+
+func handler(event: string, context: LambdaContext) -> string
     // Simple echo handler for API Gateway
     // Returns a JSON response
     
@@ -31,7 +33,7 @@ func handler(event: string) -> string
         end
     end
     
-    print("Handler processing: " + final_input)
+    print("Handler processing ID: " + context.request_id + " Input: " + final_input)
     
     // Return result
     return "{\"message\": \"Hello from Noxy!\", \"input\": " + final_input + "}"
