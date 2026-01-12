@@ -284,9 +284,9 @@ print(sys.argv()[0])</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Concurrency</h3>
-                    <pre><code class="language-go">let c: any = make_chan(0)
+                    <pre><code class="language-go">let c: chan int = make_chan(0)
 spawn(worker, c)
-let msg: any = recv(c)</code></pre>
+let msg: int = chan_recv(c)</code></pre>
                 </div>
             </div>
         </div>
@@ -312,19 +312,19 @@ let msg: any = recv(c)</code></pre>
                     <p>Using channels to communicate between concurrent routines.</p>
                     <pre><code class="language-go">use time
 
-func worker(id: int, c: any)
+func worker(id: int, c: chan string)
     time.sleep(100)
-    send(c, "Message from " + to_str(id))
+    chan_send(c, "Message from " + to_str(id))
 end
 
 func main()
-    let c: any = make_chan(0)
+    let c: chan string = make_chan(0)
     spawn(worker, 1, c)
     spawn(worker, 2, c)
     
     // Receive 2 messages
-    print(recv(c))
-    print(recv(c))
+    print(chan_recv(c))
+    print(chan_recv(c))
 end</code></pre>
                 </div>
                 <div class="example-tab active" id="hello">

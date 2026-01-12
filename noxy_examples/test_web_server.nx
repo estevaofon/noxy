@@ -1,0 +1,64 @@
+
+// Verification Script: test_web_server.nx
+use http_server select *
+use http_client select *
+use json_parser select *
+use time select *
+
+// Handler
+func my_handler(req: HttpRequest) -> HttpResponse
+    // print("Handler received: " + req.method + " " + req.path)
+    if req.method == "POST" && req.path == "/echo" then
+        // Echo JSON
+        let node: ref JsonNode = json_parse(to_str(req.body))
+        if node != null then
+            let json_str: string = json_stringify(node)
+            return response_json(json_str) 
+        end
+        return response_error(400, "Invalid JSON")
+    end
+    
+    if req.path == "/hello" then
+        return response_text("Hello Noxy World")
+    end
+    
+    return response_404()
+end
+
+// Server Routine
+func run_server()
+    let s: HttpServer = new_server("127.0.0.1", 8098)
+    serve(s, my_handler)
+end
+
+// Main
+func main()
+    // 1. Start Server
+    print("Starting server...")
+    spawn(run_server)
+    
+    sleep(500) // Wait for server start
+    
+    // Test Client
+    print("Test 1: GET /hello")
+    let res1: ClientResponse = get("http://127.0.0.1:8098/hello")
+    
+    if res1.ok && res1.body == b"Hello Noxy World" then
+        print("Response 1 OK")
+    else
+        print("Response 1 FAILED: " + res1.error)
+    end
+
+    print("Test 2: POST /echo")
+    let res2: ClientResponse = post("http://127.0.0.1:8098/echo", b"{\"msg\": \"hello\"}")
+    if res2.ok then
+        print("Response 2 OK: " + to_str(res2.body))
+    else
+        print("Response 2 FAILED: " + res2.error)
+    end
+
+    sleep(1000)
+    print("Done.")
+end
+
+main()
