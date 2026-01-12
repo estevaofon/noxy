@@ -25,14 +25,14 @@ func main() -> void
                       body
                       
     print("Sending request...")
-    let sent: NetResult = send(sock, to_bytes(req))
+    let sent: NetResult = socket_send(sock, to_bytes(req))
     print("Sent bytes: " + to_str(sent.count))
     
     // Read loop
     let total: int = 0
     let loop: bool = true
     while loop do
-        let res: NetResult = recv(sock, 1024)
+        let res: NetResult = socket_recv(sock, 1024)
         if !res.ok then
             print("Recv error or closed")
             loop = false

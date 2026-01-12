@@ -24,7 +24,7 @@ func worker(start_n: int, end_n: int, c: any)
         end
         i = i + 1
     end
-    send(c, count)
+    chan_send(c, count)
 end
 
 func main()
@@ -47,7 +47,7 @@ func main()
     let total_primes: int = 0
     let finished: int = 0
     while finished < num_threads do
-        let partial: any = recv(c) // any
+        let partial: any = chan_recv(c) // any
         total_primes = total_primes + to_int(partial)
         finished = finished + 1
     end

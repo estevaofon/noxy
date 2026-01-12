@@ -583,6 +583,14 @@ func (p *Parser) parseType() ast.NoxyType {
 		t = &ast.PrimitiveType{Name: "int"}
 	case token.TYPE_FLOAT:
 		t = &ast.PrimitiveType{Name: "float"}
+	case token.CHAN:
+		// chan <Type>
+		p.nextToken()
+		elemType := p.parseType()
+		if elemType == nil {
+			return nil
+		}
+		t = &ast.ChanType{ElementType: elemType}
 	case token.TYPE_STRING:
 		t = &ast.PrimitiveType{Name: "string"}
 	case token.TYPE_BOOL:

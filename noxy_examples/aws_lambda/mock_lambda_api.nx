@@ -27,7 +27,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
     if req.method == "POST" && req.path == "/trigger" then
         let body_str: string = to_str(req.body)
         print("[MOCK API] Enqueueing event: " + body_str)
-        send(event_queue, body_str)
+        chan_send(event_queue, body_str)
         return response_text("Event Queued")
     end
     
@@ -35,7 +35,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
     // This blocks until an event is available in the channel!
     if req.method == "GET" && strings_contains(req.path, "/runtime/invocation/next") then
         print("[MOCK API] Runtime waiting for event...")
-        let event_body: string = to_str(recv(event_queue))
+        let event_body: string = to_str(chan_recv(event_queue))
         print("[MOCK API] Sending event to runtime")
         
         let req_id: string = "req-" + to_str(time_now()) // Simple ID
@@ -58,7 +58,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
         let result: string = to_str(req.body)
         print("[MOCK API] Received execution result: " + result)
         // Store for verification
-        send(result_queue, result)
+        chan_send(result_queue, result)
         return response_error(202, "Accepted")
     end
     
@@ -66,7 +66,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
     if req.method == "POST" && strings_contains(req.path, "/error") then
         let err: string = to_str(req.body)
         print("[MOCK API] Received execution error: " + err)
-        send(result_queue, "ERROR: " + err)
+        chan_send(result_queue, "ERROR: " + err)
         return response_error(202, "Accepted")
     end
 

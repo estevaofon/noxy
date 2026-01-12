@@ -48,30 +48,35 @@ Use `make_chan(buffer_size)`:
 
 ```noxy
 // Unbuffered channel (Synchronous)
-let c_sync: any = make_chan(0)
+let c_sync: chan int = make_chan(0)
 
 // Buffered channel (Asynchronous/Queue)
-let c_buf: any = make_chan(10)
+let c_buf: chan string = make_chan(10)
+
+// Untyped channel (can hold any value)
+let c_any: chan any = make_chan(5)
+chan_send(c_any, 42)
+chan_send(c_any, "hello")
 ```
 
 ### Sending and Receiving
 
-- **Send**: `send(channel, value)`
-- **Receive**: `recv(channel)`
-- **Close**: `close(channel)`
-- **Check Closed**: `is_closed(channel)` -> `bool`
+- **Send**: `chan_send(channel, value)`
+- **Receive**: `chan_recv(channel)`
+- **Close**: `chan_close(channel)`
+- **Check Closed**: `chan_is_closed(channel)` -> `bool`
 
 ```noxy
-func sender(c: any)
-    send(c, "Hello from Routine!")
-    close(c)
+func sender(c: chan string)
+    chan_send(c, "Hello from Routine!")
+    chan_close(c)
 end
 
 func main()
-    let c: any = make_chan(0)
+    let c: chan string = make_chan(0)
     spawn(sender, c)
     
-    let msg: any = recv(c) // Blocks until message is received
+    let msg: string = chan_recv(c) // Blocks until message is received
     print(msg) 
 end
 ```
@@ -88,23 +93,23 @@ Closing a channel indicates that no more values will be sent. This is useful to 
 3.  **State**: Use `is_closed(ch)` to check the state safely.
 
 ```noxy
-func producer(c: any)
-    send(c, 1)
-    send(c, 2)
-    close(c) // Signal end
+func producer(c: chan int)
+    chan_send(c, 1)
+    chan_send(c, 2)
+    chan_close(c) // Signal end
 end
 
 func main()
-    let c: any = make_chan(2)
+    let c: chan int = make_chan(2)
     spawn(producer, c)
 
     // Consumer loop
     while true do
-        // Note: is_closed returns true immediately after close, even if buffer has data.
+        // Note: chan_is_closed returns true immediately after close, even if buffer has data.
         // We continue receiving until we get null (EOF).
-        let v: any = recv(c)
+        let v: any = chan_recv(c) // recv returns 'any' (or type safe if inferred, but null check requires dynamic)
         if v == null then
-             if is_closed(c) then
+             if chan_is_closed(c) then
                 print("Channel closed and empty")
                 break
              end
@@ -132,18 +137,18 @@ end
 One routine generates data, another processes it.
 
 ```noxy
-func producer(c: any)
+func producer(c: chan int)
     let i: int = 0
     while i < 5 do
-        send(c, i)
+        chan_send(c, i)
         i = i + 1
     end
-    send(c, -1) // Sentinel value (End of Stream)
+    chan_send(c, -1) // Sentinel value (End of Stream)
 end
 
-func consumer(c: any)
+func consumer(c: chan int)
     while true do
-        let v: int = int(recv(c)) // or to_int
+        let v: int = chan_recv(c)
         if v == -1 then break end
         print(fmt("Consumed: %d", v))
     end
@@ -156,20 +161,20 @@ Distribute work across multiple cores.
 ```noxy
 use time
 
-func worker(id: int, jobs: any, results: any)
+func worker(id: int, jobs: chan int, results: chan int)
     while true do
-        let job: int = recv(jobs) // Receive payload
+        let job: int = chan_recv(jobs) // Receive payload
         if job == -1 then break end // Exit signal
         
         // Process
         let res: int = job * job
-        send(results, res)
+        chan_send(results, res)
     end
 end
 
 func main()
-    let jobs: any = make_chan(100)
-    let results: any = make_chan(100)
+    let jobs: chan int = make_chan(100)
+    let results: chan int = make_chan(100)
     
     // Start 4 workers
     let w: int = 0
@@ -181,7 +186,7 @@ func main()
     // Send 10 jobs
     let j: int = 0
     while j < 10 do
-        send(jobs, j)
+        chan_send(jobs, j)
         j = j + 1
     end
     
@@ -198,9 +203,9 @@ The `when` statement (similar to Go's `select`) allows a routine to wait on mult
 
 ```noxy
 when
-    case msg = recv(ch1) then
+    case msg = chan_recv(ch1) then
         print("Received: " + msg)
-    case send(ch2, "data") then
+    case chan_send(ch2, "data") then
         print("Sent data")
     default
         print("No channel ready (non-blocking)")
@@ -221,13 +226,13 @@ let timeout: any = make_chan()
 
 spawn(func(c: any)
     time_sleep(1000)
-    send(c, true)
+    chan_send(c, true)
 end, timeout)
 
 when
-    case msg = recv(ch) then
+    case msg = chan_recv(ch) then
         print("Received message")
-    case recv(timeout) then
+    case chan_recv(timeout) then
         print("Timed out!")
 end
 ```

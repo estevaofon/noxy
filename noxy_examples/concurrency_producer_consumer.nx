@@ -6,20 +6,20 @@ func producer(c: any, count: int)
     let i: int = 0
     while i < count do
         print(fmt("Produtor: Enviando %d", i))
-        send(c, i)
+        chan_send(c, i)
         // Simula trabalho
         time.sleep(50) 
         i = i + 1
     end
     print("Produtor: Finalizado. Enviando sinal de parada (-1)")
-    send(c, -1) // Poison pill (sinal de fim)
+    chan_send(c, -1) // Poison pill (sinal de fim)
 end
 
 // Consumidor: Lê do canal e processa
 func consumer(c: any)
     print("Consumidor: Aguardando dados...")
     while true do
-        let v: any = recv(c) // Bloqueia até receber
+        let v: any = chan_recv(c) // Bloqueia até receber
         
         // Verifica tipo para segurança
         if fmt("%T", v) == "int" then

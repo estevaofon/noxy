@@ -1,0 +1,43 @@
+// Test Typed Channels with Strings and Structs
+
+struct Message
+    id: int,
+    body: string
+end
+
+func main()
+    print("--- Testing String Channel ---")
+    // 1. String Channel
+    let cs: chan string = make_chan(2)
+    
+    chan_send(cs, "Hello")
+    chan_send(cs, "World")
+    
+    let s1: string = chan_recv(cs)
+    let s2: string = chan_recv(cs)
+    
+    print("Received:", s1, s2)
+    if s1 + " " + s2 == "Hello World" then
+        print("String Channel: PASS")
+    else
+        print("String Channel: FAIL")
+    end
+
+    print("\n--- Testing Struct Channel ---")
+    // 2. Struct Channel
+    let cm: chan Message = make_chan(1)
+    
+    let msg: Message = Message(1, "Data")
+    chan_send(cm, msg)
+    
+    let received: Message = chan_recv(cm)
+    print(fmt("Received Msg: ID=%d, Body=%s", received.id, received.body))
+    
+    if received.id == 1 && received.body == "Data" then
+        print("Struct Channel: PASS")
+    else
+        print("Struct Channel: FAIL")
+    end
+end
+
+main()

@@ -92,6 +92,17 @@ func (rt *RefType) String() string {
 	return "ref " + rt.ElementType.String()
 }
 
+type ChanType struct {
+	ElementType NoxyType
+}
+
+func (ct *ChanType) String() string {
+	if ct.ElementType == nil {
+		return "chan any"
+	}
+	return "chan " + ct.ElementType.String()
+}
+
 type Parameter struct {
 	Name string
 	Type NoxyType

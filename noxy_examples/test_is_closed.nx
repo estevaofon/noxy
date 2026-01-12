@@ -3,20 +3,20 @@ print("Testing Channel is_closed...")
 
 let ch: any = make_chan(2)
 
-print("Closed initially?", is_closed(ch)) // Expected: false
+print("Closed initially?", chan_is_closed(ch)) // Expected: false
 
-send(ch, 1)
-close(ch)
+chan_send(ch, 1)
+chan_close(ch)
 
-print("Closed after close(ch) but with data?", is_closed(ch)) // Expected: true
+print("Closed after close(ch) but with data?", chan_is_closed(ch)) // Expected: true
 print("Double close safety test...")
-close(ch)
-print("Still true?", is_closed(ch)) // Expected: true
+chan_close(ch)
+print("Still true?", chan_is_closed(ch)) // Expected: true
 
 // Recv value
-print("Recv value:", recv(ch)) // 1
-print("Closed now (empty)?", is_closed(ch)) // Expected: true
+print("Recv value:", chan_recv(ch)) // 1
+print("Closed now (empty)?", chan_is_closed(ch)) // Expected: true
 
-print("Recv closed:", recv(ch)) // null
+print("Recv closed:", chan_recv(ch)) // null
 
 print("Testing is_closed passed.")

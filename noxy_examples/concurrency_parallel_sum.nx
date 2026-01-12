@@ -17,7 +17,7 @@ func sum_worker(arr: int[], start_idx: int, end_idx: int, result_chan: any)
     end
     
     print(fmt("Worker [%d-%d]: Concluído. Soma: %d", start_idx, end_idx, partial_sum))
-    send(result_chan, partial_sum)
+    chan_send(result_chan, partial_sum)
 end
 
 func main()
@@ -54,7 +54,7 @@ func main()
     let parts_received: int = 0
     
     while parts_received < 2 do
-        let part: any = recv(results)
+        let part: any = chan_recv(results)
         final_sum = final_sum + to_int(part)
         parts_received = parts_received + 1
     end

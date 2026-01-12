@@ -29,7 +29,7 @@ func should_ignore(s: string) -> bool
     "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx", "md2html.nx",
     "watch_file.nx", "stress_test.nx", "division_error.nx", "error_type.nx", "error_arity.nx", "test_let_error.nx", "error_index.nx",
     "test_let_error_function.nx", "test_unclosed.nx", "benchmark_parallel.nx", "concurrency.nx", "concurrency_parallel_sum.nx", "concurrency_producer_consumer.nx", "run_all_tests.nx",
-    "fibonacci_spinner.nx", "web_server_demo.nx"]
+    "fibonacci_spinner.nx", "web_server_demo.nx", "test_typed_chan_error.nx"]
     
     if contains(exclusions, s) then 
         return true 
@@ -55,7 +55,7 @@ end
 // Worker Function
 func worker(id: int, jobs: any, results: any, noxy_bin: string)
     while true do
-        let file_any: any = recv(jobs)
+        let file_any: any = chan_recv(jobs)
         let file: string = to_str(file_any)
         
         if file == "-1" then 
@@ -67,9 +67,9 @@ func worker(id: int, jobs: any, results: any, noxy_bin: string)
         let res: SysResult = exec_output(cmd)
         
         if res.ok then
-            send(results, "PASS:" + file)
+            chan_send(results, "PASS:" + file)
         else
-            send(results, "FAIL:" + file + ":" + to_str(res.exit_code))
+            chan_send(results, "FAIL:" + file + ":" + to_str(res.exit_code))
         end
     end
 end
@@ -156,14 +156,14 @@ func main()
     // 5. Send Jobs
     let f: int = 0
     while f < total_files do
-        send(jobs, files_to_run[f])
+        chan_send(jobs, files_to_run[f])
         f = f + 1
     end
     
     // Send Poison Pills
     let p: int = 0
     while p < num_workers do
-        send(jobs, "-1")
+        chan_send(jobs, "-1")
         p = p + 1
     end
     
@@ -174,7 +174,7 @@ func main()
     
     let received: int = 0
     while received < total_files do
-        let res_str: string = to_str(recv(results))
+        let res_str: string = to_str(chan_recv(results))
         // Format: PASS:filename OR FAIL:filename:code
         
         if strlen(res_str) >= 5 then

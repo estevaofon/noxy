@@ -1,0 +1,11 @@
+// Test Typed Channels Failures
+
+func main()
+    let c: chan int = make_chan(1)
+
+    // FAIL 1: Sending wrong type
+    chan_send(c, "hello") // Should fail: cannot send string to chan int
+
+    // FAIL 2: Receiving into wrong type
+    let s: string = chan_recv(c) // Should fail: type mismatch... expected string, got int
+end

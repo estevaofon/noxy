@@ -47,6 +47,7 @@ const (
 	TYPE_VOID   TokenType = "TYPE_VOID"
 	REF         TokenType = "REF"
 	MAP         TokenType = "MAP"
+	CHAN        TokenType = "CHAN"
 
 	// Palavras-chave - Literais
 	TRUE  TokenType = "TRUE"
@@ -134,6 +135,7 @@ var keywords = map[string]TokenType{
 	"void":    TYPE_VOID,
 	"ref":     REF,
 	"map":     MAP,
+	"chan":    CHAN,
 	"true":    TRUE,
 	"false":   FALSE,
 	"null":    NULL,

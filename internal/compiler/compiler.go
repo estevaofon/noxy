@@ -888,7 +888,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// If ExpressionStmt, can be recv (discard result) or send.
 
 			if callExpr == nil {
-				return nil, nil, fmt.Errorf("[line %d] invalid case condition: expected send(...) or recv(...)", c.currentLine)
+				return nil, nil, fmt.Errorf("[line %d] invalid case condition: expected chan_send(...) or chan_recv(...)", c.currentLine)
 			}
 
 			funcName := ""
@@ -896,10 +896,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				funcName = ident.Value
 			}
 
-			if funcName == "recv" {
+			if funcName == "chan_recv" {
 				// Recv Case: [Chan, Null, 0]
 				if len(callExpr.Arguments) != 1 {
-					return nil, nil, fmt.Errorf("[line %d] recv expects 1 argument", c.currentLine)
+					return nil, nil, fmt.Errorf("[line %d] chan_recv expects 1 argument", c.currentLine)
 				}
 				// Compile Channel
 				_, _, err := c.Compile(callExpr.Arguments[0])
@@ -910,13 +910,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				c.emitByte(byte(chunk.OP_NULL)) // Val (unused for recv)
 				c.emitConstant(value.NewInt(0)) // Mode 0
 
-			} else if funcName == "send" {
+			} else if funcName == "chan_send" {
 				// Send Case: [Chan, Val, 1]
 				if isAssign {
-					return nil, nil, fmt.Errorf("[line %d] cannot assign result of send", c.currentLine)
+					return nil, nil, fmt.Errorf("[line %d] cannot assign result of chan_send", c.currentLine)
 				}
 				if len(callExpr.Arguments) != 2 {
-					return nil, nil, fmt.Errorf("[line %d] send expects 2 arguments", c.currentLine)
+					return nil, nil, fmt.Errorf("[line %d] chan_send expects 2 arguments", c.currentLine)
 				}
 				// Compile Channel
 				_, _, err := c.Compile(callExpr.Arguments[0])
@@ -932,7 +932,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				c.emitConstant(value.NewInt(1)) // Mode 1
 
 			} else {
-				return nil, nil, fmt.Errorf("[line %d] invalid case call: expected send or recv, got %s", c.currentLine, funcName)
+				return nil, nil, fmt.Errorf("[line %d] invalid case call: expected chan_send or chan_recv, got %s", c.currentLine, funcName)
 			}
 		}
 
@@ -1235,7 +1235,95 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.CallExpression:
-		// Compile Function
+		// Check for special functions: chan_send, chan_recv
+		if ident, ok := n.Function.(*ast.Identifier); ok {
+			if ident.Value == "chan_send" {
+				if len(n.Arguments) != 2 {
+					return nil, nil, fmt.Errorf("[line %d] chan_send expects 2 arguments", c.currentLine)
+				}
+				// Arg 0: Channel
+				// Start by getting 'chan_send' logic...
+				// But we need to verify types first.
+				// Wait, if we compile arguments first, we can check their types.
+				// But standard Call compilation compiles Function first, then Arguments.
+				// Let's stick to standard flow but capture types.
+
+				// 1. Compile Function (send)
+				_, _, err := c.Compile(n.Function)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// 2. Compile Arg 0 (Channel)
+				_, chType, err := c.Compile(n.Arguments[0])
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// Verify it is a channel OR any
+				var isAnyChannel bool
+				chanType, ok := chType.(*ast.ChanType)
+				if !ok {
+					// Check if it is 'any'
+					if chType.String() == "any" {
+						isAnyChannel = true
+					} else {
+						return nil, nil, fmt.Errorf("[line %d] first argument to chan_send must be a channel, got %s", c.currentLine, chType.String())
+					}
+				}
+
+				// 3. Compile Arg 1 (Value)
+				_, valType, err := c.Compile(n.Arguments[1])
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// Verify Type Match (only if not any)
+				if !isAnyChannel {
+					if !c.areTypesCompatible(chanType.ElementType, valType) {
+						return nil, nil, fmt.Errorf("[line %d] cannot send %s to %s", c.currentLine, valType.String(), chType.String())
+					}
+				}
+
+				// Emit Call
+				c.emitBytes(byte(chunk.OP_CALL), 2)
+				return c.currentChunk, valType, nil // send returns value sent
+			} else if ident.Value == "chan_recv" {
+				if len(n.Arguments) != 1 {
+					return nil, nil, fmt.Errorf("[line %d] chan_recv expects 1 argument", c.currentLine)
+				}
+				// 1. Compile Function
+				_, _, err := c.Compile(n.Function)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				// 2. Compile Arg (Channel)
+				_, chType, err := c.Compile(n.Arguments[0])
+				if err != nil {
+					return nil, nil, err
+				}
+
+				var retType ast.NoxyType
+
+				chanType, ok := chType.(*ast.ChanType)
+				if !ok {
+					if chType.String() == "any" {
+						retType = &ast.PrimitiveType{Name: "any"}
+					} else {
+						return nil, nil, fmt.Errorf("[line %d] argument to chan_recv must be a channel, got %s", c.currentLine, chType.String())
+					}
+				} else {
+					retType = chanType.ElementType
+				}
+
+				// Emit Call
+				c.emitBytes(byte(chunk.OP_CALL), 1)
+				return c.currentChunk, retType, nil
+			}
+		}
+
+		// Normal Call
 		_, _, err := c.Compile(n.Function)
 		if err != nil {
 			return nil, nil, err
@@ -1251,7 +1339,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		// Emit Call
 		c.emitBytes(byte(chunk.OP_CALL), byte(len(n.Arguments)))
-		return c.currentChunk, nil, nil // Return type of call? Unknown for now.
+		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil // Return type unknown for now
 
 	case nil:
 		// Skip

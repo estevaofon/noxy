@@ -3,7 +3,7 @@ use time
 func worker(id: int, c: any)
     print(fmt("Worker %d start", id))
     time.sleep(100)
-    send(c, fmt("Result from %d", id))
+    chan_send(c, fmt("Result from %d", id))
 end
 
 func main()
@@ -16,7 +16,7 @@ func main()
 
     let i: int = 0
     while i < 3 do
-        let msg: any = recv(c) // any because channel is untyped
+        let msg: any = chan_recv(c) // any because channel is untyped
         print(fmt("Main received: %s", msg))
         i = i + 1
     end

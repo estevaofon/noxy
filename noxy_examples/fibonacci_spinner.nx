@@ -12,7 +12,7 @@ end
 // Worker que calcula e envia o resultado para o canal
 func fibonacci_worker(n: int, out: any)
     let res: int = fibonacci(n)
-    send(out, res)
+    chan_send(out, res)
 end
 
 // Spinner que roda até receber um sinal no stop_chan
@@ -27,7 +27,7 @@ func spinner(stop_chan: any)
         
         // Versão idiomatica com when
         when
-            case recv(stop_chan) then
+            case chan_recv(stop_chan) then
                 // Recebeu sinal de parada (qualquer valor)
                 return
             default
@@ -60,10 +60,10 @@ func main()
     spawn(fibonacci_worker, n, result_chan)
     
     // Espera pelo resultado (bloqueante)
-    let res: int = recv(result_chan)
+    let res: int = chan_recv(result_chan)
     
     // Para o spinner
-    send(stop_chan, true)
+    chan_send(stop_chan, true)
     
     // Limpa a linha do spinner (opcional)
     print("\r                      \r") 

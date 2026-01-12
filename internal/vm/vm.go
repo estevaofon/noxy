@@ -231,7 +231,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewChannel(size)
 	})
 
-	vm.DefineNative("send", func(args []value.Value) value.Value {
+	vm.DefineNative("chan_send", func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
@@ -243,7 +243,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return args[1]
 	})
 
-	vm.DefineNative("close", func(args []value.Value) value.Value {
+	vm.DefineNative("chan_close", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
@@ -262,7 +262,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
-	vm.DefineNative("is_closed", func(args []value.Value) value.Value {
+	vm.DefineNative("chan_is_closed", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBool(false)
 		}
@@ -277,7 +277,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewBool(chObj.Closed)
 	})
 
-	vm.DefineNative("recv", func(args []value.Value) value.Value {
+	vm.DefineNative("chan_recv", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}

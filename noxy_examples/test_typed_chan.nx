@@ -1,0 +1,34 @@
+// Test Typed Channels
+
+func main()
+    print("Testing Typed Channels...")
+
+    // 1. Declaration and Make
+    let c: chan int = make_chan(1) // Typed via variable declaration
+    print("Channel Created")
+
+    // 2. Send (Correct Type)
+    chan_send(c, 42)
+    print("Sent 42")
+
+    // 3. Receive (Correct Type)
+    let val: int = chan_recv(c) // Type inference or explicit type
+    print(fmt("Received: %d", val))
+
+    if val != 42 then
+        print("FAIL: Expected 42")
+    else
+        print("PASS: Received 42")
+    end
+
+    // 4. Test Type compatibility in declaration
+    // This should work
+    let c_any: chan any = make_chan(1)
+    chan_send(c_any, "string")
+    let s: any = chan_recv(c_any)
+    print(fmt("Received from any channel: %v", s))
+
+    print("All tests passed!")
+end
+
+main()
