@@ -469,6 +469,43 @@ else
     print("Error: " + result.error)
 end</code></pre>
                 </div>
+                <div class="example-tab" id="closures">
+                    <h3>Closures</h3>
+                    <p>Functions can capture variables from their outer scope, allowing for state encapsulation.</p>
+                    <pre><code class="language-go">func makeAccount(initialBalance: int) -> func
+    let balance: int = initialBalance
+    
+    // Return a function that captures 'balance'
+    return func(amount: int) -> int
+        balance = balance + amount
+        return balance
+    end
+end
+
+let account: func = makeAccount(100)
+print("Initial: 100")
+print("Deposit 50: " + to_str(account(50)))   // 150
+print("Withdraw 30: " + to_str(account(-30))) // 120</code></pre>
+                </div>
+                <div class="example-tab" id="http-server">
+                    <h3>HTTP Server</h3>
+                    <p>Built-in support for creating concurrent HTTP servers.</p>
+                    <pre><code class="language-go">use http_server
+
+func handler(req: HttpRequest) -> HttpResponse
+    if req.path == "/" then
+        return http_server.response_text("Hello from Noxy!")
+    elif req.path == "/json" then
+        return http_server.response_json("{\"status\": \"ok\"}")
+    end
+    return http_server.response_404()
+end
+
+// Create and start server
+let server: HttpServer = http_server.new_server("127.0.0.1", 8080)
+print("Server running on http://127.0.0.1:8080")
+http_server.serve(server, handler)</code></pre>
+                </div>
             </div>
         </div>
     </section>
