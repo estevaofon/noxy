@@ -60,7 +60,7 @@ Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Jus
 ```noxy
 Noxy REPL v0.1
 Type 'exit' to quit.
->>> let x = 10
+>>> let x: int = 10
 >>> x + 5
 15
 >>> if true then
