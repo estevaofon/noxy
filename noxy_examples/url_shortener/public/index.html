@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noxy URL Shortener</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Noxy URL Shortener</h1>
+            <p>Built with Noxy HTTP Server & SQLite</p>
+        </header>
+
+        <section class="shorten-section">
+            <form id="shortenForm">
+                <input type="url" id="urlInput" placeholder="Enter long URL here..." required>
+                <button type="submit">Shorten URL</button>
+            </form>
+            <div id="result" class="hidden">
+                <p>Shortened URL:</p>
+                <a href="#" id="shortLink" target="_blank"></a>
+            </div>
+        </section>
+
+        <section class="recent-section">
+            <h2>Recent URLs</h2>
+            <div id="loading" style="display:none;">Loading...</div>
+            <ul id="urlList">
+                <!-- List items will be injected here -->
+            </ul>
+        </section>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

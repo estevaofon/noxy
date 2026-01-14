@@ -1,6 +1,7 @@
 // stdlib/http_server.nx - Concurrent HTTP Server
 use net select *
 use io select *
+use strings select *
 use http_parser select *
 
 // ============================================

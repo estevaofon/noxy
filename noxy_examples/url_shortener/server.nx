@@ -1,0 +1,274 @@
+use http_server select *
+use http_parser select *
+use net select *
+use io select *
+use sqlite
+use strings select *
+use json_parser select *
+use json_helpers select *
+use sys select *
+use time
+use rand select *
+
+// ============================================
+// Database Setup
+// ============================================
+
+let db: sqlite.Database = sqlite.open("urls.db")
+
+func init_db() -> void
+    if !db.open then
+        print("Failed to open database 'urls.db'")
+        return
+    end
+    
+    // Table schema
+    let sql: string = "CREATE TABLE IF NOT EXISTS urls (code TEXT PRIMARY KEY, original_url TEXT, created_at TEXT)"
+    let res: sqlite.ExecResult = sqlite.exec(db, sql)
+    
+    if res == null then
+       print("Error: sqlite.exec returned null during init_db")
+       return
+    end
+
+    if !res.ok then
+        print("DB Init Error: " + res.error)
+    else
+        print("Database initialized.")
+    end
+end
+
+// ============================================
+// Helpers
+// ============================================
+
+func generate_code() -> string
+    let charset: string = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    let code: string = ""
+    let i: int = 0
+    let len_charset: int = length(charset) 
+    
+    while i < 6 do
+        let idx: int = random_int(0, len_charset) 
+        code = code + char_at(charset, idx)
+        i = i + 1
+    end
+    return code
+end
+
+func read_file(path: string) -> string
+    let f: File = open(path, "r")
+    
+    if !f.open then
+        // Try fallback path for when running from project root
+        let fallback: string = "noxy_examples/url_shortener/" + path
+        f = open(fallback, "r")
+        if !f.open then
+            print("Error: Failed to open file '" + path + "' (checked fallback)")
+            return ""
+        end
+    end
+    
+    let res: IOResult = read(f)
+    close(f)
+    
+    if res.ok then
+        return res.data
+    end
+    return ""
+end
+
+// ============================================
+// Handlers
+// ============================================
+
+func handle_shorten(body: bytes) -> HttpResponse
+    let json_str: string = to_str(body)
+    
+    let node: ref JsonNode = json_parse(json_str) 
+    
+    if node == null then 
+        return response_error(400, "Invalid JSON") 
+    end
+    
+    let url: string = get_string(node, "url")
+    if is_empty(url) then 
+        return response_error(400, "Missing url field") 
+    end
+    
+    let code: string = generate_code()
+    let created_at: string = time.format(time.now_datetime())
+    
+    // Using execute_params to avoid manual statement handling issues
+    let params: any[]
+    append(params, code)
+    append(params, url)
+    append(params, created_at)
+    
+    // Workaround: Open local connection for thread safety
+    let local_db: sqlite.Database = sqlite.open("urls.db")
+    
+    if !local_db.open then
+         // Fallback for different CWD
+         local_db = sqlite.open("noxy_examples/url_shortener/urls.db")
+         if !local_db.open then
+             return response_error(500, "DB Error: Could not open database")
+         end
+    end
+
+    let res: sqlite.ExecResult = sqlite.execute_params(local_db, "INSERT INTO urls (code, original_url, created_at) VALUES (?, ?, ?)", params)
+    sqlite.close(local_db)
+    
+    if res == null then
+       return response_error(500, "DB Error: Native Exec null")
+    end
+    
+    if !res.ok then 
+        return response_error(500, "DB Error: " + res.error) 
+    end
+    
+    let json_resp: string = "{\"code\": \"" + code + "\", \"short_url\": \"/" + code + "\"}"
+    return response_json(json_resp)
+end
+
+func handle_list() -> HttpResponse
+    // Using simple query
+    // Note: 'rowid' is standard in SQLite for row id
+    let local_db: sqlite.Database = sqlite.open("urls.db")
+    
+    if !local_db.open then
+         // Fallback for different CWD
+         local_db = sqlite.open("noxy_examples/url_shortener/urls.db")
+    end
+
+    let res: sqlite.QueryResult = sqlite.query(local_db, "SELECT code, original_url, created_at FROM urls ORDER BY rowid DESC LIMIT 20")
+    sqlite.close(local_db)
+    
+    if !res.ok then 
+        return response_error(500, "DB Error: " + res.error) 
+    end
+    
+    let items: string[20]
+    let count: int = 0
+    let i: int = 0
+    
+    while i < res.row_count do
+        if count >= 20 then
+            break 
+        end
+        
+        let row: Row = res.rows[i]
+        let code: string = row.values[0]
+        let url: string = row.values[1]
+        
+        // Escape quotes manually if needed, or assume clean for now. 
+        // Better to be safe:
+        let safe_url: string = replace(url, "\"", "\\\"")
+        
+        let item: string = "{\"code\": \"" + code + "\", \"original_url\": \"" + safe_url + "\"}"
+        items[count] = item
+        count = count + 1
+        i = i + 1
+    end
+    
+    let joined: string = join_count(items, ",", count)
+    return response_json("[" + joined + "]")
+end
+
+func handle_redirect(req: HttpRequest, code: string) -> HttpResponse
+    // Validate code to prevent SQL injection in query() 
+    if !is_alnum(code) then 
+        return response_404() 
+    end
+    
+    let sql: string = "SELECT original_url FROM urls WHERE code = '" + code + "'"
+    let local_db: sqlite.Database = sqlite.open("urls.db")
+    
+    if !local_db.open then
+         // Fallback for different CWD
+         local_db = sqlite.open("noxy_examples/url_shortener/urls.db")
+    end
+    
+    let q_res: sqlite.QueryResult = sqlite.query(local_db, sql)
+    sqlite.close(local_db)
+    
+    if !q_res.ok then
+        return response_404()
+    end
+    
+    if q_res.row_count == 0 then 
+        return response_404() 
+    end
+    
+    let row: Row = q_res.rows[0]
+    let original_url: string = row.values[0]
+    
+    // 302 Redirect
+    let headers: string[64]
+    headers[0] = "Location: " + original_url
+    headers[1] = "Connection: close"
+    headers[2] = "Content-Type: text/plain"
+    
+    return HttpResponse("HTTP/1.1", 302, "Found", headers, 3, to_bytes("Redirecting to " + original_url))
+end
+
+// ============================================
+// Router
+// ============================================
+
+func router(req: HttpRequest) -> HttpResponse
+    print("Request: " + req.method + " " + req.path)
+    
+    // API
+    if req.method == "POST" && req.path == "/api/shorten" then
+        return handle_shorten(req.body)
+    end
+    
+    if req.method == "GET" && req.path == "/api/urls" then
+        return handle_list()
+    end
+
+    // Static Files
+    if req.method == "GET" then
+        if req.path == "/" || req.path == "/index.html" then
+            return response_html(read_file("public/index.html"))
+        end
+        if req.path == "/style.css" then 
+            return response_ok(to_bytes(read_file("public/style.css")), "text/css")
+        end
+        if req.path == "/script.js" then 
+            return response_ok(to_bytes(read_file("public/script.js")), "application/javascript")
+        end
+        
+        // Short code redirect
+        // Check if path is like /ABCDEF (len > 1) and not one of the above
+        if length(req.path) > 1 && starts_with(req.path, "/") then
+             let code: string = substring(req.path, 1, length(req.path))
+             // Basic check to see if it looks like a code
+             if length(code) > 0 then
+                 return handle_redirect(req, code)
+             end
+        end
+    end
+    
+    return response_404()
+end
+
+// ============================================
+// Main
+// ============================================
+
+init_db()
+
+let host: string = "127.0.0.1"
+let port: int = 8080
+
+// Allow override via args or env if needed, but keep simple
+let server: HttpServer = new_server(host, port)
+
+print("URL Shortener running at http://" + host + ":" + to_str(port))
+print("Press Ctrl+C to stop")
+
+serve(server, router)
+
+close(db)
