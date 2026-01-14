@@ -1,0 +1,96 @@
+use http_server select *
+use http_parser select *
+use net select *
+use io select *
+use sqlite
+use strings select *
+use json_parser select *
+use json_helpers select *
+use sys select *
+use time
+use rand select *
+
+// ============================================
+// Database Actor System (Worker Pool)
+// ============================================
+
+// Constants
+let REQ_EXEC: int = 1
+let REQ_QUERY: int = 2
+
+// Response Structure
+struct DbResponse
+    ok: bool,
+    exec_res: sqlite.ExecResult,   // Populated if EXEC
+    query_res: sqlite.QueryResult, // Populated if QUERY
+    error: string
+end
+
+// Request Structure
+struct DbRequest
+    type: int,
+    sql: string,
+    params: any[],
+    reply_ch: chan DbResponse
+end
+
+// Global Job Channel
+let POOL_SIZE: int = 5 // Number of DB workers
+let db_jobs: chan DbRequest = make_chan(100) // Buffer for pending jobs
+
+// Worker Function (The Actor)
+func db_worker(id: int)
+    print("Worker " + to_str(id) + " starting...")
+    
+// ... (rest of the file simplified for brevity in this mental model, will replace content)
+
+    // Each worker has its OWN private connection
+    let db: sqlite.Database = sqlite.open("urls.db")
+    if !db.open then
+         db = sqlite.open("noxy_examples/url_shortener/urls.db")
+    end
+    
+    // Initialize tables
+    let init_sql: string = "CREATE TABLE IF NOT EXISTS urls (code TEXT PRIMARY KEY, original_url TEXT, created_at TEXT)"
+    sqlite.exec(db, init_sql)
+    
+     // Empty objects for null pattern
+    let empty_exec: sqlite.ExecResult = sqlite.ExecResult(false, "", 0, 0)
+    let empty_cols: string[]
+    let empty_rows: sqlite.Row[]
+    let empty_query: sqlite.QueryResult = sqlite.QueryResult(empty_cols, empty_rows, 0, false, "")
+    
+    // Main Loop
+    while true do
+        let job: DbRequest = chan_recv(db_jobs)
+        
+        let resp: DbResponse = DbResponse(false, empty_exec, empty_query, "")
+        
+        if job.type == REQ_EXEC then
+            let res: sqlite.ExecResult = sqlite.execute_params(db, job.sql, job.params)
+            
+            if res != null && res.ok then
+                resp = DbResponse(true, res, empty_query, "")
+            else
+                let err: string = "Unknown Error"
+                if res != null then err = res.error end
+                resp = DbResponse(false, empty_exec, empty_query, err)
+            end
+        else
+            let res: sqlite.QueryResult = sqlite.query(db, job.sql)
+            
+            if res != null && res.ok then
+                 resp = DbResponse(true, empty_exec, res, "")
+            else
+                 let err: string = "Unknown Error"
+                 if res != null then err = res.error end
+                 resp = DbResponse(false, empty_exec, empty_query, err)
+            end
+        end
+        
+        // Fix: Explicitly declare variable before sending
+        let ch: chan any = job.reply_ch
+        chan_send(ch, resp)
+    end
+end
+// ...

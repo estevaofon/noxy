@@ -1,0 +1,358 @@
+use http_server select *
+use http_parser select *
+use net select *
+use io select *
+use sqlite
+use strings select *
+use json_parser select *
+use json_helpers select *
+use sys select *
+use time
+use rand select *
+
+// ============================================
+// Database Actor System (Worker Pool)
+// ============================================
+
+// Constants
+let REQ_EXEC: int = 1
+let REQ_QUERY: int = 2
+
+// Response Structure
+struct DbResponse
+    ok: bool,
+    exec_res: any,   // Changed from sqlite.ExecResult to any
+    query_res: any, // Changed from sqlite.QueryResult to any
+    error: string
+end
+
+// Request Structure
+struct DbRequest
+    type: int,
+    sql: string,
+    params: any[],
+    reply_ch: chan DbResponse
+end
+
+// Global Job Channel
+let POOL_SIZE: int = 5 // Number of DB workers
+let db_jobs: chan DbRequest = make_chan(100) // Buffer for pending jobs
+
+// Worker Function (The Actor)
+func db_worker(id: int)
+    print("Worker " + to_str(id) + " starting...")
+    
+    // Each worker has its OWN private connection
+    // This is valid because it lives and dies in this thread
+    let db: sqlite.Database = sqlite.open("urls.db")
+    
+    if !db.open then
+         // Fallback logic
+         db = sqlite.open("noxy_examples/url_shortener/urls.db")
+         if !db.open then
+             print("Worker " + to_str(id) + " failed to open DB")
+             return
+         end
+    end
+    
+    // Initialize tables if needed (race condition benign here with IF NOT EXISTS)
+    let init_sql: string = "CREATE TABLE IF NOT EXISTS urls (code TEXT PRIMARY KEY, original_url TEXT, created_at TEXT)"
+    sqlite.exec(db, init_sql)
+    
+    print("Worker " + to_str(id) + " DB Handle: " + to_str(db.handle) + " Open: " + to_str(db.open))
+    
+    // Empty objects for null pattern
+    let empty_exec: sqlite.ExecResult = sqlite.ExecResult(false, "", 0, 0)
+    
+    // Empty QueryResult requires manual array init to be safe with types
+    let empty_cols: string[]
+    let empty_rows: sqlite.Row[]
+    let empty_query: sqlite.QueryResult = sqlite.QueryResult(empty_cols, empty_rows, 0, false, "")
+    
+    // Main Loop
+    while true do
+        let job: DbRequest = chan_recv(db_jobs)
+        print("Worker " + to_str(id) + ": Received job type " + to_str(job.type))
+        
+        // Handle Request
+        let resp: DbResponse = DbResponse(false, empty_exec, empty_query, "")
+        
+        if job.type == REQ_EXEC then
+            print("Worker " + to_str(id) + ": Executing SQL: " + job.sql)
+            // Execute with params
+            // Note: execute_params is safer
+            let res: sqlite.ExecResult = sqlite.execute_params(db, job.sql, job.params)
+            
+            if res != null && res.ok then
+                print("Worker " + to_str(id) + ": Exec Success")
+                resp = DbResponse(true, res, empty_query, "")
+            else
+                let err: string = "Unknown Error"
+                if res != null then 
+                    err = res.error 
+                end
+                print("Worker " + to_str(id) + ": Exec Fail: " + err)
+                resp = DbResponse(false, empty_exec, empty_query, err)
+            end
+        else
+            // Query (Select)
+            print("Worker " + to_str(id) + ": Querying SQL: " + job.sql)
+            let res: sqlite.QueryResult = sqlite.query(db, job.sql)
+            
+            if res != null && res.ok then
+                 print("Worker " + to_str(id) + ": Query Success (" + to_str(res.row_count) + " rows)")
+                 resp = DbResponse(true, empty_exec, res, "")
+            else
+                 let err: string = "Unknown Error"
+                 if res != null then 
+                     err = res.error 
+                 end
+                 print("Worker " + to_str(id) + ": Query Fail: " + err)
+                 resp = DbResponse(false, empty_exec, empty_query, err)
+            end
+        end
+        
+        // Send Reply
+        print("Worker " + to_str(id) + ": Sending reply...")
+        let ch: chan any = job.reply_ch
+        chan_send(ch, resp)
+        print("Worker " + to_str(id) + ": Reply sent.")
+    end
+end
+
+func init_pool()
+    print("Initializing " + to_str(POOL_SIZE) + " DB workers...")
+    let i: int = 0
+    while i < POOL_SIZE do
+        spawn(db_worker, i)
+        i = i + 1
+    end
+end
+
+// ============================================
+// Public DB API (Async to Sync Wrappers)
+// ============================================
+
+func db_execute_safe(sql: string, params: any[]) -> sqlite.ExecResult
+    let reply_ch: chan any = make_chan(0) // Unbuffered
+    let req: DbRequest = DbRequest(REQ_EXEC, sql, params, reply_ch)
+    
+    chan_send(db_jobs, req)
+    let resp_any: any = chan_recv(reply_ch)
+    let resp: DbResponse = resp_any // Implicit cast or unsafe assignment
+    
+    if !resp.ok then
+        // Return a dummy error result if wrapper logic failed? 
+        // Or better, ExecResult has error field.
+        return null // Caller checks for null
+    end
+    
+    let res: sqlite.ExecResult = resp.exec_res
+    return res
+end
+
+func db_query_safe(sql: string) -> sqlite.QueryResult
+    let reply_ch: chan any = make_chan(0)
+    let params: any[] // Empty
+    let req: DbRequest = DbRequest(REQ_QUERY, sql, params, reply_ch)
+    
+    chan_send(db_jobs, req)
+    let resp_any: any = chan_recv(reply_ch)
+    let resp: DbResponse = resp_any
+    
+    if !resp.ok then
+        return null
+    end
+    
+    let res: sqlite.QueryResult = resp.query_res
+    return res
+end
+
+
+// ============================================
+// Helpers
+// ============================================
+
+func generate_code() -> string
+    let charset: string = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    let code: string = ""
+    let i: int = 0
+    let len_charset: int = length(charset) 
+    
+    while i < 6 do
+        let idx: int = random_int(0, len_charset) 
+        code = code + char_at(charset, idx)
+        i = i + 1
+    end
+    return code
+end
+
+func read_file(path: string) -> string
+    let f: File = open(path, "r")
+    
+    if !f.open then
+        let fallback: string = "noxy_examples/url_shortener/" + path
+        f = open(fallback, "r")
+        if !f.open then
+            return ""
+        end
+    end
+    
+    let res: IOResult = read(f)
+    close(f)
+    
+    if res.ok then 
+        return res.data 
+    end
+    return ""
+end
+
+// ============================================
+// Handlers
+// ============================================
+
+func handle_shorten(body: bytes) -> HttpResponse
+    let json_str: string = to_str(body)
+    let node: ref JsonNode = json_parse(json_str) 
+    
+    if node == null then 
+        return response_error(400, "Invalid JSON") 
+    end
+    
+    let url: string = get_string(node, "url")
+    if is_empty(url) then 
+        return response_error(400, "Missing url field") 
+    end
+    
+    let code: string = generate_code()
+    let created_at: string = time.format(time.now_datetime())
+    
+    let params: any[]
+    append(params, code)
+    append(params, url)
+    append(params, created_at)
+    
+    // SEND TO WORKER POOL
+    let res: sqlite.ExecResult = db_execute_safe("INSERT INTO urls (code, original_url, created_at) VALUES (?, ?, ?)", params)
+    
+    if res == null then
+       return response_error(500, "DB Error: Worker returned null")
+    end
+    
+    if !res.ok then 
+        return response_error(500, "DB Error: " + res.error) 
+    end
+    
+    let json_resp: string = "{\"code\": \"" + code + "\", \"short_url\": \"/" + code + "\"}"
+    return response_json(json_resp)
+end
+
+func handle_list() -> HttpResponse
+    // SEND TO WORKER POOL
+    let res: sqlite.QueryResult = db_query_safe("SELECT code, original_url, created_at FROM urls ORDER BY rowid DESC LIMIT 20")
+    
+    if res == null || !res.ok then 
+        // Handle null case specifically if needed
+        let err: string = "Unknown DB Error"
+        if res != null then 
+            err = res.error 
+        end
+        return response_error(500, "DB Error: " + err) 
+    end
+    
+    let items: string[20]
+    let count: int = 0
+    let i: int = 0
+    
+    while i < res.row_count do
+        if count >= 20 then 
+            break 
+        end
+        
+        let row: Row = res.rows[i]
+        let code: string = row.values[0]
+        let url: string = row.values[1]
+        let safe_url: string = replace(url, "\"", "\\\"")
+        
+        let item: string = "{\"code\": \"" + code + "\", \"original_url\": \"" + safe_url + "\"}"
+        items[count] = item
+        count = count + 1
+        i = i + 1
+    end
+    
+    let joined: string = join_count(items, ",", count)
+    return response_json("[" + joined + "]")
+end
+
+func handle_redirect(req: HttpRequest, code: string) -> HttpResponse
+    if !is_alnum(code) then 
+        return response_404() 
+    end
+    
+    let sql: string = "SELECT original_url FROM urls WHERE code = '" + code + "'"
+    
+    // SEND TO WORKER POOL
+    let q_res: sqlite.QueryResult = db_query_safe(sql)
+    
+    if q_res == null || !q_res.ok || q_res.row_count == 0 then 
+        return response_404() 
+    end
+    
+    let row: Row = q_res.rows[0]
+    let original_url: string = row.values[0]
+    
+    let headers: string[64]
+    headers[0] = "Location: " + original_url
+    headers[1] = "Connection: close"
+    headers[2] = "Content-Type: text/plain"
+    
+    return HttpResponse("HTTP/1.1", 302, "Found", headers, 3, to_bytes("Redirecting to " + original_url))
+end
+
+// ============================================
+// Router & Main
+// ============================================
+
+func router(req: HttpRequest) -> HttpResponse
+    print("Request: " + req.method + " " + req.path)
+    
+    if req.method == "POST" && req.path == "/api/shorten" then
+        return handle_shorten(req.body)
+    end
+    
+    if req.method == "GET" && req.path == "/api/urls" then
+        return handle_list()
+    end
+
+    if req.method == "GET" then
+        if req.path == "/" || req.path == "/index.html" then
+            return response_html(read_file("public/index.html"))
+        end
+        if req.path == "/style.css" then 
+            return response_ok(to_bytes(read_file("public/style.css")), "text/css")
+        end
+        if req.path == "/script.js" then 
+            return response_ok(to_bytes(read_file("public/script.js")), "application/javascript")
+        end
+        
+        if length(req.path) > 1 && starts_with(req.path, "/") then
+             let code: string = substring(req.path, 1, length(req.path))
+             if length(code) > 0 then
+                 return handle_redirect(req, code)
+             end
+        end
+    end
+    
+    return response_404()
+end
+
+init_pool()
+
+let host: string = "127.0.0.1"
+let port: int = 8080
+let server: HttpServer = new_server(host, port)
+
+print("URL Shortener V2 (Worker Pool) running at http://" + host + ":" + to_str(port))
+print("Press Ctrl+C to stop")
+
+serve(server, router)

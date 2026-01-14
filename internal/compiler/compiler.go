@@ -1265,10 +1265,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				chanType, ok := chType.(*ast.ChanType)
 				if !ok {
 					// Check if it is 'any'
-					if chType.String() == "any" {
+					if chType != nil && chType.String() == "any" {
 						isAnyChannel = true
 					} else {
-						return nil, nil, fmt.Errorf("[line %d] first argument to chan_send must be a channel, got %s", c.currentLine, chType.String())
+						typeStr := "unknown/nil"
+						if chType != nil {
+							typeStr = chType.String()
+						}
+						return nil, nil, fmt.Errorf("[line %d] first argument to chan_send must be a channel, got %s", c.currentLine, typeStr)
 					}
 				}
 

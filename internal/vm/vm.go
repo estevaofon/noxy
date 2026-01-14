@@ -88,6 +88,7 @@ type VM struct {
 	stmtParams  map[int]map[int]interface{}
 	nextDbID    int
 	nextStmtID  int
+	DbLock      sync.Mutex // Protects DB maps
 
 	// Net Management (Moved to SharedState)
 	netBufferedData  map[int][]byte   // For peeked data during select (Local to thread/VM?)
@@ -2205,9 +2206,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			}
 		}
 
+		vm.DbLock.Lock()
 		id := vm.nextDbID
 		vm.nextDbID++
 		vm.dbHandles[id] = db
+		vm.DbLock.Unlock()
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
 		inst.Fields["handle"] = value.NewInt(int64(id))
@@ -2226,6 +2229,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 
 		handle := int(dbInst.Fields["handle"].AsInt)
+
+		vm.DbLock.Lock()
+		defer vm.DbLock.Unlock()
+
 		if db, ok := vm.dbHandles[handle]; ok {
 			db.Close()
 			delete(vm.dbHandles, handle)
@@ -2251,7 +2258,12 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		resStruct := resTmplInst.Struct
 
 		handle := int(dbInst.Fields["handle"].AsInt)
-		if db, ok := vm.dbHandles[handle]; ok {
+
+		vm.DbLock.Lock()
+		db, ok := vm.dbHandles[handle]
+		vm.DbLock.Unlock() // Unlock for Exec
+
+		if ok {
 			result, err := db.Exec(sqlStr)
 			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
 			if err != nil {
@@ -2299,7 +2311,12 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		resStruct := resTmplInst.Struct
 
 		handle := int(dbInst.Fields["handle"].AsInt)
-		if db, ok := vm.dbHandles[handle]; ok {
+
+		vm.DbLock.Lock()
+		db, ok := vm.dbHandles[handle]
+		vm.DbLock.Unlock()
+
+		if ok {
 			// Convert params
 			queryArgs := make([]interface{}, len(paramsArray.Elements))
 			for i, val := range paramsArray.Elements {
@@ -2365,13 +2382,20 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		stmtStructDef := stmtInst.Struct
 
 		handle := int(dbInst.Fields["handle"].AsInt)
-		if db, ok := vm.dbHandles[handle]; ok {
+
+		vm.DbLock.Lock()
+		db, ok := vm.dbHandles[handle]
+		vm.DbLock.Unlock()
+
+		if ok {
 			stmt, err := db.Prepare(sqlStr)
 			if err == nil {
+				vm.DbLock.Lock()
 				id := vm.nextStmtID
 				vm.nextStmtID++
 				vm.stmtHandles[id] = stmt
 				vm.stmtParams[id] = make(map[int]interface{})
+				vm.DbLock.Unlock()
 
 				inst := value.NewInstance(stmtStructDef).Obj.(*value.ObjInstance)
 				inst.Fields["handle"] = value.NewInt(int64(id))
@@ -2392,6 +2416,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		idx := int(args[1].AsInt)
 
 		handle := int(stmtInst.Fields["handle"].AsInt)
+
+		vm.DbLock.Lock()
+		defer vm.DbLock.Unlock()
+
 		if _, ok := vm.stmtHandles[handle]; ok {
 			if vm.stmtParams[handle] == nil {
 				vm.stmtParams[handle] = make(map[int]interface{})
@@ -2426,8 +2454,25 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		resStruct := resTmplInst.Struct
 
 		handle := int(stmtInst.Fields["handle"].AsInt)
-		if stmt, ok := vm.stmtHandles[handle]; ok {
-			params := vm.stmtParams[handle]
+
+		vm.DbLock.Lock()
+		stmt, ok := vm.stmtHandles[handle]
+		var params map[int]interface{}
+		if ok {
+			// Copy params? Or use direct ref?
+			// Since stmtParams access is guarded, we should copy or execute under lock?
+			// Executing under lock blocks other threads.
+			// Copy params.
+			origParams := vm.stmtParams[handle]
+			params = make(map[int]interface{})
+			for k, v := range origParams {
+				params[k] = v
+			}
+		}
+		vm.DbLock.Unlock()
+
+		if ok {
+			// params := vm.stmtParams[handle] // Replaced by copy
 			var maxIdx int
 			for k := range params {
 				if k > maxIdx {
@@ -2476,6 +2521,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewNull()
 		}
 		handle := int(stmtInst.Fields["handle"].AsInt)
+
+		vm.DbLock.Lock()
+		defer vm.DbLock.Unlock()
+
 		if _, ok := vm.stmtHandles[handle]; ok {
 			vm.stmtParams[handle] = make(map[int]interface{})
 		}
@@ -2491,6 +2540,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewNull()
 		}
 		handle := int(stmtInst.Fields["handle"].AsInt)
+
+		vm.DbLock.Lock()
+		defer vm.DbLock.Unlock()
+
 		if stmt, ok := vm.stmtHandles[handle]; ok {
 			stmt.Close()
 			delete(vm.stmtHandles, handle)
@@ -2523,7 +2576,12 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		rowStruct := rowTmplInst.Struct
 
 		handle := int(dbInst.Fields["handle"].AsInt)
-		if db, ok := vm.dbHandles[handle]; ok {
+
+		vm.DbLock.Lock()
+		db, ok := vm.dbHandles[handle]
+		vm.DbLock.Unlock()
+
+		if ok {
 			rows, err := db.Query(sqlStr)
 			if err != nil {
 				// Return QueryResult with ok=false and error message
@@ -2830,6 +2888,10 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
+	// Check if already defined in shared globals to avoid overwriting with thread-local closure
+	if _, ok := vm.GetGlobal(name); ok {
+		return
+	}
 	vm.SetGlobal(name, value.NewNative(name, fn))
 }
 
