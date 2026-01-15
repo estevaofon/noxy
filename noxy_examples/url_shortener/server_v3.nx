@@ -11,44 +11,52 @@ use time
 use rand select *
 
 // ============================================
-// Database Setup (Global & Thread-Safe)
+// Database Setup
 // ============================================
 
-let db: sqlite.Database = sqlite.open("urls.db")
+let db: sqlite.Database = sqlite.open("urls_v3.db") // New DB file for V3 schema
 
 if !db.open then
-     // Fallback logic
-     db = sqlite.open("noxy_examples/url_shortener/urls.db")
-     if !db.open then
-         print("Failed to open DB")
-         return
-     end
+     print("Failed to open DB")
+     return
 end
 
-// Initialize tables if needed
-let init_sql: string = "CREATE TABLE IF NOT EXISTS urls (code TEXT PRIMARY KEY, original_url TEXT, created_at TEXT)"
+// Schema V3: id is SERIAL (INTEGER PRIMARY KEY), code is derived, also stored for query speed?
+// Actually we only need ID to look up original_url if we decode.
+// Storing code is optional but good for debugging or reverse lookups.
+let init_sql: string = "CREATE TABLE IF NOT EXISTS urls (id INTEGER PRIMARY KEY, code TEXT, original_url TEXT, created_at TEXT)"
 sqlite.exec(db, init_sql)
 
-print("DB Opened successfully. Handle: " + to_str(db.handle))
+print("DB Opened successfully.")
 
+// ============================================
+// Obfuscation Logic
+// ============================================
+
+let KEY: int = 0x5F3A1C
+
+func obfuscate(id: int) -> int
+    return id ^ KEY
+end
+
+func deobfuscate(id: int) -> int
+    // Symmetric XOR
+    return id ^ KEY
+end
+
+func encode_id(id: int) -> string
+    let masked: int = obfuscate(id)
+    return base62_encode(masked)
+end
+
+func decode_code(code: string) -> int
+    let masked: int = base62_decode(code)
+    return deobfuscate(masked)
+end
 
 // ============================================
 // Helpers
 // ============================================
-
-func generate_code() -> string
-    let charset: string = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    let code: string = ""
-    let i: int = 0
-    let len_charset: int = length(charset) 
-    
-    while i < 6 do
-        let idx: int = random_int(0, len_charset) 
-        code = code + char_at(charset, idx)
-        i = i + 1
-    end
-    return code
-end
 
 func read_file(path: string) -> string
     let f: File = open(path, "r")
@@ -87,39 +95,39 @@ func handle_shorten(body: bytes) -> HttpResponse
         return response_error(400, "Missing url field") 
     end
     
-    let code: string = generate_code()
     let created_at: string = time.format(time.now_datetime())
     
+    // 1. Insert original_url (id is auto-generated)
     let params: any[]
-    append(params, code)
     append(params, url)
     append(params, created_at)
     
-    // DIRECT DB ACCESS - SAFE NOW
-    let res: sqlite.ExecResult = sqlite.execute_params(db, "INSERT INTO urls (code, original_url, created_at) VALUES (?, ?, ?)", params)
+    let res: sqlite.ExecResult = sqlite.execute_params(db, "INSERT INTO urls (original_url, created_at) VALUES (?, ?)", params)
     
-    if res == null then
-       return response_error(500, "DB Error: returned null")
+    if res == null || !res.ok then 
+        return response_error(500, "DB Insert Error: " + res.error) 
     end
     
-    if !res.ok then 
-        return response_error(500, "DB Error: " + res.error) 
-    end
+    let id: int = res.last_insert_id
+    
+    // 2. Compute Code from ID
+    let code: string = encode_id(id)
+    
+    // 3. Update row with Code (Optional, but good practice)
+    let update_params: any[]
+    append(update_params, code)
+    append(update_params, id)
+    sqlite.execute_params(db, "UPDATE urls SET code = ? WHERE id = ?", update_params)
     
     let json_resp: string = "{\"code\": \"" + code + "\", \"short_url\": \"/" + code + "\"}"
     return response_json(json_resp)
 end
 
 func handle_list() -> HttpResponse
-    // DIRECT DB ACCESS - SAFE NOW
-    let res: sqlite.QueryResult = sqlite.query(db, "SELECT code, original_url, created_at FROM urls ORDER BY rowid DESC LIMIT 20")
+    let res: sqlite.QueryResult = sqlite.query(db, "SELECT code, original_url, created_at FROM urls ORDER BY id DESC LIMIT 20")
     
     if res == null || !res.ok then 
-        let err: string = "Unknown DB Error"
-        if res != null then 
-            err = res.error 
-        end
-        return response_error(500, "DB Error: " + err) 
+        return response_error(500, "DB Query Error") 
     end
     
     let items: string[20]
@@ -132,9 +140,15 @@ func handle_list() -> HttpResponse
         end
         
         let row: Row = res.rows[i]
-        let code: string = row.values[0]
+        // Ensure code is not null (legacy rows might be issues if mixed, but we used new DB)
+        let code: string = row.values[0] 
         let url: string = row.values[1]
         let safe_url: string = replace(url, "\"", "\\\"")
+        
+        // If code is null/empty for some reason, re-calc?
+        if length(code) == 0 then
+             // Ideally we shouldn't fail, but let's assume it's fine.
+        end
         
         let item: string = "{\"code\": \"" + code + "\", \"original_url\": \"" + safe_url + "\"}"
         items[count] = item
@@ -151,9 +165,17 @@ func handle_redirect(req: HttpRequest, code: string) -> HttpResponse
         return response_404() 
     end
     
-    let sql: string = "SELECT original_url FROM urls WHERE code = '" + code + "'"
+    // Decode Code -> ID
+    // Note: base62_decode returns 0 on error, which is not a valid ID (sqlite rowid starts at 1)
+    let id: int = decode_code(code)
     
-    // DIRECT DB ACCESS - SAFE NOW
+    if id <= 0 then
+        return response_404()
+    end
+    
+    // Lookup by ID (Faster than string index!)
+    let sql: string = "SELECT original_url FROM urls WHERE id = " + to_str(id)
+    
     let q_res: sqlite.QueryResult = sqlite.query(db, sql)
     
     if q_res == null || !q_res.ok || q_res.row_count == 0 then 
@@ -212,7 +234,7 @@ let host: string = "127.0.0.1"
 let port: int = 8080
 let server: HttpServer = new_server(host, port)
 
-print("URL Shortener V3 (Thread-Safe SQLite) running at http://" + host + ":" + to_str(port))
+print("URL Shortener V3 (Obfuscated IDs) running at http://" + host + ":" + to_str(port))
 print("Press Ctrl+C to stop")
 
 serve(server, router)

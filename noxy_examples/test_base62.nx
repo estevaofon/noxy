@@ -1,0 +1,32 @@
+
+let n: int = 123456789
+let encoded: string = base62_encode(n)
+print("Original: " + to_str(n))
+print("Encoded: " + encoded)
+
+let decoded: int = base62_decode(encoded)
+print("Decoded: " + to_str(decoded))
+
+if n == decoded then
+    print("SUCCESS")
+else
+    print("FAILURE")
+end
+
+// Test 0
+let z: int = 0
+let enc_z: string = base62_encode(z)
+print("0 Encoded: " + enc_z)
+if enc_z == "0" && base62_decode(enc_z) == 0 then
+    print("SUCCESS 0")
+else
+      print("FAILURE 0")
+end
+
+// Test max (simple)
+let m: int = 999
+let enc_m: string = base62_encode(m)
+print("999 Encoded: " + enc_m)
+if base62_decode(enc_m) == 999 then
+    print("SUCCESS 999")
+end

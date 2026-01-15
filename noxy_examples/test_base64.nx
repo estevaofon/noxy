@@ -1,0 +1,15 @@
+
+let original: string = "Hello Noxy!"
+let encoded: string = base64_encode(original)
+print("Original: " + original)
+print("Encoded: " + encoded)
+
+let decoded_bytes: bytes = base64_decode(encoded)
+let decoded: string = to_str(decoded_bytes)
+print("Decoded: " + decoded)
+
+if original == decoded then
+    print("SUCCESS: Base64 works!")
+else
+    print("FAILURE: Decoded string does not match original")
+end

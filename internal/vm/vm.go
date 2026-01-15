@@ -2723,6 +2723,73 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewBytes(string(decoded))
 	})
 
+	const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+	vm.DefineNative("base62_encode", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewString("")
+		}
+		if args[0].Type != value.VAL_INT {
+			return value.NewString("")
+		}
+		num := args[0].AsInt
+		if num == 0 {
+			return value.NewString("0")
+		}
+
+		var coded []byte
+		neg := false
+		if num < 0 {
+			neg = true
+			num = -num
+		}
+
+		for num > 0 {
+			rem := num % 62
+			coded = append(coded, base62Chars[rem])
+			num = num / 62
+		}
+
+		if neg {
+			coded = append(coded, '-')
+		}
+
+		// Reverse
+		for i, j := 0, len(coded)-1; i < j; i, j = i+1, j-1 {
+			coded[i], coded[j] = coded[j], coded[i]
+		}
+
+		return value.NewString(string(coded))
+	})
+
+	vm.DefineNative("base62_decode", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewInt(0)
+		}
+		str := args[0].String()
+		if str == "" {
+			return value.NewInt(0)
+		}
+		var num int64
+		var neg bool
+		if strings.HasPrefix(str, "-") {
+			neg = true
+			str = str[1:]
+		}
+
+		for _, char := range str {
+			idx := strings.IndexRune(base62Chars, char)
+			if idx == -1 {
+				return value.NewInt(0) // Error
+			}
+			num = num*62 + int64(idx)
+		}
+		if neg {
+			num = -num
+		}
+		return value.NewInt(num)
+	})
+
 	// Precompile regex for fmt verbs
 	// Matches % [flags] [width] [.prec] verb
 	// Flags: [-+ #0]
