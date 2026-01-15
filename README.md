@@ -25,12 +25,19 @@ Noxy VM is a bytecode compiler and virtual machine for the Noxy language created
 - ✅ F-strings with interpolation
 - ✅ Single and double quote support
 - ✅ Line tracking for debugging
+- ✅ SQLite database support (Thread-safe)
+- ✅ HTTP server support
+- ✅ First-class functions
+- ✅ Closures
+- ✅ Concurrency (noxy routines)
+- ✅ Garbage collection
+- ✅ Built-in modules (io, net, http, sqlite)
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone <repo-url>
+git clone https://github.com/estevaofon/noxy.git
 cd noxy-vm
 
 # Build
@@ -58,7 +65,7 @@ go run ./cmd/noxy/main.go program.nx
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.1
+Noxy REPL v1.0.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
