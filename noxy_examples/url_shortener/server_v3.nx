@@ -21,9 +21,6 @@ if !db.open then
      return
 end
 
-// Schema V3: id is SERIAL (INTEGER PRIMARY KEY), code is derived, also stored for query speed?
-// Actually we only need ID to look up original_url if we decode.
-// Storing code is optional but good for debugging or reverse lookups.
 let init_sql: string = "CREATE TABLE IF NOT EXISTS urls (id INTEGER PRIMARY KEY, code TEXT, original_url TEXT, created_at TEXT)"
 sqlite.exec(db, init_sql)
 
@@ -144,11 +141,6 @@ func handle_list() -> HttpResponse
         let code: string = row.values[0] 
         let url: string = row.values[1]
         let safe_url: string = replace(url, "\"", "\\\"")
-        
-        // If code is null/empty for some reason, re-calc?
-        if length(code) == 0 then
-             // Ideally we shouldn't fail, but let's assume it's fine.
-        end
         
         let item: string = "{\"code\": \"" + code + "\", \"original_url\": \"" + safe_url + "\"}"
         items[count] = item
