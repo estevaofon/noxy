@@ -1,0 +1,40 @@
+use sqlite
+use time
+
+// 1. Open DB in Main Thread
+let db: sqlite.Database = sqlite.open("repro.db")
+if !db.open then
+    print("Main: Failed to open DB")
+    return
+end
+
+print("Main: DB Opened. Handle ID: " + to_str(db.handle))
+
+// Create table
+sqlite.exec(db, "CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, val TEXT)")
+
+// 2. Define Worker Function
+func worker(id: int, shared_db: sqlite.Database)
+    print("Worker " + to_str(id) + ": Starting with DB Handle " + to_str(shared_db.handle))
+    
+    // Attempt to use the shared handle
+    // In current broken state, this will fail because handle ID is local to Main thread
+    let res: sqlite.QueryResult = sqlite.query(shared_db, "SELECT count(*) FROM test")
+    
+    if res == null || !res.ok then
+        print("Worker " + to_str(id) + ": Query FAILED (Expected before fix)")
+        if res != null then
+            print("Error: " + res.error)
+        end
+    else
+        print("Worker " + to_str(id) + ": Query SUCCESS (Expected after fix)")
+    end
+end
+
+// 3. Spawn Worker
+spawn(worker, 1, db)
+
+// Wait for worker
+time.sleep(1000)
+sqlite.close(db)
+print("Main: Done")

@@ -63,6 +63,14 @@ type SharedState struct {
 	NetConns     map[int]net.Conn
 	NextNetID    int
 	NetLock      sync.Mutex
+
+	// Shared Database Resources
+	DbHandles   map[int]*sql.DB
+	StmtHandles map[int]*sql.Stmt
+	StmtParams  map[int]map[int]interface{}
+	NextDbID    int
+	NextStmtID  int
+	DbLock      sync.Mutex
 }
 
 type VM struct {
@@ -82,13 +90,6 @@ type VM struct {
 	// IO Management
 	openFiles map[int64]*os.File
 	nextFD    int64
-
-	dbHandles   map[int]*sql.DB
-	stmtHandles map[int]*sql.Stmt
-	stmtParams  map[int]map[int]interface{}
-	nextDbID    int
-	nextStmtID  int
-	DbLock      sync.Mutex // Protects DB maps
 
 	// Net Management (Moved to SharedState)
 	netBufferedData  map[int][]byte   // For peeked data during select (Local to thread/VM?)
@@ -115,21 +116,22 @@ func NewWithConfig(cfg VMConfig) *VM {
 		NetListeners: make(map[int]net.Listener),
 		NetConns:     make(map[int]net.Conn),
 		NextNetID:    1,
+		DbHandles:    make(map[int]*sql.DB),
+		StmtHandles:  make(map[int]*sql.Stmt),
+		StmtParams:   make(map[int]map[int]interface{}),
+		NextDbID:     1,
+		NextStmtID:   1,
 	}
 	return NewWithShared(shared, cfg)
 }
 
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	vm := &VM{
-		shared:           shared,
-		Config:           cfg,
-		openFiles:        make(map[int64]*os.File),
-		nextFD:           1,
-		dbHandles:        make(map[int]*sql.DB),
-		stmtHandles:      make(map[int]*sql.Stmt),
-		stmtParams:       make(map[int]map[int]interface{}),
-		nextDbID:         1,
-		nextStmtID:       1,
+		shared:    shared,
+		Config:    cfg,
+		openFiles: make(map[int64]*os.File),
+		nextFD:    1,
+
 		netBufferedData:  make(map[int][]byte),
 		netBufferedConns: make(map[int]net.Conn),
 	}
@@ -2206,11 +2208,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			}
 		}
 
-		vm.DbLock.Lock()
-		id := vm.nextDbID
-		vm.nextDbID++
-		vm.dbHandles[id] = db
-		vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		id := vm.shared.NextDbID
+		vm.shared.NextDbID++
+		vm.shared.DbHandles[id] = db
+		vm.shared.DbLock.Unlock()
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
 		inst.Fields["handle"] = value.NewInt(int64(id))
@@ -2230,12 +2232,12 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(dbInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		defer vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		defer vm.shared.DbLock.Unlock()
 
-		if db, ok := vm.dbHandles[handle]; ok {
+		if db, ok := vm.shared.DbHandles[handle]; ok {
 			db.Close()
-			delete(vm.dbHandles, handle)
+			delete(vm.shared.DbHandles, handle)
 			dbInst.Fields["open"] = value.NewBool(false)
 		}
 		return value.NewNull()
@@ -2259,9 +2261,9 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(dbInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		db, ok := vm.dbHandles[handle]
-		vm.DbLock.Unlock() // Unlock for Exec
+		vm.shared.DbLock.Lock()
+		db, ok := vm.shared.DbHandles[handle]
+		vm.shared.DbLock.Unlock() // Unlock for Exec
 
 		if ok {
 			result, err := db.Exec(sqlStr)
@@ -2312,9 +2314,9 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(dbInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		db, ok := vm.dbHandles[handle]
-		vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		db, ok := vm.shared.DbHandles[handle]
+		vm.shared.DbLock.Unlock()
 
 		if ok {
 			// Convert params
@@ -2383,19 +2385,19 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(dbInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		db, ok := vm.dbHandles[handle]
-		vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		db, ok := vm.shared.DbHandles[handle]
+		vm.shared.DbLock.Unlock()
 
 		if ok {
 			stmt, err := db.Prepare(sqlStr)
 			if err == nil {
-				vm.DbLock.Lock()
-				id := vm.nextStmtID
-				vm.nextStmtID++
-				vm.stmtHandles[id] = stmt
-				vm.stmtParams[id] = make(map[int]interface{})
-				vm.DbLock.Unlock()
+				vm.shared.DbLock.Lock()
+				id := vm.shared.NextStmtID
+				vm.shared.NextStmtID++
+				vm.shared.StmtHandles[id] = stmt
+				vm.shared.StmtParams[id] = make(map[int]interface{})
+				vm.shared.DbLock.Unlock()
 
 				inst := value.NewInstance(stmtStructDef).Obj.(*value.ObjInstance)
 				inst.Fields["handle"] = value.NewInt(int64(id))
@@ -2417,14 +2419,14 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(stmtInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		defer vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		defer vm.shared.DbLock.Unlock()
 
-		if _, ok := vm.stmtHandles[handle]; ok {
-			if vm.stmtParams[handle] == nil {
-				vm.stmtParams[handle] = make(map[int]interface{})
+		if _, ok := vm.shared.StmtHandles[handle]; ok {
+			if vm.shared.StmtParams[handle] == nil {
+				vm.shared.StmtParams[handle] = make(map[int]interface{})
 			}
-			vm.stmtParams[handle][idx] = val
+			vm.shared.StmtParams[handle][idx] = val
 		}
 		return value.NewNull()
 	}
@@ -2455,21 +2457,21 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(stmtInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		stmt, ok := vm.stmtHandles[handle]
+		vm.shared.DbLock.Lock()
+		stmt, ok := vm.shared.StmtHandles[handle]
 		var params map[int]interface{}
 		if ok {
 			// Copy params? Or use direct ref?
 			// Since stmtParams access is guarded, we should copy or execute under lock?
 			// Executing under lock blocks other threads.
 			// Copy params.
-			origParams := vm.stmtParams[handle]
+			origParams := vm.shared.StmtParams[handle]
 			params = make(map[int]interface{})
 			for k, v := range origParams {
 				params[k] = v
 			}
 		}
-		vm.DbLock.Unlock()
+		vm.shared.DbLock.Unlock()
 
 		if ok {
 			// params := vm.stmtParams[handle] // Replaced by copy
@@ -2522,11 +2524,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		handle := int(stmtInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		defer vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		defer vm.shared.DbLock.Unlock()
 
-		if _, ok := vm.stmtHandles[handle]; ok {
-			vm.stmtParams[handle] = make(map[int]interface{})
+		if _, ok := vm.shared.StmtHandles[handle]; ok {
+			vm.shared.StmtParams[handle] = make(map[int]interface{})
 		}
 		return value.NewNull()
 	})
@@ -2541,13 +2543,13 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		handle := int(stmtInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		defer vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		defer vm.shared.DbLock.Unlock()
 
-		if stmt, ok := vm.stmtHandles[handle]; ok {
+		if stmt, ok := vm.shared.StmtHandles[handle]; ok {
 			stmt.Close()
-			delete(vm.stmtHandles, handle)
-			delete(vm.stmtParams, handle)
+			delete(vm.shared.StmtHandles, handle)
+			delete(vm.shared.StmtParams, handle)
 		}
 		return value.NewNull()
 	})
@@ -2577,9 +2579,9 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		handle := int(dbInst.Fields["handle"].AsInt)
 
-		vm.DbLock.Lock()
-		db, ok := vm.dbHandles[handle]
-		vm.DbLock.Unlock()
+		vm.shared.DbLock.Lock()
+		db, ok := vm.shared.DbHandles[handle]
+		vm.shared.DbLock.Unlock()
 
 		if ok {
 			rows, err := db.Query(sqlStr)
