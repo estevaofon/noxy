@@ -17,6 +17,8 @@ import (
 	"strings"
 )
 
+const Version = "v1.0.0"
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -27,7 +29,28 @@ func main() {
 
 	// Parse flags
 	showDisassembly := flag.Bool("disassembly", false, "Show bytecode disassembly")
+	showVersion := flag.Bool("version", false, "Show version information")
+	showHelp := flag.Bool("help", false, "Show help message")
+
+	// Custom Usage to show double dashes
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: noxy [options] [file]\n\nOptions:\n")
+		flag.VisitAll(func(f *flag.Flag) {
+			fmt.Fprintf(os.Stderr, "  --%s\n\t%s\n", f.Name, f.Usage)
+		})
+	}
+
 	flag.Parse()
+
+	if *showHelp {
+		flag.Usage()
+		return
+	}
+
+	if *showVersion {
+		fmt.Printf("Noxy %s\n", Version)
+		return
+	}
 
 	// Remaining args are positional
 	args := flag.Args()
@@ -52,7 +75,7 @@ func getDir(path string) string {
 }
 
 func startREPL(showDisasm bool) {
-	fmt.Println("Noxy REPL v0.1")
+	fmt.Printf("Noxy REPL %s\n", Version)
 	fmt.Println("Type 'exit' to quit.")
 
 	// Shared VM for persistence
