@@ -65,7 +65,7 @@ go run ./cmd/noxy/main.go program.nx
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v1.0.0
+Noxy REPL v1.1.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
