@@ -146,22 +146,6 @@ func startREPL(showDisasm bool) {
 			continue
 		}
 
-		// If we are here, parse was successful.
-		// BUT we might want to enforce that if we opened a block, we closed it?
-		// Parser should error if block not closed.
-		// Just creating an empty line to finish multiline input?
-		// Python REPL:
-		// >>> if True:
-		// ...     print(1)
-		// ...
-		// (Run)
-		//
-		// Noxy syntax uses 'end'. So 'end' token should close the block.
-		// If parser says OK, then the block IS closed.
-		// So we can run immediately.
-
-		// 2. REPL Magic: If statement is a single ExpressionStmt, print it.
-		// "1 + 1" -> "print(1 + 1)"
 		if len(program.Statements) == 1 {
 			if exprStmt, ok := program.Statements[0].(*ast.ExpressionStmt); ok {
 				// Wrap in print call

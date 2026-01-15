@@ -225,9 +225,6 @@ func (v Value) String() string {
 	case VAL_FLOAT:
 		return fmt.Sprintf("%f", v.AsFloat)
 	case VAL_OBJ:
-		// Check for specific object types if they don't implement String() naturally via fmt?
-		// But ObjArray implements String(), so fmt.Sprintf("%s", v.Obj) should work if v.Obj satisfies fmt.Stringer?
-		// Or we can type switch here.
 		switch o := v.Obj.(type) {
 		case *ObjArray:
 			return o.String()
@@ -319,29 +316,9 @@ func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, c
 func NewClosure(fn *ObjFunction) Value {
 	return Value{
 		Type: VAL_FUNCTION, // Reuse VAL_FUNCTION to mean "Callable" (VM will assume ObjClosure or handle translation?)
-		// Wait, if I reuse VAL_FUNCTION, then Obj must be ObjClosure wrapper.
-		// But existing code expects ObjFunction.
-		// If I strictly wrap, I must update all casts.
-		// Alternatively, VAL_FUNCTION remains ObjFunction, and VAL_CLOSURE is new.
-		// But closures ARE the main way functions exist at runtime.
-		// Let's use VAL_CLOSURE for runtime closures.
-		// VAL_FUNCTION remains for compile-time constants (prototypes).
-		// When VM executes call, it expects CLOSURE? Or Both?
-		// Both is messy.
-		// Better: VM expects VAL_CLOSURE.
-		// When loading a function constant, we wrap it in a Closure if it has 0 upvalues?
-		// Or OP_CLOSURE instruction creates the closure.
-		// So runtime stack always has VAL_CLOSURE for user functions.
-		// 'spawn' expects function. Should handle closure.
-		Obj: &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount)},
+		Obj:  &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount)},
 	}
 }
-
-// Note: If I reuse VAL_FUNCTION tag for ObjClosure, I MUST update all `v.Obj.(*ObjFunction)` casts.
-// This is a big refactor.
-// To minimize diff, I can keep VAL_FUNCTION as ObjFunction and add VAL_CLOSURE.
-// But calling logic needs to handle both or just one.
-// Let's TRY to add VAL_CLOSURE tag.
 
 func NewNative(name string, fn NativeFunc) Value {
 	return Value{

@@ -47,12 +47,9 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.ZEROS, p.parseZeros)
 	p.registerPrefix(token.REF, p.parsePrefixExpression)
 	p.registerPrefix(token.BIT_NOT, p.parsePrefixExpression)
-	// p.registerPrefix(token.IF, p.parseIfExpression) // Removed
 	p.registerPrefix(token.FUNC, p.parseFunctionLiteral)
 
 	p.registerPrefix(token.PERCENT, p.parseGroupedExpression) // Grouped expression logic for PERCENT? No.
-	// Oh wait, I registered PERCENT for infix above in previous steps.
-	// LBRACE is for Map Literal.
 	p.registerPrefix(token.LBRACE, p.parseMapLiteral)
 
 	p.infixParseFns = make(map[token.TokenType]func(ast.Expression) ast.Expression)
@@ -88,14 +85,6 @@ func (p *Parser) Errors() []string {
 func (p *Parser) peekError(t token.TokenType) {
 	msg := fmt.Sprintf("  File \"%s\", line %d\n    %s\nSyntaxError: expected %s, found %s",
 		"file", p.peekToken.Line, "code line here...", t.Display(), p.peekToken.Type.Display())
-	// Wait, I can't easily get the filename and code line here without passing it down or storing simpler "Line:Col: msg" and letting main format it?
-	// The user requested: SyntaxError: invalid syntax "def"
-	// My previous format was: [Line:Col] msg.
-	// Providing a full Python-style traceback (File "...", line X \n code \n Error) requires more context in the error or main.
-	// For now, I will stick to the requested single line format or simple multiline if I can't get file/code easily.
-	// "[Line:Col] SyntaxError: ..." is good enough for now.
-	// Actually, let's just do:
-	// [Line:Col] SyntaxError: expected ')' found ':'
 	msg = fmt.Sprintf("[%d:%d] SyntaxError: expected %s, found %s",
 		p.peekToken.Line, p.peekToken.Column, t.Display(), p.peekToken.Type.Display())
 	p.errors = append(p.errors, msg)
@@ -104,10 +93,6 @@ func (p *Parser) peekError(t token.TokenType) {
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
-
-	// Skip NEW tokens if they are just fillers?
-	// In Noxy Python parser: skip_newlines() was explicit.
-	// Here we might want to handle them. For now, let's keep them and handle in parsing logic.
 }
 
 func (p *Parser) skipUntilEnd() {
@@ -173,16 +158,8 @@ func (p *Parser) parseStatement() ast.Statement {
 			return nil
 		}
 
-		// Check if it's an assignment
-		// Handle `case msg = recv` (ExpressionStmt vs AssignStmt logic correction in parseWhenStatement used parseExpression)
-		// But here in parseStatement generic:
 		if p.peekTokenIs(token.ASSIGN) {
 			p.nextToken() // eat ASSIGN -> curToken is ASSIGN
-			// stmt target is `expr`.
-			// But `expr` might be complicated tree? AssignStmt allows generic expression target?
-			// Typically only Identifier or Index/MemberAccess.
-			// AssignStmt struct has Target Expression. Valid.
-			// Logic is correct.
 			tokenAssign := p.curToken
 			p.nextToken() // move to value
 			stmt := &ast.AssignStmt{Token: tokenAssign, Target: expr}
@@ -425,18 +402,6 @@ func (p *Parser) parseWhenStatement() *ast.WhenStatement {
 		if p.curTokenIs(token.CASE) {
 			cc := &ast.CaseClause{Token: p.curToken, IsDefault: false}
 			p.nextToken() // eat 'case'
-
-			// Condition statement (ExprStmt or AssignStmt)
-			// Problem: parseStatement eats newline?
-			// case recv(c) then ...
-			// If we call parseStatement, it might look for newline terminator.
-			// But 'then' is the terminator here.
-			// So we can parseExpression? Or Assignment?
-			// Assignments starts with Identifier?
-			// parseStatement handles choice.
-			// However custom case parsing:
-			// parseExpression(LOWEST) -> if '=' peek -> Assign. else ExprStmt.
-
 			expr := p.parseExpression(LOWEST)
 			if p.peekTokenIs(token.ASSIGN) {
 				// Assigment: case msg = ...
@@ -451,14 +416,6 @@ func (p *Parser) parseWhenStatement() *ast.WhenStatement {
 				assignStmt.Value = p.parseExpression(LOWEST)
 				cc.Condition = assignStmt
 			} else {
-				// Expression statement: case send(...) or case recv(...)
-				// We don't have the start token of expr easily here without casting or capturing before.
-				// However, using p.curToken (which is probably THEN) is okay for now as it's just for error reporting location roughly.
-				// Or use token.Token{Type: token.ILLEGAL, Literal: expr.TokenLiteral()}? No.
-				// Let's blindly use p.curToken for now, or capture it before parsing expr if possible.
-				// Refactoring to capture start token:
-				// But wait, I can't restart parsing.
-				// Let's use p.curToken. It's close enough.
 				cc.Condition = &ast.ExpressionStmt{Token: p.curToken, Expression: expr}
 			}
 
@@ -600,9 +557,6 @@ func (p *Parser) parseType() ast.NoxyType {
 	case token.FUNC:
 		t = &ast.PrimitiveType{Name: "func"} // Generic function type
 	case token.BYTES: // This is Literal 'b"..."'.
-		// Shouldn't be here in parseType.
-		// But wait, declaration says ": bytes".
-		// Is "bytes" a keyword? Check token.go.
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.IDENTIFIER:
 		name := p.curToken.Literal
@@ -620,11 +574,7 @@ func (p *Parser) parseType() ast.NoxyType {
 		if !p.expectPeek(token.LBRACKET) {
 			return nil
 		}
-		// curToken is LBRACKET. Move to KeyType.
-		// p.nextToken() // This was redundant. expectPeek already advanced curToken to LBRACKET, and peekToken to KeyType.
 
-		// Now, p.curToken is LBRACKET, p.peekToken is the start of the KeyType.
-		// We need to advance curToken to the KeyType before parsing it.
 		p.nextToken() // Advance curToken to the KeyType
 
 		keyType := p.parseType()
@@ -749,11 +699,6 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 
 	value, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
 	if err != nil {
-		// handle error? fallback?
-		// for now default 0 or log?
-		// Sscanf previously just set 0 if failed?
-		// Let's keep 0 but maybe log if needed.
-		// Actually ParseInt with base 0 handles 0x.
 		fmt.Printf("Error parsing int: %s\n", err) // Optional debug
 	}
 	lit.Value = value
@@ -819,12 +764,6 @@ func (p *Parser) parseFString() ast.Expression {
 				})
 			}
 
-			// Find closing brace
-			// Note: This logic is simple and doesn't handle nested braces like { {a:1} }
-			// For a full implementation we need a proper brace counter or sub-lexer
-			// But since we are extracting the string to pass to a new parser,
-			// we can just find the matching }
-
 			braceCount := 1
 			j := i + 1
 			for ; j < len(literal); j++ {
@@ -849,10 +788,6 @@ func (p *Parser) parseFString() ast.Expression {
 			// Parse expression
 			l := lexer.New(exprContent)
 			par := New(l) // Recursive parser
-			// Note: We need to register same prefixes/infixes? New() does that.
-			// But typically recursive parser creation is heavy.
-			// Ideally we use p itself? No, p depends on p.l.
-			// New parser is safer.
 
 			innerExpr := par.parseExpression(LOWEST)
 			// Check errors
@@ -946,8 +881,6 @@ func (p *Parser) parseWhileStatement() *ast.WhileStatement {
 	stmt.Condition = p.parseExpression(LOWEST)
 
 	if !p.expectPeek(token.DO) {
-		// Or if Noxy is `while cond {` or `while cond do`?
-		// Assuming DO as per Lexer tokens
 		return nil
 	}
 
@@ -982,15 +915,6 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		}
 		p.nextToken()
 	}
-
-	// If we stopped at ELSE, we leave it there for `parseIfExpression` to see?
-	// `parseIfExpression` checks `peekTokenIs(ELSE)`.
-	// If we are AT `ELSE`, `parseBlockStatement` loop terminated.
-	// So `curToken` IS `ELSE`.
-	// If `parseIfExpression` does `p.peekTokenIs(ELSE)`, it checks NEXT token.
-	// Discrepancy.
-
-	// Let's fix `parseIfExpression`.
 
 	return block
 }
@@ -1346,22 +1270,6 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 	stmt.Name = p.curToken.Literal
 
 	stmt.FieldsList = []*ast.StructField{}
-	// Fields are inside until END
-	// struct Point
-	//    x: int
-	//    y: int
-	// end
-	// OR comma separated?
-	// Spec `struct Point x: int, y: int end` ?
-	// Or block-like?
-	// Noxy Python parser used `block` for struct fields?
-	// Let's assume standard block-like or comma list.
-	// Python parser: `parse_struct_def`.
-	// Let's check spec or assume block-like structure as most Noxy constructs use `end`.
-
-	// "struct" Name
-	// Fields...
-	// "end"
 
 	p.nextToken() // move past Name.
 

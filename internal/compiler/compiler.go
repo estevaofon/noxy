@@ -298,11 +298,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		structObj := value.NewStruct(n.Name, fields)
 		c.emitConstant(structObj)
 
-		// Define Type? Struct is a type definition AND a value (constructor).
-		// The value 'Point' is a function/struct-def. Its type is... 'func' or 'struct_def'?
-		// NoxyType doesn't have FunctionType yet in AST fully?
-		// But for now we don't assign structs to variables often, we call them.
-
 		structType := &ast.PrimitiveType{Name: "struct_def"} // Dummy
 
 		if c.scopeDepth > 0 {
@@ -324,13 +319,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		// TODO: Type check if member exists on leftType? requires knowing struct fields.
-		// For now, allow dynamic or just skip check.
 
 		nameConst := c.makeConstant(value.NewString(n.Member))
 		c.emitBytes(byte(chunk.OP_GET_PROPERTY), byte(nameConst))
 
-		return c.currentChunk, nil, nil // Return Unknown type? OR leftType field type.
+		return c.currentChunk, nil, nil
 
 	case *ast.ArrayLiteral:
 		var elemType ast.NoxyType
@@ -467,11 +460,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 			c.patchJump(endJump)
-
-			// Type check: left should be bool, right boolean?
-			// Noxy truthiness? Python-like?
-			// If safety requested, maybe strict bool?
-			// Assuming strict for now given syntax.
 			if !c.areTypesCompatible(&ast.PrimitiveType{Name: "bool"}, leftType) || !c.areTypesCompatible(&ast.PrimitiveType{Name: "bool"}, rightType) {
 				l := "nil"
 				if leftType != nil {
@@ -754,12 +742,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		if isMap {
-			// Convert Map to Keys Array
-			// Stack: [Map]
-			// We need to call keys(map).
-			// Emitting: keys(map).
-			// Problem: 'map' is on stack. 'keys' function not.
-			// Use local temp for map.
 			c.addLocal(" $map", colType) // Consumes Map from stack
 
 			// Get 'keys' global
@@ -772,18 +754,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// Call keys(map)
 			c.emitBytes(byte(chunk.OP_CALL), 1)
-			// Stack: [KeysArray]
-
-			// Determine new type: Array of KeyType
-			// For simplicity, assume keys return strings (for now in Noxy maps are string keys?)
-			// Noxy Spec: map[Key, Value]. keys() returns Key[].
-			// If we can determine Map Key Type, we effectively have Array<KeyType>.
-			// For now, let's treat as Array (dynamic or inferred).
 		}
 
 		// 3. Store Collection in Local ($collection)
-		// Stack has Collection (or Keys Array)
-		c.addLocal(" $collection", nil) // Type? inferred or dyn
+		c.addLocal(" $collection", nil)
 
 		// 4. Init Index ($index = 0)
 		c.emitConstant(value.NewInt(0))
@@ -943,39 +917,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 		c.emitBytes(byte(chunk.OP_SELECT), byte(count))
 
-		// Stack now has: [Index, Value, OK] (Index is bottom, OK is top)
-		// We want to dispatch based on Index.
-		// Since we need Index for multiple checks, and Value/OK for body...
-		// Let's store them in temps or manage stack carefully.
-		// "Index" is 0..N-1.
-		// Strategy:
-		//   We are checking Index against 0, 1, 2...
-		//   Index is at Stack[-3].
-		//   Better to Peek Index?
-		//   Or use OP_DUP specific slot? OP_DUP only dups top?
-		//   VM has OP_DUP (top).
-		//   We don't have OP_PEEK.
-		//   We can use Locals!
-		//   Store (Index, Value, OK) in hidden locals.
-
 		c.beginScope()
 		// Determine types? Dynamic.
 		c.addLocal(" $sel_idx", &ast.PrimitiveType{Name: "int"}) // Stack[-3] -> local 0
 		c.addLocal(" $sel_val", nil)                             // Stack[-2] -> local 1
 		c.addLocal(" $sel_ok", &ast.PrimitiveType{Name: "bool"}) // Stack[-1] -> local 2
-		// Note: addLocal assumes value is on stack. Order matters.
-		// Stack from OP_SELECT: [Index, Value, OK].
-		// addLocal adds to end.
-		// If we addLocal, we are claiming stack slots from bottom up?
-		// No, addLocal purely updates compiler tracking. The VALUES are inherently on stack.
-		// So $sel_idx corresponds to index if we define them in order?
-		// Wait, locals are indices into stack relative to base pointer.
-		// If we declare 3 locals now, they map to the top 3 stack values.
-		// Stack: [..., Index, Value, OK]
-		// addLocal("idx"): maps to slot X (Index)
-		// addLocal("val"): maps to slot X+1 (Value)
-		// addLocal("ok"): maps to slot X+2 (OK)
-		// Yes, this works.
 
 		idxSlot := len(c.locals) - 3
 		valSlot := len(c.locals) - 2
@@ -1016,54 +962,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			c.patchJump(nextJump)          // Patch jump to next comparison
 			c.emitByte(byte(chunk.OP_POP)) // Pop comparison result (from IF_FALSE jump? No, IF_FALSE doesn't pop in Noxy VM? Yes it does? Check VM.)
-			// Checking VM OP_JUMP_IF_FALSE: it reads top, if false jump, else fallthrough. DOES IT POP?
-			// Check chunk.go disassembly or VM code. Typically standard VM pops condition.
-			// Re-checking VM code... (I assume yes).
-			// If it pops, then "nextJump" target is AFTER pop.
-			// So `c.emitByte(byte(chunk.OP_POP))` after `nextJump` instruction is wrong IF `OP_JUMP_IF_FALSE` already popped.
-			// Let's assume standard behavior: `if (pop()) jump else continue`.
-			// So we don't need explicit pop after jump instruction IF condition consumed.
-			// Wait, if it jumps, it skips the fallthrough code.
-			// If it doesn't jump, it falls through.
-			// If it jumps, the condition is GONE from stack? Yes.
-			// So both paths have condition gone.
-			// So NO explicit pop after `nextJump`.
-			// BUT, I wrote `c.emitByte(byte(chunk.OP_POP))` above!
-			// Line: `c.emitByte(byte(chunk.OP_POP)) // Pop comparison result`
-			// This pop is strictly for FAL-THROUGH path if OP_JUMP_IF_FALSE *peeks*.
-			// Noxy VM `OP_JUMP_IF_FALSE`:
-			/*
-				func (vm *VM) run() {
-					// ...
-					case chunk.OP_JUMP_IF_FALSE:
-						offset := vm.readShort()
-						condition := vm.peek() // PEEK!
-						if isFalsey(condition) {
-							vm.ip += int(offset)
-						}
-				}
-			*/
-			// Wait, I need to check VM implementation.
-			// If it uses PEEK, then I DO need POP.
-			// If it uses POP, then I DON'T.
-			// Most of my IF compilation uses:
-			// `jumpToElse := c.emitJump(chunk.OP_JUMP_IF_FALSE)`
-			// `c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)`
-			// This suggests PEEK.
-			// Let's verify VM later. For now assume PEEK.
-			// So:
-			// IF_FALSE -> Jump to Meta_Else. Stack has Condition.
-			// Fallthrough -> Stack has Condition. Pop it. Enter Body.
-			// Meta_Else: Stack has Condition. Pop it.
-			// So logic:
-			//   Jump_If_False(Next)
-			//   Pop (True path)
-			//   Body...
-			//   Jump(End)
-			// Next:
-			//   Pop (False path)
-			//   ...
-			// Correct.
 		}
 
 		// Fallthrough if no case matched? (Should be impossible if SELECT works)
@@ -1241,14 +1139,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if len(n.Arguments) != 2 {
 					return nil, nil, fmt.Errorf("[line %d] chan_send expects 2 arguments", c.currentLine)
 				}
-				// Arg 0: Channel
-				// Start by getting 'chan_send' logic...
-				// But we need to verify types first.
-				// Wait, if we compile arguments first, we can check their types.
-				// But standard Call compilation compiles Function first, then Arguments.
-				// Let's stick to standard flow but capture types.
-
-				// 1. Compile Function (send)
 				_, _, err := c.Compile(n.Function)
 				if err != nil {
 					return nil, nil, err
@@ -1352,9 +1242,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return nil, nil, fmt.Errorf("unsupported node type %T", n)
 	}
 }
-
-// Rewritten specific AssignStmt handler inside Compile, skipping invalid overwrite
-// Just careful re-introduction of AssignStmt Case body.
 
 func (c *Compiler) setLine(line int) {
 	if line > 0 {
@@ -1551,9 +1438,6 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
 
 	if len(c.upvalues) >= 255 {
 		// Error: too many upvalues
-		// We'll panic or handle error gracefully?
-		// For now, simple return error index or panic for dev.
-		// Returning 255 might be safe if we check.
 	}
 
 	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal})

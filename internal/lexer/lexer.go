@@ -338,12 +338,6 @@ func (l *Lexer) readString(quote byte) (string, bool) {
 			case '\\':
 				out = append(out, '\\')
 			default:
-				// Unknown escape, keep literal backslash and char?
-				// Or just the char?
-				// Usually languages keep the backslash if invalid escape, or error.
-				// Let's keep it simple: just the char (like Go? No Go errors).
-				// Python: '\z' -> '\z'.
-				// Let's replicate python behavior roughly: if not special, keep backslash + char.
 				out = append(out, '\\')
 				out = append(out, l.ch)
 			}

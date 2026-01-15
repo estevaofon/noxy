@@ -300,8 +300,6 @@ func (ie *InfixExpression) String() string {
 	return "(" + ie.Left.String() + " " + ie.Operator + " " + ie.Right.String() + ")"
 }
 
-// Basic implementation. Will add more nodes (Func, Struct, etc) as we progress.
-
 type BlockStatement struct {
 	Token      token.Token // the { token or similar
 	Statements []Statement
@@ -433,11 +431,8 @@ func (al *ArrayLiteral) String() string {
 }
 
 type MapLiteral struct {
-	Token token.Token               // '{'
-	Pairs map[Expression]Expression // Keys are expressions too
-	// Since map range is random, for parsing we might want slice of pairs to maintain order or for deterministic tests?
-	// But runtime map is unordered.
-	// AST usually uses slice of keys and values to easier processing.
+	Token  token.Token               // '{'
+	Pairs  map[Expression]Expression // Keys are expressions too
 	Keys   []Expression
 	Values []Expression
 }
@@ -469,12 +464,9 @@ func (ie *IndexExpression) String() string {
 }
 
 type StructStatement struct {
-	Token  token.Token // 'struct'
-	Name   string
-	Fields map[string]NoxyType // Or ordered list? Ordered for constructor?
-	// Spec says: struct Point x: int, y: int end.
-	// Constructor arguments order matters.
-	// So we need list of fields.
+	Token      token.Token // 'struct'
+	Name       string
+	Fields     map[string]NoxyType
 	FieldsList []*StructField
 }
 
@@ -512,8 +504,8 @@ func (mae *MemberAccessExpression) String() string {
 type CaseClause struct {
 	Token     token.Token // 'case' or 'default'
 	IsDefault bool
-	Condition Statement       // For 'case msg = recv(ch)' or 'case send(ch, v)'. Note: send is expr, assign is stmt.
-	Body      *BlockStatement // 'then ...'
+	Condition Statement
+	Body      *BlockStatement
 }
 
 type WhenStatement struct {

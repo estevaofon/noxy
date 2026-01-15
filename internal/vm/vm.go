@@ -758,17 +758,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	})
 
 	vm.DefineNative("io_read_bytes", func(args []value.Value) value.Value {
-		// args: fileInst, IOResultStructDef (reusing IOResult but data will be bytes)
-		// Or maybe we need a IOByteResult?
-		// Actually, IOResult.data is defined as string in io.nx.
-		// But in VM, VAL_OBJ fields can be any value.
-		// If io.nx defines data as `bytes`, it will work.
-		// Let's check io.nx provided. IOResult has data: string.
-		// We probably need a new struct definition passed in, or reuse IOResult but the user knows it's bytes?
-		// No, strict typing in Noxy might complain if we assign VAL_BYTES to a field expected string?
-		// Noxy VM runtime doesn't enforce field types strictly on assignment if not checked.
-		// But for clarity, we should assume io.nx will handle the struct definition.
-
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -809,8 +798,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 
 		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
 		resInst.Fields["ok"] = value.NewBool(isOk)
-		// Crucial: NewBytes, not NewString.
-		// io.nx must define a struct where data is 'bytes' or generic.
 		resInst.Fields["data"] = value.NewBytes(string(contentBytes))
 		resInst.Fields["error"] = value.NewString(errorStr)
 		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
@@ -1036,12 +1023,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		diff := ts1 - ts2
 		if diff < 0 {
 			diff = -diff
-		} // Duration is implicitly absolute or signed? Assuming diff(target, now)
-
-		// If we want signed duration, logic depends on requirement. 'diff' usually return difference.
-		// Let's assume signed.
-
-		// But logic: diff_duration(natal, agora) -> time until natal.
+		}
 
 		totalSecs := ts1 - ts2
 		absSecs := totalSecs
@@ -1658,11 +1640,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 					return value.NewArray(nil)
 				}
 
-				// Deep copy? Or slice? Go slices reference underlying array.
-				// For immutability or safety in Noxy, usually we might want copy if Noxy arrays are mutable refs.
-				// But slicing usually shares backing store in languages like Go/Python? Python slices are copies.
-				// Go slices share.
-				// Let's create a new array with copied elements to be safe/consistent with Python-style likely expected.
 				newElems := make([]value.Value, end-start)
 				copy(newElems, arr.Elements[start:end])
 				return value.NewArray(newElems)
@@ -2116,12 +2093,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 								vm.shared.NetLock.Unlock()
 
 								if isListener {
-									// Set short deadline to peek
-									// Cast to TCPListener to set deadline
-									// net.Listener interface doesn't have SetDeadline, specific implementations do.
-									// But Accept() blocks.
-									// We can only use SetDeadline if we have access to underlying FD or type assertion.
-									// Assuming TCPListener
 									if tcpL, ok := l.(*net.TCPListener); ok {
 										tcpL.SetDeadline(time.Now().Add(time.Millisecond * time.Duration(timeoutMs)))
 										conn, err := l.Accept()
@@ -2461,10 +2432,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		stmt, ok := vm.shared.StmtHandles[handle]
 		var params map[int]interface{}
 		if ok {
-			// Copy params? Or use direct ref?
-			// Since stmtParams access is guarded, we should copy or execute under lock?
-			// Executing under lock blocks other threads.
-			// Copy params.
 			origParams := vm.shared.StmtParams[handle]
 			params = make(map[int]interface{})
 			for k, v := range origParams {
@@ -3014,13 +2981,7 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 		Slots:   1,   // Locals start at 1
 		Globals: nil, // Use nil to force fallback to Shared VM Globals (Locked)
 	}
-	// If globals was specific (not shared), we might want to use it.
-	// But mostly we pass vm.shared.Globals.
-	// If we pass a custom map (e.g. module), we should set it.
-	// HACK: We can check if it's the shared map, but we don't have == on maps.
-	// For now, let's assume if it is NOT vm.shared.Globals (empty logic variables), we use it.
-	// Actually, Interpret passes vm.shared.Globals.
-	// Let's change Interpret to pass nil.
+
 	if globals != nil && len(globals) > 0 {
 		frame.Globals = globals
 	} else {
