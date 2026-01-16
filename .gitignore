@@ -25,3 +25,4 @@ AWS_DEPLOY_GUIDE.md
 *.db
 *.exe
 .gemini/
+SAFE_MODE_PROMPT.md
