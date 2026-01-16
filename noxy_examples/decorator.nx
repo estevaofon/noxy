@@ -1,0 +1,17 @@
+func meu_decorator(f: func) -> func
+    func wrapper(nome: string) -> func
+        print("Antes")
+        f(nome)
+        print("Depois")
+        return f
+    end
+    return wrapper
+end
+
+func hello(nome: string)
+    print("Hello, " + nome + "!")
+end
+
+let decorated: func = meu_decorator(hello)
+decorated("João")
+
