@@ -83,6 +83,10 @@ func handleRequest(req PluginRequest) (interface{}, error) {
 		return handleUpdateItem(req.Params)
 	case "delete_item":
 		return handleDeleteItem(req.Params)
+	case "scan":
+		return handleScan(req.Params)
+	case "query":
+		return handleQuery(req.Params)
 	default:
 		return nil, fmt.Errorf("unknown method: %s", req.Method)
 	}
@@ -284,6 +288,81 @@ func handleUpdateItem(params []interface{}) (interface{}, error) {
 	}
 
 	return true, nil
+}
+
+func handleScan(params []interface{}) (interface{}, error) {
+	// Params: [clientId, tableName, limit?]
+	if len(params) < 2 {
+		return nil, fmt.Errorf("expected client_id, table")
+	}
+
+	clientId, _ := params[0].(string)
+	tableName, _ := params[1].(string)
+
+	client := getClient(clientId)
+	if client == nil {
+		return nil, fmt.Errorf("client not found: %s", clientId)
+	}
+
+	// Basic scan, maybe add filter expressions later if requested
+	in := &dynamodb.ScanInput{
+		TableName: aws.String(tableName),
+	}
+
+	out, err := client.Scan(context.TODO(), in)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []map[string]interface{}
+	if err := attributevalue.UnmarshalListOfMaps(out.Items, &items); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal items: %v", err)
+	}
+
+	return items, nil
+}
+
+func handleQuery(params []interface{}) (interface{}, error) {
+	// Params: [clientId, tableName, keyConditionExpr, exprAttrValues]
+	if len(params) < 4 {
+		return nil, fmt.Errorf("expected client_id, table, keyCondition, exprValues")
+	}
+
+	clientId, _ := params[0].(string)
+	tableName, _ := params[1].(string)
+	keyCond, _ := params[2].(string)
+	valMap, ok := params[3].(map[string]interface{})
+	if !ok {
+		valMap = make(map[string]interface{})
+	}
+
+	client := getClient(clientId)
+	if client == nil {
+		return nil, fmt.Errorf("client not found: %s", clientId)
+	}
+
+	avVals, err := attributevalue.MarshalMap(valMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal query values: %v", err)
+	}
+
+	in := &dynamodb.QueryInput{
+		TableName:                 aws.String(tableName),
+		KeyConditionExpression:    aws.String(keyCond),
+		ExpressionAttributeValues: avVals,
+	}
+
+	out, err := client.Query(context.TODO(), in)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []map[string]interface{}
+	if err := attributevalue.UnmarshalListOfMaps(out.Items, &items); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal items: %v", err)
+	}
+
+	return items, nil
 }
 
 func getClient(id string) *dynamodb.Client {

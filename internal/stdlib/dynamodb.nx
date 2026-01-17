@@ -83,3 +83,15 @@ func delete_item(client: Client, table: string, key: map[string, any]) -> bool
     let res: any = dynamodb_request("delete_item", client.id, table, key)
     return res != null
 end
+
+func scan(client: Client, table: string) -> any
+    if !loaded then return null end
+    // Request: {method: "scan", params: [client.id, table]}
+    return dynamodb_request("scan", client.id, table)
+end
+
+func query(client: Client, table: string, keyCond: string, exprVals: map[string, any]) -> any
+    if !loaded then return null end
+    // Request: {method: "query", params: [client.id, table, keyCond, exprVals]}
+    return dynamodb_request("query", client.id, table, keyCond, exprVals)
+end

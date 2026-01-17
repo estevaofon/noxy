@@ -12,7 +12,9 @@ echo "Compiling noxy..."
 go build -o noxy ./cmd/noxy
 
 echo "Compiling noxy-plugin-dynamodb..."
-go build -o noxy-plugin-dynamodb ./cmd/noxy-plugin-dynamodb
+cd cmd/noxy-plugin-dynamodb
+go build -o ../../noxy-plugin-dynamodb
+cd ../..
 
 # 2. Prepare Distribution Directory
 echo "Preparing artifacts..."

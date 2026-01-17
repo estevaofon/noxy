@@ -1,0 +1,81 @@
+use dynamodb
+
+// ==========================================
+// DynamoDB Example: Query and Scan
+// ==========================================
+
+print("--- DynamoDB Query & Scan Example ---")
+
+let options: map[string, any] = {"region": "us-east-1"}
+let client: dynamodb.Client = dynamodb.connect(options)
+let TABLE_NAME: string = "mynotes_users"
+
+if client.id == "" then
+    print("Failed to connect.")
+    // exit
+end
+
+// ------------------------------------------
+// 1. Scan (Get All Items)
+// ------------------------------------------
+print("\n--- Scanning All Items ---")
+// scan returns a list of maps (any type in Noxy for now)
+let allItems: any = dynamodb.scan(client, TABLE_NAME)
+
+if allItems != null then
+    // In Noxy, we can iterate over lists
+    // Note: Since we don't have generics in foreach yet, 'item' is 'any'
+    // but we can cast or use it as map if valid.
+    // Note: Iteration over 'any' result from plugin might require explicit casting 
+    // or if the plugin returns specific Noxy List type. 
+    // Currently 'any' holds the list.
+    print(f"Found {length(allItems)} items.")
+    print(allItems) // Printing the whole list
+end
+
+// ------------------------------------------
+// 2. Query (Find specific items)
+// ------------------------------------------
+print("\n--- Querying Items (Partition Key) ---")
+// We want to find user with id "123" using Query instead of GetItem
+// KeyConditionExpression: "id = :uid"
+let keyCond: string = "id = :uid"
+let exprVals: map[string, any] = {
+    ":uid": "123"
+}
+
+let queryResults: any = dynamodb.query(client, TABLE_NAME, keyCond, exprVals)
+
+if queryResults != null then
+    print(f"Found {length(queryResults)} matching items.")
+    if length(queryResults) > 0 then
+        let first: map[string, any] = queryResults[0]
+        print(f"First match: {first['name']}")
+    end
+else
+    print("Query failed or returned null.")
+end
+
+print("\n--- Finished ---")
+
+// ==========================================
+// REFERENCE: Complex Query Syntax
+// ==========================================
+//
+//   The 'keyCond' string follows standard DynamoDB KeyConditionExpression syntax.
+//   It ONLY works on Key Attributes (Partition Key and Option Sort Key).
+//
+//   Examples (Assuming Table has Partition Key 'pk' and Sort Key 'sk'):
+//
+//   1. Exact Match on PK and Range on SK:
+//      keyCond: "pk = :id AND sk > :date"
+//      exprVals: {":id": "User123", ":date": "2024-01-01"}
+//
+//   2. Begins With (Prefix Search on SK):
+//      keyCond: "pk = :id AND begins_with(sk, :prefix)"
+//      exprVals: {":id": "User123", ":prefix": "ORDER#"}
+//
+//   3. Between (Range on SK):
+//      keyCond: "pk = :id AND sk BETWEEN :start AND :end"
+//      exprVals: {":id": "User123", ":start": 100, ":end": 200}
+//
