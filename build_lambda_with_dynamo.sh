@@ -12,7 +12,7 @@ echo "Compiling noxy..."
 go build -o noxy ./cmd/noxy
 
 echo "Compiling noxy-plugin-dynamodb..."
-go -C cmd/noxy-plugin-dynamodb build -o ../../noxy-plugin-dynamodb
+go -C noxy_libs/dynamodb/plugin build -o ../../../noxy-plugin-dynamodb
 
 # 2. Prepare Distribution Directory
 echo "Preparing artifacts..."
@@ -20,7 +20,6 @@ rm -rf lambda_dist_dynamo
 mkdir -p lambda_dist_dynamo
 
 # Copy binaries
-cp noxy lambda_dist_dynamo/
 cp noxy lambda_dist_dynamo/
 
 # Copy Lambda Runtime Environment (Bootstrap + Runtime Loop)
