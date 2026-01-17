@@ -17,14 +17,19 @@ Run these commands from the project root:
 # 1. Build the generic Noxy VM
 go build -o noxy.exe ./cmd/noxy
 
-# 2. Build the DynamoDB Plugin
-# We use -C to build inside the plugin directory without changing folders
-go -C noxy_libs/dynamodb/plugin build -o ../../../noxy-plugin-dynamodb.exe
-
-# 3. Organize into noxy_libs Structure (Required)
+# 2. Organize into noxy_libs Structure (Required)
 mkdir -p noxy_libs/dynamodb
-mv noxy-plugin-dynamodb.exe noxy_libs/dynamodb/
-# Note: dynamodb.nx is usually already residing in noxy_libs/dynamodb/
+
+# 3. Build the DynamoDB Plugin
+# We use -C to build inside the plugin directory without changing folders
+go -C noxy_libs/dynamodb/plugin build -o ../noxy-plugin-dynamodb.exe
+
+# The result file structure should be:
+```
+noxy_libs/dynamodb/
+├── dynamodb.nx
+└── noxy-plugin-dynamodb.exe
+```
 
 > **Note**: For Linux/Mac, remove the `.exe` extension.
 
