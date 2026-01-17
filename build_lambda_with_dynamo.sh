@@ -21,7 +21,7 @@ mkdir -p lambda_dist_dynamo
 
 # Copy binaries
 cp noxy lambda_dist_dynamo/
-cp noxy-plugin-dynamodb lambda_dist_dynamo/
+cp noxy lambda_dist_dynamo/
 
 # Copy Lambda Runtime Environment (Bootstrap + Runtime Loop)
 # We assume these exist from previous project structure
@@ -35,13 +35,16 @@ cp noxy_examples/aws_lambda/exec_runtime.nx lambda_dist_dynamo/
 cp noxy_examples/aws_lambda/function.nx lambda_dist_dynamo/function.nx
 
 # Copy Library Wrappers
-cp internal/stdlib/dynamodb.nx lambda_dist_dynamo/
+# Copy Noxy Libs (DynamoDB)
+mkdir -p lambda_dist_dynamo/noxy_libs/dynamodb
+cp noxy-plugin-dynamodb lambda_dist_dynamo/noxy_libs/dynamodb/
+cp noxy_libs/dynamodb/dynamodb.nx lambda_dist_dynamo/noxy_libs/dynamodb/
 
 # 3. Set Permissions (Critical for AWS Lambda)
 echo "Setting permissions..."
 chmod +x lambda_dist_dynamo/bootstrap
 chmod +x lambda_dist_dynamo/noxy
-chmod +x lambda_dist_dynamo/noxy-plugin-dynamodb
+chmod +x lambda_dist_dynamo/noxy_libs/dynamodb/noxy-plugin-dynamodb
 
 # 4. Zip it up
 echo "Creating deploy_dynamo.zip..."

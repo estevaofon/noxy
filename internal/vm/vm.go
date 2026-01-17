@@ -4074,14 +4074,20 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 	// Helper to check 4 locations
 	checkLocations := func(suffix string) bool {
 		candidates := []string{
+			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix, suffix+".nx"), // noxy_libs/mod/mod.nx (file in dir)
+			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix),               // noxy_libs/mod (dir)
 			filepath.Join(vm.Config.RootPath, "stdlib", suffix),
 			filepath.Join(vm.Config.RootPath, suffix),
+			filepath.Join("noxy_libs", suffix, suffix+".nx"),
+			filepath.Join("noxy_libs", suffix),
 			filepath.Join("stdlib", suffix),
 			suffix,
 		}
 		for _, p := range candidates {
+			// fmt.Printf("Checking path: %s\n", p)
 			info, err := os.Stat(p)
 			if err == nil {
+				// fmt.Printf("Found: %s (IsDir: %v)\n", p, info.IsDir())
 				path = p
 				isDir = info.IsDir()
 				// found = true
@@ -4094,8 +4100,10 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 	// 1. Check for .nx file
 	if checkLocations(pathName+".nx") && !isDir {
 		// Found file
-	} else if checkLocations(pathName) && isDir {
-		// Found directory (on disk)
+	} else if checkLocations(pathName) {
+		// Found directory OR file (noxy_libs/mod/mod.nx)
+		// If isDir is false, it means we found .../mod.nx via the mod name check,
+		// which acts as the module entry point.
 	} else {
 		// Not found on disk, check embedded stdlib
 		// Stdlib is flat in embed.go usually? Or structure preserved?

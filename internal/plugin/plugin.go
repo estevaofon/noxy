@@ -47,14 +47,32 @@ func LoadPlugin(name string, executableName string) (*PluginClient, error) {
 	}
 
 	// Resolve executable path
-	// Assume it's in the same directory as the main executable or in PATH
-	execPath := executableName
-	if path, err := exec.LookPath(executableName); err == nil {
+	var execPath string
+	// 1. Check PATH
+	path, err := exec.LookPath(executableName)
+	if err == nil {
 		execPath = path
 	} else {
-		// Try relative to current dir
-		if _, err := os.Stat(executableName); err == nil {
-			execPath, _ = filepath.Abs(executableName)
+		// 2. Check noxy_libs/<plugin>/<plugin> (local or relative to root)
+		// We need root path, but plugin lookup is generic?
+		// Actually, sys_load_plugin doesn't pass root.
+		// For now we check "./noxy_libs/<plugin>/<plugin>"
+
+		// If name matches executableName, assumes plugin follows folder convention
+		// Try: ./noxy_libs/<name>/<executableName>
+		noxyLibPath := filepath.Join("noxy_libs", name, executableName)
+		if _, err := os.Stat(noxyLibPath); err == nil {
+			execPath, _ = filepath.Abs(noxyLibPath)
+		} else {
+			// Try with .exe extension for Windows if not found
+			if _, err := os.Stat(noxyLibPath + ".exe"); err == nil {
+				execPath, _ = filepath.Abs(noxyLibPath + ".exe")
+			} else {
+				// 3. Try relative to current dir
+				if _, err := os.Stat(executableName); err == nil {
+					execPath, _ = filepath.Abs(executableName)
+				}
+			}
 		}
 	}
 
