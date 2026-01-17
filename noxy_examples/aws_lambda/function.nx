@@ -5,28 +5,14 @@ use json_parser select *
 use json_helpers select *
 use dynamodb
 use lambda_types select *
+use strings select *
 
 // ==========================================
 // Helper: JSON Serialization
 // ==========================================
 func escape_json_string(s: string) -> string
-    // Basic escaping: \ -> \\, " -> \"
-    // Ideally we'd handle \n, \r, \t etc.
-    let res: string = ""
-    let i: int = 0
-    let len: int = length(s)
-    
-    // Manual iteration over string bytes/chars not super efficient in Noxy yet
-    // but works for basic cases.
-    // If 'strings_replace' is available that's better.
-    // Let's assume input doesn't have crazy chars for this MVP or use simple checks.
-    
-    // Noxy doesn't have strings_replace in stdlib explicitly unless I check strings.nx?
-    // Let's just wrap in quotes and hope for best or implement simple loop if needed.
-    // Actually, let's just replace " with \"
-    // But we don't have replace.
-    // Let's use a workaround: construct with simple concatenation.
-    return s // TODO: Implement proper escaping if possible
+    // Replace " with \"
+    return replace(s, "\"", "\\\"")
 end
 
 func serialize_any(val: any) -> string
@@ -118,5 +104,10 @@ func handler(event: string, context: LambdaContext) -> string
     end
     
     // 4. Return API Gateway Response
-    return "{\"statusCode\": 200, \"headers\": {\"Content-Type\": \"application/json\"}, \"body\": " + body_json + "}"
+    // IMPORTANT: 'body' must be a STRINGified JSON for Proxy Integration
+    // We already have body_json as a valid JSON string (e.g., "[{...}]")
+    // We need to enclose it in quotes and escape internal quotes to put inside the response JSON
+    let escaped_body: string = escape_json_string(body_json)
+    
+    return "{\"statusCode\": 200, \"headers\": {\"Content-Type\": \"application/json\"}, \"body\": \"" + escaped_body + "\"}"
 end
