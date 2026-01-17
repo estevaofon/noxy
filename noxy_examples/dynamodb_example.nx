@@ -1,0 +1,90 @@
+use dynamodb
+
+// ==========================================
+// DynamoDB Example: CRUD Operations
+// ==========================================
+
+print("--- DynamoDB Example ---")
+
+// 1. Connection
+// Configure the AWS region (and other options as needed)
+let options: map[string, any] = {
+    "region": "us-east-1"
+}
+
+// Connect returns a Client. If authentication fails, the plugin will log it,
+// but the 'connect' call initializes the local client handle.
+// Ensure your environment has AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY set,
+// or a configured ~/.aws/credentials file.
+let client: dynamodb.Client = dynamodb.connect(options)
+
+if client.id == "" || client.id == "error" then
+    print("Error: Could not initialize DynamoDB client.")
+   // exit(1) // if we had exit
+end
+
+print(f"Connected. Client ID: {client.id}")
+
+let TABLE_NAME: string = "mynotes_users"
+let USER_ID: string = "user_example_001"
+
+// 2. Create (Put Item)
+// Create a map representing the item. Note the usage of 'any' for values.
+let newUser: map[string, any] = {
+    "id": USER_ID,
+    "name": "Jane Doe",
+    "email": "jane@example.com",
+    "age": 30,
+    "active": true,
+    "tags": ["new", "verified"]
+}
+
+print(f"Creating user {USER_ID}...")
+let created: bool = dynamodb.put_item(client, TABLE_NAME, newUser)
+if created then
+    print("User created successfully.")
+else
+    print("Failed to create user.")
+end
+
+// 3. Read (Get Item)
+// Define the key to lookup.
+let key: map[string, any] = {
+    "id": USER_ID
+}
+
+print(f"Reading user {USER_ID}...")
+let user: map[string, any] = dynamodb.get_item(client, TABLE_NAME, key)
+
+if user != null then
+    print(f"Found user: {user['name']} (Email: {user['email']}, Age: {user['age']})")
+else
+    print("User not found.")
+end
+
+// 4. Update (Update Item)
+// We will update the 'static' age and set a new 'last_login' timestamp.
+// Update Expression syntax follows DynamoDB rules.
+let updateExpr: string = "SET age = :newAge, active = :isActive"
+
+// Expression Attribute Values map placeholder names to actual values.
+let exprVals: map[string, any] = {
+    ":newAge": 31,
+    ":isActive": false
+}
+
+print(f"Updating user {USER_ID}...")
+let updated: bool = dynamodb.update_item(client, TABLE_NAME, key, updateExpr, exprVals)
+
+if updated then
+    print("User updated successfully.")
+    // Verify update
+    let updatedUser: map[string, any] = dynamodb.get_item(client, TABLE_NAME, key)
+    if updatedUser != null then
+        print(f"Updated Data -> Age: {updatedUser['age']}, Active: {updatedUser['active']}")
+    end
+else
+    print("Failed to update user.")
+end
+
+

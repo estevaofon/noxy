@@ -45,6 +45,7 @@ const (
 	TYPE_BOOL   TokenType = "TYPE_BOOL"
 	TYPE_BYTES  TokenType = "TYPE_BYTES"
 	TYPE_VOID   TokenType = "TYPE_VOID"
+	TYPE_ANY    TokenType = "TYPE_ANY" // Add ANY
 	REF         TokenType = "REF"
 	MAP         TokenType = "MAP"
 	CHAN        TokenType = "CHAN"
@@ -133,6 +134,7 @@ var keywords = map[string]TokenType{
 	"bool":    TYPE_BOOL,
 	"bytes":   TYPE_BYTES,
 	"void":    TYPE_VOID,
+	"any":     TYPE_ANY, // Add any keyword
 	"ref":     REF,
 	"map":     MAP,
 	"chan":    CHAN,

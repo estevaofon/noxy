@@ -13,6 +13,7 @@ import (
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
+	"noxy-vm/internal/plugin"
 	"noxy-vm/internal/stdlib"
 	"noxy-vm/internal/value"
 	"os"
@@ -1439,6 +1440,39 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		inst.Fields["ok"] = value.NewBool(okVal)
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	vm.DefineNative("sys_load_plugin", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		name := args[0].String()
+		path := args[1].String()
+
+		client, err := plugin.LoadPlugin(name, path)
+		if err != nil {
+			fmt.Printf("Plugin Load Error: %v\n", err)
+			return value.NewBool(false)
+		}
+
+		// Register the request proxy function
+		// e.g. "dynamodb_request"
+		proxyName := name + "_request"
+		vm.DefineNative(proxyName, func(pArgs []value.Value) value.Value {
+			if len(pArgs) < 2 {
+				return value.NewNull()
+			}
+			method := pArgs[0].String()
+			// The rest are params ?? Or pass a list/map as second arg?
+			// Plan said: dynamodb_request("put_item", {client: ..., table: ..., item: ...})
+			// So params is usually a single object (map) or list?
+			// PluginClient.Call takes []value.Value.
+			// Let's pass all remaining args.
+			params := pArgs[1:] // args[0] is method
+			return client.Call(method, params)
+		})
+
+		return value.NewBool(true)
 	})
 
 	vm.DefineNative("sys_getenv", func(args []value.Value) value.Value {

@@ -554,6 +554,8 @@ func (p *Parser) parseType() ast.NoxyType {
 		t = &ast.PrimitiveType{Name: "bool"}
 	case token.TYPE_BYTES:
 		t = &ast.PrimitiveType{Name: "bytes"}
+	case token.TYPE_ANY:
+		t = &ast.PrimitiveType{Name: "any"}
 	case token.FUNC:
 		t = &ast.PrimitiveType{Name: "func"} // Generic function type
 	case token.BYTES: // This is Literal 'b"..."'.

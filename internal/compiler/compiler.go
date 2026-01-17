@@ -375,7 +375,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, fmt.Errorf("[line %d] mixed key types in map", c.currentLine)
 				}
 				if !c.areTypesCompatible(valType, vt) {
-					return nil, nil, fmt.Errorf("[line %d] mixed value types in map", c.currentLine)
+					// Mixed values: Promote to ANY
+					valType = &ast.PrimitiveType{Name: "any"}
+					// Verify this new type is compatible with previous? "any" is compatible with everything in our logic.
+					// But we need to ensure verify future elements?
+					// Once valType is "any", areTypesCompatible(any, T) returns true.
 				}
 			}
 		}
@@ -1386,24 +1390,52 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if expStr == actStr {
 		return true
 	}
-	// Allow any[] -> Any T[]
-	if actStr == "any[]" && strings.HasSuffix(expStr, "[]") {
-		return true
+	// Structural Check for Maps and Arrays
+	if expMap, ok := expected.(*ast.MapType); ok {
+		if actMap, ok := actual.(*ast.MapType); ok {
+			// Check Keys
+			if !c.areTypesCompatible(expMap.KeyType, actMap.KeyType) {
+				return false
+			}
+			// Check Values
+			// If expected value is 'any', accept any actual value type
+			if isAny(expMap.ValueType) {
+				return true
+			}
+			return c.areTypesCompatible(expMap.ValueType, actMap.ValueType)
+		}
 	}
-	// Allow map[any, any] -> Any Map
-	if actStr == "map[any, any]" && strings.HasPrefix(expStr, "map[") {
-		return true
-	}
-	// Also ref any -> ref T (if nil ref?) - "ref any" handling
-	if actStr == "ref any" && strings.HasPrefix(expStr, "ref ") {
-		return true
+
+	if expArr, ok := expected.(*ast.ArrayType); ok {
+		if actArr, ok := actual.(*ast.ArrayType); ok {
+			// If expected element is 'any', accept any actual element type
+			if isAny(expArr.ElementType) {
+				return true
+			}
+			return c.areTypesCompatible(expArr.ElementType, actArr.ElementType)
+		}
 	}
 
 	// 'any' type compatibility (if we had it explicitly)
-	if expStr == "any" || actStr == "any" {
-		return true
+	if expStr == "any" || isAny(expected) {
+		return true // Expected 'any', accept anything
+	}
+	// 'any' in actual? (Unsafe? or Dynamic?)
+	if actStr == "any" || isAny(actual) {
+		return true // Actual is 'any', allow assignment to anything (dynamic)? Or strict?
+		// Let's allow it for flexibility (like TypeScript 'any')
 	}
 
+	return false
+}
+
+func isAny(t ast.NoxyType) bool {
+	if t == nil {
+		return false
+	}
+	if pt, ok := t.(*ast.PrimitiveType); ok && pt.Name == "any" {
+		return true
+	}
 	return false
 }
 
