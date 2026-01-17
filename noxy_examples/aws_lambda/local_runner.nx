@@ -1,0 +1,21 @@
+// noxy_examples/aws_lambda/local_runner.nx
+// Runner for local testing of function.nx (bypassing runtime API)
+
+use lambda_types select *
+use function select *
+
+print("--- Starting Local Lambda Test ---")
+
+// 1. Mock Context
+let ctx: LambdaContext = LambdaContext("req-12345", 1000, "arn:aws:lambda:us-east-1:123456789012:function:test", "trace-abc", "test-func", 128, "log-group", "log-stream")
+
+
+// 2. Mock Event (API Gateway Proxy style if needed, or simple raw)
+let event: string = "{\"body\": \"test input\"}"
+
+print("Invoking handler...")
+let result: string = handler(event, ctx)
+
+print("\n--- Handler Response ---")
+print(result)
+print("------------------------")

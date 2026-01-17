@@ -12,9 +12,7 @@ echo "Compiling noxy..."
 go build -o noxy ./cmd/noxy
 
 echo "Compiling noxy-plugin-dynamodb..."
-cd cmd/noxy-plugin-dynamodb
-go build -o ../../noxy-plugin-dynamodb
-cd ../..
+go -C cmd/noxy-plugin-dynamodb build -o ../../noxy-plugin-dynamodb
 
 # 2. Prepare Distribution Directory
 echo "Preparing artifacts..."
@@ -34,9 +32,7 @@ cp noxy_examples/aws_lambda/exec_runtime.nx lambda_dist_dynamo/
 
 # Copy the actual Function Logic
 # Modify this line to point to your specific Lambda handler script using DynamoDB
-# For this example, we assume there is a 'function.nx' that uses dynamodb.
-# Or we can create a sample 'function_dynamo.nx'
-cp noxy_examples/dynamodb_example.nx lambda_dist_dynamo/function.nx
+cp noxy_examples/aws_lambda/function.nx lambda_dist_dynamo/function.nx
 
 # Copy Library Wrappers
 cp internal/stdlib/dynamodb.nx lambda_dist_dynamo/
