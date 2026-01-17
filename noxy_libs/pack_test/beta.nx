@@ -1,0 +1,4 @@
+
+func hello() -> string
+    return "Hello from Beta"
+end

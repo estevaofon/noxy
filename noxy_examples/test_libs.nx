@@ -1,0 +1,23 @@
+
+// test_libs.nx
+use math_lib
+
+func main()
+    print("Testing math_lib from noxy_libs...")
+    
+    let sum: int = math_lib.add(10, 20)
+    print("10 + 20 = ")
+    print(sum)
+    
+    let diff: int = math_lib.subtract(50, 15)
+    print("50 - 15 = ")
+    print(diff)
+    
+    let config: math_lib.MathConfig = math_lib.new_config(4)
+    print("Config created with precision: ")
+    print(config.precision)
+    
+    print("Success!")
+end
+
+main()
