@@ -4155,6 +4155,23 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 
 	// Case 1: Directory Import (Implicit Module)
 	if isDir {
+		// Check for entry point file (e.g. <dirname>.nx, main.nx)
+		// If found, load that file directly instead of treating dir as a map of files.
+		// Removed mod.nx and lib.nx to avoid shadowing directory contents when those files exist as children.
+		baseName := filepath.Base(path)
+		candidates := []string{baseName + ".nx", "main.nx"}
+
+		for _, cand := range candidates {
+			entryPath := filepath.Join(path, cand)
+			if _, err := os.Stat(entryPath); err == nil {
+				// Found entry point, verify it is not a directory
+				// (It shouldn't be given the extension, but safety first)
+				path = entryPath
+				isDir = false
+				goto FileImport
+			}
+		}
+
 		files, err := os.ReadDir(path)
 		if err != nil {
 			return value.NewNull(), err
@@ -4187,6 +4204,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 		return value.NewMapWithData(moduleGlobals), nil
 	}
 
+FileImport:
 	// Case 2: File Import
 	content, err := os.ReadFile(path)
 	if err != nil {

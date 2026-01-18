@@ -1,0 +1,5 @@
+use quicksort select *
+
+let array: int[15] = [10, 7, 8, 9, 1, 5, 2, 6, 3, 4, 15, 12, 11, 14, 13, 0]
+quicksort(array, 0, 15)
+print(to_str(array))

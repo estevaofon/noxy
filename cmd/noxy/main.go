@@ -9,6 +9,7 @@ import (
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/token"
 	"noxy-vm/internal/vm"
 	"os"
@@ -40,6 +41,7 @@ func main() {
 		})
 	}
 
+	getPkg := flag.String("get", "", "Download and install a package (e.g. github.com/user/repo@version)")
 	flag.Parse()
 
 	if *showHelp {
@@ -49,6 +51,14 @@ func main() {
 
 	if *showVersion {
 		fmt.Printf("Noxy %s\n", Version)
+		return
+	}
+
+	if *getPkg != "" {
+		if err := pkgmanager.Get(*getPkg); err != nil {
+			fmt.Printf("Error getting package: %s\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
