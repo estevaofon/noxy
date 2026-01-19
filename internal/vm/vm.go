@@ -1447,28 +1447,92 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewBool(false)
 		}
 		name := args[0].String()
-		path := args[1].String()
+		cmdName := args[1].String()
 
-		client, err := plugin.LoadPlugin(name, path)
-		if err != nil {
-			fmt.Printf("Plugin Load Error: %v\n", err)
+		// Intelligent Path Search
+		var cmdPath string
+		found := false
+
+		// 1. Check absolute path or PATH override
+		if filepath.IsAbs(cmdName) {
+			if _, err := os.Stat(cmdName); err == nil {
+				cmdPath = cmdName
+				found = true
+			}
+		} else {
+			// 2. Check path provided directly (PATH lookup)
+			if path, err := exec.LookPath(cmdName); err == nil {
+				cmdPath = path
+				found = true
+			}
+		}
+
+		// 3. Check Current Working Directory (explicitly)
+		if !found {
+			cwd, _ := os.Getwd()
+			localPath := filepath.Join(cwd, cmdName)
+			// Add .exe on Windows if not present
+			if runtime.GOOS == "windows" && !strings.HasSuffix(localPath, ".exe") {
+				localPath += ".exe"
+			}
+			if _, err := os.Stat(localPath); err == nil {
+				cmdPath = localPath
+				found = true
+			}
+		}
+
+		// 4. Check noxy_libs recursively (Depth restricted)
+		if !found {
+			cwd, _ := os.Getwd()
+			libsDir := filepath.Join(cwd, "noxy_libs")
+			filepath.Walk(libsDir, func(path string, info os.FileInfo, err error) error {
+				if found {
+					return filepath.SkipDir // Stop if found
+				}
+				if err != nil {
+					return nil // Ignore errors
+				}
+				if info.IsDir() {
+					if info.Name() == ".git" {
+						return filepath.SkipDir
+					}
+					return nil
+				}
+
+				fname := info.Name()
+				isMatch := fname == cmdName
+				if runtime.GOOS == "windows" {
+					isMatch = fname == cmdName || fname == cmdName+".exe"
+				}
+
+				if isMatch {
+					cmdPath = path
+					found = true
+					return filepath.SkipDir // Abort walk
+				}
+				return nil
+			})
+		}
+
+		if !found {
+			fmt.Printf("Plugin Load Error: command not found: %s\n", cmdName)
 			return value.NewBool(false)
 		}
 
-		// Register the request proxy function
-		// e.g. "dynamodb_request"
-		proxyName := name + "_request"
-		vm.DefineNative(proxyName, func(pArgs []value.Value) value.Value {
-			if len(pArgs) < 2 {
+		client, err := plugin.LoadPlugin(name, cmdPath)
+		if err != nil {
+			fmt.Printf("Plugin Load Error: failed to load plugin: %v\n", err)
+			return value.NewBool(false)
+		}
+
+		// Define Native dynamically
+		nativeName := name + "_request" // e.g. dynamodb_request
+		vm.DefineNative(nativeName, func(args []value.Value) value.Value {
+			if len(args) < 1 {
 				return value.NewNull()
 			}
-			method := pArgs[0].String()
-			// The rest are params ?? Or pass a list/map as second arg?
-			// Plan said: dynamodb_request("put_item", {client: ..., table: ..., item: ...})
-			// So params is usually a single object (map) or list?
-			// PluginClient.Call takes []value.Value.
-			// Let's pass all remaining args.
-			params := pArgs[1:] // args[0] is method
+			method := args[0].String()
+			params := args[1:]
 			return client.Call(method, params)
 		})
 
