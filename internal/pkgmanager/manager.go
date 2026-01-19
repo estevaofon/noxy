@@ -2,6 +2,7 @@ package pkgmanager
 
 import (
 	"fmt"
+	"noxy-vm/internal/version"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,7 +145,7 @@ func gitCheckout(dir, version string) error {
 	return cmd.Run()
 }
 
-func updateModFile(pkg, version string) error {
+func updateModFile(pkg, pkgVersion string) error {
 	modPath := "noxy.mod"
 	var config *ModuleConfig
 
@@ -161,6 +162,7 @@ func updateModFile(pkg, version string) error {
 		}
 	}
 
-	config.Require[pkg] = version
+	config.NoxyVersion = version.Version
+	config.Require[pkg] = pkgVersion
 	return config.Save(modPath)
 }

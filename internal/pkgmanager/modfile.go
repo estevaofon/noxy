@@ -7,8 +7,9 @@ import (
 )
 
 type ModuleConfig struct {
-	Module  string
-	Require map[string]string
+	Module      string
+	NoxyVersion string
+	Require     map[string]string
 }
 
 func NewModuleConfig() *ModuleConfig {
@@ -42,6 +43,10 @@ func ParseModFile(path string) (*ModuleConfig, error) {
 			if len(parts) >= 2 {
 				config.Module = parts[1]
 			}
+		case "noxy":
+			if len(parts) >= 2 {
+				config.NoxyVersion = parts[1]
+			}
 		case "require":
 			if len(parts) >= 3 {
 				// require <pkg> <version>
@@ -58,6 +63,10 @@ func (c *ModuleConfig) Save(path string) error {
 
 	if c.Module != "" {
 		sb.WriteString(fmt.Sprintf("module %s\n\n", c.Module))
+	}
+
+	if c.NoxyVersion != "" {
+		sb.WriteString(fmt.Sprintf("noxy %s\n\n", c.NoxyVersion))
 	}
 
 	if len(c.Require) > 0 {

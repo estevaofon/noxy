@@ -11,14 +11,13 @@ import (
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/token"
+	"noxy-vm/internal/version"
 	"noxy-vm/internal/vm"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
 )
-
-const Version = "v1.2.0"
 
 func main() {
 	defer func() {
@@ -50,7 +49,7 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Printf("Noxy %s\n", Version)
+		fmt.Printf("Noxy %s\n", version.Version)
 		return
 	}
 
@@ -85,7 +84,7 @@ func getDir(path string) string {
 }
 
 func startREPL(showDisasm bool) {
-	fmt.Printf("Noxy REPL %s\n", Version)
+	fmt.Printf("Noxy REPL %s\n", version.Version)
 	fmt.Println("Type 'exit' to quit.")
 
 	// Shared VM for persistence
