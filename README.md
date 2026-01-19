@@ -2,7 +2,7 @@
 
 A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://noxylang.com/)
 
-For a complete guide, consult the [NOXY_LANGUAGE_SPEC.md](NOXY_LANGUAGE_SPEC.md).
+For a complete guide, consult the [NOXY_LANGUAGE_SPEC.md](docs/NOXY_LANGUAGE_SPEC.md).
 
 <p align="center">
 <img width="200" height="200" alt="noxy" src="https://github.com/user-attachments/assets/acfc226e-f129-43ed-97df-25dda7c97fcf" />
@@ -29,7 +29,7 @@ Noxy VM is a bytecode compiler and virtual machine for the Noxy language created
 - ✅ HTTP server support
 - ✅ First-class functions
 - ✅ Closures
-- ✅ Concurrency (noxy routines)
+- ✅ Concurrency (noxy routines) [docs/CONCURRENCY.md](docs/CONCURRENCY.md)
 - ✅ Garbage collection
 - ✅ Built-in modules (io, net, http, sqlite)
 - ✅ Package manager (see [docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))
@@ -66,7 +66,7 @@ go run ./cmd/noxy/main.go program.nx
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v1.1.0
+Noxy REPL v1.2.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
