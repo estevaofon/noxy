@@ -1,9 +1,0 @@
-
-use pack_test
-
-func main()
-    print(pack_test.alpha.hello())
-    print(pack_test.beta.hello())
-end
-
-main()
