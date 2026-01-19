@@ -1,4 +1,0 @@
-
-func hello() -> string
-    return "Hello from Alpha"
-end

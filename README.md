@@ -32,6 +32,7 @@ Noxy VM is a bytecode compiler and virtual machine for the Noxy language created
 - ✅ Concurrency (noxy routines)
 - ✅ Garbage collection
 - ✅ Built-in modules (io, net, http, sqlite)
+- ✅ Package manager (see [docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))
 
 ## Installation
 
