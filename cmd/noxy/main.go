@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-const Version = "v1.1.0"
+const Version = "v1.2.0"
 
 func main() {
 	defer func() {
