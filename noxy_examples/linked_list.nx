@@ -16,7 +16,7 @@ func pop(node: ref Node) -> int
     if node == null || node.proximo == null then
         return -1
     end
-    let current: Node = node
+    let current: ref Node = node
     while current.proximo.proximo != null do
         current = current.proximo
     end
@@ -57,7 +57,7 @@ _append(no1, 90)
 _append(no1, 100)
 
 func print_list(node: ref Node)
-    let current: Node = node
+    let current: ref Node = node
     while current != null do
         print(to_str(current.valor))
         current = current.proximo
