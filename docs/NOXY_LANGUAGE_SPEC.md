@@ -133,6 +133,39 @@ end
 Structs are passed by **VALUE** (Copy) by default. A deep copy is performed. To pass by reference (so modifications affect the original), use `ref`.
 
 ---
+### 2.3 The `ref` Operator
+
+The `ref` operator creates a reference (pointer) to an existing variable.
+
+#### L-Value Requirement
+You can **ONLY** take a reference of an **addressable value** (L-Value). This means the operand must be a variable, a struct field, or an array/map index.
+**You CANNOT take a reference of a temporary value (R-Value), such as a function call result or a literal.**
+
+**Correct Usage:**
+```noxy
+let err: Error = Error("msg")
+let r: ref Error = ref err      // OK: 'err' is a variable
+```
+
+**Incorrect Usage:**
+```noxy
+let r: ref Error = ref Error("msg") // ERROR: Cannot take reference of temporary value
+```
+
+#### Memory Safety (Captured Variables)
+Noxy ensures memory safety when using `ref`.
+- If you create a `ref` to a **local variable**, that variable is automatically **Captured** (moved to the Heap) by the compiler.
+- Implemented via **Upvalues**, this ensures that the variable survives the end of the function scope.
+- This means you can safely return references to local variables ("Out Parameter" pattern). They will not become "dangling pointers".
+
+```noxy
+func create_safe_ref() -> ref int
+    let x: int = 42
+    return ref x // Safe! 'x' is promoted to Heap because it is referenced.
+end
+```
+
+---
 
 ## 3. Variable Declarations
 
