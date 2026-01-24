@@ -1,0 +1,26 @@
+struct Box
+    val: int
+end
+
+func change(b: ref Box)
+    b.val = 99
+end
+
+let b: Box = Box(10)
+print("Before: " + to_str(b.val))
+change(ref b)
+print("After: " + to_str(b.val))
+
+struct Node
+    next: ref Node
+end
+
+func link(n: ref Node)
+    let next: Node = Node(null)
+    n.next = ref next
+end
+
+let n: Node = Node(null)
+print("Before link: next is null? " + to_str(n.next == null))
+link(ref n)
+print("After link: next is null? " + to_str(n.next == null))

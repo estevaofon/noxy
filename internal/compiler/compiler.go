@@ -716,26 +716,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, leftType, nil
 
 	case *ast.PrefixExpression:
-		_, rightType, err := c.Compile(n.Right)
-		if err != nil {
-			return nil, nil, err
-		}
-		if _, ok := rightType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-			if ref, ok := rightType.(*ast.RefType); ok {
-				rightType = ref.ElementType
-			}
-		}
-		if n.Operator == "-" {
-			c.emitByte(byte(chunk.OP_NEGATE))
-			return c.currentChunk, rightType, nil
-		} else if n.Operator == "!" {
-			c.emitByte(byte(chunk.OP_NOT))
-			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
-		} else if n.Operator == "~" {
-			c.emitByte(byte(chunk.OP_BIT_NOT))
-			return c.currentChunk, rightType, nil
-		} else if n.Operator == "ref" {
+		// Handle 'ref' operator specially - don't compile Right first
+		if n.Operator == "ref" {
 			// Handle 'ref' operator: ref x
 			// Same logic as CallExpression 'isRefParam' block basically, but generalized?
 			// But for now, just support what's needed.
@@ -802,6 +784,28 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			} else {
 				return nil, nil, fmt.Errorf("[line %d] invalid operand for 'ref' operator", c.currentLine)
 			}
+		}
+
+		// For other operators (-, !, ~), compile Right first
+		_, rightType, err := c.Compile(n.Right)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, ok := rightType.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+			if ref, ok := rightType.(*ast.RefType); ok {
+				rightType = ref.ElementType
+			}
+		}
+		if n.Operator == "-" {
+			c.emitByte(byte(chunk.OP_NEGATE))
+			return c.currentChunk, rightType, nil
+		} else if n.Operator == "!" {
+			c.emitByte(byte(chunk.OP_NOT))
+			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
+		} else if n.Operator == "~" {
+			c.emitByte(byte(chunk.OP_BIT_NOT))
+			return c.currentChunk, rightType, nil
 		}
 		return c.currentChunk, rightType, nil
 

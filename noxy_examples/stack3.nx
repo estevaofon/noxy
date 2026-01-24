@@ -1,0 +1,119 @@
+struct Node
+    valor: int,
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        let novo: Node = Node(valor, null)
+        node.proximo = ref novo
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+
+func pop(node: ref Node) -> int
+    if node == null || node.proximo == null then
+        return -1
+    end
+    let current: ref Node = node
+    while current.proximo.proximo != null do
+        current = current.proximo
+    end
+    let valor: int = current.proximo.valor
+    current.proximo = null
+    return valor
+end
+
+
+func _peek(node: ref Node) -> int
+    if node == null || node.proximo == null then
+        return -1
+    end
+    let current: ref Node = node.proximo
+    while current.proximo != null do
+        current = current.proximo
+    end
+    return current.valor
+end
+
+
+func pop_front(head: ref Node) -> int
+    if head == null then
+        return -1
+    end
+    let valor: int = head.valor
+
+    if head.proximo == null then
+        // lista tinha 1 elemento: devolve o valor
+        // e você decide fora daqui como sinalizar "lista vazia"
+        return valor
+    end
+
+    // copia dados do próximo para o atual e pula o próximo
+    head.valor = head.proximo.valor
+    head.proximo = head.proximo.proximo
+    return valor
+end
+
+
+func _is_empty(node: ref Node) -> bool
+    return node == null || node.proximo == null
+end
+    
+
+let no1: Node = Node(0, null)
+
+func print_list(node: ref Node)
+    let current: ref Node = node.proximo
+    while current != null do
+        print(to_str(current.valor))
+        current = current.proximo
+    end
+end
+
+func stack_push(valor: int)
+    _append(no1, valor)
+end
+
+func stack_pop() -> int
+    let i:int = pop(no1)
+    return i
+end
+
+func peek() -> int
+    return _peek(no1)
+end
+
+func is_empty() -> bool
+    return _is_empty(no1)
+end
+
+func print_is_empty()
+    if is_empty() then
+        print("Pilha vazia")
+    else
+        print("Pilha não está vazia")
+    end
+end
+
+stack_push(20)
+stack_push(30)
+print_list(no1)
+let topo: int = peek()
+print("Topo da pilha "+to_str(topo))
+let popped: int = stack_pop()
+print("pop(): "+to_str(popped))
+print_list(no1)
+let topo: int = peek()
+print("Topo da pilha "+to_str(topo))
+let popped: int = stack_pop()
+print("pop(): "+to_str(popped))
+let topo: int = peek()
+print("Topo da pilha "+to_str(topo))
+print_is_empty()
+stack_push(40)
+let topo: int = peek()
+print("Topo da pilha "+to_str(topo))
+print_is_empty()
