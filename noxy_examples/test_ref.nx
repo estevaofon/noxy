@@ -1,0 +1,8 @@
+let a: int = 10
+
+func change(x: ref int)
+    x = 20
+end
+
+change(a)
+print(a)

@@ -1,0 +1,29 @@
+
+let a: int = 10
+let b: int = 20
+
+// Fixed logical error in user example (temp should be int, not ref int)
+func swap(x: ref int, y: ref int)
+    let temp: int = x
+    x = y
+    y = temp
+end
+
+func verify()
+    print("Before:", a, b)
+    if a != 10 || b != 20 then
+        print("FAIL: Initial values incorrect")
+        return
+    end
+
+    swap(a, b)
+
+    print("After:", a, b)
+    if a != 20 || b != 10 then
+        print("FAIL: Swap failed")
+    else
+        print("SUCCESS: Swap passed")
+    end
+end
+
+verify()

@@ -68,6 +68,12 @@ const (
 	OP_SELECT
 	OP_CLOSURE       // [const_index] [upvalue_count] [is_local, index]...
 	OP_CLOSE_UPVALUE // Explicit instruction to close upvalues
+	OP_REF_LOCAL
+	OP_REF_GLOBAL
+	OP_REF_PROPERTY
+	OP_REF_INDEX
+	OP_DEREF
+	OP_STORE_VIA_REF
 )
 
 func (op OpCode) String() string {
@@ -164,6 +170,18 @@ func (op OpCode) String() string {
 		return "OP_CLOSURE"
 	case OP_CLOSE_UPVALUE:
 		return "OP_CLOSE_UPVALUE"
+	case OP_REF_LOCAL:
+		return "OP_REF_LOCAL"
+	case OP_REF_GLOBAL:
+		return "OP_REF_GLOBAL"
+	case OP_REF_PROPERTY:
+		return "OP_REF_PROPERTY"
+	case OP_REF_INDEX:
+		return "OP_REF_INDEX"
+	case OP_DEREF:
+		return "OP_DEREF"
+	case OP_STORE_VIA_REF:
+		return "OP_STORE_VIA_REF"
 	case OP_DUP:
 		return "OP_DUP"
 	case OP_ARRAY:
@@ -372,6 +390,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.closureInstruction("OP_CLOSURE", offset)
 	case OP_CLOSE_UPVALUE:
 		return c.simpleInstruction("OP_CLOSE_UPVALUE", offset)
+	case OP_REF_LOCAL:
+		return c.byteInstruction("OP_REF_LOCAL", offset)
+	case OP_REF_GLOBAL:
+		return c.constantInstruction("OP_REF_GLOBAL", offset)
+	case OP_REF_PROPERTY:
+		return c.constantInstruction("OP_REF_PROPERTY", offset)
+	case OP_REF_INDEX:
+		return c.simpleInstruction("OP_REF_INDEX", offset)
+	case OP_DEREF:
+		return c.simpleInstruction("OP_DEREF", offset)
+	case OP_STORE_VIA_REF:
+		return c.byteInstruction("OP_STORE_VIA_REF", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

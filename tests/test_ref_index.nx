@@ -1,0 +1,11 @@
+
+func test(arr: ref int[])
+    print("Inside test")
+    let x: int = arr[0]
+    print("x:", x)
+    arr[0] = 99
+    print("new arr[0]:", arr[0])
+end
+
+let a: int[] = [10, 20]
+test(a)

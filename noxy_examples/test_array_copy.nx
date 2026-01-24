@@ -1,0 +1,7 @@
+func modify(arr: int[])
+    arr[0] = 99
+end
+
+let a: int[] = [10, 20]
+modify(a)
+print(a[0])

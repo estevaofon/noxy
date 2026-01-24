@@ -1,0 +1,30 @@
+// Minimal merge test to investigate loop
+
+struct Node 
+    data: int,
+    next: ref Node
+end
+
+let n1: Node = Node(1, null)
+let n2: Node = Node(2, null)
+
+func merge(l1: ref Node, l2: ref Node) -> ref Node
+    if l1 == null then
+        return l2
+    end
+    if l2 == null then
+        return l1
+    end
+    
+    if l1.data < l2.data then
+        l1.next = merge(l1.next, l2)
+        return l1
+    else
+        l2.next = merge(l1, l2.next)
+        return l2
+    end
+end
+
+print("Testing merge:")
+let result: ref Node = merge(n1, n2)
+print("Done")

@@ -1,0 +1,30 @@
+// Teste: ref Node vs Node em variável local
+
+struct Node
+    valor: int,
+    proximo: ref Node
+end
+
+// Teste 1: Com ref Node
+func teste_com_ref(node: ref Node)
+    let local: ref Node = node
+    local = Node(999, null)
+    print("Dentro (ref): local.valor = " + to_str(local.valor))
+end
+
+// Teste 2: Sem ref (só Node)
+func teste_sem_ref(node: ref Node)
+    let local: Node = node
+    local = Node(888, null)
+    print("Dentro (sem ref): local.valor = " + to_str(local.valor))
+end
+
+let n: Node = Node(10, null)
+
+print("Antes: n.valor = " + to_str(n.valor))
+
+teste_com_ref(ref n)
+print("Depois de teste_com_ref: n.valor = " + to_str(n.valor))
+
+teste_sem_ref(ref n)
+print("Depois de teste_sem_ref: n.valor = " + to_str(n.valor))

@@ -206,14 +206,18 @@ func parse_value(p: ref Parser) -> ref JsonNode
     
     if c == "{" then return parse_object(p) end
     if c == "[" then return parse_array(p) end
-    if c == "\"" then return ref make_string(parse_string_val(p)) end
+    if c == "\"" then 
+        let s: JsonNode = make_string(parse_string_val(p))
+        return ref s 
+    end
     if c == "t" then 
         // true
         let ign: string = advance(p) 
         ign = advance(p) // r
         ign = advance(p) // u
         ign = advance(p) // e
-        return ref make_bool(true)
+        let b: JsonNode = make_bool(true)
+        return ref b
     end
     if c == "f" then
         // false
@@ -222,7 +226,8 @@ func parse_value(p: ref Parser) -> ref JsonNode
         ign = advance(p) // l
         ign = advance(p) // s
         ign = advance(p) // e
-        return ref make_bool(false)
+        let b: JsonNode = make_bool(false)
+        return ref b
     end
     if c == "n" then
         // null
@@ -230,20 +235,24 @@ func parse_value(p: ref Parser) -> ref JsonNode
         ign = advance(p) // u
         ign = advance(p) // l
         ign = advance(p) // l
-        return ref make_null()
+        let n: JsonNode = make_null()
+        return ref n
     end
     
     // Number
     let code: int = ord(c)
     if c == "-" || (code >= 48 && code <= 57) then
-        return ref make_number(parse_number_str(p))
+        let num: JsonNode = make_number(parse_number_str(p))
+        return ref num
     end
     
-    return ref make_null() // Error
+    let err: JsonNode = make_null()
+    return ref err // Error
 end
 
 func parse_array(p: ref Parser) -> ref JsonNode
-    let arr: ref JsonNode = ref make_array()
+    let arr_node: JsonNode = make_array()
+    let arr: ref JsonNode = ref arr_node
     let ign: string = advance(p) // [
     
     skip_whitespace(p)
@@ -270,7 +279,8 @@ func parse_array(p: ref Parser) -> ref JsonNode
 end
 
 func parse_object(p: ref Parser) -> ref JsonNode
-    let obj: ref JsonNode = ref make_object()
+    let obj_node: JsonNode = make_object()
+    let obj: ref JsonNode = ref obj_node
     let ign: string = advance(p) // {
     
     skip_whitespace(p)
@@ -285,7 +295,7 @@ func parse_object(p: ref Parser) -> ref JsonNode
         skip_whitespace(p)
         if peek(p) == ":" then ign = advance(p) end
         
-        let val: ref JsonNode = parse_value(p)
+        let val: JsonNode = parse_value(p)
         val.key = key
         append_child(obj, val)
         
@@ -312,7 +322,7 @@ end
 // Stringify
 // ============================================
 
-func json_stringify(node: ref JsonNode) -> string
+func json_stringify(node: JsonNode) -> string
     if node == null then return "null" end
     
     if node.type == TYPE_NULL then return "null" end

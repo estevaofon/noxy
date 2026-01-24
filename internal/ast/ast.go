@@ -103,6 +103,23 @@ func (ct *ChanType) String() string {
 	return "chan " + ct.ElementType.String()
 }
 
+type FunctionType struct {
+	Params []NoxyType
+	Return NoxyType
+}
+
+func (ft *FunctionType) String() string {
+	ps := []string{}
+	for _, p := range ft.Params {
+		ps = append(ps, p.String())
+	}
+	ret := "void"
+	if ft.Return != nil {
+		ret = ft.Return.String()
+	}
+	return "func(" + strings.Join(ps, ", ") + ") -> " + ret
+}
+
 type Parameter struct {
 	Name string
 	Type NoxyType

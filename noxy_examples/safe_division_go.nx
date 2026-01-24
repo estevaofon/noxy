@@ -12,7 +12,8 @@ end
 // Se falha: Result(0, ref Error("msg"))
 func safe_divide(a: int, b: int) -> Result
     if b == 0 then
-        return Result(0, ref Error("DIVISION_BY_ZERO"))
+        let err: Error = Error("DIVISION_BY_ZERO")
+        return Result(0, ref err)
     end
     return Result(a / b, null)
 end

@@ -5,7 +5,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)
+        node.proximo = ref novo
     else
         _append(node.proximo, valor)
     end
@@ -65,7 +66,7 @@ end
 let no1: Node = Node(0, null)
 
 func print_list(node: ref Node)
-    let current: ref Node = node
+    let current: ref Node = node.proximo
     while current != null do
         print(to_str(current.valor))
         current = current.proximo

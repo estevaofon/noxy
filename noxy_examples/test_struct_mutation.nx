@@ -1,0 +1,12 @@
+struct Item
+    val: int
+end
+
+func modify(i: Item)
+    i.val = 99
+end
+
+let it: Item = Item(10)
+print(it.val)
+modify(it)
+print(it.val)

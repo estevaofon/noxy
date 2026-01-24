@@ -32,7 +32,7 @@ end
 // Test Case 2: Failure
 let res2: result.Result = get_user_age(99)
 if result.is_err(res2) then
-    let err: ref result.Error = result.unwrap_err(res2)
+    let err: result.Error = result.unwrap_err(res2)
     print(f"User 99 Error: {err.msg} (Code: {err.code})")
 end
 
@@ -48,7 +48,7 @@ if result.is_ok(val1) && result.is_ok(val2) then
 end
 
 if result.is_err(val3) then
-    let err: ref result.Error = result.unwrap_err(val3)
+    let err: result.Error = result.unwrap_err(val3)
     print(f"Error: {err.msg} (Code: {err.code})")
 end
 
