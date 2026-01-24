@@ -80,7 +80,7 @@ func runVmTests(t *testing.T, tests []vmTestCase) {
 		var captured value.Value = value.NewNull()
 
 		// Define native before running
-		vm.defineNative("test_report", func(args []value.Value) value.Value {
+		vm.DefineNative("test_report", func(args []value.Value) value.Value {
 			if len(args) > 0 {
 				captured = args[0]
 			}
