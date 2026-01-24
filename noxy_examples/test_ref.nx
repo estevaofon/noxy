@@ -1,6 +1,6 @@
 let a: int = 10
 
-func change(x: int)
+func change(x: ref int)
     x = 20
 end
 
