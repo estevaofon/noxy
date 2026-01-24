@@ -79,16 +79,16 @@ print("=== ADICIONANDO ELEMENTOS ===")
 
 struct Node
   data: int,
-  left: ref Node,
-  right: ref Node
+  left: Node,
+  right: Node
 end
 
 // Formato mais sofisticado (múltiplos níveis)
 let root: Node = Node(1, null, null)
-root.left = ref Node(2, null, null)
-root.right = ref Node(3, null, null)
-root.left.left = ref Node(4, null, null)
-root.left.right = ref Node(5, null, null)
+root.left = Node(2, null, null)
+root.right = Node(3, null, null)
+root.left.left = Node(4, null, null)
+root.left.right = Node(5, null, null)
 
 // Desenho da arvore binaria em ASCII
 //     1

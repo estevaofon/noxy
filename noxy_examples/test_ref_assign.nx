@@ -1,0 +1,38 @@
+struct Node
+    id: int,
+    next: ref Node
+end
+
+let n1: Node = Node(1, null)
+let n2: Node = Node(2, null)
+
+print("Init: n1.id=%v n1.next=%v", n1.id, n1.next)
+
+func update_next(r: ref Node, target: ref Node)
+    print("Updating ref r(id=%v) next to target(id=%v)", r.id, target.id)
+    r.next = target
+end
+
+update_next(n1, n2)
+
+print("After update:")
+if n1.next == null then
+    print("n1.next is null (FAIL)")
+else
+    print("n1.next.id = %v (EXPECT 2)", n1.next.id)
+end
+
+func return_ref(r: ref Node) -> ref Node
+    return r
+end
+
+let r_ret: ref Node = return_ref(n1)
+print("Returned ref id = %v", r_ret.id)
+
+func update_via_ret(r: ref Node, target: ref Node)
+    r.next = target
+end
+
+let n3: Node = Node(3, null)
+update_via_ret(r_ret, n3)
+print("After update via ret: n1.next.id = %v (EXPECT 3)", n1.next.id)

@@ -1,0 +1,47 @@
+// Simple linked list test - just 2 nodes
+
+struct Node 
+    data: int,
+    next: ref Node
+end
+
+let n1: Node = Node(1, null)
+let n2: Node = Node(2, null)
+
+func print_list(head: ref Node) 
+    let current: ref Node = head
+    let count: int = 0
+    while current != null && count < 10 do
+        print(current.data)
+        current = current.next
+        count = count + 1
+    end
+end
+
+// Test simple linking
+print("Before link:")
+print("n1:")
+print_list(n1)
+print("n2:")
+print_list(n2)
+
+// Link n1 to n2
+n1.next = n2
+
+print("After link n1->n2:")
+print_list(n1)
+
+// Now test modification via function
+func modify(node: ref Node, new_next: ref Node)
+    node.next = new_next
+end
+
+// Unlink
+modify(n1, null)
+print("After modify(n1, null):")
+print_list(n1)
+
+// Link again
+modify(n1, n2)
+print("After modify(n1, n2):")
+print_list(n1)

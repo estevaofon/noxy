@@ -29,7 +29,7 @@ func should_ignore(s: string) -> bool
     "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx", "md2html.nx",
     "watch_file.nx", "stress_test.nx", "division_error.nx", "error_type.nx", "error_arity.nx", "test_let_error.nx", "error_index.nx",
     "test_let_error_function.nx", "test_unclosed.nx", "benchmark_parallel.nx", "concurrency.nx", "concurrency_parallel_sum.nx", "concurrency_producer_consumer.nx", "run_all_tests.nx",
-    "fibonacci_spinner.nx", "web_server_demo.nx", "test_typed_chan_error.nx"]
+    "fibonacci_spinner.nx", "web_server_demo.nx", "test_typed_chan_error.nx", "test_web_server.nx"]
     
     if contains(exclusions, s) then 
         return true 

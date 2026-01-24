@@ -3,7 +3,7 @@ use io
 print("Iniciando testes de IO...")
 
 // Teste 1: Escrita
-let path: string = "test_io_output.txt"
+let path: string = "test_io_output_2.txt"
 if io.exists(path) then
     io.remove(path)
 end

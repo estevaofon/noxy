@@ -18,6 +18,7 @@ const (
 	VAL_BYTES
 	VAL_CHANNEL
 	VAL_WAITGROUP
+	VAL_REF
 )
 
 type Value struct {
@@ -214,6 +215,51 @@ func (ow *ObjWaitGroup) Format(f fmt.State, verb rune) {
 	}
 }
 
+type RefType int
+
+const (
+	REF_PTR RefType = iota
+	REF_GLOBAL
+	REF_PROPERTY
+	REF_INDEX
+	REF_UPVALUE // New RefType for captured locals
+)
+
+type ObjRef struct {
+	RefType   RefType
+	Name      string      // For Global or Property Name
+	Ptr       *Value      // For Local (unsafe if escapes)
+	Upvalue   *ObjUpvalue // For Local (safe, captured)
+	Container Value       // For Property/Index (Object, Array, Map)
+	Index     Value       // For Index
+}
+
+func (or *ObjRef) String() string {
+	switch or.RefType {
+	case REF_GLOBAL:
+		return fmt.Sprintf("<ref global %s>", or.Name)
+	case REF_UPVALUE:
+		return fmt.Sprintf("<ref upvalue %p>", or.Upvalue)
+	case REF_PROPERTY:
+		return fmt.Sprintf("<ref prop %s>", or.Name)
+	case REF_INDEX:
+		return fmt.Sprintf("<ref index %s>", or.Index.String())
+	default:
+		return fmt.Sprintf("<ref %p>", or.Ptr)
+	}
+}
+
+func (or *ObjRef) Format(f fmt.State, verb rune) {
+	switch verb {
+	case 'T':
+		fmt.Fprint(f, "reference")
+	case 's', 'v':
+		fmt.Fprint(f, or.String())
+	default:
+		fmt.Fprintf(f, "%%!%c(*ObjRef=%s)", verb, or.String())
+	}
+}
+
 func (v Value) String() string {
 	switch v.Type {
 	case VAL_BOOL:
@@ -256,6 +302,8 @@ func (v Value) String() string {
 		return v.Obj.(*ObjChannel).String()
 	case VAL_WAITGROUP:
 		return v.Obj.(*ObjWaitGroup).String()
+	case VAL_REF:
+		return v.Obj.(*ObjRef).String()
 	default:
 		return "unknown"
 	}

@@ -7,7 +7,7 @@ end
 
 struct Result
     value: any,
-    err: ref Error
+    err: Error
 end
 
 // Factory function to create a successful Result
@@ -39,6 +39,6 @@ func unwrap(r: Result) -> any
 end
 
 // Unwrap the error from a Result
-func unwrap_err(r: Result) -> ref Error
+func unwrap_err(r: Result) -> Error
     return r.err
 end

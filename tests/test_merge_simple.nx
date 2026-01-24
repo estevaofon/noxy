@@ -1,0 +1,41 @@
+// Simplest merge test
+
+struct Node 
+    data: int,
+    next: ref Node
+end
+
+let n1: Node = Node(1, null)
+let n2: Node = Node(2, null)
+let n3: Node = Node(3, null)
+let n4: Node = Node(4, null)
+
+n1.next = n3
+n2.next = n4
+
+func merge(l1: ref Node, l2: ref Node) -> ref Node
+    if l1 == null then
+        return l2
+    end
+    if l2 == null then
+        return l1
+    end
+    
+    print("merge: comparing")
+    print(l1.data)
+    print(l2.data)
+    
+    if l1.data < l2.data then
+        print("l1 path")
+        l1.next = merge(l1.next, l2)
+        return l1
+    else
+        print("l2 path")
+        l2.next = merge(l1, l2.next)
+        return l2
+    end
+end
+
+print("Starting")
+let r: ref Node = merge(n1, n2)
+print("Done")

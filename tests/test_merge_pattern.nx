@@ -1,0 +1,52 @@
+// Test the exact merge pattern
+
+struct Node 
+    data: int,
+    next: ref Node
+end
+
+let n1: Node = Node(1, null)
+let n2: Node = Node(2, null)
+let n3: Node = Node(3, null)
+let n4: Node = Node(4, null)
+
+// Two separate lists:
+// List 1: n1 -> n3 (1 -> 3)
+// List 2: n2 -> n4 (2 -> 4)
+n1.next = n3
+n2.next = n4
+
+func merge(l1: ref Node, l2: ref Node) -> ref Node
+    print("merge called")
+    if l1 == null then
+        print("l1 is null, returning l2")
+        return l2
+    end
+    if l2 == null then
+        print("l2 is null, returning l1")
+        return l1
+    end
+    
+    print("l1.data=" + to_str(l1.data) + " l2.data=" + to_str(l2.data))
+    
+    if l1.data < l2.data then
+        print("Going l1 path")
+        l1.next = merge(l1.next, l2)
+        return l1
+    else
+        print("Going l2 path")
+        l2.next = merge(l1, l2.next)
+        return l2
+    end
+end
+
+print("Starting merge test:")
+let result: ref Node = merge(n1, n2)
+print("Merge complete!")
+
+// Print result
+let current: ref Node = result
+while current != null do
+    print(current.data)
+    current = current.next
+end

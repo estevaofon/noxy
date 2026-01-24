@@ -3225,6 +3225,258 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			vm.stack[frame.Slots+int(slot)] = vm.peek(0)
 
+		case chunk.OP_REF_LOCAL:
+			slot := int(c.Code[ip])
+			ip++
+			// Reference to a stack slot - Capture it!
+			upvalue := vm.captureUpvalue(&vm.stack[frame.Slots+slot])
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType: value.REF_UPVALUE,
+					Upvalue: upvalue,
+				},
+			})
+
+		case chunk.OP_REF_GLOBAL:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType: value.REF_GLOBAL,
+					Name:    name,
+				},
+			})
+
+		case chunk.OP_REF_PROPERTY:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+
+			// Pop Container (Object/Struct)
+			container := vm.pop()
+
+			// Auto-dereference if container is a ref
+			if container.Type == value.VAL_REF {
+				ref := container.Obj.(*value.ObjRef)
+				switch ref.RefType {
+				case value.REF_GLOBAL:
+					val, ok := frame.Globals[ref.Name]
+					if !ok {
+						val, ok = vm.GetGlobal(ref.Name)
+						if !ok {
+							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
+						}
+					}
+					container = val
+				case value.REF_UPVALUE:
+					container = *ref.Upvalue.Location
+				case value.REF_PTR:
+					container = *ref.Ptr
+				case value.REF_PROPERTY:
+					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+						if val, ok := inst.Fields[ref.Name]; ok {
+							container = val
+						} else {
+							container = value.NewNull()
+						}
+					}
+				case value.REF_INDEX:
+					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+						idx := int(ref.Index.AsInt)
+						if idx >= 0 && idx < len(arr.Elements) {
+							container = arr.Elements[idx]
+						}
+					}
+				}
+			}
+
+			// Now check container type
+			if container.Type != value.VAL_OBJ {
+				return vm.runtimeError(c, ip, "Property reference base must be an object")
+			}
+
+			// Debug: Check ID if Node
+			/*(
+			  if inst, ok := container.Obj.(*value.ObjInstance); ok {
+			       if idVal, hasId := inst.Fields["id"]; hasId {
+			           fmt.Printf("VM REF_PROPERTY: %s on Node[%v]\n", name, idVal)
+			       }
+			  }
+			*/
+
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType:   value.REF_PROPERTY,
+					Container: container,
+					Name:      name,
+				},
+			})
+
+		case chunk.OP_REF_INDEX:
+			// Pop Index, then Container
+			idx := vm.pop()
+			container := vm.pop()
+
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType:   value.REF_INDEX,
+					Container: container,
+					Index:     idx,
+				},
+			})
+
+		case chunk.OP_DEREF:
+			refVal := vm.pop()
+			if refVal.Type == value.VAL_NULL {
+				vm.push(refVal) // Passthrough null
+			} else if refVal.Type != value.VAL_REF {
+				// Not a ref - pass through as-is (already dereferenced)
+				vm.push(refVal)
+			} else {
+				// VAL_REF - dereference it
+				ref := refVal.Obj.(*value.ObjRef)
+
+				switch ref.RefType {
+				case value.REF_GLOBAL:
+					// Global lookup (Read)
+					val, ok := frame.Globals[ref.Name]
+					if !ok {
+						val, ok = vm.GetGlobal(ref.Name)
+						if !ok {
+							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
+						}
+					}
+					vm.push(val)
+				case value.REF_UPVALUE:
+					// Read from Upvalue
+					vm.push(*ref.Upvalue.Location)
+				case value.REF_PTR:
+					// Local pointer read
+					vm.push(*ref.Ptr)
+				case value.REF_PROPERTY:
+					// Read property from container
+					// Assume ObjInstance for now. Could be Map (if string key?) or Module?
+					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+						if val, ok := inst.Fields[ref.Name]; ok {
+							vm.push(val)
+						} else {
+							// Default value or null? Or error?
+							// Struct fields should exist if type checked.
+							// If dynamic, maybe null.
+							vm.push(value.NewNull())
+						}
+					} else {
+						return vm.runtimeError(c, ip, "Target is not an instance")
+					}
+				case value.REF_INDEX:
+					// Read index from container (Array or Map)
+					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+						idx := int(ref.Index.AsInt)
+						if idx < 0 || idx >= len(arr.Elements) {
+							return vm.runtimeError(c, ip, "Index out of bounds")
+						}
+						vm.push(arr.Elements[idx])
+					} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
+						// Map key
+						// Need to hash key? ObjMap uses interface{} key or Value key?
+						// ObjMap keys are interface{}. We need Value->Interface conversion or map stores Values?
+						// value.go: Data map[interface{}]Value
+						var key interface{}
+						// Minimal key conversion logic (duplicated from elsewhere? or simple)
+						if ref.Index.Type == value.VAL_OBJ {
+							if s, ok := ref.Index.Obj.(string); ok {
+								key = s
+							} else {
+								key = ref.Index.Obj // Pointer/etc
+							}
+						} else {
+							// Primitive
+							if ref.Index.Type == value.VAL_INT {
+								key = ref.Index.AsInt
+							} else {
+								key = ref.Index.AsInt // Hack?
+								// Actually we need to match NewMap set logic.
+								// Currently Noxy map keys: Int, String, Bool?
+								// Let's rely on simple for now.
+								return vm.runtimeError(c, ip, "Map key type not fully supported in ref yet")
+							}
+						}
+
+						if val, ok := m.Data[key]; ok {
+							vm.push(val)
+						} else {
+							vm.push(value.NewNull())
+						}
+					} else {
+						return vm.runtimeError(c, ip, "Target is not indexable")
+					}
+				}
+			}
+		case chunk.OP_STORE_VIA_REF:
+			slot := int(c.Code[ip])
+			ip++
+			val := vm.pop() // Value to assign
+
+			// The reference itself is in a local variable (e.g., parameter 'x')
+			refVal := vm.stack[frame.Slots+slot]
+
+			if refVal.Type != value.VAL_REF {
+				return vm.runtimeError(c, ip, "Cannot store via non-ref variable")
+			}
+
+			ref := refVal.Obj.(*value.ObjRef)
+
+			switch ref.RefType {
+			case value.REF_GLOBAL:
+				// Global assignment
+				if _, ok := frame.Globals[ref.Name]; ok {
+					frame.Globals[ref.Name] = val
+				} else {
+					vm.SetGlobal(ref.Name, val)
+				}
+			case value.REF_UPVALUE:
+				// Write to Upvalue
+				*ref.Upvalue.Location = val
+			case value.REF_PTR:
+				// Local assignment: Write to Ptr
+				*ref.Ptr = val
+			case value.REF_PROPERTY:
+				if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+					inst.Fields[ref.Name] = val
+				} else {
+					return vm.runtimeError(c, ip, "Target is not an instance")
+				}
+			case value.REF_INDEX:
+				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+					idx := int(ref.Index.AsInt)
+					if idx < 0 || idx >= len(arr.Elements) {
+						return vm.runtimeError(c, ip, "Index out of bounds")
+					}
+					arr.Elements[idx] = val
+				} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
+					// Map Write
+					var key interface{}
+					if ref.Index.Type == value.VAL_OBJ {
+						if s, ok := ref.Index.Obj.(string); ok {
+							key = s
+						} else {
+							return vm.runtimeError(c, ip, "Map key must be string (simple ref support)")
+						}
+					} else if ref.Index.Type == value.VAL_INT {
+						key = ref.Index.AsInt
+					}
+					m.Data[key] = val
+				}
+			}
+
 		case chunk.OP_ADD:
 			b := vm.pop()
 			a := vm.pop()
@@ -3919,6 +4171,42 @@ func (vm *VM) run(minFrameCount int) error {
 			name := nameVal.Obj.(string)
 
 			instanceVal := vm.pop()
+
+			// Auto-dereference if instance is a ref
+			if instanceVal.Type == value.VAL_REF {
+				ref := instanceVal.Obj.(*value.ObjRef)
+				switch ref.RefType {
+				case value.REF_GLOBAL:
+					v, ok := frame.Globals[ref.Name]
+					if !ok {
+						v, ok = vm.GetGlobal(ref.Name)
+						if !ok {
+							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
+						}
+					}
+					instanceVal = v
+				case value.REF_UPVALUE:
+					instanceVal = *ref.Upvalue.Location
+				case value.REF_PTR:
+					instanceVal = *ref.Ptr
+				case value.REF_PROPERTY:
+					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+						if v, ok := inst.Fields[ref.Name]; ok {
+							instanceVal = v
+						} else {
+							instanceVal = value.NewNull()
+						}
+					}
+				case value.REF_INDEX:
+					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+						idx := int(ref.Index.AsInt)
+						if idx >= 0 && idx < len(arr.Elements) {
+							instanceVal = arr.Elements[idx]
+						}
+					}
+				}
+			}
+
 			if instanceVal.Type != value.VAL_OBJ {
 				return vm.runtimeError(c, ip, "only instances/maps have properties")
 			}
@@ -3948,6 +4236,41 @@ func (vm *VM) run(minFrameCount int) error {
 
 			val := vm.pop()
 			instanceVal := vm.pop()
+
+			// Auto-dereference if instance is a ref
+			if instanceVal.Type == value.VAL_REF {
+				ref := instanceVal.Obj.(*value.ObjRef)
+				switch ref.RefType {
+				case value.REF_GLOBAL:
+					v, ok := frame.Globals[ref.Name]
+					if !ok {
+						v, ok = vm.GetGlobal(ref.Name)
+						if !ok {
+							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
+						}
+					}
+					instanceVal = v
+				case value.REF_UPVALUE:
+					instanceVal = *ref.Upvalue.Location
+				case value.REF_PTR:
+					instanceVal = *ref.Ptr
+				case value.REF_PROPERTY:
+					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+						if v, ok := inst.Fields[ref.Name]; ok {
+							instanceVal = v
+						} else {
+							instanceVal = value.NewNull()
+						}
+					}
+				case value.REF_INDEX:
+					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+						idx := int(ref.Index.AsInt)
+						if idx >= 0 && idx < len(arr.Elements) {
+							instanceVal = arr.Elements[idx]
+						}
+					}
+				}
+			}
 
 			if instanceVal.Type != value.VAL_OBJ {
 				return vm.runtimeError(c, ip, "only instances have properties")

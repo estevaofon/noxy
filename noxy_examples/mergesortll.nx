@@ -1,55 +1,64 @@
 struct Node 
+    id: int,
     data: int,
     next: ref Node
 end
 
-let node_7: Node = Node(7, null)
-let node_1: Node = Node(1, ref node_7)
-let node_3: Node = Node(3, ref node_1)
-let node_9: Node = Node(9, ref node_3)
+// Create nodes
+let node_7: Node = Node(7, 7, null)
+let node_1: Node = Node(1, 1, null)
+let node_3: Node = Node(3, 3, null)
+let node_9: Node = Node(9, 9, null)
+
+// Link: 9 -> 3 -> 1 -> 7
+node_9.next = node_3
+node_3.next = node_1
+node_1.next = node_7
 
 func print_list(head: ref Node) 
     let current: ref Node = head
-    while current.next != null do
+    while current != null do
         print(current.data)
-        current = current.next
+        let next_node: ref Node = current.next
+        current = next_node
     end
-    print(current.data)
 end
-
 
 func find_middle(head: ref Node) -> ref Node
     let slow: ref Node = head
     let fast: ref Node = head.next
 
-    while fast.next != null && fast.next != null do
-        slow = slow.next
-        fast = fast.next
+    while fast != null && fast.next != null do
+        let slow_next: ref Node = slow.next
+        slow = slow_next
+        
+        let fast_next: ref Node = fast.next
+        let fast_next_next: ref Node = fast_next.next
+        fast = fast_next_next
     end
 
     return slow
 end
 
 func merge(l1: ref Node, l2: ref Node) -> ref Node
-    let head: ref Node = Node(0, null)
-    let tail: ref Node = head
-
-    while l1 != null && l2 != null do
-        if l1.data < l2.data then
-            tail.next = l1
-            l1 = l1.next
-        else
-            tail.next = l2
-            l2 = l2.next
-        end
-        tail = tail.next
+    if l1 == null then
+        return l2
     end
-    if l1 != null then
-        tail.next = l1
+    if l2 == null then
+        return l1
+    end
+    
+    if l1.data < l2.data then
+        let l1_next: ref Node = l1.next
+        let res: ref Node = merge(l1_next, l2)
+        l1.next = res
+        return l1
     else
-        tail.next = l2
+        let l2_next: ref Node = l2.next
+        let res: ref Node = merge(l1, l2_next)
+        l2.next = res
+        return l2
     end
-    return head.next
 end
 
 func merge_sort(head: ref Node) -> ref Node
@@ -59,12 +68,20 @@ func merge_sort(head: ref Node) -> ref Node
 
     let middle: ref Node = find_middle(head)
     let after_middle: ref Node = middle.next
+    
     middle.next = null
+    
+    // Recursive calls on detached lists (locals)
     let left: ref Node = merge_sort(head)
     let right: ref Node = merge_sort(after_middle)
 
     return merge(left, right)
 end
 
-let sorted_head: ref Node = merge_sort(ref node_9)
+print("Before sorting:")
+print_list(node_9)
+
+let sorted_head: ref Node = merge_sort(node_9)
+
+print("After sorting:")
 print_list(sorted_head)
