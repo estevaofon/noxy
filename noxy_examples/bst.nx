@@ -1,0 +1,146 @@
+// Binary Search Tree (BST) - Árvore Binária de Busca
+// Algoritmo clássico que testa structs com múltiplas referências
+
+struct TreeNode
+    valor: int,
+    esquerda: ref TreeNode,
+    direita: ref TreeNode
+end
+
+// Insere um valor na árvore
+func insert(node: ref TreeNode, valor: int)
+    if valor < node.valor then
+        if node.esquerda == null then
+            let novo: TreeNode = TreeNode(valor, null, null)
+            node.esquerda = ref novo
+        else
+            insert(node.esquerda, valor)
+        end
+    else
+        if node.direita == null then
+            let novo: TreeNode = TreeNode(valor, null, null)
+            node.direita = ref novo
+        else
+            insert(node.direita, valor)
+        end
+    end
+end
+
+// Busca um valor na árvore
+func search(node: ref TreeNode, valor: int) -> bool
+    if node == null then
+        return false
+    end
+    if node.valor == valor then
+        return true
+    end
+    if valor < node.valor then
+        return search(node.esquerda, valor)
+    else
+        return search(node.direita, valor)
+    end
+end
+
+// Travessia In-Order (esquerda, raiz, direita) - imprime em ordem crescente
+func inorder(node: ref TreeNode)
+    if node == null then
+        return
+    end
+    inorder(node.esquerda)
+    print(to_str(node.valor))
+    inorder(node.direita)
+end
+
+// Encontra o valor mínimo da árvore
+func find_min(node: ref TreeNode) -> int
+    if node == null then
+        return -1
+    end
+    let current: ref TreeNode = node
+    while current.esquerda != null do
+        current = current.esquerda
+    end
+    return current.valor
+end
+
+// Encontra o valor máximo da árvore
+func find_max(node: ref TreeNode) -> int
+    if node == null then
+        return -1
+    end
+    let current: ref TreeNode = node
+    while current.direita != null do
+        current = current.direita
+    end
+    return current.valor
+end
+
+// Conta o número de nós na árvore
+func count_nodes(node: ref TreeNode) -> int
+    if node == null then
+        return 0
+    end
+    return 1 + count_nodes(node.esquerda) + count_nodes(node.direita)
+end
+
+// Calcula a altura da árvore
+func height(node: ref TreeNode) -> int
+    if node == null then
+        return 0
+    end
+    let left_height: int = height(node.esquerda)
+    let right_height: int = height(node.direita)
+    if left_height > right_height then
+        return 1 + left_height
+    else
+        return 1 + right_height
+    end
+end
+
+// ==================== TESTES ====================
+
+print("=== Binary Search Tree (BST) ===")
+print("")
+
+// Criar a raiz
+let root: TreeNode = TreeNode(50, null, null)
+
+// Inserir valores
+print("Inserindo: 30, 70, 20, 40, 60, 80, 25")
+insert(ref root, 30)
+insert(ref root, 70)
+insert(ref root, 20)
+insert(ref root, 40)
+insert(ref root, 60)
+insert(ref root, 80)
+insert(ref root, 25)
+
+// Estrutura esperada:
+//        50
+//       /  \
+//      30   70
+//     / \   / \
+//    20 40 60 80
+//     \
+//     25
+
+print("")
+print("Travessia In-Order (deve imprimir em ordem crescente):")
+inorder(ref root)
+
+print("")
+print("Estatísticas:")
+print("- Número de nós: " + to_str(count_nodes(ref root)))
+print("- Altura da árvore: " + to_str(height(ref root)))
+print("- Valor mínimo: " + to_str(find_min(ref root)))
+print("- Valor máximo: " + to_str(find_max(ref root)))
+
+print("")
+print("Buscas:")
+print("- Buscar 40: " + to_str(search(ref root, 40)))
+print("- Buscar 25: " + to_str(search(ref root, 25)))
+print("- Buscar 100: " + to_str(search(ref root, 100)))
+print("- Buscar 50 (raiz): " + to_str(search(ref root, 50)))
+
+print("")
+print("=== Todos os testes concluídos! ===")
