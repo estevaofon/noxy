@@ -1484,7 +1484,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if globalType, ok := c.resolveGlobalType(ident.Value); ok {
 							if _, isRef := globalType.(*ast.RefType); isRef {
 								nameConst := c.makeConstant(value.NewString(ident.Value))
-								c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
+								c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConst))
 							} else {
 								// Global value, create ref to it
 								nameConst := c.makeConstant(value.NewString(ident.Value))
