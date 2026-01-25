@@ -1,0 +1,25 @@
+// ---------------------------------------------------------
+// ILLUSTRATING COMPILER PROTECTION
+// ---------------------------------------------------------
+
+struct Wallet
+    balance: ref int    // Holds a pointer to the money
+end
+
+let money_in_bank: int = 1000
+let my_wallet: Wallet = Wallet(ref money_in_bank)
+
+// [SCENARIO]: Accidentally trying to set balance to 0.
+// OLD NOXY: Would silently corrupt the pointer address to 0x0 (NULL), causing crash later.
+// NEW NOXY: Protects you at compile time.
+
+print(fmt("Current Balance (Auto-Deref works!): %v", my_wallet.balance))
+
+// The Mistake: Assigning a raw number to a reference field
+// Uncomment below to see the protection in action:
+// my_wallet.balance = 0 
+
+// ^ ERROR: "type mismatch: expected ref int (rebind) or int (update), got int"
+// (Currently blocks explicitly to prevent corruption)
+
+print("Safe! Wallet still points to correct memory.")
