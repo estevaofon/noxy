@@ -4282,6 +4282,10 @@ func (vm *VM) run(minFrameCount int) error {
 
 			instance.Fields[name] = val
 			vm.push(val)
+
+		case chunk.OP_COPY:
+			val := vm.pop()
+			vm.push(vm.copyValue(val))
 		}
 	}
 }

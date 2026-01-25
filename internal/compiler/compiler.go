@@ -27,15 +27,16 @@ type Upvalue struct {
 }
 
 type Compiler struct {
-	enclosing    *Compiler
-	currentChunk *chunk.Chunk
-	locals       []Local
-	globals      map[string]ast.NoxyType
-	upvalues     []Upvalue
-	scopeDepth   int
-	loops        []*Loop
-	currentLine  int
-	FileName     string
+	enclosing      *Compiler
+	currentChunk   *chunk.Chunk
+	locals         []Local
+	globals        map[string]ast.NoxyType
+	upvalues       []Upvalue
+	scopeDepth     int
+	loops          []*Loop
+	currentLine    int
+	FileName       string
+	funcReturnType ast.NoxyType // Expected return type for current function context
 }
 
 func New() *Compiler {
@@ -1233,10 +1234,26 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.ReturnStmt:
 		if n.ReturnValue != nil {
-			_, _, err := c.Compile(n.ReturnValue)
+			_, valType, err := c.Compile(n.ReturnValue)
 			if err != nil {
 				return nil, nil, err
 			}
+
+			// Auto-dereference if returning Ref but function expects Value
+			if c.funcReturnType != nil {
+				// Check if func returns Ref?
+				_, expectingRef := c.funcReturnType.(*ast.RefType)
+				// Check if val is Ref
+				_, isRef := valType.(*ast.RefType)
+
+				if isRef && !expectingRef {
+					// Implicit Dereference
+					c.emitByte(byte(chunk.OP_DEREF))
+					// Implicit Copy to ensure Value Semantics isolation on return
+					c.emitByte(byte(chunk.OP_COPY))
+				}
+			}
+
 		} else {
 			c.emitByte(byte(chunk.OP_NULL))
 		}
@@ -1259,7 +1276,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Store in Global
 		c.globals[n.Name] = funcType
 
-		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body)
+		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1291,7 +1308,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			fnName = "anonymous"
 		}
 
-		fnObj, fnCompiler, err := c.compileFunction(fnName, n.Parameters, n.Body)
+		fnObj, fnCompiler, err := c.compileFunction(fnName, n.Parameters, n.Body, n.ReturnType) // Literal return type? n.ReturnType? FunctionLiteral needs return type field if typed. Assuming inferred/any if nil.
+		if err != nil {
+			return nil, nil, err
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1776,10 +1796,11 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
 	return len(c.upvalues) - 1
 }
 
-func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement) (value.Value, *Compiler, error) {
+func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {
 	fnCompiler := NewChild(c)
 	fnCompiler.scopeDepth = 1    // Inside function body
 	fnCompiler.addLocal("", nil) // Reserve slot 0 for function instance
+	fnCompiler.funcReturnType = returnType
 
 	paramsInfo := []value.ParamInfo{}
 	for _, param := range params {

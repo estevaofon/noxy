@@ -1,0 +1,31 @@
+
+// Test: Auto-dereference when returning 'ref' but function expects 'value'
+
+func append_copy(i: ref int[]) -> int[]
+    append(i, 1)
+    return i // Should implicit dereference here because return type is int[] (Value)
+end
+
+let a: int[] = [1, 2]
+print("Original a:", a)
+
+let b: int[] = append_copy(a) 
+// 'a' passed by ref to append_copy. 'a' becomes [1, 2, 1] inside.
+// 'b' receives COPY of 'a' (value).
+
+print("After append_copy(a)")
+print("a:", a) // Should be [1, 2, 1]
+print("b:", b) // Should be [1, 2, 1]
+
+append(b, 3) 
+// Modify 'b'. Since 'b' is a copy (value), 'a' should NOT change.
+
+print("After append(b, 3)")
+print("a:", a) // Should still be [1, 2, 1]
+print("b:", b) // Should be [1, 2, 1, 3]
+
+if length(a) == 3 && length(b) == 4 then
+    print("SUCCESS: Auto-dereference worked")
+else
+    print("FAILURE: References leaked or copy failed")
+end

@@ -1,0 +1,14 @@
+func append_1(i: ref int[]) -> ref int[]
+    append(i, 1)
+    return i
+end
+
+let a: int[] = [1, 2]
+let b: ref int[] = append_1(a)
+print(a)
+append_1(b)
+print(b)
+append_1(b)
+print(b)
+append_1(b)
+print(b)

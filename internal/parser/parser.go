@@ -974,9 +974,9 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 
 	// Return type arrow? `-> type`
 	if p.peekTokenIs(token.ARROW) {
-		p.nextToken() // eat )
-		p.nextToken() // eat ->
-		p.parseType() // Consumes type tokens.
+		p.nextToken()                   // eat )
+		p.nextToken()                   // eat ->
+		stmt.ReturnType = p.parseType() // Consumes type tokens.
 	}
 
 	stmt.Body = p.parseBlockStatement()
@@ -1016,10 +1016,11 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	}
 
 	// Return type
+	// fmt.Printf("DEBUG: parseFuncStmt: cur=%s peek=%s\n", p.curToken.Type, p.peekToken.Type)
 	if p.peekTokenIs(token.ARROW) {
 		p.nextToken() // eat )
 		p.nextToken() // eat ->
-		p.parseType()
+		lit.ReturnType = p.parseType()
 	}
 
 	lit.Body = p.parseBlockStatement()

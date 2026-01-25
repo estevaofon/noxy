@@ -74,6 +74,7 @@ const (
 	OP_REF_INDEX
 	OP_DEREF
 	OP_STORE_VIA_REF
+	OP_COPY
 )
 
 func (op OpCode) String() string {
@@ -402,6 +403,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_DEREF", offset)
 	case OP_STORE_VIA_REF:
 		return c.byteInstruction("OP_STORE_VIA_REF", offset)
+	case OP_COPY:
+		return c.simpleInstruction("OP_COPY", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

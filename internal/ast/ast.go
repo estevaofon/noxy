@@ -366,6 +366,7 @@ type FunctionStatement struct {
 	Name       string
 	Parameters []*Parameter
 	Body       *BlockStatement
+	ReturnType NoxyType
 }
 
 func (fs *FunctionStatement) statementNode()       {}
@@ -383,6 +384,7 @@ type FunctionLiteral struct {
 	Parameters []*Parameter
 	Body       *BlockStatement
 	Name       string // Optional, empty for anonymous
+	ReturnType NoxyType
 }
 
 func (fl *FunctionLiteral) expressionNode()      {}

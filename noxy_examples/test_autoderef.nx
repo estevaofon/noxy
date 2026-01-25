@@ -1,0 +1,31 @@
+
+// Test: Auto-dereference when returning 'ref' but function expects 'value'
+// Using 'int' (primitive) to clearly demonstrate value copy vs reference behavior.
+
+func increment_and_ret(i: ref int) -> int
+    i = i + 1
+    return i // Should implicit dereference to 'int' value
+end
+
+let x: int = 10
+print("Original x:", x)
+
+let y: int = increment_and_ret(x)
+// x passed by ref. x becomes 11.
+// y receives COPY of x's value (11).
+
+print("After increment_and_ret(x)")
+print("x:", x) // Should be 11
+print("y:", y) // Should be 11
+
+print("Assigning y = 50")
+y = 50
+
+print("x:", x) // Should still be 11 (if y is value)
+print("y:", y) // Should be 50
+
+if x == 11 && y == 50 then
+    print("SUCCESS: Auto-dereference worked. y is a distinct value.")
+else
+    print("FAILURE: y might be a reference to x, or logic error.")
+end
