@@ -4426,6 +4426,13 @@ func (vm *VM) run(minFrameCount int) error {
 			}
 			vm.push(val)
 
+		case chunk.OP_SWAP:
+			// Swap top two stack elements: [a, b] -> [b, a]
+			b := vm.pop()
+			a := vm.pop()
+			vm.push(b)
+			vm.push(a)
+
 		case chunk.OP_COPY:
 			val := vm.pop()
 			vm.push(vm.copyValue(val))

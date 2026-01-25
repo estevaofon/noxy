@@ -239,6 +239,65 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			} else {
 				// Global Logic
 				if globalType, exists := c.globals[ident.Value]; exists {
+					// Check if global is a reference type
+					if refType, isRef := globalType.(*ast.RefType); isRef {
+						// Type-Based Assignment for Global Refs
+						_, isRefVal := valType.(*ast.RefType)
+						if isRefVal || valType == nil {
+							// REBIND: ref = ref -> Just update the global with new ref
+							if valType != nil && !c.areTypesCompatible(globalType, valType) {
+								return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
+							}
+							// Standard global set (rebind)
+							nameConstant := c.makeConstant(value.NewString(ident.Value))
+							c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
+							c.emitByte(byte(chunk.OP_POP))
+						} else {
+							// UPDATE: ref = val -> Write value to target
+							if !c.areTypesCompatible(refType.ElementType, valType) {
+								return nil, nil, fmt.Errorf("[line %d] type mismatch in update to global '%s': expected %s (rebind) or %s (update), got %s", c.currentLine, ident.Value, refType.String(), refType.ElementType.String(), valType.String())
+							}
+							// Emit: Get global ref, then store value into it
+							nameConstant := c.makeConstant(value.NewString(ident.Value))
+							c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConstant))
+							// Stack: [val, ref] - need to swap
+							// Use OP_STORE_REF which expects [ref, val]
+							// But we have [val, ref]. We need to emit differently.
+							// Actually, we compiled Value first, then GET_GLOBAL.
+							// Stack: [val, ref]
+							// OP_STORE_REF expects: pop val, pop ref. So [ref, val] order.
+							// We have [val, ref]. We need OP_STORE_REF_SWAPPED or different approach.
+							// Alternative: Emit GET_GLOBAL first, then compile value.
+							// But we already compiled value. Can't undo.
+							// Use OP_STORE_REF with swapped logic? Or add OP_SWAP?
+							// For now, let's just emit the global name and use a new opcode.
+							// Actually, I'll recompile: emit GET first, then value.
+							// NO - value already compiled.
+							// HACK: pop both, swap, push back? No such ops.
+							// Simplest: Just do the store in VM with swapped operands.
+							// I'll create OP_STORE_GLOBAL_DEREF which takes name as operand.
+							// Stack: [val] -> reads global ref, writes val to it.
+							// That's cleaner. Let's use that.
+							// Actually, I don't have that opcode. Let me improvise.
+							// Emit: swap then store_ref? No swap opcode.
+							// For now, just error and require wrapping in function.
+							// TODO: Add proper support later.
+							// Actually, simpler: just use existing logic but different stack order.
+							// Re-emit: POP val (save in temp), GET_GLOBAL, push val back, STORE_REF
+							// No temp storage in VM.
+							// Let's just emit correct order by recompiling:
+							// This is hacky but works: emit a synthetic sequence.
+							// GET_GLOBAL pushes ref. Then we need val on top.
+							// We already have val on stack. GET_GLOBAL added ref.
+							// Stack: [val, ref]. STORE_REF wants [ref, val].
+							// I'll add a simple OP_SWAP.
+							c.emitByte(byte(chunk.OP_SWAP))
+							c.emitByte(byte(chunk.OP_STORE_REF))
+							// No OP_POP needed - STORE_REF consumes both values
+						}
+						return c.currentChunk, nil, nil
+					}
+					// Standard type check for non-ref globals
 					if !c.areTypesCompatible(globalType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 					}

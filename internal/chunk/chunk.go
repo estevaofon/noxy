@@ -76,6 +76,7 @@ const (
 	OP_STORE_VIA_REF
 	OP_STORE_REF
 	OP_SET_PROPERTY_DEREF
+	OP_SWAP
 	OP_COPY
 )
 
@@ -409,6 +410,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_STORE_REF", offset)
 	case OP_SET_PROPERTY_DEREF:
 		return c.constantInstruction("OP_SET_PROPERTY_DEREF", offset)
+	case OP_SWAP:
+		return c.simpleInstruction("OP_SWAP", offset)
 	case OP_COPY:
 		return c.simpleInstruction("OP_COPY", offset)
 	default:
