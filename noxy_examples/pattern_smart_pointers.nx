@@ -1,0 +1,69 @@
+// ============================================================
+// Pattern 3: SMART POINTERS (Observer Pattern)
+// ============================================================
+// A struct holds a reference that can be dynamically rebound.
+// This enables patterns like observers, strategy, and dependency injection.
+
+struct Observer
+    name: string
+    watched_value: ref int
+end
+
+func observe(o: Observer) -> string
+    return fmt("%s sees: %d", o.name, o.watched_value)
+end
+
+func notify(o: Observer, new_val: int)
+    // UPDATE: o.watched_value is ref int, new_val is int
+    o.watched_value = new_val
+end
+
+// Shared state
+let temperature: int = 20
+let humidity: int = 50
+
+func print_environment()
+    print(fmt("  [Environment] Temp=%d, Humidity=%d", temperature, humidity))
+end
+
+func main()
+    // Create two observers, initially both watching temperature
+    let sensor1: Observer = Observer("Sensor1", ref temperature)
+    let sensor2: Observer = Observer("Sensor2", ref temperature)
+    
+    print("=== Initial Setup ===")
+    print(observe(sensor1))
+    print(observe(sensor2))
+    print_environment()
+    
+    // Sensor1 changes temperature (UPDATE through reference)
+    print("")
+    print("=== Sensor1 reports new temperature: 25 ===")
+    notify(sensor1, 25)
+    print(observe(sensor1))
+    print(observe(sensor2))  // sensor2 also sees 25 (same target!)
+    print_environment()
+    
+    // REBIND: sensor2 switches to watch humidity
+    print("")
+    print("=== Sensor2 switches to watching humidity ===")
+    sensor2.watched_value = ref humidity  // REBIND
+    print(observe(sensor1))
+    print(observe(sensor2))
+    
+    // Now they watch different things
+    print("")
+    print("=== Sensor2 reports new humidity: 70 ===")
+    notify(sensor2, 70)
+    print(observe(sensor1))  // Still sees temperature
+    print(observe(sensor2))  // Sees humidity
+    print_environment()
+    
+    // Final demonstration: direct field update
+    print("")
+    print("=== Direct update via sensor1.watched_value = 30 ===")
+    sensor1.watched_value = 30  // UPDATE temperature
+    print_environment()
+end
+
+main()

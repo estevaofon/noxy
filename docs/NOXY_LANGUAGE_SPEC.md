@@ -191,9 +191,88 @@ b.val = ref z // REBIND: 'b.val' now points to 'z'
 #### 3. Strict Type Safety
 You cannot assign a raw value to a reference field thinking it will update the pointer.
 ```noxy
-b.val = 50 // ERROR: Type Mismatch (unless interpreted as Update)
-// In Noxy 1.2+, this ensures you don't accidentally corrupt memory.
+b.val = 50 // This is an UPDATE - writes 50 to the target, not a rebind
 ```
+
+#### 4. Reference Patterns
+
+Type-Based Assignment enables powerful patterns in Noxy, comparable to smart pointers, mutable bindings, and dynamic aliases in other languages.
+
+##### Pattern A: Mutable Bindings (Pass-by-Reference)
+
+Functions can modify external variables through references:
+
+```noxy
+func double_it(val: ref int)
+    val = val * 2  // UPDATE: writes to original variable
+end
+
+func swap(a: ref int, b: ref int)
+    let val_a: int = a  // Read values first
+    let val_b: int = b
+    a = val_b           // UPDATE with int → writes to target
+    b = val_a
+end
+
+let x: int = 10
+double_it(ref x)  // x is now 20
+
+let a: int = 100
+let b: int = 200
+swap(ref a, ref b)  // a=200, b=100
+```
+
+> **Note**: When swapping, you must read values into `int` variables first. Using `a = b` directly would REBIND (since `b` is `ref int`), not update.
+
+##### Pattern B: Dynamic Aliases
+
+A local reference can be rebound to point to different variables:
+
+```noxy
+let counter_A: int = 0
+let counter_B: int = 0
+
+let active: ref int = ref counter_A
+
+active = active + 1     // Updates counter_A (now 1)
+active = ref counter_B  // REBIND: now points to counter_B
+active = active + 1     // Updates counter_B (now 1)
+// Result: counter_A=1, counter_B=1
+```
+
+##### Pattern C: Smart Pointers (Observer Pattern)
+
+Structs with reference fields can dynamically switch their data source:
+
+```noxy
+struct Observer
+    name: string
+    target: ref int
+end
+
+let temperature: int = 20
+let humidity: int = 50
+
+let sensor: Observer = Observer("Main", ref temperature)
+
+// Read through reference
+print(sensor.target)  // 20 (auto-deref)
+
+// UPDATE value
+sensor.target = 25    // temperature is now 25
+
+// REBIND to different source
+sensor.target = ref humidity  // Now watching humidity
+sensor.target = 70            // humidity is now 70
+```
+
+##### Summary Table: Type-Based Assignment
+
+| LHS Type | RHS Type | Action | Example |
+|----------|----------|--------|---------|
+| `ref T` | `T` | **UPDATE** – writes value to target | `r = 50` |
+| `ref T` | `ref T` | **REBIND** – changes pointer | `r = ref other` |
+| `T` | `T` | Standard assignment | `x = 10` |
 
 #### Memory Safety (Captured Variables)
 Noxy ensures memory safety when using `ref`.

@@ -1,0 +1,57 @@
+// ============================================================
+// Pattern 2: DYNAMIC ALIASES
+// ============================================================
+// A local reference can be rebound to point to different variables,
+// acting as a "movable pointer" or dynamic alias.
+
+let counter_A: int = 0
+let counter_B: int = 0
+let counter_C: int = 0
+
+func increment(counter: ref int)
+    counter = counter + 1
+end
+
+func print_counters()
+    print(fmt("  A=%d, B=%d, C=%d", counter_A, counter_B, counter_C))
+end
+
+func main()
+    // Create a dynamic alias that can point to any counter
+    let active_counter: ref int = ref counter_A
+    
+    print("Initial state:")
+    print_counters()
+    
+    // Increment A three times via alias
+    print("Incrementing via alias (pointing to A)...")
+    increment(active_counter)
+    increment(active_counter)
+    increment(active_counter)
+    print_counters()
+    
+    // REBIND: Switch alias to B
+    print("Rebinding alias to B...")
+    active_counter = ref counter_B
+    
+    // Increment B twice via alias
+    print("Incrementing via alias (now pointing to B)...")
+    increment(active_counter)
+    increment(active_counter)
+    print_counters()
+    
+    // REBIND: Switch alias to C
+    print("Rebinding alias to C...")
+    active_counter = ref counter_C
+    
+    // UPDATE directly via alias
+    print("Setting C to 100 via direct assignment...")
+    active_counter = 100
+    print_counters()
+    
+    // Final state shows independent counters
+    print("")
+    print("Final: Each counter was modified through the same alias!")
+end
+
+main()

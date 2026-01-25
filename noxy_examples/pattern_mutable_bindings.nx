@@ -1,0 +1,38 @@
+// ============================================================
+// Pattern 1: MUTABLE BINDINGS
+// ============================================================
+// A function can receive a reference and modify the original value.
+// This is like "pass by reference" in other languages.
+
+func double_it(val: ref int)
+    // UPDATE: val is ref int, 2 * val is int -> writes to target
+    val = val * 2
+end
+
+func swap(a: ref int, b: ref int)
+    // Must read BOTH values first to avoid ref-to-ref rebind
+    let val_a: int = a  // Read value from 'a' target
+    let val_b: int = b  // Read value from 'b' target
+    a = val_b           // UPDATE: write val_b into 'a' target
+    b = val_a           // UPDATE: write val_a into 'b' target
+end
+
+func main()
+    let x: int = 10
+    let y: int = 20
+    
+    print(fmt("Before double_it: x = %d", x))
+    double_it(ref x)
+    print(fmt("After double_it: x = %d", x))
+    
+    // Use fresh variables for swap to demonstrate clearly
+    let a: int = 100
+    let b: int = 200
+    
+    print("")
+    print(fmt("Before swap: a = %d, b = %d", a, b))
+    swap(ref a, ref b)
+    print(fmt("After swap: a = %d, b = %d", a, b))
+end
+
+main()

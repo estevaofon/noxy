@@ -1,0 +1,63 @@
+// Demonstration of new "Consistent Reference" behavior in Noxy
+// Scenario: A generic 'Controller' that can bind to different 'Motors' (global variables)
+
+struct Controller
+    target_speed: ref int
+    name: string
+end
+
+// "Hardware" registers (global variables)
+let motor_A_speed: int = 0
+let motor_B_speed: int = 0
+
+func print_status()
+    print("----------------")
+    print(fmt("Motor A: %d", motor_A_speed))
+    print(fmt("Motor B: %d", motor_B_speed))
+    print("----------------")
+end
+
+func main()
+    // 1. Initialize Controller pointing to Motor A
+    let ctrl: Controller = Controller(ref motor_A_speed, "Main Controller")
+
+    print("Initial State (Pointing to A):")
+    print_status()
+
+    // 2. UPDATE: Set speed of Motor A via Controller
+    // Logic: 'ctrl.target_speed' is (ref int). RHS is (int).
+    // Action: Auto-dereference. Writes 50 to *motor_A_speed.
+    print(fmt("Commanding %s to 50...", ctrl.name))
+    ctrl.target_speed = 50 
+    print_status() // Expect A=50, B=0
+
+    // 3. REBIND: Switch Controller to Motor B
+    // Logic: 'ctrl.target_speed' is (ref int). RHS is (ref int).
+    // Action: Rebind. 'ctrl.target_speed' now points to motor_B_speed.
+    print("Switching Controller to Motor B...")
+    ctrl.target_speed = ref motor_B_speed
+    
+    // 4. UPDATE: Set speed of Motor B via Controller
+    print(fmt("Commanding %s to 100...", ctrl.name))
+    ctrl.target_speed = 100
+    print_status() // Expect A=50, B=100
+
+    // 5. LOCAL REBIND: Local variables work the same way
+    let active_motor: ref int = ref motor_A_speed
+    print("Local monitor pointing to A")
+    print(fmt("Monitor reads: %d", active_motor)) // Reads A (50)
+
+    print("Rebinding local monitor to B...")
+    active_motor = ref motor_B_speed // Rebind
+    print(fmt("Monitor reads: %d", active_motor)) // Reads B (100)
+    
+    print("Emergency Stop via Monitor (all 0)")
+    active_motor = 0 // Writes to B
+    // Switch local back to A to stop A
+    active_motor = ref motor_A_speed
+    active_motor = 0 // Writes to A
+    
+    print_status() // Expect A=0, B=0
+end
+
+main()

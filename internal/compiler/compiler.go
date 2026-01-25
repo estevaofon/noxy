@@ -189,9 +189,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// 2. Check and Set Variable
 			if arg, localType := c.resolveLocal(ident.Value); arg != -1 {
 				// Local Logic
-				local := c.locals[arg]
-				if refType, isRef := localType.(*ast.RefType); isRef && local.IsParam {
-					// Assignment to a Reference Parameter (Locals are Pointers)
+				_ = c.locals[arg] // Keep reference for potential future use
+				if refType, isRef := localType.(*ast.RefType); isRef {
+					// Assignment to a Reference (Param or Local)
 					// Logic:
 					// 1. If RHS is also RefType and matches: REBIND (Pointer Update) -> OP_SET_LOCAL
 					// 2. If RHS is ValueType and matches ElemType: UPDATE (Value Update) -> OP_STORE_VIA_REF
