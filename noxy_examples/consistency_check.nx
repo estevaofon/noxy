@@ -1,0 +1,32 @@
+
+struct Container
+    val: ref int
+end
+
+let g1: int = 10
+let g2: int = 20
+
+func test_unified_consistency()
+    let c: Container = Container(ref g1)
+    
+    // 1. Local Rebind (Should compile now)
+    let r: ref int = ref g1
+    r = ref g2 // REBIND
+    print(fmt("After r = ref g2: r=%d (Expected 20)", r))
+
+    // 2. Field Update (Should compile now with implicit Deref)
+    c.val = 30 // UPDATE value of g1 (via c.val)
+    print(fmt("After c.val = 30: g1=%d (Expected 30)", g1))
+
+    // 3. Field Rebind (Already worked, verifying fallback)
+    c.val = ref g2 // REBIND c.val to g2
+    c.val = 40     // UPDATE g2
+    print(fmt("After c.val->g2, c.val=40: g2=%d (Expected 40)", g2))
+    print(fmt("Check g1 is still 30: g1=%d", g1))
+end
+
+func main()
+    test_unified_consistency()
+end
+
+main()

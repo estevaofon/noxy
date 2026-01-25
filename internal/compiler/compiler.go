@@ -191,20 +191,40 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				// Local Logic
 				local := c.locals[arg]
 				if refType, isRef := localType.(*ast.RefType); isRef && local.IsParam {
-					// Assignment to a Reference Parameter (write-through)
-					// Only params are aliases. Locals are pointers.
+					// Assignment to a Reference Parameter (Locals are Pointers)
+					// Logic:
+					// 1. If RHS is also RefType and matches: REBIND (Pointer Update) -> OP_SET_LOCAL
+					// 2. If RHS is ValueType and matches ElemType: UPDATE (Value Update) -> OP_STORE_VIA_REF
 
-					// Auto-deref right side if it is a Ref and we need a Value
+					isRefVal := false
+					if valType != nil {
+						_, isRefVal = valType.(*ast.RefType)
+					}
+
+					// 1. REBIND Check
+					if isRefVal {
+						// Types must match EXACTLY (ref T = ref T)
+						if c.areTypesCompatible(refType, valType) {
+							// REBINDING local reference
+							c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+							c.emitByte(byte(chunk.OP_POP))
+							return c.currentChunk, nil, nil
+						}
+					}
+
+					// 2. UPDATE Check (Auto-Deref RHS if needed?)
+					// If RHS is RefType but we want Value, we deref RHS.
+					// Original code did this. Let's keep it.
 					if valRef, valIsRef := valType.(*ast.RefType); valIsRef {
-						c.emitByte(byte(chunk.OP_DEREF))
+						c.emitByte(byte(chunk.OP_DEREF)) // Turn Ref<T> into T
 						valType = valRef.ElementType
 					}
 
 					if !c.areTypesCompatible(refType.ElementType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to reference '%s': expected %s, got %s", c.currentLine, ident.Value, refType.ElementType.String(), valType.String())
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to reference '%s': expected %s (rebind) or %s (update), got %s", c.currentLine, ident.Value, refType.String(), refType.ElementType.String(), valType.String())
 					}
+					// UPDATE Value via Ref
 					c.emitBytes(byte(chunk.OP_STORE_VIA_REF), byte(arg))
-					// OP_STORE_VIA_REF pops the value
 				} else {
 					if !c.areTypesCompatible(localType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
@@ -362,88 +382,25 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						refField := fieldType.(*ast.RefType)
 						if c.areTypesCompatible(refField.ElementType, valType) {
 							// Emit UPDATE logic:
-							// Stack: [Object, Value]
-							// We need: [Object, Value] -> but operation is different.
-							// OP_SET_PROPERTY sets the field itself.
-							// We want to set *field.
-							// We need to GET the field (pointer), then STORE_VIA_REF?
-							// Or emit a new opcode OP_SET_PROPERTY_DEREF?
-							// Or sequence:
-							// 1. Get Object (It is already on stack as 'Left' result?)
-							// Wait, c.Compile(n.Left) put Object on stack.
-							// Then c.Compile(n.Value) put Value on stack.
-							// Stack: [Obj, Val]
+							// Emit UPDATE logic: [Obj, Value]
+							// Use OP_SET_PROPERTY_DEREF which handles: Obj.Field (Ref) -> *Ref = Value
+							nameConst := c.makeConstant(value.NewString(memberExp.Member))
+							c.emitBytes(byte(chunk.OP_SET_PROPERTY_DEREF), byte(nameConst))
+							c.emitByte(byte(chunk.OP_POP)) // Result of assignment?
 
-							// To do *Obj.Field = Val:
-							// We need: Get Field (Ref) -> Store Val into it.
-							// Is there an opcode for "Get Property then Store via Ref"?
-							// No.
-							// We can emit:
-							// SWAP (Val, Obj) -> NO.
+							// Wait, SET_PROPERTY returns Val. POP removes it (as Stmt).
+							// SET_PROPERTY_DEREF should also return Val.
 
-							// We have [Obj, Val].
-							// We need to consume them and perform update.
-							// If we change compilation order?
-							// Compile Left -> [Obj]
-							// DUP -> [Obj, Obj]
-							// GET_PROPERTY -> [Obj, Ref]
-							// POP Obj? No.
-							// We need [Ref, Val] for OP_STORE_VIA_REF.
+							return c.currentChunk, nil, nil
 
-							// Implementation complexity:
-							// We are inside AssignStmt case.
-							// We already compiled Left and Value.
-							// Stack is [Obj, Val].
-							// We can't easily inject instructions between them now without complex stack manipulation.
-
-							// Use a Helper Opcode? OP_SET_PROPERTY_DEREF
-							// Or restructure:
-							// Don't compile Value yet?
-							// But we needed Value type for decision.
-
-							// FIX: We need to change the order or usage.
-							// But `valType` compilation emitted bytes.
-							// We are stuck with [Obj, Val].
-
-							// Valid approach for now:
-							// Emit OP_SET_PROPERTY_AUTO_DEREF (New Opcode?)
-							// OR
-							// Throw Error "Update via assignment not implemented yet, use *field = val syntax"
-							// But we promised Type-Based Assignment.
-
-							// Workaround:
-							// Can we do:
-							// [Obj, Val]
-							// 1. Store Val in temp local? No.
-
-							// Let's defer "Update" implementation for a second PR if hard?
-							// No, user expects it.
-
-							// Simplest fix:
-							// If we detect Ref Field + Value assignment:
-							// Error for now? "Cannot assign value to reference field directly yet (requires auto-deref support in VM)".
-							// Or stick to SAFETY first:
-							// "Type Mismatch" is correct behavior for now (prevents crash).
-							// The "working" g2 assignment caused crash/corruption.
-							// Blocking it is a FIX.
-
-							// So: Enforce Strict Type Match.
-							// If they want to update, they need to deref (which we don't have syntax for yet).
-							// BUT we said we'd solve it.
-
-							return nil, nil, fmt.Errorf("[line %d] direct assignment to reference field not supported yet (use rebind 'field = ref x' or helper)", c.currentLine)
 						} else {
-							return nil, nil, fmt.Errorf("[line %d] type mismatch: expected %s (rebind) or %s (update, not impl), got %s", c.currentLine, fieldType.String(), refField.ElementType.String(), valType.String())
+							return nil, nil, fmt.Errorf("[line %d] type mismatch: expected %s (rebind) or %s (update), got %s", c.currentLine, fieldType.String(), refField.ElementType.String(), valType.String())
 						}
 					}
-				} else {
-					// Not a ref field, standard check
-					if !c.areTypesCompatible(fieldType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to field '%s': expected %s, got %s", c.currentLine, memberExp.Member, fieldType.String(), valType.String())
-					}
-				}
-			}
 
+				}
+				// Not a ref field, fallthrough to standard logic
+			}
 			// Field Name
 			nameConst := c.makeConstant(value.NewString(memberExp.Member))
 			c.emitBytes(byte(chunk.OP_SET_PROPERTY), byte(nameConst))

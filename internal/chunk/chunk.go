@@ -74,6 +74,8 @@ const (
 	OP_REF_INDEX
 	OP_DEREF
 	OP_STORE_VIA_REF
+	OP_STORE_REF
+	OP_SET_PROPERTY_DEREF
 	OP_COPY
 )
 
@@ -403,6 +405,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_DEREF", offset)
 	case OP_STORE_VIA_REF:
 		return c.byteInstruction("OP_STORE_VIA_REF", offset)
+	case OP_STORE_REF:
+		return c.simpleInstruction("OP_STORE_REF", offset)
+	case OP_SET_PROPERTY_DEREF:
+		return c.constantInstruction("OP_SET_PROPERTY_DEREF", offset)
 	case OP_COPY:
 		return c.simpleInstruction("OP_COPY", offset)
 	default:

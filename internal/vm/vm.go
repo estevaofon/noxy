@@ -3476,6 +3476,61 @@ func (vm *VM) run(minFrameCount int) error {
 					m.Data[key] = val
 				}
 			}
+		case chunk.OP_STORE_REF:
+			val := vm.pop()    // Value to assign
+			refVal := vm.pop() // The reference itself (popped from stack)
+
+			if refVal.Type != value.VAL_REF {
+				return vm.runtimeError(c, ip, "Cannot store via non-ref value")
+			}
+
+			ref := refVal.Obj.(*value.ObjRef)
+
+			switch ref.RefType {
+			case value.REF_GLOBAL:
+				// Global assignment
+				if _, ok := frame.Globals[ref.Name]; ok {
+					frame.Globals[ref.Name] = val
+				} else {
+					// Fallback to shared globals? Or error?
+					// OP_STORE_VIA_REF does createGlobal if needed, let's match it.
+					// Or check if exists first? Ref exists, so it should exist.
+					// vm.SetGlobal writes to shared.
+					// If ref.Name is not in frame.Globals (module), it must be shared?
+					// Or we should update shared.
+					vm.SetGlobal(ref.Name, val)
+				}
+			case value.REF_UPVALUE:
+				*ref.Upvalue.Location = val
+			case value.REF_PTR:
+				*ref.Ptr = val
+			case value.REF_PROPERTY:
+				if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+					inst.Fields[ref.Name] = val
+				} else {
+					return vm.runtimeError(c, ip, "Target is not an instance")
+				}
+			case value.REF_INDEX:
+				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+					idx := int(ref.Index.AsInt)
+					if idx < 0 || idx >= len(arr.Elements) {
+						return vm.runtimeError(c, ip, "Index out of bounds")
+					}
+					arr.Elements[idx] = val
+				} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
+					var key interface{}
+					if ref.Index.Type == value.VAL_OBJ {
+						if s, ok := ref.Index.Obj.(string); ok {
+							key = s
+						} else {
+							return vm.runtimeError(c, ip, "Map key must be string")
+						}
+					} else if ref.Index.Type == value.VAL_INT {
+						key = ref.Index.AsInt
+					}
+					m.Data[key] = val
+				}
+			}
 
 		case chunk.OP_ADD:
 			b := vm.pop()
@@ -4238,6 +4293,7 @@ func (vm *VM) run(minFrameCount int) error {
 			instanceVal := vm.pop()
 
 			// Auto-dereference if instance is a ref
+
 			if instanceVal.Type == value.VAL_REF {
 				ref := instanceVal.Obj.(*value.ObjRef)
 				switch ref.RefType {
@@ -4281,6 +4337,93 @@ func (vm *VM) run(minFrameCount int) error {
 			}
 
 			instance.Fields[name] = val
+			vm.push(val)
+
+		case chunk.OP_SET_PROPERTY_DEREF:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+
+			val := vm.pop()
+			instanceVal := vm.pop()
+
+			// Expect Instance (Can be Ref to Instance)
+			if instanceVal.Type == value.VAL_REF {
+				// Deref container first
+				ref := instanceVal.Obj.(*value.ObjRef)
+				// Reuse getRefTarget logic or simple strict deref?
+				// Simple deref for now. Users should not update property of a ref to an int.
+				switch ref.RefType {
+				case value.REF_GLOBAL:
+					v, ok := frame.Globals[ref.Name]
+					if !ok {
+						v, ok = vm.GetGlobal(ref.Name)
+						if !ok {
+							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
+						}
+					}
+					instanceVal = v
+				case value.REF_UPVALUE:
+					instanceVal = *ref.Upvalue.Location
+				case value.REF_PTR:
+					instanceVal = *ref.Ptr
+				case value.REF_PROPERTY:
+					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+						if v, ok := inst.Fields[ref.Name]; ok {
+							instanceVal = v
+						}
+					}
+				}
+			}
+
+			if instanceVal.Type != value.VAL_OBJ {
+				return vm.runtimeError(c, ip, "only instances have properties")
+			}
+			instance, ok := instanceVal.Obj.(*value.ObjInstance)
+			if !ok {
+				return vm.runtimeError(c, ip, "only instances have properties")
+			}
+
+			// Get Field - EXPECTING REFERENCE
+			fieldVal, ok := instance.Fields[name]
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined property '%s'", name)
+			}
+
+			if fieldVal.Type != value.VAL_REF {
+				return vm.runtimeError(c, ip, "property '%s' is not a reference", name)
+			}
+
+			// Write Value to Reference -> Duplicate OP_STORE_REF logic
+			ref := fieldVal.Obj.(*value.ObjRef)
+			switch ref.RefType {
+			case value.REF_GLOBAL:
+				if _, ok := frame.Globals[ref.Name]; ok {
+					frame.Globals[ref.Name] = val
+				} else {
+					vm.SetGlobal(ref.Name, val)
+				}
+			case value.REF_UPVALUE:
+				*ref.Upvalue.Location = val
+			case value.REF_PTR:
+				*ref.Ptr = val
+			case value.REF_PROPERTY:
+				if targetInst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+					targetInst.Fields[ref.Name] = val
+				} else {
+					return vm.runtimeError(c, ip, "Target is not an instance")
+				}
+			case value.REF_INDEX:
+				// ... (Dup logic) ...
+				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+					idx := int(ref.Index.AsInt)
+					if idx < 0 || idx >= len(arr.Elements) {
+						return vm.runtimeError(c, ip, "Index out of bounds")
+					}
+					arr.Elements[idx] = val
+				}
+			}
 			vm.push(val)
 
 		case chunk.OP_COPY:
