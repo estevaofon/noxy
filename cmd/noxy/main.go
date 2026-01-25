@@ -176,7 +176,7 @@ func startREPL(showDisasm bool) {
 		}
 
 		// 3. Compile
-		c := compiler.NewWithState(replGlobals, "REPL")
+		c := compiler.NewWithState(replGlobals, make(map[string]*ast.StructStatement), "REPL")
 		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)
@@ -242,7 +242,7 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		os.Exit(1)
 	}
 
-	c := compiler.NewWithState(make(map[string]ast.NoxyType), filename)
+	c := compiler.NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename)
 	chunk, _, err := c.Compile(program)
 	if err != nil {
 		fmt.Printf("Compiler error: %s\n", err)

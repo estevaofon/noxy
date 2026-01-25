@@ -1,0 +1,81 @@
+// COMPARISON: CURRENT STATUS vs PROPOSED FIX
+// Objetivo: Tornar structs seguras e consistentes (evitando crashes).
+
+struct Box
+    val: ref int
+end
+
+let g: int = 100
+let b: Box = Box(ref g)
+
+// ---------------------------------------------------------
+// 1. EXPRESSIONS (Uso do Valor)
+// ---------------------------------------------------------
+print("--- TEST 1: EXPRESSIONS ---")
+
+// [CURRENT BEHAVIOR]
+// O compilador não sabe que 'b.val' é uma referência.
+// Ele passa o objeto-ponteiro direto para a soma.
+// RESULTADO: Runtime Error (Panic no VM).
+// let x: int = b.val + 1 
+
+let x: int = b.val + 1
+print("Expression Result (100+1): %v", x)
+
+// [PROPOSED FIX]
+// O compilador vai olhar a definição de 'Box', ver que 'val' é 'ref int'.
+// Ele insere automaticamente o opcode OP_DEREF.
+// RESULTADO: Sucesso (100 + 1 = 101).
+
+
+// ---------------------------------------------------------
+// 2. TYPE SAFETY (Atribuição Incorreta)
+// ---------------------------------------------------------
+print("--- TEST 2: TYPE SAFETY ---")
+
+// [CURRENT BEHAVIOR]
+// O compilador aceita atribuir 'int' direto num campo 'ref int'.
+// Isso "sobrescreve" o ponteiro com um número cru.
+// RESULTADO: A Struct fica corrompida. O tipo muda em runtime de Ref para Int.
+// b.val = 500  // Compila, mas quebra o contrato da struct.
+
+//b.val = 500
+//print("b.val: %v", b.val)
+
+// [PROPOSED FIX]
+// O compilador verifica os tipos.
+// RESULTADO: Compile Error! "Type Mismatch: expected ref int, got int".
+// O usuário é obrigado a passar uma referência válida ou usar a sintaxe correta.
+
+
+// ---------------------------------------------------------
+// 3. REBINDING vs UPDATE
+// ---------------------------------------------------------
+print("--- TEST 3: UPDATE ---")
+
+let g2: int = 200
+
+b.val = ref g2
+print(fmt("b.val: %v", b.val))
+
+// [CURRENT BEHAVIOR]
+// b.val = ref g2
+// Isso altera o PONTEIRO (b.val agora aponta para g2).
+
+// [PROPOSED FIX: TYPE-BASED ASSIGNMENT]
+// A proposta é usar o TIPO do valor atribuído para decidir a operação:
+
+// A) ATUALIZAR VALOR (Update) - Igual a Locais
+// Se atribuirmos um 'int' (valor), fazemos Auto-Deref.
+// b.val = 300      // Compilador gera: *b.val = 300
+// print(g)         // Imprime 300 (Valor original alterado)
+
+// B) REBIND PONTEIRO (Rebind) - Exclusivo de Campos
+// Se atribuirmos um 'ref int' (ponteiro), mudamos o alvo.
+// b.val = ref g2   // Compilador gera: b.val = address(g2)
+// print(b.val)     // Agora aponta para g2 (200)
+
+// VANTAGEM:
+// - Mantém consistência com locais (b.val = 300 funciona igual r = 300)
+// - Mantém flexibilidade de ponteiros (b.val = ref g2 permite mudar estrutura)
+// - Resolve o bug de corrupção (b.val = 300 não tritura mais o ponteiro)

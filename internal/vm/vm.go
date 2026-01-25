@@ -4515,7 +4515,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 			if len(p.Errors()) > 0 {
 				return value.NewNull(), fmt.Errorf("parse error in embedded module %s: %v", name, p.Errors())
 			}
-			c := compiler.NewWithState(make(map[string]ast.NoxyType), embedPath)
+			c := compiler.NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), name)
 			chunk, _, err := c.Compile(prog)
 			if err != nil {
 				return value.NewNull(), err
@@ -4609,7 +4609,7 @@ FileImport:
 		return value.NewNull(), fmt.Errorf("parse error in module %s: %v", name, p.Errors())
 	}
 
-	c := compiler.NewWithState(make(map[string]ast.NoxyType), path)
+	c := compiler.NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), path)
 	chunk, _, err := c.Compile(prog)
 	if err != nil {
 		return value.NewNull(), err

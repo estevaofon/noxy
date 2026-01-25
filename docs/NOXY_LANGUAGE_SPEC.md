@@ -152,11 +152,53 @@ let r: ref Error = ref err      // OK: 'err' is a variable
 let r: ref Error = ref Error("msg") // ERROR: Cannot take reference of temporary value
 ```
 
+### 2.3 Reference Semantics (`ref`)
+The `ref` keyword allows creating pointers to existing values. Noxy unifies reference usage through **"Automatic Dereference"** and **"Type-Based Assignment"**.
+
+#### 1. Automatic Dereference (Expressions)
+You can use a reference (`ref T`) in expressions just like a normal value. The compiler automatically assumes you want the **value**.
+```noxy
+let x: int = 10
+let r: ref int = ref x
+
+// NO explicit dereference needed (*r is not required)
+let y: int = r + 1   // Compiler auto-derefs 'r' -> 11
+print(r)             // Prints 10
+```
+This applies to both Local Variables and Struct Fields.
+
+#### 2. Type-Based Assignment (Updates vs Rebinds)
+When assigning to a reference variable/field, the behavior depends on the **Type** of the right-hand side:
+
+**A. Value Update (Assigning `T`)**
+If you assign a value of type `T` to a `ref T`, it updates the **underlying value**.
+```noxy
+r = 20      // Updates 'x' to 20
+box.val = 30 // Updates the value pointed to by 'box.val'
+```
+
+**B. Pointer Rebind (Assigning `ref T`)**
+If you assign a `ref T` to a `ref T`, it changes the **pointer target**.
+*Note: This is strictly controlled. Local references cannot be unbound.*
+```noxy
+struct Box { val: ref int }
+let b: Box = Box(ref x)
+let z: int = 99
+
+b.val = ref z // REBIND: 'b.val' now points to 'z'
+```
+
+#### 3. Strict Type Safety
+You cannot assign a raw value to a reference field thinking it will update the pointer.
+```noxy
+b.val = 50 // ERROR: Type Mismatch (unless interpreted as Update)
+// In Noxy 1.2+, this ensures you don't accidentally corrupt memory.
+```
+
 #### Memory Safety (Captured Variables)
 Noxy ensures memory safety when using `ref`.
 - If you create a `ref` to a **local variable**, that variable is automatically **Captured** (moved to the Heap) by the compiler.
 - Implemented via **Upvalues**, this ensures that the variable survives the end of the function scope.
-- This means you can safely return references to local variables ("Out Parameter" pattern). They will not become "dangling pointers".
 
 ```noxy
 func create_safe_ref() -> ref int

@@ -1,0 +1,56 @@
+// NOXY REFERENCE CONSISTENCY DEMO
+// Este arquivo ilustra as diferenças de comportamento entre referências locais e campos.
+
+struct Container
+    val: ref int
+end
+
+let g1: int = 100
+let g2: int = 200
+
+// ==========================================
+// SCENARIO 1: LOCAL VARIABLES (Implicit Deref)
+// ==========================================
+print("--- SCENARIO 1: LOCAL REFS ---")
+
+func demo_local(r: ref int)
+    print(fmt("Initial local r: %v", r))
+    
+    // 1. ASSIGNMENT behaves as UPDATE VALUE (Implicit Dereference)
+    // O compilador entende que 'r' é um alias para o valor.
+    r = 101 
+    print(fmt("After 'r = 101', g1 is: %v", g1)) // O valor original foi alterado
+    
+    // 2. EXPRESSION works automatically
+    // O compilador insere um OP_DEREF implícito aqui.
+    print(fmt("Math on ref: r + 1 = %v", r + 1)) 
+    
+    // 3. REBINDING is impossible
+    // r = ref g2 // ERRO DE SINTAXE: Não é possível reatribuir o ponteiro de uma ref local
+end
+
+demo_local(ref g1)
+
+// ==========================================
+// SCENARIO 2: STRUCT FIELDS (Pointer Semantics)
+// ==========================================
+print("\n--- SCENARIO 2: FIELD REFS ---")
+
+// Criamos um container apontando para g1
+let c: Container = Container(ref g1)
+
+// 1. ASSIGNMENT behaves as REBIND POINTER
+// Tentar atribuir valor direto falha porque o campo é tratado como ponteiro cru.
+// c.val = 102 // COMPILE ERROR: Type Mismatch (Expected ref int, got int)
+
+// Atribuir 'ref g2' funciona, mas REONTA o ponteiro (Rebind), ao invés de alterar o valor.
+c.val = ref g2 
+//c.val = g2
+print("After 'c.val = ref g2', c.val now points to g2")
+print(fmt("c.val: %v", c.val))
+
+// 2. EXPRESSION fails (CRITICAL BUG) -> NOW FIXED!
+// O compilador agora sabe que c.val é uma ref e emite OP_DEREF.
+print("Attempting match on field (SHOULD WORK NOW)...")
+let x: int = c.val + 1 
+print("Result: %v", x)

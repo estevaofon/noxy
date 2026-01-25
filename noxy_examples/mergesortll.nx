@@ -11,9 +11,10 @@ let node_3: Node = Node(3, 3, null)
 let node_9: Node = Node(9, 9, null)
 
 // Link: 9 -> 3 -> 1 -> 7
-node_9.next = node_3
-node_3.next = node_1
-node_1.next = node_7
+// Link: 9 -> 3 -> 1 -> 7
+node_9.next = ref node_3
+node_3.next = ref node_1
+node_1.next = ref node_7
 
 func print_list(head: ref Node) 
     let current: ref Node = head

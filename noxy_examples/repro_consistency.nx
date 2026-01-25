@@ -1,0 +1,43 @@
+struct Container
+    r: ref int
+end
+
+let global_x: int = 10
+let global_y: int = 20
+let c: Container = Container(ref global_x)
+
+print("Initial c.r via implicit deref logic in print? No, print receives value.")
+// We need to print pointed value.
+// But we can't explicit deref?
+// We can use a helper to print ref int
+func print_ref(val: ref int)
+    print("Value: %v", val) 
+    // val is ref int. In printf, does it deref? 
+    // fmt implementation in Noxy might not auto-deref ValRef.
+    // But 'val' in expression is usage?
+    // In compiler Identifier lookup: 
+    // If local is Ref, emits OP_GET_LOCAL (pushes Ref).
+    // So 'val' is Ref.
+    // If usage is in BinaryExpr, it auto-derefs.
+    // In Call args?
+    // Argument processing checks if param is ref. 
+    // print takes 'any'.
+    // So it receives Ref.
+end
+
+// Helper to check rebind
+func rebind_attempt(target: ref int, new_ref: ref int)
+    // target = new_ref // Uncommenting this should cause compile error
+end
+
+c.r = ref global_y // Field Rebind - Should OK
+print("Rebound field c.r")
+
+// Printing c.r using arithmetic to force deref
+let v: int = c.r + 0
+print("c.r value: %v", v)
+
+let local_ref: ref int = ref global_x
+// local_ref = ref global_y // Uncomment assignment to test local rebind failure
+
+print("Consistency Check Complete")
