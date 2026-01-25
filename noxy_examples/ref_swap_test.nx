@@ -2,11 +2,14 @@
 let a: int = 10
 let b: int = 20
 
-// Fixed logical error in user example (temp should be int, not ref int)
+// Correct swap implementation:
+// Must read BOTH values into int variables first, then UPDATE.
+// Using x = y directly would REBIND (since y is ref int), not UPDATE.
 func swap(x: ref int, y: ref int)
-    let temp: int = x
-    x = y
-    y = temp
+    let val_x: int = x   // Read value from x (auto-deref)
+    let val_y: int = y   // Read value from y (auto-deref)
+    x = val_y            // UPDATE: write val_y to target of x
+    y = val_x            // UPDATE: write val_x to target of y
 end
 
 func verify()

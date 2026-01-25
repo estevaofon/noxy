@@ -1,0 +1,46 @@
+// Debug para entender o comportamento do swap
+
+let a: int = 10
+let b: int = 20
+
+func swap_wrong(x: ref int, y: ref int)
+    print(fmt("Início: x=%d, y=%d", x, y))
+    let temp: int = x    // temp = 10 (auto-deref)
+    print(fmt("temp = %d", temp))
+    
+    // x = y: Como y é ref int, isso faz REBIND do parâmetro x
+    // O parâmetro x (uma referência local) agora aponta para onde y aponta
+    x = y
+    print(fmt("Após x = y: x=%d, y=%d", x, y))
+    
+    // y = temp: temp é int, então faz UPDATE do alvo de y
+    y = temp
+    print(fmt("Após y = temp: x=%d, y=%d", x, y))
+end
+
+func swap_correct(x: ref int, y: ref int)
+    print(fmt("Início correto: x=%d, y=%d", x, y))
+    let val_x: int = x   // Lê valor
+    let val_y: int = y   // Lê valor
+    print(fmt("val_x=%d, val_y=%d", val_x, val_y))
+    
+    x = val_y            // UPDATE: escreve no alvo
+    y = val_x            // UPDATE: escreve no alvo
+    print(fmt("Após UPDATE: x=%d, y=%d", x, y))
+end
+
+print("=== SWAP ERRADO ===")
+print(fmt("a=%d, b=%d", a, b))
+swap_wrong(a, b)
+print(fmt("Depois: a=%d, b=%d", a, b))
+
+print("")
+print("=== Resetando ===")
+a = 10
+b = 20
+
+print("")
+print("=== SWAP CORRETO ===")
+print(fmt("a=%d, b=%d", a, b))
+swap_correct(a, b)
+print(fmt("Depois: a=%d, b=%d", a, b))
