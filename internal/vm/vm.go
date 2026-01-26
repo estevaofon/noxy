@@ -3185,6 +3185,44 @@ func (vm *VM) run(minFrameCount int) error {
 		case chunk.OP_POP:
 			vm.LastPopped = vm.pop()
 
+		case chunk.OP_ADDR:
+			val := vm.pop()
+			if val.Type == value.VAL_REF {
+				ref := val.Obj.(*value.ObjRef)
+				addrStr := ""
+				switch ref.RefType {
+				case value.REF_PTR:
+					addrStr = fmt.Sprintf("%p", ref.Ptr)
+				case value.REF_GLOBAL:
+					// For global, we might not have direct pointer readily available as uintptr
+					// But we can format the Ref object itself or try to get address of value in map
+					// For consistency with C/Go pointers, let's show the address of the Ref struct itself as proxy
+					// or use the Name
+					addrStr = fmt.Sprintf("<global %s>", ref.Name)
+				case value.REF_UPVALUE:
+					addrStr = fmt.Sprintf("%p", ref.Upvalue.Location)
+				case value.REF_PROPERTY:
+					containerAddr := fmt.Sprintf("%p", ref.Container.Obj)
+					addrStr = fmt.Sprintf("<prop %s of %s>", ref.Name, containerAddr)
+				case value.REF_INDEX:
+					addrStr = fmt.Sprintf("<index %s>", ref.Index.String())
+				}
+				vm.push(value.NewString(addrStr))
+			} else {
+				// Address of a value? In Noxy, pass-by-value means address of stack slot?
+				// But we popped it. So it's a transient value.
+				// Returning "val" for non-refs is misleading.
+				// Let's return <value> or address of the variable if it was a variable?
+				// But we only received the value.
+				// addr() usually expects a Reference.
+				// So if not ref, invalid or just print pseudo-address.
+				// Let's error or return string representation for now?
+				// Better: addr(x) where x is int. Compiler didn't emit REF.
+				// Compiler should force REF_LOCAL if addr is called?
+				// For now, allow runtime checks.
+				vm.push(value.NewString(fmt.Sprintf("%p", &val)))
+			}
+
 		case chunk.OP_GET_GLOBAL:
 			index := c.Code[ip]
 			ip++

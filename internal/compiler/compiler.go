@@ -1625,6 +1625,28 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				// Emit Call
 				c.emitBytes(byte(chunk.OP_CALL), 1)
 				return c.currentChunk, retType, nil
+			} else if ident.Value == "addr" {
+				// addr(ref x) debug function
+				if len(n.Arguments) != 1 {
+					return nil, nil, fmt.Errorf("[line %d] addr expects 1 argument", c.currentLine)
+				}
+				// Compile Argument
+				// We expect a Reference on the stack (ObjRef).
+				// We do NOT want auto-dereference.
+				_, argType, err := c.Compile(n.Arguments[0])
+				if err != nil {
+					return nil, nil, err
+				}
+
+				if _, isRef := argType.(*ast.RefType); !isRef {
+					// Check if user passed `ref x` (PrefixExpression) which returns RefType
+					// Or a variable that is RefType.
+					// If they passed `x` which is int, argType is int.
+					return nil, nil, fmt.Errorf("[line %d] addr() requires a reference. Try 'addr(ref %s)'", c.currentLine, n.Arguments[0].String())
+				}
+
+				c.emitByte(byte(chunk.OP_ADDR))
+				return c.currentChunk, &ast.PrimitiveType{Name: "string"}, nil
 			}
 		}
 

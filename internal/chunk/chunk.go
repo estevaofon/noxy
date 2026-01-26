@@ -78,6 +78,7 @@ const (
 	OP_SET_PROPERTY_DEREF
 	OP_SWAP
 	OP_COPY
+	OP_ADDR
 )
 
 func (op OpCode) String() string {
@@ -414,6 +415,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_SWAP", offset)
 	case OP_COPY:
 		return c.simpleInstruction("OP_COPY", offset)
+	case OP_ADDR:
+		return c.simpleInstruction("OP_ADDR", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

@@ -1,0 +1,60 @@
+
+// Test: addr() built-in function
+// Usage: addr(ref variable)
+
+let global_var: int = 100
+let global_ref: ref int = ref global_var
+
+func test_local()
+    print("--- Local Variable Address ---")
+    let x: int = 10
+    let r1: ref int = ref x
+    let r2: ref int = r1 // Copy reference
+    
+    // 1. Get address of x directly (must use ref x)
+    let addr_x: string = addr(ref x)
+    print(f"Address of x: {addr_x}")
+    
+    // 2. Get address via reference
+    let addr_r1: string = addr(r1) // Valid: r1 is ref int
+    print(f"Address via r1: {addr_r1}")
+    
+    if addr_x == addr_r1 then
+        print("PASS: addr(ref x) matches addr(r1)")
+    else
+        print(f"FAIL: Mismatch. {addr_x} != {addr_r1}")
+    end
+    
+    // 3. Rebind check
+    let y: int = 20
+    r1 = ref y // Rebind r1 to y
+    let addr_y: string = addr(ref y)
+    let addr_r1_new: string = addr(r1)
+    
+    print(f"Address of y: {addr_y}")
+    print(f"Address via r1 (after rebind): {addr_r1_new}")
+    
+    if addr_r1_new != addr_x && addr_r1_new == addr_y then
+         print("PASS: Rebind changed address correctly")
+    else
+         print("FAIL: Rebind logic failed")
+    end
+end
+
+func test_global()
+    print("\n--- Global Variable Address ---")
+    let addr_g: string = addr(ref global_var)
+    let addr_ref: string = addr(global_ref)
+    
+    print(f"Global Address: {addr_g}")
+    print(f"Global Ref Address: {addr_ref}")
+    
+    if addr_g == addr_ref then
+        print("PASS: Global address matches")
+    else
+        print("FAIL: Global address mismatch")
+    end
+end
+
+test_local()
+test_global()

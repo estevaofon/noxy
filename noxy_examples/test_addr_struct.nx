@@ -1,0 +1,40 @@
+
+struct Point
+    x: int,
+    y: int
+end
+
+func test_struct()
+    print("--- Struct Address Test ---")
+    let p1: Point = Point(10, 20)
+    let p2: Point = Point(30, 40)
+    
+    // Address of variables
+    let addr_p1: string = addr(ref p1)
+    let addr_p2: string = addr(ref p2)
+    
+    print(f"p1 var addr: {addr_p1}")
+    print(f"p2 var addr: {addr_p2}")
+    
+    if addr_p1 != addr_p2 then
+        print("PASS: p1 and p2 have different variable addresses")
+    else
+        print("FAIL: p1 and p2 have same address?")
+    end
+    
+    // Address of fields
+    let addr_p1_x: string = addr(ref p1.x)
+    let addr_p2_x: string = addr(ref p2.x)
+    
+    print(f"p1.x field addr: {addr_p1_x}")
+    print(f"p2.x field addr: {addr_p2_x}")
+    
+    // CURRENT LIMITATION LOGIC CHECK:
+    if addr_p1_x == addr_p2_x then
+        print("WARNING: Field addresses are identical (Symbolic only?)")
+    else
+        print("PASS: Field addresses are distinct")
+    end
+end
+
+test_struct()
