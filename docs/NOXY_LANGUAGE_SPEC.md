@@ -480,6 +480,7 @@ print(f"Hello, {name}!")
 - `delete(map, key)`
 
 ### Utils
+- `addr(ref var)`: Returns the memory address/identity of a variable as a string.
 - `zeros(n)`: create zeroed array.
 - `fmt(format, args...)`: printf-style formatting.
   - `%s`: String
