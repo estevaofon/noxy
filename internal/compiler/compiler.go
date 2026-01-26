@@ -205,6 +205,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if isRefVal {
 						// Types must match EXACTLY (ref T = ref T)
 						if c.areTypesCompatible(refType, valType) {
+							// Check if trying to rebind a ref parameter (has no effect outside function)
+							local := c.locals[arg]
+							if local.IsParam {
+								fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
+								fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
+								fmt.Printf("  = note: '%s' is passed by reference, not a reference variable\n", ident.Value)
+								fmt.Printf("  = help: to modify the original value, assign directly: %s = <value>\n", ident.Value)
+							}
 							// REBINDING local reference
 							c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 							c.emitByte(byte(chunk.OP_POP))
