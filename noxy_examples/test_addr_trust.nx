@@ -1,0 +1,73 @@
+
+// Test: Complex Aliasing and addr() Trust Verification
+// We will create a "shell game" where we swap references and verify identity via addr()
+
+struct Container
+    id: int,
+    data: int
+end
+
+func verify_identity(name1: string, r1: ref Container, name2: string, r2: ref Container)
+    let a1: string = addr(r1)
+    let a2: string = addr(r2)
+    
+    print(f"Checking: {name1} vs {name2}")
+    print(f"  {name1}: {a1}")
+    print(f"  {name2}: {a2}")
+    
+    if a1 == a2 then
+        print("  RESULT: SAME OBJECT (Aliasing detected) [OK]")
+    else
+        print("  RESULT: DIFFERENT OBJECTS [OK]")
+    end
+end
+
+func test_shell_game()
+    print("--- The Shell Game ---")
+    
+    // Setup 3 containers
+    let c1: Container = Container(1, 100)
+    let c2: Container = Container(2, 200)
+    let c3: Container = Container(3, 300)
+    
+    // References
+    let ref_A: ref Container = ref c1
+    let ref_B: ref Container = ref c2
+    let ref_C: ref Container = ref c3
+    
+    print("Initial State:")
+    verify_identity("ref_A", ref_A, "c1", ref c1) // Should match
+    verify_identity("ref_B", ref_B, "c2", ref c2) // Should match
+    
+    print("\n--- Move 1: Swap A and B ---")
+    // Swap pointers
+    let temp: ref Container = ref_A
+    ref_A = ref_B
+    ref_B = temp
+    
+    // Now A should point to c2, B should point to c1
+    verify_identity("ref_A", ref_A, "c2", ref c2) // Match c2?
+    verify_identity("ref_B", ref_B, "c1", ref c1) // Match c1?
+    
+    print("\n--- Move 2: Everyone points to C ---")
+    ref_A = ref c3
+    ref_B = ref c3
+    
+    verify_identity("ref_A", ref_A, "c3", ref c3)
+    verify_identity("ref_B", ref_B, "c3", ref c3)
+    verify_identity("ref_A", ref_A, "ref_B", ref_B)
+    
+    print("\n--- Move 3: Modify via ref_A, check c3 ---")
+    // Update value through ref_A
+    *ref_A = Container(999, 999)
+    
+    print(f"c3 id is now: {c3.id} (Expected 999)")
+    
+    if c3.id == 999 then
+        print("PASS: Update via aliased reference worked correctly.")
+    else
+        print("FAIL: Update verified failure.")
+    end
+end
+
+test_shell_game()
