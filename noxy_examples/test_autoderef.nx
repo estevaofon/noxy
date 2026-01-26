@@ -3,7 +3,7 @@
 // Using 'int' (primitive) to clearly demonstrate value copy vs reference behavior.
 
 func increment_and_ret(i: ref int) -> int
-    i = i + 1
+    *i = i + 1
     return i // Should implicit dereference to 'int' value
 end
 

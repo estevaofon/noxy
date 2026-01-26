@@ -48,6 +48,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.REF, p.parsePrefixExpression)
 	p.registerPrefix(token.BIT_NOT, p.parsePrefixExpression)
 	p.registerPrefix(token.FUNC, p.parseFunctionLiteral)
+	p.registerPrefix(token.STAR, p.parsePrefixExpression) // Support *deref
 
 	p.registerPrefix(token.PERCENT, p.parseGroupedExpression) // Grouped expression logic for PERCENT? No.
 	p.registerPrefix(token.LBRACE, p.parseMapLiteral)

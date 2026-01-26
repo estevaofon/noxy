@@ -2,9 +2,9 @@ let a: int = 10
 let b: int = 20
 
 func swap(x: ref int, y: ref int)
-    let temp: int = x
-    x = y
-    y = temp
+    let temp: int = *x
+    *x = *y
+    *y = temp
 end
 
 swap(a, b)

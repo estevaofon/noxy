@@ -15,7 +15,7 @@ end
 
 func notify(o: Observer, new_val: int)
     // UPDATE: o.watched_value is ref int, new_val is int
-    o.watched_value = new_val
+    *o.watched_value = new_val
 end
 
 // Shared state
@@ -62,7 +62,7 @@ func main()
     // Final demonstration: direct field update
     print("")
     print("=== Direct update via sensor1.watched_value = 30 ===")
-    sensor1.watched_value = 30  // UPDATE temperature
+    *sensor1.watched_value = 30  // UPDATE temperature
     print_environment()
 end
 

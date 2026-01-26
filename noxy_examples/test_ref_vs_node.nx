@@ -8,7 +8,7 @@ end
 // Teste 1: Com ref Node
 func teste_com_ref(node: ref Node)
     let local: ref Node = node
-    local = Node(999, null)
+    *local = Node(999, null)
     print("Dentro (ref): local.valor = " + to_str(local.valor))
 end
 

@@ -2,6 +2,6 @@ let x: int = 10
 let r: ref int = ref x
 
 // This should UPDATE x
-r = 50
+*r = 50
 
 print(fmt("x = %d (expected 50)", x))

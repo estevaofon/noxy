@@ -18,7 +18,7 @@ func demo_local(r: ref int)
     
     // 1. ASSIGNMENT behaves as UPDATE VALUE (Implicit Dereference)
     // O compilador entende que 'r' é um alias para o valor.
-    r = 101 
+    *r = 101 
     print(fmt("After 'r = 101', g1 is: %v", g1)) // O valor original foi alterado
     
     // 2. EXPRESSION works automatically

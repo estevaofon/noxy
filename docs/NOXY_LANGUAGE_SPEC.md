@@ -161,42 +161,42 @@ You can use a reference (`ref T`) in expressions just like a normal value. The c
 let x: int = 10
 let r: ref int = ref x
 
-// NO explicit dereference needed (*r is not required)
+// 1. Reading (Auto-Dereference)
+// You can use the reference directly to READ the value.
+// The compiler automatically follows the pointer.
 let y: int = r + 1   // Compiler auto-derefs 'r' -> 11
 print(r)             // Prints 10
 ```
 This applies to both Local Variables and Struct Fields.
 
-#### 2. Type-Based Assignment (Updates vs Rebinds)
-When assigning to a reference variable/field, the behavior depends on the **Type** of the right-hand side:
+#### 2. Writing (Update vs Rebind)
+The distinction between modifying the *value* and modifying the *pointer* is made explicit by syntax:
 
-**A. Value Update (Assigning `T`)**
-If you assign a value of type `T` to a `ref T`, it updates the **underlying value**.
+**A. Value Update (Explicit `*`)**
+To update the content of the memory pointed to by a reference, you MUST use the dereference operator `*`.
 ```noxy
-r = 20      // Updates 'x' to 20
-box.val = 30 // Updates the value pointed to by 'box.val'
+*r = 20      // DESTROY/UPDATE: Writes 20 into the memory of 'x'
+*box.val = 30 // Writes 30 into the memory pointed to by 'box.val'
 ```
 
-**B. Pointer Rebind (Assigning `ref T`)**
-If you assign a `ref T` to a `ref T`, it changes the **pointer target**.
-*Note: This is strictly controlled. Local references cannot be unbound.*
+**B. Pointer Rebind (Standard `=`)**
+To change the reference itself (make it point to something else), use standard assignment.
+*Note: The type of the RHS must be a Reference (`ref T`).*
 ```noxy
-struct Box { val: ref int }
-let b: Box = Box(ref x)
 let z: int = 99
-
-b.val = ref z // REBIND: 'b.val' now points to 'z'
+r = ref z    // REBIND: 'r' now points to 'z' (does not affect 'x')
 ```
 
 #### 3. Strict Type Safety
-You cannot assign a raw value to a reference field thinking it will update the pointer.
+The compiler enforces these rules to prevent ambiguity:
 ```noxy
-b.val = 50 // This is an UPDATE - writes 50 to the target, not a rebind
+r = 50       // ERROR: Cannot assign 'int' to 'ref int'. Did you mean '*r = 50'?
+*r = ref z   // ERROR: Cannot assign 'ref int' to 'int'.
 ```
 
 #### 4. Reference Patterns
 
-Type-Based Assignment enables powerful patterns in Noxy, comparable to smart pointers, mutable bindings, and dynamic aliases in other languages.
+These patterns allow Noxy to safely support smart pointers and mutable bindings.
 
 ##### Pattern A: Mutable Bindings (Pass-by-Reference)
 
@@ -208,10 +208,10 @@ func double_it(val: ref int)
 end
 
 func swap(a: ref int, b: ref int)
-    let val_a: int = a  // Read values first
+    let val_a: int = a  // Read values (auto-deref)
     let val_b: int = b
-    a = val_b           // UPDATE with int → writes to target
-    b = val_a
+    *a = val_b          // UPDATE: write to address of 'a' using '*'
+    *b = val_a          // UPDATE: write to address of 'b' using '*'
 end
 
 let x: int = 10
@@ -222,7 +222,7 @@ let b: int = 200
 swap(ref a, ref b)  // a=200, b=100
 ```
 
-> **Note**: When swapping, you must read values into `int` variables first. Using `a = b` directly would REBIND (since `b` is `ref int`), not update.
+> **Note**: This syntax makes swaps safe and explicit. `a = b` would try to rebind the pointer `a` to point to the same place as `b` (if `b` were a reference expression), which is not what you want in a swap.
 
 ##### Pattern B: Dynamic Aliases
 
@@ -234,9 +234,9 @@ let counter_B: int = 0
 
 let active: ref int = ref counter_A
 
-active = active + 1     // Updates counter_A (now 1)
-active = ref counter_B  // REBIND: now points to counter_B
-active = active + 1     // Updates counter_B (now 1)
+*active = *active + 1     // Updates counter_A (now 1)
+active = ref counter_B    // REBIND: now points to counter_B
+*active = *active + 1     // Updates counter_B (now 1)
 // Result: counter_A=1, counter_B=1
 ```
 
@@ -259,20 +259,20 @@ let sensor: Observer = Observer("Main", ref temperature)
 print(sensor.target)  // 20 (auto-deref)
 
 // UPDATE value
-sensor.target = 25    // temperature is now 25
+*sensor.target = 25   // temperature is now 25
 
 // REBIND to different source
 sensor.target = ref humidity  // Now watching humidity
-sensor.target = 70            // humidity is now 70
+*sensor.target = 70           // humidity is now 70
 ```
 
 ##### Summary Table: Type-Based Assignment
 
-| LHS Type | RHS Type | Action | Example |
-|----------|----------|--------|---------|
-| `ref T` | `T` | **UPDATE** – writes value to target | `r = 50` |
-| `ref T` | `ref T` | **REBIND** – changes pointer | `r = ref other` |
-| `T` | `T` | Standard assignment | `x = 10` |
+| LHS Type | RHS Type | Syntax | Action |
+|----------|----------|--------|--------|
+| `ref T` | `T` | `*r = val` | **UPDATE** – writes into memory |
+| `ref T` | `ref T` | `r = ref x`| **REBIND** – changes pointer |
+| `T` | `T` | `x = val` | Standard assignment |
 
 #### Memory Safety (Captured Variables)
 Noxy ensures memory safety when using `ref`.

@@ -28,7 +28,7 @@ func main()
     // Logic: 'ctrl.target_speed' is (ref int). RHS is (int).
     // Action: Auto-dereference. Writes 50 to *motor_A_speed.
     print(fmt("Commanding %s to 50...", ctrl.name))
-    ctrl.target_speed = 50 
+    *ctrl.target_speed = 50 
     print_status() // Expect A=50, B=0
 
     // 3. REBIND: Switch Controller to Motor B
@@ -39,7 +39,7 @@ func main()
     
     // 4. UPDATE: Set speed of Motor B via Controller
     print(fmt("Commanding %s to 100...", ctrl.name))
-    ctrl.target_speed = 100
+    *ctrl.target_speed = 100
     print_status() // Expect A=50, B=100
 
     // 5. LOCAL REBIND: Local variables work the same way
@@ -52,10 +52,10 @@ func main()
     print(fmt("Monitor reads: %d", active_motor)) // Reads B (100)
     
     print("Emergency Stop via Monitor (all 0)")
-    active_motor = 0 // Writes to B
+    *active_motor = 0 // Writes to B
     // Switch local back to A to stop A
     active_motor = ref motor_A_speed
-    active_motor = 0 // Writes to A
+    *active_motor = 0 // Writes to A
     
     print_status() // Expect A=0, B=0
 end

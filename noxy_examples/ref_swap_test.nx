@@ -8,8 +8,8 @@ let b: int = 20
 func swap(x: ref int, y: ref int)
     let val_x: int = x   // Read value from x (auto-deref)
     let val_y: int = y   // Read value from y (auto-deref)
-    x = val_y            // UPDATE: write val_y to target of x
-    y = val_x            // UPDATE: write val_x to target of y
+    *x = val_y            // UPDATE: write val_y to target of x
+    *y = val_x            // UPDATE: write val_x to target of y
 end
 
 func verify()

@@ -34,7 +34,8 @@ end
 func sobrescreve_conteudo(node: ref Node)
     print("  [sobrescreve_conteudo] Recebi node ID: " + to_str(node.id))
     // Ao atribuir um novo Node() (valor), estamos substituindo o conteúdo da memória apontada.
-    node = Node(999, null) 
+    // NOVA SINTAXE: *node = ...
+    *node = Node(999, null) 
     print("  [sobrescreve_conteudo] Conteúdo sobrescrito para 999")
 end
 

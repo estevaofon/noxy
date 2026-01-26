@@ -1,0 +1,124 @@
+
+// Test: Explicit Dereference Syntax
+// This file tests the new syntax rules:
+// *r = val  (Update)
+// r = ref x (Rebind)
+// r = val   (Error)
+
+struct Box
+    val: int,
+    next: ref Box
+end
+
+func verify_syntax(r: ref int)
+    // 1. Explicit Update (*r = val)
+    *r = 100
+    print(f"Updated value via *r: {*r}") // *r in expression is valid (though r works too)
+    
+    // 2. Read (r works as value)
+    if r == 100 then
+        print("PASS: Update worked")
+    else
+        print(f"FAIL: Expected 100, got {r}")
+    end
+end
+
+func test_rebind()
+    let a: int = 10
+    let b: int = 20
+    let r: ref int = ref a
+    
+    // Initial State
+    print(f"Initial r points to a: {r}")
+    
+    // Rebind
+    r = ref b
+    print(f"Rebound r points to b: {r}")
+    
+    // Update New Target
+    *r = 99
+    print(f"Updated *r = 99. b is now: {b}, a is: {a}")
+    
+    if b == 99 && a == 10 then
+        print("PASS: Rebind and Update worked correctly")
+    else
+        print("FAIL: Rebind logic incorrect")
+    end
+end
+
+func test_struct_field_syntax()
+    let b1: Box = Box(1, null)
+    let b2: Box = Box(2, null)
+    
+    // Field Rebind
+    b1.next = ref b2
+    print(f"b1.next points to b2 (val: {b1.next.val})")
+    
+    // Field Update via Deref
+    // *b1.next = ... 
+    // This parses as *(b1.next) because DOT has higher precedence than PREFIX
+    // So valid.
+    
+    // Let's create a local ref to struct
+    let r_box: ref Box = ref b1
+    
+    // Update field of ref struct
+    // r_box.val = 50 
+    // This is implicitly valid? 
+    // r_box.val accesses field 'val' (int). 
+    // Assigning int to int. Standard assignment.
+    // Wait, r_box is ref. r_box.val auto-derefs r_box.
+    // So YES, r_box.val = 50 is fine if .val is not a ref field.
+    
+    r_box.val = 50
+    print(f"Updated r_box.val to 50. Original b1.val: {b1.val}")
+    
+    // Now Ref Field
+    // r_box.next is ref Box.
+    // *r_box.next = Box(999, null) -- Update target of next
+    
+    *r_box.next = Box(999, null)
+    print(f"Updated *r_box.next. b2 should be overwritten.")
+    print(f"b2.val: {b2.val}") // Should be 999
+    
+end
+
+
+// --- Global Scope Tests ---
+let global_A: int = 1000
+let global_B: int = 2000
+let global_ref: ref int = ref global_A
+
+func test_global_scope()
+    print("\n--- Testing Global Scope ---")
+    // 1. Read Global Ref
+    print(f"Initial global_ref points to global_A: {global_ref}") // Should be 1000
+    
+    // 2. Update via Deref (*global_ref = ...)
+    *global_ref = 1500
+    print(f"Updated global_A via *global_ref. global_A is now: {global_A}")
+    
+    // 3. Rebind Global Ref (global_ref = ...)
+    // Note: Rebinding global variable inside function requires 'global' keyword if implied? 
+    // Wait, Noxy doesn't need 'global' keyword to access globals, but maybe to assign to them?
+    // Let's try direct assignment. If Noxy creates a local shadowing it, valid.
+    // But we want to modify the GLOBAL variable 'global_ref'.
+    // Noxy usually treats assignment to unknown name as global if declared? 
+    // No, Noxy compiler `resolveLocal` returns -1, then checks `globals`.
+    // So `global_ref = ...` should hit the global logic in `AssignStmt`.
+    
+    global_ref = ref global_B
+    print(f"Rebound global_ref to global_B. Value is: {global_ref}") // 2000
+    
+    // 4. Update new target
+    *global_ref = 2500
+    print(f"Updated global_B via *global_ref. global_B is now: {global_B}")
+    
+    if global_A == 1500 && global_B == 2500 then
+        print("PASS: Global Scope Update/Rebind worked")
+    else
+        print(f"FAIL: Global State mismatch. A={global_A}, B={global_B}")
+    end
+end
+
+test_global_scope()

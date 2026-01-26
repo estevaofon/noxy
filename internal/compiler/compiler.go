@@ -179,7 +179,72 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, &ast.PrimitiveType{Name: "bytes"}, nil
 
 	case *ast.AssignStmt:
-		if ident, ok := n.Target.(*ast.Identifier); ok {
+		if prefixExp, ok := n.Target.(*ast.PrefixExpression); ok {
+			// Explicit Dereference Assignment: *ref = val
+			// This signals an UPDATE (writing to the value pointed to).
+			if prefixExp.Operator != "*" {
+				return nil, nil, fmt.Errorf("[line %d] invalid assignment target", c.currentLine)
+			}
+
+			// 1. Compile Operator (The Reference)
+			// e.g. *x = 10 -> compile x
+			_, refType, err := c.Compile(prefixExp.Right)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			// Must be a Reference type
+			refT, isRef := refType.(*ast.RefType)
+			if !isRef {
+				return nil, nil, fmt.Errorf("[line %d] cannot dereference non-reference type %s in assignment", c.currentLine, refType.String())
+			}
+
+			// 2. Compile Value
+			_, valType, err := c.Compile(n.Value)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			// 3. Type Check: ElementType vs ValueType
+			// Logic: *ref<T> = T
+			// Check if value type matches the element type of the reference
+
+			// Auto-deref RHS if it is a RefType but we need a Value
+			// e.g. *x = ref y -> Error unless *x expects a ref type
+			// Standard case: *x (int) = y (int)
+			// Complex case: *n (Node) = Node(...)
+
+			// If RHS is ref but we expect value:
+			if valRef, valIsRef := valType.(*ast.RefType); valIsRef {
+				// If element type is NOT ref, we should deref rhs?
+				// e.g. let a: ref int; *a = ref b; -> *a gets VALUE of b.
+				// Yes, auto-deref RHS value context.
+				if _, targetIsRef := refT.ElementType.(*ast.RefType); !targetIsRef {
+					c.emitByte(byte(chunk.OP_DEREF))
+					valType = valRef.ElementType
+				}
+			}
+
+			if !c.areTypesCompatible(refT.ElementType, valType) {
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s", c.currentLine, refT.ElementType.String(), valType.String())
+			}
+
+			// 4. Emit Store
+			// Stack: [Ref, Val]
+			// OP_STORE_REF expects [Ref, Val] -> writes Val to *Ref
+			c.emitByte(byte(chunk.OP_STORE_REF))
+			// Only pop if statement? AssignStmt handles the POP logic?
+			// AssignStmt usually returns `nil` for type in expression context? No, AssignStmt IS a Statement.
+			// But in Noxy, AssignStmt is treated as Statement which returns nothing to stack usually,
+			// EXCEPT Noxy uses Stack VM where assignment might leave value?
+			// Current implementation for `OP_SET_LOCAL` does `emitByte(byte(chunk.OP_POP))` after setting.
+			// `OP_STORE_REF` likely consumes both Ref and Val.
+			// Let's assume OP_STORE_REF consumes both.
+
+			return c.currentChunk, nil, nil
+
+		} else if ident, ok := n.Target.(*ast.Identifier); ok {
+			// Identifier Assignment: x = val
 			// 1. Compile Value (pushed to stack)
 			_, valType, err := c.Compile(n.Value)
 			if err != nil {
@@ -190,50 +255,42 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if arg, localType := c.resolveLocal(ident.Value); arg != -1 {
 				// Local Logic
 				_ = c.locals[arg] // Keep reference for potential future use
+
 				if refType, isRef := localType.(*ast.RefType); isRef {
-					// Assignment to a Reference (Param or Local)
-					// Logic:
-					// 1. If RHS is also RefType and matches: REBIND (Pointer Update) -> OP_SET_LOCAL
-					// 2. If RHS is ValueType and matches ElemType: UPDATE (Value Update) -> OP_STORE_VIA_REF
+					// Assignment to a Reference Variable (local ref T)
+					// NEW LOGIC: This MUST be a REBIND (ref = ref).
+					// Update (*ref = val) is handled above.
 
 					isRefVal := false
 					if valType != nil {
 						_, isRefVal = valType.(*ast.RefType)
 					}
 
-					// 1. REBIND Check
 					if isRefVal {
-						// Types must match EXACTLY (ref T = ref T)
+						// REBIND: ref = ref
 						if c.areTypesCompatible(refType, valType) {
-							// Check if trying to rebind a ref parameter (has no effect outside function)
+							// Check if trying to rebind a ref parameter
 							local := c.locals[arg]
 							if local.IsParam {
 								fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
 								fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
-								fmt.Printf("  = note: '%s' is passed by reference, not a reference variable\n", ident.Value)
-								fmt.Printf("  = help: to modify the original value, assign directly: %s = <value>\n", ident.Value)
 							}
-							// REBINDING local reference
 							c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 							c.emitByte(byte(chunk.OP_POP))
 							return c.currentChunk, nil, nil
 						}
 					}
 
-					// 2. UPDATE Check (Auto-Deref RHS if needed?)
-					// If RHS is RefType but we want Value, we deref RHS.
-					// Original code did this. Let's keep it.
-					if valRef, valIsRef := valType.(*ast.RefType); valIsRef {
-						c.emitByte(byte(chunk.OP_DEREF)) // Turn Ref<T> into T
-						valType = valRef.ElementType
+					// If we are here, it's a TYPE MISMATCH or INVALID ASSIGNMENT (trying to update via =)
+					if c.areTypesCompatible(refType.ElementType, valType) {
+						// User tried `ref = val`. Suggest `*ref = val`
+						return nil, nil, fmt.Errorf("[line %d] cannot assign value 'T' to reference 'ref T' in variable '%s'.\n  hint: Did you mean to update the value? Use '*%s = ...'", c.currentLine, ident.Value, ident.Value)
 					}
 
-					if !c.areTypesCompatible(refType.ElementType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to reference '%s': expected %s (rebind) or %s (update), got %s", c.currentLine, ident.Value, refType.String(), refType.ElementType.String(), valType.String())
-					}
-					// UPDATE Value via Ref
-					c.emitBytes(byte(chunk.OP_STORE_VIA_REF), byte(arg))
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
+
 				} else {
+					// Standard Value Assignment (int = int)
 					if !c.areTypesCompatible(localType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 					}
@@ -242,6 +299,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				}
 			} else if arg := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
+				// TODO: Check types for upvalues if possible. Assuming mostly value types for now or standard rebind.
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
@@ -249,63 +307,30 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if globalType, exists := c.globals[ident.Value]; exists {
 					// Check if global is a reference type
 					if refType, isRef := globalType.(*ast.RefType); isRef {
-						// Type-Based Assignment for Global Refs
+						// Global Reference Assignment
 						_, isRefVal := valType.(*ast.RefType)
-						if isRefVal || valType == nil {
-							// REBIND: ref = ref -> Just update the global with new ref
+
+						if isRefVal || valType == nil { // Allow rebind to null (valType is nil? null is specific type?)
+							// Actually null type needs handling.
+							// REBIND: ref = ref
 							if valType != nil && !c.areTypesCompatible(globalType, valType) {
 								return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 							}
-							// Standard global set (rebind)
+
 							nameConstant := c.makeConstant(value.NewString(ident.Value))
 							c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
 							c.emitByte(byte(chunk.OP_POP))
 						} else {
-							// UPDATE: ref = val -> Write value to target
-							if !c.areTypesCompatible(refType.ElementType, valType) {
-								return nil, nil, fmt.Errorf("[line %d] type mismatch in update to global '%s': expected %s (rebind) or %s (update), got %s", c.currentLine, ident.Value, refType.String(), refType.ElementType.String(), valType.String())
+							// User tried `ref = val`. Explicitly FORBID update via name.
+							if c.areTypesCompatible(refType.ElementType, valType) {
+								return nil, nil, fmt.Errorf("[line %d] cannot assign value to global reference '%s'.\n  hint: Did you mean to update the value? Use '*%s = ...'", c.currentLine, ident.Value, ident.Value)
 							}
-							// Emit: Get global ref, then store value into it
-							nameConstant := c.makeConstant(value.NewString(ident.Value))
-							c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConstant))
-							// Stack: [val, ref] - need to swap
-							// Use OP_STORE_REF which expects [ref, val]
-							// But we have [val, ref]. We need to emit differently.
-							// Actually, we compiled Value first, then GET_GLOBAL.
-							// Stack: [val, ref]
-							// OP_STORE_REF expects: pop val, pop ref. So [ref, val] order.
-							// We have [val, ref]. We need OP_STORE_REF_SWAPPED or different approach.
-							// Alternative: Emit GET_GLOBAL first, then compile value.
-							// But we already compiled value. Can't undo.
-							// Use OP_STORE_REF with swapped logic? Or add OP_SWAP?
-							// For now, let's just emit the global name and use a new opcode.
-							// Actually, I'll recompile: emit GET first, then value.
-							// NO - value already compiled.
-							// HACK: pop both, swap, push back? No such ops.
-							// Simplest: Just do the store in VM with swapped operands.
-							// I'll create OP_STORE_GLOBAL_DEREF which takes name as operand.
-							// Stack: [val] -> reads global ref, writes val to it.
-							// That's cleaner. Let's use that.
-							// Actually, I don't have that opcode. Let me improvise.
-							// Emit: swap then store_ref? No swap opcode.
-							// For now, just error and require wrapping in function.
-							// TODO: Add proper support later.
-							// Actually, simpler: just use existing logic but different stack order.
-							// Re-emit: POP val (save in temp), GET_GLOBAL, push val back, STORE_REF
-							// No temp storage in VM.
-							// Let's just emit correct order by recompiling:
-							// This is hacky but works: emit a synthetic sequence.
-							// GET_GLOBAL pushes ref. Then we need val on top.
-							// We already have val on stack. GET_GLOBAL added ref.
-							// Stack: [val, ref]. STORE_REF wants [ref, val].
-							// I'll add a simple OP_SWAP.
-							c.emitByte(byte(chunk.OP_SWAP))
-							c.emitByte(byte(chunk.OP_STORE_REF))
-							// No OP_POP needed - STORE_REF consumes both values
+							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 						}
 						return c.currentChunk, nil, nil
 					}
-					// Standard type check for non-ref globals
+
+					// Standard Global Assignment
 					if !c.areTypesCompatible(globalType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 					}
@@ -316,7 +341,32 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
 			// Array/Map Assignment: arr[i] = val
-			// Stack Order: [Array, Index, Value] -> OP_SET_INDEX
+			// Behavior:
+			// Arrays/Maps hold VALUES or REFERENCES?
+			// Spec says: Arrays of Ref exist.
+			// If array is `ref int[]`, then `arr[i]` accesses the int.
+			// Wait, the new syntax applies to Reference Variables.
+			// Does `arr[i]` return a reference (L-Value) or a Value?
+			// In Noxy, pass-by-value default.
+			// If `arr: int[]`, `arr[i] = 10` updates the array. This is standard.
+			// If `arr: ref int[]` (reference to array), `arr[i] = 10` updates the array pointed to. Standard.
+			// What if `arr: (ref int)[]` (Array of References)?
+			// `arr[i]` is a `ref int`.
+			// `arr[i] = ref x` (REBIND the element i to point to x).
+			// `*arr[i] = 10` (UPDATE the value pointed to by element i).
+
+			// So, `IndexExpression` assignment is REBINDING the slot in the container.
+			// If the container holds References, we are rebinding that slot.
+			// If the container holds Values, we are updating that slot (but it's just value assignment).
+
+			// So existing logic `OP_SET_INDEX` works for `arr[i] = val`.
+			// Validations:
+			// If `arr` is `(ref int)[]`:
+			//   `arr[i] = ref z` -> OK (Set Index with Ref)
+			//   `arr[i] = 50` -> ERROR (Type mismatch, expected ref int).
+			//   `*arr[i] = 50` -> This would be parsed as `*(arr[i]) = 50`. Handled by PrefixExpression case!
+
+			// So we just need to Ensure Types Match in Set Index.
 
 			// 1. Compile Array (Left)
 			_, leftType, err := c.Compile(indexExp.Left)
@@ -324,19 +374,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			// Auto-dereference collection if Ref
+			// Auto-dereference collection if Ref (e.g. ref int[])
 			if _, ok := leftType.(*ast.RefType); ok {
 				c.emitByte(byte(chunk.OP_DEREF))
 			}
 
 			// 2. Compile Index
-			// TODO: check index type?
 			_, idxType, err := c.Compile(indexExp.Index)
 			if err != nil {
 				return nil, nil, err
 			}
 
-			// Auto-dereference index if Ref
 			if _, ok := idxType.(*ast.RefType); ok {
 				c.emitByte(byte(chunk.OP_DEREF))
 			}
@@ -351,34 +399,36 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if ref, ok := leftType.(*ast.RefType); ok {
 				leftType = ref.ElementType
 			}
-
-			// Unwrap RefType in index
 			if ref, ok := idxType.(*ast.RefType); ok {
 				idxType = ref.ElementType
 			}
 
 			// Type Check
 			if arrType, ok := leftType.(*ast.ArrayType); ok {
-				// Check index is int?
 				if idxType != nil && idxType.String() != "int" {
 					return nil, nil, fmt.Errorf("[line %d] array index must be int, got %s", c.currentLine, idxType.String())
 				}
-				// Check value compatibility with element type
+
+				// STRICT CHECK:
+				// If ElementType is Ref, Value MUST be Ref (Rebind).
+				// Implicit deref/update via assignment is NOT allowed if types don't match.
+				// But `areTypesCompatible` handles exact match for Refs.
+				// So if `arr` is `ref int[]`, Element is `ref int`.
+				// `val` must be `ref int`.
+				// If `val` is `int`, `areTypesCompatible` returns false. Code errors. Correct.
+				// User must use `*arr[i] = val` which goes to PrefixExp case.
+
 				if !c.areTypesCompatible(arrType.ElementType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
 				}
 			} else if mapType, ok := leftType.(*ast.MapType); ok {
-				// Check key type
 				if !c.areTypesCompatible(mapType.KeyType, idxType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map key: expected %s, got %s", c.currentLine, mapType.KeyType.String(), idxType.String())
 				}
-				// Check value type
 				if !c.areTypesCompatible(mapType.ValueType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s", c.currentLine, mapType.ValueType.String(), valType.String())
 				}
 			} else {
-				// Dynamic or error?
-				// Allow if 'any'
 				if leftType != nil && leftType.String() != "any" {
 					return nil, nil, fmt.Errorf("[line %d] index assignment on non-array/map type: %s", c.currentLine, leftType.String())
 				}
@@ -389,7 +439,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		} else if memberExp, ok := n.Target.(*ast.MemberAccessExpression); ok {
 			// Struct Field Assignment: obj.field = val
-			// Stack Order: [Object, Value] -> OP_SET_PROPERTY
+			// Only REBIND allowed for Ref Fields.
+			// *obj.field = val is handled by PrefixExpression.
 
 			// 1. Compile Object
 			_, leftType, err := c.Compile(memberExp.Left)
@@ -403,13 +454,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			// 2. Compile Value
-			_, valType, err := c.Compile(n.Value) // Capturing valType
+			_, valType, err := c.Compile(n.Value)
 			if err != nil {
 				return nil, nil, err
 			}
 
 			// RESOLVE FIELD TYPE:
-			// Look up struct field type to enforce safety / enable update logic
 			var fieldType ast.NoxyType
 			if prim, ok := leftType.(*ast.PrimitiveType); ok {
 				if structDef, exists := c.structs[prim.Name]; exists {
@@ -423,51 +473,32 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			// TYPE-BASED ASSIGNMENT LOGIC:
-			// 1. If Field is Ref:
 			if fieldType != nil {
+				// If Field is Ref, Value MUST be compatible Ref (Rebind).
 				if _, isRefField := fieldType.(*ast.RefType); isRefField {
-					// Check Value Type
-					// Allow NULL to be assigned to Ref (Rebind to null)
+					// Check Compatibility
 					isRefVal := false
 					if valType != nil {
 						_, isRefVal = valType.(*ast.RefType)
 					}
 
+					// Assuming null is compatible
 					if isRefVal || valType == nil {
-						// A) REBIND: ref field = ref val OR null -> OP_SET_PROPERTY (Change Pointer)
-						// Must match ref types if not null
-						if valType != nil {
-							if !c.areTypesCompatible(fieldType, valType) {
-								return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
-							}
+						if valType != nil && !c.areTypesCompatible(fieldType, valType) {
+							return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 						}
-						// Proceed to Standard Set Property (below)
 					} else {
-						// B) UPDATE: ref field = val -> Auto-Deref (*field = val)
-						// Check if value matches ElementType
-						// fieldType is Ref<T>, valType is T?
-						refField := fieldType.(*ast.RefType)
-						if c.areTypesCompatible(refField.ElementType, valType) {
-							// Emit UPDATE logic:
-							// Emit UPDATE logic: [Obj, Value]
-							// Use OP_SET_PROPERTY_DEREF which handles: Obj.Field (Ref) -> *Ref = Value
-							nameConst := c.makeConstant(value.NewString(memberExp.Member))
-							c.emitBytes(byte(chunk.OP_SET_PROPERTY_DEREF), byte(nameConst))
-							c.emitByte(byte(chunk.OP_POP)) // Result of assignment?
-
-							// Wait, SET_PROPERTY returns Val. POP removes it (as Stmt).
-							// SET_PROPERTY_DEREF should also return Val.
-
-							return c.currentChunk, nil, nil
-
-						} else {
-							return nil, nil, fmt.Errorf("[line %d] type mismatch: expected %s (rebind) or %s (update), got %s", c.currentLine, fieldType.String(), refField.ElementType.String(), valType.String())
-						}
+						// Error: Trying to assign Value to Ref Field
+						return nil, nil, fmt.Errorf("[line %d] cannot assign value to reference field '%s'.\n  hint: Did you mean to update the value? Use '*%s.%s = ...'", c.currentLine, memberExp.Member, "...", memberExp.Member)
 					}
-
+				} else {
+					// Standard Field
+					if !c.areTypesCompatible(fieldType, valType) {
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in field assignment: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
+					}
 				}
-				// Not a ref field, fallthrough to standard logic
 			}
+
 			// Field Name
 			nameConst := c.makeConstant(value.NewString(memberExp.Member))
 			c.emitBytes(byte(chunk.OP_SET_PROPERTY), byte(nameConst))

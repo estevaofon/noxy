@@ -6,27 +6,27 @@ let y: int = 20
 
 print("Step 1: Calling update(ref x)")
 func update(r: ref int)
-    r = 99  // UPDATE: escreve 99 no alvo
+    *r = 99  // UPDATE: escreve 99 no alvo
 end
 update(ref x)  // x agora é 99
 print(fmt("After update: x = %d", x))
 
 print("Step 2: Local ref operations")
 let local_ref: ref int = ref x
-local_ref = 50       // UPDATE: x = 50
+*local_ref = 50       // UPDATE: x = 50
 print(fmt("After local_ref = 50: x = %d", x))
 
 local_ref = ref y    // REBIND: agora aponta para y
-local_ref = 100      // UPDATE: y = 100
+*local_ref = 100      // UPDATE: y = 100
 print(fmt("After local_ref = 100: y = %d", y))
 
 print("Step 3: Struct field operations")
 let box: Box = Box(ref x)
-box.val = 200        // UPDATE: x = 200
+*box.val = 200        // UPDATE: x = 200
 print(fmt("After box.val = 200: x = %d", x))
 
 box.val = ref y      // REBIND: agora aponta para y
-box.val = 300        // UPDATE: y = 300
+*box.val = 300        // UPDATE: y = 300
 print(fmt("After box.val = 300: y = %d", y))
 
 print("Done!")

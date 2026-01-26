@@ -10,11 +10,11 @@ func swap_wrong(x: ref int, y: ref int)
     
     // x = y: Como y é ref int, isso faz REBIND do parâmetro x
     // O parâmetro x (uma referência local) agora aponta para onde y aponta
-    x = y
+    *x = *y
     print(fmt("Após x = y: x=%d, y=%d", x, y))
     
     // y = temp: temp é int, então faz UPDATE do alvo de y
-    y = temp
+    *y = temp
     print(fmt("Após y = temp: x=%d, y=%d", x, y))
 end
 
@@ -24,8 +24,8 @@ func swap_correct(x: ref int, y: ref int)
     let val_y: int = y   // Lê valor
     print(fmt("val_x=%d, val_y=%d", val_x, val_y))
     
-    x = val_y            // UPDATE: escreve no alvo
-    y = val_x            // UPDATE: escreve no alvo
+    *x = val_y            // UPDATE: escreve no alvo
+    *y = val_x            // UPDATE: escreve no alvo
     print(fmt("Após UPDATE: x=%d, y=%d", x, y))
 end
 

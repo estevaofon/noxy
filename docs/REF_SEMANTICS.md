@@ -92,59 +92,49 @@ end
 
 ## 4. Modificando Campos vs Modificando o Ponteiro
 
-### Modificar um campo (sempre afeta o objeto original):
+A Noxy introduziu uma distinção sintática explícita para evitar ambiguidades:
+
+1.  **Rebind** (`ptr = ref outro`): Muda para ONDE o ponteiro aponta.
+2.  **Update** (`*ptr = valor`): Muda o VALOR no endereço apontado.
+
+### Modificar um campo (Sempre Update se não for ref)
+
+Para campos primitivos, a atribuição é direta e modifica o objeto original (graças ao auto-deref na leitura do ponteiro struct):
 
 ```noxy
 func mudar_valor(node: ref Node)
-    node.valor = 999  // Modifica o Node original - OK!
+    node.valor = 999  // OK: Acessa o objeto original e muda o campo
 end
-
-let n: Node = Node(10, null)
-mudar_valor(ref n)
-print(to_str(n.valor))  // Imprime: 999
 ```
 
-### Modificar o ponteiro:
+### Modificar o ponteiro (Rebind) vs Sobrescrever (Update)
 
 ```noxy
-// Com parâmetro ref - MODIFICA o original!
-func substituir(node: ref Node)
-    node = Node(999, null)  // Substitui a variável do chamador!
+// 1. REBIND (Mudar a seta)
+func rebind_exemplo(node: ref Node)
+    // Muda a variável LOCAL 'node' para apontar para outro lugar
+    node = Node(999, null)  // ERRO! Não pode atribuir valor a ref.
+    
+    let novo: Node = Node(999, null)
+    node = ref novo // OK: Agora 'node' aponta para 'novo'
+    // O Node original do chamador NÃO foi afetado.
 end
 
-let n: Node = Node(10, null)
-substituir(ref n)
-print(to_str(n.valor))  // Imprime: 999 (n foi substituído!)
-```
-
-```noxy
-// Com variável local - NÃO afeta o original
-func nao_substitui(node: ref Node)
-    let local: ref Node = node
-    local = Node(999, null)  // Só muda 'local'
-end
-
-let n: Node = Node(10, null)
-nao_substitui(ref n)
-print(to_str(n.valor))  // Imprime: 10 (n permanece intacto!)
-```
-
----
-
-## 5. Regra de Ouro
-
-> **Quando precisar traversar uma estrutura de dados sem modificar o ponteiro original,
-> sempre crie uma variável local para a travessia.**
-
-```noxy
-func traverse_seguro(head: ref Node)
-    let current: ref Node = head  // Cria cópia LOCAL do ponteiro
-    while current != null do
-        // usa current...
-        current = current.proximo  // Seguro!
-    end
+// 2. UPDATE DESTRUTIVO (Mudar o alvo)
+func update_exemplo(node: ref Node)
+    // Usa o asterisco (*) para dizer: "Vá no endereço e escreva lá"
+    *node = Node(999, null)
+    // AGORA o objeto original do chamador FOI DESTRUÍDO/SUBSTITUÍDO!
 end
 ```
+
+### Tabela Verdade da Sintaxe
+
+| Sintaxe | Ação | Efeito no Chamador |
+| :--- | :--- | :--- |
+| `r = ref x` | **Rebind** | Nenhum (só muda variável local `r`) |
+| `*r = x` | **Update** | **Destrutivo** (altera memória original) |
+| `r = x` | **Erro** | Proteção contra bugs |
 
 ---
 
@@ -225,6 +215,7 @@ end
 | Situação | Código | Efeito |
 |----------|--------|--------|
 | Parâmetro `ref`, atribuir campo | `n.valor = x` | Modifica objeto ✓ |
-| Parâmetro `ref`, atribuir variável | `n = outro` | **Modifica original do chamador!** |
-| Variável local `ref T`, atribuir campo | `v.campo = x` | Modifica objeto ✓ |
-| Variável local `ref T`, atribuir variável | `v = outro` | Só muda ponteiro local |
+| Parâmetro `ref`, rebind | `n = ref outro` | Só muda variável local `n` |
+| Parâmetro `ref`, update | `*n = valor` | **Modifica original do chamador!** |
+| Variável local `ref T`, update | `*v = valor` | Modifica objeto apontado ✓ |
+| Variável local `ref T`, rebind | `v = ref outro` | Só muda ponteiro local |

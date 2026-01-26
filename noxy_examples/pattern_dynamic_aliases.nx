@@ -9,7 +9,7 @@ let counter_B: int = 0
 let counter_C: int = 0
 
 func increment(counter: ref int)
-    counter = counter + 1
+    *counter = counter + 1
 end
 
 func print_counters()
@@ -46,7 +46,7 @@ func main()
     
     // UPDATE directly via alias
     print("Setting C to 100 via direct assignment...")
-    active_counter = 100
+    *active_counter = 100
     print_counters()
     
     // Final state shows independent counters
