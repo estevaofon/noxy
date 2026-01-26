@@ -52,62 +52,40 @@ end
 
 ---
 
-## 3. Exemplo Prático: O Problema
+## 3. Exemplo Prático: O Mito da Destruição
 
-### Código ERRADO ❌
+Muitos pensam que como `ref` permite alterar o objeto, reatribuir a variável também altera o chamador. **Isso não é verdade para ponteiros!**
+
+### O que realmente acontece
 
 ```noxy
 let global_node: Node = Node(10, null)
 
 func traverse(node: ref Node)
-    // PROBLEMA: 'node' é um parâmetro ref!
-    // Atribuir a 'node' modifica 'global_node'!
+    // Isso é seguro! 'node' é uma variável local que contém um endereço.
+    // Mudar o endereço que 'node' aponta NÃO muda 'global_node'.
     while node != null do
         print(to_str(node.valor))
-        node = node.proximo  // ← ERRO: modifica global_node!
+        node = node.proximo  // ← Só muda a variável local 'node'
     end
 end
 
 traverse(ref global_node)
-// Depois dessa chamada, global_node foi corrompido!
+// global_node continua apontando para o início da lista!
 ```
 
-**O que acontece:**
-```
-Antes da chamada:
-global_node ──────▶ [Node: 10] ──▶ [Node: 20] ──▶ null
+### Então, qual é o risco?
 
-Depois de "node = node.proximo":
-global_node ──────▶ [Node: 20] ──▶ null   (Perdemos o primeiro nó!)
-```
+O risco é **confundir o leitor**. Reusar o parâmetro para iterar é má prática, mas não corrompe a memória do chamador.
 
-### Código CORRETO ✓
+O **verdadeiro poder (e perigo)** do `ref` é alterar o CONTEÚDO:
 
 ```noxy
-let global_node: Node = Node(10, null)
-
-func traverse(node: ref Node)
-    // SOLUÇÃO: criar variável LOCAL para traversar
-    let current: ref Node = node
-    while current != null do
-        print(to_str(current.valor))
-        current = current.proximo  // ← OK: só muda o ponteiro local
-    end
+func destruir(node: ref Node)
+    // Isso é PERIGOSO. Atribuir um VALOR sobrescreve a memória original!
+    node = Node(666, null) 
 end
-
-traverse(ref global_node)
-// global_node permanece intacto!
-```
-
-**O que acontece:**
-```
-Durante a chamada:
-global_node ──────▶ [Node: 10] ──▶ [Node: 20] ──▶ null
-                         ▲
-current (local) ─────────┘  (depois: ──▶ [Node: 20] ──▶ null ──▶ null)
-
-Depois da chamada:
-global_node ──────▶ [Node: 10] ──▶ [Node: 20] ──▶ null  (intacto!)
+// global_node agora teria ID 666!
 ```
 
 ---

@@ -1,0 +1,61 @@
+struct Node
+    id: int,
+    next: ref Node
+end
+
+// Caso 1: Mover o Ponteiro Local (Variável Local)
+// Comportamento: Apenas a variável local 'current' muda. O chamador não é afetado.
+func traverse_com_local(node: ref Node)
+    print("  [traverse_com_local] Recebi node ID: " + to_str(node.id))
+    let current: ref Node = node
+    current = current.next // Rebind local
+    if current != null then
+        print("  [traverse_com_local] 'current' avançou para ID: " + to_str(current.id))
+    else
+        print("  [traverse_com_local] 'current' é null")
+    end
+end
+
+// Caso 2: Tentar Mover o Parâmetro (Rebind de Referência)
+// Comportamento: O parâmetro 'node' é uma variável local que guarda o endereço.
+// Atribuir outro ENDEREÇO a ela (node = node.next) só muda o parâmetro local.
+// NÃO afeta a variável do chamador. (Equivalente a mudar um ponteiro Node*, não Node**)
+func tenta_mover_parametro(node: ref Node)
+    print("  [tenta_mover_parametro] Recebi node ID: " + to_str(node.id))
+    node = node.next // Rebind do parâmetro (local)
+    if node != null then
+        print("  [tenta_mover_parametro] Parâmetro 'node' agora aponta para ID: " + to_str(node.id))
+    end
+end
+
+// Caso 3: Sobrescrever o CONTEÚDO (Assign de Valor)
+// Comportamento: Atribuir um VALOR (Node struct) a uma referência faz uma atribuição por desreferência (*ptr = val).
+// Isso MODIFICA os dados do objeto original!
+func sobrescreve_conteudo(node: ref Node)
+    print("  [sobrescreve_conteudo] Recebi node ID: " + to_str(node.id))
+    // Ao atribuir um novo Node() (valor), estamos substituindo o conteúdo da memória apontada.
+    node = Node(999, null) 
+    print("  [sobrescreve_conteudo] Conteúdo sobrescrito para 999")
+end
+
+// Setup
+let n3: Node = Node(3, null)
+let n2: Node = Node(2, ref n3)
+let head: Node = Node(1, ref n2)
+
+print("=== INICIO ===")
+print("Head Original ID: " + to_str(head.id)) // 1
+
+print("\n--- Teste 1: Usando variavel local (Seguro) ---")
+traverse_com_local(ref head)
+print("[Fora] Head ID: " + to_str(head.id)) // Deve continuar 1
+
+print("\n--- Teste 2: Tentando mover o parametro (Também Seguro/Inócuo) ---")
+tenta_mover_parametro(ref head)
+print("[Fora] Head ID: " + to_str(head.id)) // CONTINUA 1! (O ponteiro do chamador não muda)
+print("(Nota: O parametro 'node' se comportou como uma variavel local)")
+
+print("\n--- Teste 3: Sobrescrevendo com Valor (Destrutivo) ---")
+sobrescreve_conteudo(ref head)
+print("[Fora] Head ID: " + to_str(head.id)) // AGORA MUDOU PARA 999!
+print("(Nota: Atribuir um VALOR a uma referencia substitui o objeto na memória)")

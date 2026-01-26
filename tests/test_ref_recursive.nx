@@ -9,8 +9,8 @@ let n1: Node = Node(1, null)
 let n2: Node = Node(2, null)
 let n3: Node = Node(3, null)
 
-n1.next = n2
-n2.next = n3
+n1.next = ref n2
+n2.next = ref n3
 
 func recursive_test(node: ref Node) -> ref Node
     if node == null then
