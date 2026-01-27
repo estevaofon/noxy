@@ -1,0 +1,27 @@
+// Minimal reproduction for list of refs
+struct Vertex
+    id: int
+end
+
+print("Test 1: Declaration with empty list")
+// let l1: ref Vertex[] = [] // EXPECT FAILURE: "expected ref Vertex[], got any[]"
+// print("L1 ok")
+
+print("Test 2: Declaration with typed element")
+let v: Vertex = Vertex(1)
+let l2: ref Vertex[] = [ref v]
+print("L2 created. Len: " + to_str(length(l2)))
+
+print("Test 5: Typed array assignment")
+let arr: (ref Vertex)[] = [ref v] // Explicit precedence now required
+let elem: ref Vertex = arr[0] 
+print("Typed elem: " + to_str(elem.id))
+
+print("Test 6: Append to typed array")
+let v2: Vertex = Vertex(2)
+append(arr, ref v2)
+print("Arr len: " + to_str(length(arr)))
+
+
+
+

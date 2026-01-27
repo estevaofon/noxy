@@ -1,0 +1,30 @@
+// Test for Struct Value Arrays (Vertex[])
+
+struct Vertex
+    id: int
+end
+
+print("Test 1: Struct Array Declaration")
+let v1: Vertex = Vertex(1)
+let list: Vertex[] = [v1] 
+print("List created. Len: " + to_str(length(list)))
+
+print("Test 2: Access Value")
+let val: Vertex = list[0]
+print("Val ID: " + to_str(val.id))
+
+print("Test 3: Append Value")
+let v2: Vertex = Vertex(2)
+append(list, v2)
+print("Updated Len: " + to_str(length(list)))
+print("Second ID: " + to_str(list[1].id))
+
+print("Test 4: Value Semantics Check (Shared Reference behavior actually)")
+// In Noxy, structs are reference types by default (ObjInstance).
+// So modifying v1 should reflect in list[0]?
+v1.id = 99
+print("Modified v1.id: " + to_str(v1.id))
+print("List[0].id: " + to_str(list[0].id))
+// If they are same object, it should be 99.
+
+print("Done")

@@ -1,0 +1,26 @@
+struct Vertex
+    id: int
+end
+
+// Cenário Inicial
+let a: Vertex = Vertex(1)
+
+// --- CASO 1: Array Comum ---
+let lista_comum: Vertex[] = [a]
+
+lista_comum[0] = Vertex(2) 
+// Resultado: 
+// 'lista_comum[0]' agora é o Vertex(2)
+// 'a' CONTINUA sendo Vertex(1) -> O vínculo foi quebrado.
+print(lista_comum[0].id)
+print(a.id)
+
+// --- CASO 2: Array de Refs ---
+let lista_refs: (ref Vertex)[] = [ref a]
+
+*lista_refs[0] = Vertex(2)
+// Resultado:
+// Como lista_refs[0] é um ponteiro para a variável 'a'...
+//... a variável 'a' AGORA É Vertex(2)! -> Você mudou a variável original.
+print(lista_refs[0].id)
+print(a.id)

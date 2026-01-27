@@ -1,0 +1,252 @@
+// Graph with Cycles Verification Project
+// Testing circular references, memory safety, and graph traversal.
+// ============================================================
+// Graph com Ciclos em Noxy - Teste de Referências Circulares
+// ============================================================
+//
+// OBJETIVO:
+// Validar que o sistema de refs suporta referências circulares
+// sem entrar em loop infinito ou corromper memória.
+//
+// FEATURES VALIDADAS:
+// ✅ Ref circular simples              -> A.vizinhos[0] = B, B.vizinhos[0] = A
+// ✅ Deferência circular profunda      -> b.vizinhos[0].vizinhos[0].nome
+// ✅ DFS não entra em loop infinito    -> Flag visitado previne revisita
+// ✅ BFS não entra em loop infinito    -> Flag visitado previne revisita
+// ✅ Mutação de campo via ref          -> v.visitado = true persiste
+// ✅ Detecção de ciclo                 -> has_cycle() retorna true
+// ✅ Múltiplas refs para mesmo nó      -> C recebe refs de B, D, E
+// ✅ Lista tipada de refs              -> (ref Vertex)[]
+// ✅ slice() com lista de refs         -> array_utils.slice() funciona
+//
+// ESTRUTURA DO GRAFO:
+//
+//        A ---- B
+//        |      |
+//        |      |
+//        D ---- C
+//         \    /
+//          \  /
+//           E
+//
+// CICLOS PRESENTES:
+// - A -> B -> C -> D -> A
+// - D -> E -> C -> D
+//
+// ============================================================
+
+use array_utils
+
+// --- Phase 1: Struct Vertex ---
+struct Vertex
+    id: int,
+    nome: string,
+    vizinhos: list,   // list of ref Vertex
+    visitado: bool
+end
+
+// --- Phase 3: Struct Graph ---
+struct Graph
+    vertices: list   // list of ref Vertex
+end
+
+// --- Phase 3 & 4: Helper Functions ---
+
+func create_vertex(g: ref Graph, id: int, nome: string) -> ref Vertex
+    let v: Vertex = Vertex(id, nome, [], false)
+    append(g.vertices, ref v)
+    return ref v
+end
+
+func add_edge(v1: ref Vertex, v2: ref Vertex)
+    append(v1.vizinhos, v2)
+    append(v2.vizinhos, v1)  // Undirected graph (bidirectional ref)
+end
+
+func reset_visited(g: ref Graph)
+    let i: int = 0
+    while i < length(g.vertices) do
+        let v: ref Vertex = g.vertices[i]
+        v.visitado = false
+        i = i + 1
+    end
+end
+
+// --- Phase 5: DFS (Depth-First Search) ---
+
+func dfs(v: ref Vertex)
+    if v.visitado then
+        return  // Critical: prevents infinite loop in cycles
+    end
+    
+    v.visitado = true
+    print("Visitando: " + v.nome)
+    
+    let i: int = 0
+    while i < length(v.vizinhos) do
+        let vizinho: ref Vertex = v.vizinhos[i]
+        dfs(vizinho)
+        i = i + 1
+    end
+end
+
+// --- Phase 6: BFS (Breadth-First Search) ---
+
+func bfs(start: ref Vertex)
+    let fila: (ref Vertex)[] = [start]
+    start.visitado = true
+    
+    while length(fila) > 0 do
+        // Remove first element from queue using slice
+        let atual: ref Vertex = fila[0]
+        if length(fila) > 1 then
+            fila = array_utils.slice(fila, 1, length(fila))
+        else
+            fila = []
+        end
+        
+        print("Visitando: " + atual.nome)
+        
+        let i: int = 0
+        while i < length(atual.vizinhos) do
+            let vizinho: ref Vertex = atual.vizinhos[i]
+            if vizinho.visitado == false then
+                vizinho.visitado = true
+                append(fila, vizinho)
+            end
+            i = i + 1
+        end
+    end
+end
+
+// --- Phase 7: Cycle Detection ---
+
+func has_cycle_util(v: ref Vertex, parent: ref Vertex) -> bool
+    v.visitado = true
+    
+    let i: int = 0
+    while i < length(v.vizinhos) do
+        let vizinho: ref Vertex = v.vizinhos[i]
+        
+        if vizinho.visitado == false then
+            // Recurse
+            if has_cycle_util(vizinho, v) then
+                return true
+            end
+        else
+            // Neighbor visited and not parent = CYCLE!
+            if parent != null then
+                if vizinho.id != parent.id then
+                    return true
+                end
+            else
+                return true
+            end
+        end
+        
+        i = i + 1
+    end
+    
+    return false
+end
+
+func has_cycle(g: ref Graph) -> bool
+    reset_visited(g)
+    
+    // Check from first vertex (assuming connected component for test)
+    if length(g.vertices) > 0 then
+        let start: ref Vertex = g.vertices[0]
+        return has_cycle_util(start, null)
+    end
+    
+    return false
+end
+
+// --- Phase 8: Metrics ---
+
+func degree(v: ref Vertex) -> int
+    return length(v.vizinhos)
+end
+
+func total_edges(g: ref Graph) -> int
+    let soma: int = 0
+    let i: int = 0
+    while i < length(g.vertices) do
+        let v: ref Vertex = g.vertices[i]
+        soma = soma + length(v.vizinhos)
+        i = i + 1
+    end
+    // Each edge counted twice
+    return soma / 2
+end
+
+// --- Phase 9: Main Test ---
+
+print("=== Graph com Ciclos - Teste ===")
+print("")
+
+// Create graph
+let grafo: Graph = Graph([])
+
+// Create vertices
+let a: ref Vertex = create_vertex(ref grafo, 1, "A")
+let b: ref Vertex = create_vertex(ref grafo, 2, "B")
+let c: ref Vertex = create_vertex(ref grafo, 3, "C")
+let d: ref Vertex = create_vertex(ref grafo, 4, "D")
+let e: ref Vertex = create_vertex(ref grafo, 5, "E")
+
+// Create edges (with cycles!)
+//     A ---- B
+//     |      |
+//     D ---- C
+//      \    /
+//       \  /
+//        E
+
+add_edge(a, b)
+add_edge(b, c)
+add_edge(c, d)
+add_edge(d, a)  // Closes cycle A-B-C-D-A
+add_edge(d, e)
+add_edge(e, c)  // Closes cycle D-E-C-D
+
+print("Grafo criado com " + to_str(length(grafo.vertices)) + " vértices")
+print("Total de arestas: " + to_str(total_edges(ref grafo)))
+print("")
+
+// Test circular ref basic
+print("Teste de ref circular:")
+let a_viz0: ref Vertex = a.vizinhos[0]
+print("A -> vizinho[0] -> nome = " + a_viz0.nome)
+
+let b_viz0: ref Vertex = b.vizinhos[0]
+let b_viz0_viz0: ref Vertex = b_viz0.vizinhos[0]
+print("B -> vizinho[0] -> vizinhos[0] -> nome = " + b_viz0_viz0.nome)
+print("")
+
+// DFS
+print("DFS a partir de A:")
+reset_visited(ref grafo)
+dfs(a)
+print("")
+
+// BFS
+print("BFS a partir de A:")
+reset_visited(ref grafo)
+bfs(a)
+print("")
+
+// Cycle detection
+print("Grafo contém ciclo? " + to_str(has_cycle(ref grafo)))
+print("")
+
+// Degrees
+print("Graus dos vértices:")
+print("- Grau de A: " + to_str(degree(a)))
+print("- Grau de B: " + to_str(degree(b)))
+print("- Grau de C: " + to_str(degree(c)))
+print("- Grau de D: " + to_str(degree(d)))
+print("- Grau de E: " + to_str(degree(e)))
+print("")
+
+print("=== Testes concluídos! ===")

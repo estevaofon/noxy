@@ -522,16 +522,70 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 }
 
 // Type parsing
+// Type Parsing Strategy:
+// We distinguish between 'parseType' and 'parseAtomicType' to handle operator precedence correctly,
+// particularly for Reference vs Array binding.
+//
+//  1. parseType (Higher Level):
+//     Handles modifiers that might have ambiguous precedence, like 'ref' (prefix) vs '[]' (postfix).
+//     It enforces that '[]' binds tighter than 'ref' by default so `ref int[]` means `Ref<Array<int>>`.
+//
+//  2. parseAtomicType (Fundamental Unit):
+//     Parses the most basic type unit (int, ident, map, etc.) or a parenthesized group '(T)'.
+//     By using parentheses, the user can override precedence, allowing `(ref int)[]` to mean `Array<Ref<int>>`.
 func (p *Parser) parseType() ast.NoxyType {
-	// Optional REF
+	// Optional REF - Handle REF here to wrap the result (Ref(Type))
+	// This restores `ref int[]` -> Ref(Array(int)) precedence
 	if p.curToken.Type == token.REF {
 		p.nextToken()
-		// Wrap recursive call
 		elementType := p.parseType()
 		if elementType == nil {
 			return nil
 		}
 		return &ast.RefType{ElementType: elementType}
+	}
+
+	t := p.parseAtomicType()
+	if t == nil {
+		return nil
+	}
+
+	// Check for array brackets [] or [size]
+	// Loop to support multidimensional arrays int[][]
+	for p.peekTokenIs(token.LBRACKET) {
+		p.nextToken() // eat [
+
+		size := 0
+		// Check for size (optional)
+		if !p.peekTokenIs(token.RBRACKET) {
+			p.nextToken()                     // Eat the size token
+			if p.curToken.Type == token.INT { // Verify token type name
+				fmt.Sscanf(p.curToken.Literal, "%d", &size)
+			}
+		}
+
+		if !p.expectPeek(token.RBRACKET) {
+			return nil
+		}
+		t = &ast.ArrayType{ElementType: t, Size: size}
+	}
+
+	return t
+}
+
+func (p *Parser) parseAtomicType() ast.NoxyType {
+	// Note: 'ref' keyword is handled in parseType (not here) to enforce prefix precedence.
+	// To achieve "Array of References" like '(ref T)[]', the user must use parentheses.
+	// The LPAREN case below handles the recursion back to parseType, allowing '(ref T)' to be parsed as an atomic unit.
+
+	// Grouped Type (T)
+	if p.curToken.Type == token.LPAREN {
+		p.nextToken() // eat (
+		t := p.parseType()
+		if !p.expectPeek(token.RPAREN) {
+			return nil
+		}
+		return t
 	}
 
 	var t ast.NoxyType
@@ -544,6 +598,10 @@ func (p *Parser) parseType() ast.NoxyType {
 	case token.CHAN:
 		// chan <Type>
 		p.nextToken()
+		// Chan binds loosely? `chan int[]` -> Chan of (Array) or (Chan of Int) array?
+		// Go: chan int[] is channel of int-slices.
+		// Standard precedence: Prefix binds looser.
+		// So recurse parseType
 		elemType := p.parseType()
 		if elemType == nil {
 			return nil
@@ -558,7 +616,7 @@ func (p *Parser) parseType() ast.NoxyType {
 	case token.TYPE_ANY:
 		t = &ast.PrimitiveType{Name: "any"}
 	case token.FUNC:
-		t = &ast.PrimitiveType{Name: "func"} // Generic function type
+		t = &ast.PrimitiveType{Name: "func"}
 	case token.BYTES: // This is Literal 'b"..."'.
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.IDENTIFIER:
@@ -582,10 +640,6 @@ func (p *Parser) parseType() ast.NoxyType {
 
 		keyType := p.parseType()
 
-		// Expect COMMA
-		// parseType leaves curToken at the last token of the type (e.g. TypeName or RBRACKET of array)
-		// So peek should be COMMA.
-
 		if !p.expectPeek(token.COMMA) {
 			return nil
 		}
@@ -598,33 +652,11 @@ func (p *Parser) parseType() ast.NoxyType {
 		}
 
 		t = &ast.MapType{KeyType: keyType, ValueType: valueType}
-		return t // Map type doesn't support array suffix immediately? 'map[]' -> array of maps?
-		// If so, we should fall through to array check.
-
+		return t
 	default:
 		// Fallback or error?
 		t = &ast.PrimitiveType{Name: "int"} // Default
 	}
-
-	// Check for array brackets [] or [size]
-	if p.peekTokenIs(token.LBRACKET) {
-		p.nextToken() // eat [
-
-		size := 0
-		// Check for size (optional)
-		if !p.peekTokenIs(token.RBRACKET) {
-			p.nextToken()                     // Eat the size token
-			if p.curToken.Type == token.INT { // Verify token type name
-				fmt.Sscanf(p.curToken.Literal, "%d", &size)
-			}
-		}
-
-		if !p.expectPeek(token.RBRACKET) {
-			return nil
-		}
-		t = &ast.ArrayType{ElementType: t, Size: size}
-	}
-
 	return t
 }
 

@@ -1,0 +1,197 @@
+// ============================================================
+// File System em Noxy - Teste de Structs Aninhadas e Referências
+// ============================================================
+//
+// OBJETIVO:
+// Validar o sistema de referências, deferências e structs do Noxy
+// através de um sistema de arquivos simplificado.
+//
+// FEATURES VALIDADAS:
+// ✅ Struct simples                  -> Metadata
+// ✅ Struct com ref para outra       -> File.meta (ref Metadata)
+// ✅ Struct auto-referencial         -> Directory.parent (ref Directory)
+// ✅ Lista de refs                   -> dir.arquivos, dir.subdirs
+// ✅ Deferência encadeada            -> arquivo.meta.criado_em
+// ✅ Ref sobrevive escopo de função  -> create_file() + acesso posterior
+// ✅ Recursão com refs               -> total_size(), print_tree()
+// ✅ Busca recursiva retornando ref  -> find_file()
+// ✅ Travessia de cadeia de parents  -> get_full_path()
+//
+// ESTRUTURA DE DADOS:
+//
+//   Metadata (struct simples)
+//       ↑
+//       | ref
+//       |
+//   File ←----ref---- Directory
+//       ↑                  ↑
+//       |                  | ref (parent)
+//       |                  |
+//   [lista de refs]    Directory (recursivo)
+//
+// ============================================================
+// File System Verification Project
+// Testing nested structs, cross-references, and recursion depth.
+
+// --- Phase 1: Struct Metadata ---
+struct Metadata
+    criado_em: int,
+    modificado_em: int,
+    permissoes: int
+end
+
+// --- Phase 2: Struct File ---
+struct File
+    nome: string,
+    tamanho: int,
+    meta: ref Metadata
+end
+
+// --- Phase 3: Struct Directory ---
+struct Directory
+    nome: string,
+    meta: ref Metadata,
+    parent: ref Directory,
+    arquivos: list,
+    subdirs: list
+end
+
+// --- Phase 4: Creation Functions ---
+
+func create_metadata(permissoes: int) -> Metadata
+    return Metadata(20250126, 20250126, permissoes)
+end
+
+func create_file(dir: ref Directory, nome: string, tamanho: int)
+    let meta: Metadata = create_metadata(644)
+    let arquivo: File = File(nome, tamanho, ref meta)
+    append(dir.arquivos, ref arquivo)
+end
+
+func create_dir(parent: ref Directory, nome: string) -> ref Directory
+    let meta: Metadata = create_metadata(755)
+    let novo: Directory = Directory(nome, ref meta, parent, [], [])
+    append(parent.subdirs, ref novo)
+    return ref novo
+end
+
+// --- Phase 5: Traversal ---
+
+func get_full_path(dir: ref Directory) -> string
+    if dir.parent == null then
+        return dir.nome
+    end
+    return get_full_path(dir.parent) + "/" + dir.nome
+end
+
+// --- Phase 6: Recursive Functions ---
+
+// Calculate total size
+func total_size(dir: ref Directory) -> int
+    let size: int = 0
+    
+    // Sum files size
+    let i: int = 0
+    while i < length(dir.arquivos) do
+        let f: ref File = dir.arquivos[i]
+        size = size + f.tamanho
+        i = i + 1
+    end
+    
+    // Sum subdirs recursively
+    let j: int = 0
+    while j < length(dir.subdirs) do
+        let sub: ref Directory = dir.subdirs[j]
+        size = size + total_size(sub)
+        j = j + 1
+    end
+    
+    return size
+end
+
+// Print tree
+func print_tree(dir: ref Directory, indent: string)
+    print(indent + "[DIR] " + dir.nome)
+    
+    let i: int = 0
+    while i < length(dir.arquivos) do
+        let f: ref File = dir.arquivos[i]
+        print(indent + "  " + f.nome + " (" + to_str(f.tamanho) + " bytes)")
+        i = i + 1
+    end
+    
+    let j: int = 0
+    while j < length(dir.subdirs) do
+        let sub: ref Directory = dir.subdirs[j]
+        print_tree(sub, indent + "  ")
+        j = j + 1
+    end
+end
+
+// --- Phase 7: Recursive Search ---
+
+func find_file(dir: ref Directory, nome: string) -> ref File
+    // Search in local files
+    let i: int = 0
+    while i < length(dir.arquivos) do
+        let f: ref File = dir.arquivos[i]
+        if f.nome == nome then
+            return f
+        end
+        i = i + 1
+    end
+    
+    // Search recursively in subdirs
+    let j: int = 0
+    while j < length(dir.subdirs) do
+        let sub: ref Directory = dir.subdirs[j]
+        let found: ref File = find_file(sub, nome)
+        if found != null then
+            return found
+        end
+        j = j + 1
+    end
+    
+    return null
+end
+
+// --- Phase 8: Main Test ---
+
+print("=== File System Test ===")
+print("")
+
+// Create root
+let root_meta: Metadata = Metadata(20250126, 20250126, 755)
+let root: Directory = Directory("/", ref root_meta, null, [], [])
+
+// Create structure
+let docs: ref Directory = create_dir(ref root, "docs")
+let imgs: ref Directory = create_dir(ref root, "images")
+let projetos: ref Directory = create_dir(docs, "projetos")
+
+// Create files
+create_file(ref root, "readme.txt", 256)
+create_file(docs, "manual.pdf", 4096)
+create_file(projetos, "codigo.noxy", 512)
+create_file(imgs, "foto.png", 2048)
+
+// Tests
+print("Árvore de diretórios:")
+print_tree(ref root, "")
+
+print("")
+print("Tamanho total: " + to_str(total_size(ref root)) + " bytes")
+
+print("")
+print("Caminho completo de 'projetos': " + get_full_path(projetos))
+
+print("")
+let found: ref File = find_file(ref root, "codigo.noxy")
+if found != null then
+    print("Arquivo encontrado: " + found.nome)
+else
+    print("Arquivo não encontrado")
+end
+
+print("")
+print("=== Testes concluídos! ===")
