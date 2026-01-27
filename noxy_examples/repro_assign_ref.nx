@@ -1,0 +1,14 @@
+struct Node
+    next: ref Node
+end
+
+let n: Node = Node(null)
+let current: ref Node = ref n
+
+// Setup next
+let next_node: Node = Node(null)
+current.next = ref next_node
+
+// Test Rebind
+current = current.next
+print("Rebind successful")

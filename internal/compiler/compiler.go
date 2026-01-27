@@ -266,25 +266,22 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						_, isRefVal = valType.(*ast.RefType)
 					}
 
-					if isRefVal {
-						// REBIND: ref = ref
-						if c.areTypesCompatible(refType, valType) {
-							// Check if trying to rebind a ref parameter
-							local := c.locals[arg]
-							if local.IsParam {
-								fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
-								fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
-							}
-							c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
-							c.emitByte(byte(chunk.OP_POP))
-							return c.currentChunk, nil, nil
+					// REBIND: ref = ref OR ref = nil (dynamic/unknown)
+					// Enable rebind if valType is nil (unknown, e.g. from imports) or explicitly ref
+					if isRefVal || valType == nil {
+						if valType != nil && !c.areTypesCompatible(refType, valType) {
+							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 						}
-					}
 
-					// If we are here, it's a TYPE MISMATCH or INVALID ASSIGNMENT (trying to update via =)
-					if c.areTypesCompatible(refType.ElementType, valType) {
-						// User tried `ref = val`. Suggest `*ref = val`
-						return nil, nil, fmt.Errorf("[line %d] cannot assign value 'T' to reference 'ref T' in variable '%s'.\n  hint: Did you mean to update the value? Use '*%s = ...'", c.currentLine, ident.Value, ident.Value)
+						// Check if trying to rebind a ref parameter
+						local := c.locals[arg]
+						if local.IsParam {
+							fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
+							fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
+						}
+						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+						c.emitByte(byte(chunk.OP_POP))
+						return c.currentChunk, nil, nil
 					}
 
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
