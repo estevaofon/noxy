@@ -154,8 +154,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		fnVal := args[0]
 		if fnVal.Type != value.VAL_FUNCTION {
-			// For now only support script functions
-			// Native functions in spawn? Maybe later.
+			// Only script functions are supported in spawn.
 			fmt.Println("Runtime Error: spawn expects a function")
 			return value.NewNull()
 		}
@@ -200,9 +199,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			Globals: nil,
 		}
 
-		// Map closure globals if present?
-		// If fnObj.Globals is likely module map or nil (for Main).
-		// We should respect it.
+		// Inherit globals from the function/closure.
 		frame.Globals = fnObj.Globals
 
 		threadVM.frames[0] = frame
@@ -861,9 +858,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 				// Naive split
 				contentStr = strings.ReplaceAll(contentStr, "\r\n", "\n")
 				lines = strings.Split(contentStr, "\n")
-				// If last line is empty due to trailing newline, maybe keep it?
-				// strings.Split("a\n", "\n") -> ["a", ""]
-				// Usually read_lines might expect that. Let's keep it simple.
+				// Retain behavior of strings.Split where trailing newline results in an empty string.
 			}
 		} else {
 			errorStr = "File not open"
@@ -1419,8 +1414,9 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		outBytes, err := cmd.CombinedOutput()
 		outputStr := string(outBytes)
 
+		// OK indicates execution completion, regardless of exit code.
+		okVal := true
 		exitCode := 0
-		okVal := true // Logic: if exit code 0 also? or just ran? usually ok implies success.
 
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
@@ -1430,7 +1426,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			}
 			okVal = false
 		} else {
-			// On success err is nil
 			okVal = true
 		}
 
@@ -1897,8 +1892,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			conn = bufferedConn
 			delete(vm.netBufferedConns, fd)
 		} else {
-			// Accept blocks. We should UNLOCK before accepting?
-			// Yes, we unlocked above.
+			// Accept blocks. Lock is released above.
 			conn, err = listener.Accept()
 		}
 
@@ -3194,10 +3188,7 @@ func (vm *VM) run(minFrameCount int) error {
 				case value.REF_PTR:
 					addrStr = fmt.Sprintf("%p", ref.Ptr)
 				case value.REF_GLOBAL:
-					// For global, we might not have direct pointer readily available as uintptr
-					// But we can format the Ref object itself or try to get address of value in map
-					// For consistency with C/Go pointers, let's show the address of the Ref struct itself as proxy
-					// or use the Name
+					// For global references, display the name as the address proxy.
 					addrStr = fmt.Sprintf("<global %s>", ref.Name)
 				case value.REF_UPVALUE:
 					addrStr = fmt.Sprintf("%p", ref.Upvalue.Location)
@@ -3209,17 +3200,7 @@ func (vm *VM) run(minFrameCount int) error {
 				}
 				vm.push(value.NewString(addrStr))
 			} else {
-				// Address of a value? In Noxy, pass-by-value means address of stack slot?
-				// But we popped it. So it's a transient value.
-				// Returning "val" for non-refs is misleading.
-				// Let's return <value> or address of the variable if it was a variable?
-				// But we only received the value.
-				// addr() usually expects a Reference.
-				// So if not ref, invalid or just print pseudo-address.
-				// Let's error or return string representation for now?
-				// Better: addr(x) where x is int. Compiler didn't emit REF.
-				// Compiler should force REF_LOCAL if addr is called?
-				// For now, allow runtime checks.
+				// For non-reference values, return the address of the transient value.
 				vm.push(value.NewString(fmt.Sprintf("%p", &val)))
 			}
 
@@ -3440,10 +3421,7 @@ func (vm *VM) run(minFrameCount int) error {
 							if ref.Index.Type == value.VAL_INT {
 								key = ref.Index.AsInt
 							} else {
-								key = ref.Index.AsInt // Hack?
-								// Actually we need to match NewMap set logic.
-								// Currently Noxy map keys: Int, String, Bool?
-								// Let's rely on simple for now.
+								key = ref.Index.AsInt
 								return vm.runtimeError(c, ip, "Map key type not fully supported in ref yet")
 							}
 						}
@@ -3530,12 +3508,6 @@ func (vm *VM) run(minFrameCount int) error {
 				if _, ok := frame.Globals[ref.Name]; ok {
 					frame.Globals[ref.Name] = val
 				} else {
-					// Fallback to shared globals? Or error?
-					// OP_STORE_VIA_REF does createGlobal if needed, let's match it.
-					// Or check if exists first? Ref exists, so it should exist.
-					// vm.SetGlobal writes to shared.
-					// If ref.Name is not in frame.Globals (module), it must be shared?
-					// Or we should update shared.
 					vm.SetGlobal(ref.Name, val)
 				}
 			case value.REF_UPVALUE:
@@ -3590,11 +3562,7 @@ func (vm *VM) run(minFrameCount int) error {
 					vm.push(value.NewString(strA + strB))
 					continue // Added continue for cleaner flow
 				}
-				// Check if both are BYTES?
-				// VAL_BYTES has Obj as string currently.
-				// But Type is VAL_BYTES.
-				// Wait, if Type is VAL_BYTES, Obj is string.
-				// Logic:
+				// VAL_BYTES types are stored internally as strings.
 				if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
 					vm.push(value.NewBytes(a.Obj.(string) + b.Obj.(string)))
 					continue
@@ -3892,10 +3860,6 @@ func (vm *VM) run(minFrameCount int) error {
 		case chunk.OP_AND:
 			b := vm.pop()
 			a := vm.pop()
-			// Assuming strict boolean for & operator as per usage in 'if'
-			// Or should we support truthiness?
-			// binary_tree.nx usage: if condition | condition. Conditions are bool.
-			// Let's coerce to bool if needed or error. Safe to error for now.
 			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
 				vm.push(value.NewBool(a.AsBool && b.AsBool))
 			} else {
@@ -3956,15 +3920,6 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			vm.push(value.NewBool(a.AsInt == b.AsInt))
 		case chunk.OP_PRINT:
-			// v := vm.pop()
-			// fmt.Println(v)
-			// Replaced by native function 'print' call usually, but for now we keep OP_PRINT for debug?
-			// But user wants `print()`. OP_PRINT in Noxy was statement `print x`.
-			// If we support `print(x)`, it is a function call.
-			// Let's keep OP_PRINT logic for now if compiler emits it for statement `print`.
-			// But wait, Noxy doesn't have `print` keyword statement. It's a builtin function.
-			// So OP_PRINT opcode might be deprecated or used for `print` keyword if we added one.
-			// Reverting to popping and printing for debug.
 			v := vm.pop()
 			fmt.Println(v)
 
@@ -4127,15 +4082,7 @@ func (vm *VM) run(minFrameCount int) error {
 				vm.push(mod)
 			}
 
-			// Refresh frame if import caused GC or stack moves (unlikely but safe)
-			// And if recursive run changed things?
 			frame = vm.currentFrame
-			// c/ip are from frame. c/ip in local vars are stale?
-			// frame IS vm.currentFrame.
-			// After loadModule, frame is valid (frames[0]).
-			// c/ip valid.
-			// But to be safe:
-			// frame = vm.currentFrame -- Done.
 
 		case chunk.OP_IMPORT_FROM_ALL:
 			modVal := vm.pop()
@@ -4184,9 +4131,6 @@ func (vm *VM) run(minFrameCount int) error {
 
 					val, ok := mapObj.Data[key]
 					if !ok {
-						// Return null or error? Spec says null for missing key? Or error?
-						// "has_key" exists. Missing key usually runtime error or null.
-						// Let's return Null for now, similar to dynamic languages.
 						vm.push(value.NewNull())
 					} else {
 						vm.push(val)
@@ -4390,8 +4334,6 @@ func (vm *VM) run(minFrameCount int) error {
 			if instanceVal.Type == value.VAL_REF {
 				// Deref container first
 				ref := instanceVal.Obj.(*value.ObjRef)
-				// Reuse getRefTarget logic or simple strict deref?
-				// Simple deref for now. Users should not update property of a ref to an int.
 				switch ref.RefType {
 				case value.REF_GLOBAL:
 					v, ok := frame.Globals[ref.Name]

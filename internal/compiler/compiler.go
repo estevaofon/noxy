@@ -209,16 +209,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// Logic: *ref<T> = T
 			// Check if value type matches the element type of the reference
 
-			// Auto-deref RHS if it is a RefType but we need a Value
-			// e.g. *x = ref y -> Error unless *x expects a ref type
-			// Standard case: *x (int) = y (int)
-			// Complex case: *n (Node) = Node(...)
-
-			// If RHS is ref but we expect value:
+			// Auto-deref RHS if it is a RefType but we need a Value.
 			if valRef, valIsRef := valType.(*ast.RefType); valIsRef {
-				// If element type is NOT ref, we should deref rhs?
-				// e.g. let a: ref int; *a = ref b; -> *a gets VALUE of b.
-				// Yes, auto-deref RHS value context.
+				// If target is value type, dereference the RHS reference.
 				if _, targetIsRef := refT.ElementType.(*ast.RefType); !targetIsRef {
 					c.emitByte(byte(chunk.OP_DEREF))
 					valType = valRef.ElementType
@@ -231,15 +224,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// 4. Emit Store
 			// Stack: [Ref, Val]
-			// OP_STORE_REF expects [Ref, Val] -> writes Val to *Ref
+			// OP_STORE_REF consumes both (Val -> *Ref).
 			c.emitByte(byte(chunk.OP_STORE_REF))
-			// Only pop if statement? AssignStmt handles the POP logic?
-			// AssignStmt usually returns `nil` for type in expression context? No, AssignStmt IS a Statement.
-			// But in Noxy, AssignStmt is treated as Statement which returns nothing to stack usually,
-			// EXCEPT Noxy uses Stack VM where assignment might leave value?
-			// Current implementation for `OP_SET_LOCAL` does `emitByte(byte(chunk.OP_POP))` after setting.
-			// `OP_STORE_REF` likely consumes both Ref and Val.
-			// Let's assume OP_STORE_REF consumes both.
 
 			return c.currentChunk, nil, nil
 
@@ -258,8 +244,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 				if refType, isRef := localType.(*ast.RefType); isRef {
 					// Assignment to a Reference Variable (local ref T)
-					// NEW LOGIC: This MUST be a REBIND (ref = ref).
-					// Update (*ref = val) is handled above.
+					// This is a REBIND (ref = ref).
+					// Update (*ref = val) is handled by PrefixExpression.
 
 					isRefVal := false
 					if valType != nil {
@@ -296,7 +282,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				}
 			} else if arg := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
-				// TODO: Check types for upvalues if possible. Assuming mostly value types for now or standard rebind.
+				// TODO: Implement type checking for upvalues.
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
@@ -307,9 +293,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						// Global Reference Assignment
 						_, isRefVal := valType.(*ast.RefType)
 
-						if isRefVal || valType == nil { // Allow rebind to null (valType is nil? null is specific type?)
-							// Actually null type needs handling.
-							// REBIND: ref = ref
+						// Allow rebind if valType is Ref or nil (dynamic/unknown)
+						if isRefVal || valType == nil {
 							if valType != nil && !c.areTypesCompatible(globalType, valType) {
 								return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 							}
@@ -338,32 +323,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
 			// Array/Map Assignment: arr[i] = val
-			// Behavior:
-			// Arrays/Maps hold VALUES or REFERENCES?
-			// Spec says: Arrays of Ref exist.
-			// If array is `ref int[]`, then `arr[i]` accesses the int.
-			// Wait, the new syntax applies to Reference Variables.
-			// Does `arr[i]` return a reference (L-Value) or a Value?
-			// In Noxy, pass-by-value default.
-			// If `arr: int[]`, `arr[i] = 10` updates the array. This is standard.
-			// If `arr: ref int[]` (reference to array), `arr[i] = 10` updates the array pointed to. Standard.
-			// What if `arr: (ref int)[]` (Array of References)?
-			// `arr[i]` is a `ref int`.
-			// `arr[i] = ref x` (REBIND the element i to point to x).
-			// `*arr[i] = 10` (UPDATE the value pointed to by element i).
-
-			// So, `IndexExpression` assignment is REBINDING the slot in the container.
+			// IndexExpression assignment is REBINDING the slot in the container.
 			// If the container holds References, we are rebinding that slot.
-			// If the container holds Values, we are updating that slot (but it's just value assignment).
-
-			// So existing logic `OP_SET_INDEX` works for `arr[i] = val`.
-			// Validations:
-			// If `arr` is `(ref int)[]`:
-			//   `arr[i] = ref z` -> OK (Set Index with Ref)
-			//   `arr[i] = 50` -> ERROR (Type mismatch, expected ref int).
-			//   `*arr[i] = 50` -> This would be parsed as `*(arr[i]) = 50`. Handled by PrefixExpression case!
-
-			// So we just need to Ensure Types Match in Set Index.
+			// If the container holds Values, we are updating that slot.
 
 			// 1. Compile Array (Left)
 			_, leftType, err := c.Compile(indexExp.Left)
@@ -408,12 +370,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 				// STRICT CHECK:
 				// If ElementType is Ref, Value MUST be Ref (Rebind).
-				// Implicit deref/update via assignment is NOT allowed if types don't match.
-				// But `areTypesCompatible` handles exact match for Refs.
-				// So if `arr` is `ref int[]`, Element is `ref int`.
-				// `val` must be `ref int`.
-				// If `val` is `int`, `areTypesCompatible` returns false. Code errors. Correct.
-				// User must use `*arr[i] = val` which goes to PrefixExp case.
+				// Implict deref/update via assignment is NOT allowed if types don't match.
+				// User must use `*arr[i] = val` for updates.
 
 				if !c.areTypesCompatible(arrType.ElementType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
@@ -627,8 +585,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if !c.areTypesCompatible(valType, vt) {
 					// Mixed values: Promote to ANY
 					valType = &ast.PrimitiveType{Name: "any"}
-					// Verify this new type is compatible with previous? "any" is compatible with everything in our logic.
-					// But we need to ensure verify future elements?
 					// Once valType is "any", areTypesCompatible(any, T) returns true.
 				}
 			}

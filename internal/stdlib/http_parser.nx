@@ -149,9 +149,7 @@ func parse_request(data: bytes, len: int) -> HttpRequest
     let header_bytes: bytes = b""
     
     if end_headers == -1 then
-        // Strict: No headers end found. Maybe incomplete? 
-        // Fallback: Assume all is header if small? Or invalid.
-        // For robustness, if no body separator, try to parse what we have as lines.
+        // Specific case: No headers end found. Assume all content is header data for robustness.
         header_bytes = data
         body_start = len
     else
@@ -234,15 +232,8 @@ func parse_response(data: bytes, len: int) -> HttpResponse
         if s_parts.count > 0 then resp.version = s_parts.parts[0] end
         if s_parts.count > 1 then resp.status_code = to_int(s_parts.parts[1]) end
         
-        // Status text is the rest... difficult with simple split.
-        // Reconstruct or custom parse.
-        // "HTTP/1.1 200 OK" -> parts: ["HTTP/1.1", "200", "OK"]
-        // "HTTP/1.1 404 Not Found" -> parts: ["...", "404", "Not", "Found"]
         if s_parts.count > 2 then
-             // Join from 2 to end
-             // Or simple find first 2 spaces logic on original string?
-             // Let's use join if available or iteration.
-             // We don't have join_slice, so loop.
+             // Reconstruct status text from remaining parts.
              let txt: string = ""
              let k: int = 2
              while k < s_parts.count do
@@ -307,13 +298,10 @@ func get_header(headers: string[64], count: int, name: string) -> string
         let h: string = strings_to_lower(headers[i])
         if strings_starts_with(h, search) then
             // Found. Now need original value.
-            // Split original string
             let orig: string = headers[i]
             let parts: SplitResult = split(orig, ":")
             if parts.count > 1 then
-                // Value is parts[1] (maybe + parts[2] if val has :)
-                // Simple assumption: one :
-                // Trim logic needed
+                // Return trimmed value after the first colon.
                 return strings_trim(parts.parts[1]) 
             end
         end

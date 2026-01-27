@@ -131,6 +131,9 @@ func parse_string_val(p: ref Parser) -> string
     return res
 end
 
+
+
+
 func parse_number_val(p: ref Parser) -> float
     let start: int = p.pos
     let c: string = peek(p)
@@ -158,7 +161,8 @@ func parse_number_val(p: ref Parser) -> float
     return 0.0 // Placeholder if we don't extract.
 end
 
-// Redoing number parse with accumulation
+
+// Parse number by accumulating characters
 func parse_number_str(p: ref Parser) -> float
     let res: string = ""
     let c: string = peek(p)
@@ -195,10 +199,7 @@ func parse_number_str(p: ref Parser) -> float
     return to_float(res)
 end
 
-// Recursion needs forward declaration or order? order matters in Noxy? 
-// Noxy allows recursion if function is defined. 
-// Mutual recursion needs careful ordering or prototype? 
-// Noxy currently reads file linearly? No, it parses definitions. Recursion is fine.
+// Noxy supports recursion.
 
 func parse_value(p: ref Parser) -> ref JsonNode
     skip_whitespace(p)

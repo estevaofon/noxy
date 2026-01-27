@@ -50,7 +50,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.FUNC, p.parseFunctionLiteral)
 	p.registerPrefix(token.STAR, p.parsePrefixExpression) // Support *deref
 
-	p.registerPrefix(token.PERCENT, p.parseGroupedExpression) // Grouped expression logic for PERCENT? No.
+	p.registerPrefix(token.PERCENT, nil) // Percent is not a prefix operator.
 	p.registerPrefix(token.LBRACE, p.parseMapLiteral)
 
 	p.infixParseFns = make(map[token.TokenType]func(ast.Expression) ast.Expression)
@@ -58,7 +58,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.MINUS, p.parseInfixExpression)
 	p.registerInfix(token.SLASH, p.parseInfixExpression)
 	p.registerInfix(token.STAR, p.parseInfixExpression)
-	p.registerInfix(token.PERCENT, p.parseInfixExpression) // Add this
+	p.registerInfix(token.PERCENT, p.parseInfixExpression)
 	p.registerInfix(token.EQ, p.parseInfixExpression)
 	p.registerInfix(token.NEQ, p.parseInfixExpression)
 	p.registerInfix(token.LT, p.parseInfixExpression)
@@ -598,10 +598,8 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 	case token.CHAN:
 		// chan <Type>
 		p.nextToken()
-		// Chan binds loosely? `chan int[]` -> Chan of (Array) or (Chan of Int) array?
-		// Go: chan int[] is channel of int-slices.
-		// Standard precedence: Prefix binds looser.
-		// So recurse parseType
+		// Channel type syntax: chan <Type>
+		// Use parseType to allow recursive types (e.g. chan int[])
 		elemType := p.parseType()
 		if elemType == nil {
 			return nil
@@ -654,8 +652,7 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		t = &ast.MapType{KeyType: keyType, ValueType: valueType}
 		return t
 	default:
-		// Fallback or error?
-		t = &ast.PrimitiveType{Name: "int"} // Default
+		t = &ast.PrimitiveType{Name: "int"} // Default fallback
 	}
 	return t
 }

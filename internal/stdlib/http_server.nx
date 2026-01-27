@@ -32,12 +32,8 @@ end
 // This function runs in a separate routine (spawned)
 func handle_client_connection(client: Socket, user_handler: func)
     // 1. Read Request
-    // We implement a basic read loop to get the full request header/body
-    // For MVP, we read a chunk. A robust implementation would read until header end.
-    
-    // Set a timeout on the socket if supported, or rely on non-blocking + wait?
-    // Noxy sockets are blocking by default usually, unless setblocking(false).
-    // In a thread/routine, blocking is fine! That's the beauty of concurrency.
+    // Read request chunk. Note: A production implementation should read continuously until header end.
+    // Blocking read is acceptable here as this runs in a separate routine.
     
     let res: NetResult = socket_recv(client, 65536) // 64KB buffer
     
@@ -50,16 +46,8 @@ func handle_client_connection(client: Socket, user_handler: func)
     let req: HttpRequest = parse_request(res.data, res.count)
     
     // 3. Call User Handler
-    // The user handler MUST accept (HttpRequest) and return (HttpResponse)
-    // Function type checking is runtime in Noxy for 'func' type variables? 
-    // Spec implies strict typing but 'func' is a generic type in the current spec description?
-    // Or it needs to be defined? Spec says "func" is the type.
-    
-    // For now assuming dynamic dispatch or compatible signature.
-    // If strict typed, this might fail if signatures don't match, but let's assume valid usage.
-    
-    // We can't easily "try/catch" here if user_handler crashes, the routine crashes.
-    // Ideally we would wrap this.
+    // Dispatch request to user handler. Handler must match expected signature.
+    // Note: Exceptions in handler will terminate this routine.
     
     let response: HttpResponse = user_handler(req)
     
@@ -192,19 +180,6 @@ end
 
 // Helper
 func strings_contains(s: string, sub: string) -> bool
-    // This assumes strings module has contains or we implement it
-    // The user asked to review net/http, assuming strings is standard
-    // Ideally use strings.contains if available
-    // For now, implementing a wrapper or using the one from strings module if imported
-    // We imported 'use strings', but the original file had a local helper. 
-    // We can assume 'use strings' exposes 'contains' ?? 
-    // Actually spec says 'use strings select *'. 
-    // Let's assume strings module has 'contains'. 
-    // If not, we need to implement it.
-    // Checking previous 'http_server.nx' it used 'strings_contains'.
-    // Let's assume we can use the 'strings' module directly if we fix the import.
-    // But 'use strings select *' brings 'contains' into namespace?
-    // Let's check 'strings.nx' briefly if I could... I did list_dir.
-    // I'll trust strings.nx has 'contains'.
+    // Wrapper for strings module functionality.
     return contains(s, sub) 
 end
