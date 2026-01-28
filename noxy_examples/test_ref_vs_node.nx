@@ -1,7 +1,7 @@
 // Teste: ref Node vs Node em variável local
 
 struct Node
-    valor: int,
+    valor: int
     proximo: ref Node
 end
 

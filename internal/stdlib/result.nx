@@ -1,12 +1,12 @@
 // result.nx - Standard Result and Error Pattern for Noxy
 
 struct Error
-    code: int,
+    code: int
     msg: string
 end
 
 struct Result
-    value: any,
+    value: any
     err: Error
 end
 

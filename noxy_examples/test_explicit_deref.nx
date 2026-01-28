@@ -6,7 +6,7 @@
 // r = val   (Error)
 
 struct Box
-    val: int,
+    val: int
     next: ref Box
 end
 

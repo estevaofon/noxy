@@ -1,6 +1,6 @@
 
 struct Point
-    x: int,
+    x: int
     y: int
 end
 

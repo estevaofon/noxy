@@ -1,0 +1,13 @@
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func destruir(node: ref Node)
+    // Isso é PERIGOSO. Atribuir um VALOR sobrescreve a memória original!
+    *node = Node(666, null) 
+end
+
+let global_node: Node = Node(10, null)
+destruir(ref global_node)
+print(global_node.valor)

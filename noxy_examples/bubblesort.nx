@@ -1,5 +1,5 @@
 struct strucArray
-    array: int[5],
+    array: int[5]
     tamanho: int
 end
 

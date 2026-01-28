@@ -1,7 +1,7 @@
 // Test Typed Channels with Strings and Structs
 
 struct Message
-    id: int,
+    id: int
     body: string
 end
 

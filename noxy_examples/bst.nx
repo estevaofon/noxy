@@ -2,8 +2,8 @@
 // Algoritmo clássico que testa structs com múltiplas referências
 
 struct TreeNode
-    valor: int,
-    esquerda: ref TreeNode,
+    valor: int
+    esquerda: ref TreeNode
     direita: ref TreeNode
 end
 

@@ -1,31 +1,31 @@
 struct File
-    fd: int,
-    path: string,
-    mode: string,
+    fd: int
+    path: string
+    mode: string
     open: bool
 end
 
 struct IOResult
-    ok: bool,
-    data: string,
+    ok: bool
+    data: string
     error: string
 end
 
 struct IOBytesResult
-    ok: bool,
-    data: bytes,
+    ok: bool
+    data: bytes
     error: string
 end
 
 struct IOLinesResult
-    ok: bool,
-    data: []string,
+    ok: bool
+    data: []string
     error: string
 end
 
 struct FileInfo
-    exists: bool,
-    size: int,
+    exists: bool
+    size: int
     is_dir: bool
 end
 

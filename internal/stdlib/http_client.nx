@@ -9,11 +9,11 @@ struct HttpClient
 end
 
 struct ClientResponse
-    ok: bool,
-    status_code: int,
-    headers: string[64],
-    header_count: int,
-    body: bytes,
+    ok: bool
+    status_code: int
+    headers: string[64]
+    header_count: int
+    body: bytes
     error: string
 end
 

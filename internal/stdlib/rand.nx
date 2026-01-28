@@ -1,9 +1,9 @@
 use time
 
 struct RandomGenerator
-    state: int,
-    a: int,
-    c: int,
+    state: int
+    a: int
+    c: int
     m: int
 end
 

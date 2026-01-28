@@ -4,21 +4,21 @@
 
 // Estrutura básica para valores
 struct Value
-    type: int,           // 1=string, 2=number, 3=boolean
-    string_val: string,
-    number_val: float,
+    type: int           // 1=string, 2=number, 3=boolean
+    string_val: string
+    number_val: float
     bool_val: bool
 end
 
 // Estrutura para par chave-valor
 struct Pair
-    key: string,
+    key: string
     val: Value
 end
 
 // Estrutura HashMap básica
 struct HashMap
-    data: Pair[8],       // Array de 8 pares
+    data: Pair[8]       // Array de 8 pares
     count: int           // Número de pares
 end
 

@@ -3,8 +3,8 @@ use sys
 use crypto
 
 struct FileState
-    exists: bool,
-    size: int,
+    exists: bool
+    size: int
     hash: string
 end
 

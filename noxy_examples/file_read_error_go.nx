@@ -5,7 +5,7 @@ struct Error
 end
 
 struct FileReadResult
-    data: string,
+    data: string
     err: ref Error
 end
 

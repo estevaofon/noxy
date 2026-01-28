@@ -13,12 +13,12 @@ let TYPE_ARRAY: int = 4
 let TYPE_OBJECT: int = 5
 
 struct JsonNode
-    type: int,
-    bool_val: bool,
-    number_val: float,
-    string_val: string,
-    key: string,
-    child: ref JsonNode,
+    type: int
+    bool_val: bool
+    number_val: float
+    string_val: string
+    key: string
+    child: ref JsonNode
     next: ref JsonNode
 end
 

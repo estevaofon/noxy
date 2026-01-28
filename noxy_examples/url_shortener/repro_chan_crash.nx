@@ -20,17 +20,17 @@ let REQ_QUERY: int = 2
 
 // Response Structure
 struct DbResponse
-    ok: bool,
-    exec_res: sqlite.ExecResult,   // Populated if EXEC
-    query_res: sqlite.QueryResult, // Populated if QUERY
+    ok: bool
+    exec_res: sqlite.ExecResult   // Populated if EXEC
+    query_res: sqlite.QueryResult // Populated if QUERY
     error: string
 end
 
 // Request Structure
 struct DbRequest
-    type: int,
-    sql: string,
-    params: any[],
+    type: int
+    sql: string
+    params: any[]
     reply_ch: chan DbResponse
 end
 

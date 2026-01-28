@@ -4,8 +4,8 @@
 
 // Definir a estrutura do array dinâmico
 struct DynamicArray
-    elementos: int[100],      // Array interno para armazenar os elementos
-    capacidade: int,          // Capacidade máxima atual
+    elementos: int[100]      // Array interno para armazenar os elementos
+    capacidade: int          // Capacidade máxima atual
     tamanho: int              // Número atual de elementos
 end
 
@@ -78,8 +78,8 @@ print("=== ADICIONANDO ELEMENTOS ===")
 
 
 struct Node
-  data: int,
-  left: Node,
+  data: int
+  left: Node
   right: Node
 end
 

@@ -1,7 +1,7 @@
 // test_ref_vs_valor.nx - Demonstra a diferença entre passagem por valor vs referência
 
 struct Contador
-    valor: int,
+    valor: int
     nome: string
 end
 

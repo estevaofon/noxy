@@ -1,5 +1,5 @@
 struct Node
-    id: int,
+    id: int
     next: ref Node
 end
 

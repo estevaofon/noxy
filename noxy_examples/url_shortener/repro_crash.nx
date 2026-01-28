@@ -1,8 +1,8 @@
 use sqlite
 struct DbResponse
-    ok: bool,
-    exec_res: sqlite.ExecResult,
-    query_res: sqlite.QueryResult,
+    ok: bool
+    exec_res: sqlite.ExecResult
+    query_res: sqlite.QueryResult
     error: string
 end
 

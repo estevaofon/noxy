@@ -39,9 +39,9 @@ use array_utils
 
 // --- Phase 1: Struct Vertex ---
 struct Vertex
-    id: int,
-    nome: string,
-    vizinhos: list,   // list of ref Vertex
+    id: int
+    nome: string
+    vizinhos: list   // list of ref Vertex
     visitado: bool
 end
 

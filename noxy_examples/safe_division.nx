@@ -1,6 +1,6 @@
 struct Result
-    is_ok: bool,      // true = Ok, false = Err
-    value: int,       // valor quando sucesso
+    is_ok: bool      // true = Ok, false = Err
+    value: int       // valor quando sucesso
     error: string     // nome do erro quando falha
 end
 

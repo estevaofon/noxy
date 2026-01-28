@@ -3,7 +3,7 @@
 // We will create a "shell game" where we swap references and verify identity via addr()
 
 struct Container
-    id: int,
+    id: int
     data: int
 end
 

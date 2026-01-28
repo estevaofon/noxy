@@ -1,28 +1,28 @@
 // stdlib/time.nx
 
 struct DateTime
-    year: int,
-    month: int,        // 1-12
-    day: int,          // 1-31
-    hour: int,         // 0-23
-    minute: int,       // 0-59
-    second: int,       // 0-59
-    weekday: int,      // 0=domingo, 6=s?bado
-    yearday: int,      // 1-366
+    year: int
+    month: int        // 1-12
+    day: int          // 1-31
+    hour: int         // 0-23
+    minute: int       // 0-59
+    second: int       // 0-59
+    weekday: int      // 0=domingo, 6=s?bado
+    yearday: int      // 1-366
     timestamp: int     // Unix timestamp (segundos desde 1970)
 end
 
 struct Duration
-    days: int,
-    hours: int,
-    minutes: int,
-    seconds: int,
+    days: int
+    hours: int
+    minutes: int
+    seconds: int
     total_seconds: int
 end
 
 
 // ============================================
-// Obten??o de Tempo
+// Obtencao de Tempo
 // ============================================
 
 // Retorna timestamp Unix atual (segundos)

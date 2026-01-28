@@ -6,31 +6,31 @@ use strings select *
 // ============================================
 
 struct HttpRequest
-    method: string,
-    path: string,
-    query: string,
-    version: string,
-    headers: string[64],
-    header_count: int,
+    method: string
+    path: string
+    query: string
+    version: string
+    headers: string[64]
+    header_count: int
     body: bytes
 end
 
 struct HttpResponse
-    version: string,
-    status_code: int,
-    status_text: string,
-    headers: string[64],
-    header_count: int,
+    version: string
+    status_code: int
+    status_text: string
+    headers: string[64]
+    header_count: int
     body: bytes
 end
 
 struct HttpUrl
-    scheme: string,
-    host: string,
-    port: int,
-    path: string,
-    query: string,
-    fragment: string,
+    scheme: string
+    host: string
+    port: int
+    path: string
+    query: string
+    fragment: string
     valid: bool
 end
 

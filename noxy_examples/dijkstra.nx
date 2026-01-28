@@ -14,13 +14,13 @@ let NUM_VERTICES: int = 6
 struct Grafo
     // Matriz de adjacência: grafo[i][j] = peso da aresta i->j
     // 0 significa sem aresta
-    adj: int[36],  // 6x6 = 36 (simula matriz 2D)
+    adj: int[36]  // 6x6 = 36 (simula matriz 2D)
     num_vertices: int
 end
 
 struct Resultado
-    distancias: int[6],    // Distância mínima da fonte até cada vértice
-    anteriores: int[6],    // Vértice anterior no caminho mínimo
+    distancias: int[6]    // Distância mínima da fonte até cada vértice
+    anteriores: int[6]    // Vértice anterior no caminho mínimo
     visitados: bool[6]     // Vértices já processados
 end
 

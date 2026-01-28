@@ -3,8 +3,8 @@
 // A funcionalidade de Mapas ainda não está implementada.
 
 struct Usuario
-    id: int,
-    nome: string,
+    id: int
+    nome: string
     ativo: bool
 end
 

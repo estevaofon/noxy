@@ -1,23 +1,23 @@
 struct Socket
-    fd: int,
-    addr: string,
-    port: int,
+    fd: int
+    addr: string
+    port: int
     open: bool
 end
 
 struct NetResult
-    ok: bool,
-    data: bytes,
-    count: int,
+    ok: bool
+    data: bytes
+    count: int
     error: string
 end
 
 struct SelectResult
-    read: Socket[64],
-    read_count: int,
-    write: Socket[64],
-    write_count: int,
-    error: Socket[64],
+    read: Socket[64]
+    read_count: int
+    write: Socket[64]
+    write_count: int
+    error: Socket[64]
     error_count: int
 end
 

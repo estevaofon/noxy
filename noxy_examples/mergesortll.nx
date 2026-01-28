@@ -1,6 +1,6 @@
 struct Node 
-    id: int,
-    data: int,
+    id: int
+    data: int
     next: ref Node
 end
 

@@ -83,7 +83,7 @@ O **verdadeiro poder (e perigo)** do `ref` é alterar o CONTEÚDO:
 ```noxy
 func destruir(node: ref Node)
     // Isso é PERIGOSO. Atribuir um VALOR sobrescreve a memória original!
-    node = Node(666, null) 
+    *node = Node(666, null) 
 end
 // global_node agora teria ID 666!
 ```

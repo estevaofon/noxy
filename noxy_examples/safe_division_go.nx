@@ -3,7 +3,7 @@ struct Error
 end
 
 struct Result
-    value: any,
+    value: any
     err: ref Error
 end
 

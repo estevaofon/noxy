@@ -1,5 +1,5 @@
 struct SplitResult
-    count: int,
+    count: int
     parts: string[]
 end
 

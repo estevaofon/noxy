@@ -2,28 +2,28 @@
 
 // Struct simples para endereço
 struct Endereco
-    rua: string,
-    numero: int,
+    rua: string
+    numero: int
     cidade: string
 end
 
 // Struct para dados pessoais
 struct Pessoa
-    nome: string,
+    nome: string
     idade: int
 end
 
 // Struct aninhado: Funcionário tem Pessoa e Endereco
 struct Funcionario
-    dados: Pessoa,
-    endereco: Endereco,
-    salario: float,
+    dados: Pessoa
+    endereco: Endereco
+    salario: float
     ativo: bool
 end
 
 // Struct para empresa com array de funcionários
 struct Departamento
-    nome: string,
+    nome: string
     gerente: Funcionario
 end
 

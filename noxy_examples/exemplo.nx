@@ -4,7 +4,7 @@ let y: int = 20
 print(x+y)
 
 struct Pessoa
-    nome: string,
+    nome: string
     idade: int
 end
 
