@@ -1,0 +1,110 @@
+
+// Langton's Ant Simulation
+//
+// Rules:
+// 1. At a white square, turn 90° right, flip the color of the square, move forward one unit.
+// 2. At a black square, turn 90° left, flip the color of the square, move forward one unit.
+
+struct Ant
+    x: int
+    y: int
+    dir: int // 0: Up, 1: Right, 2: Down, 3: Left
+end
+
+// Grid dimensions
+let WIDTH: int = 40
+let HEIGHT: int = 20
+let AREA: int = WIDTH * HEIGHT
+
+// Initialize grid (0: White, 1: Black)
+// Using 1D array mapped to 2D
+// Initialize grid (0: White, 1: Black)
+// Using 1D array mapped to 2D
+let grid: int[] = []
+let _i: int = 0
+while _i < AREA do
+    append(grid, 0)
+    _i = _i + 1
+end
+
+// Directions offsets: [dx, dy]
+// Up (0): [0, -1]
+// Right (1): [1, 0]
+// Down (2): [0, 1]
+// Left (3): [-1, 0]
+
+let dx: int[] = [0, 1, 0, -1]
+let dy: int[] = [-1, 0, 1, 0]
+
+func print_grid(g: int[], ant: ref Ant)
+    // Clear screen (ANSI escape code)
+    print("\u001b[H\u001b[2J")
+    
+    let y: int = 0
+    while y < HEIGHT do
+        let line: string = ""
+        let x: int = 0
+        while x < WIDTH do
+            let idx: int = y * WIDTH + x
+            let cell: int = g[idx]
+            
+            if ant.x == x && ant.y == y then
+                line = line + "🐜" // Ant position
+            elif cell == 0 then
+                line = line + "⬜" // White
+            else
+                line = line + "⬛" // Black
+            end
+            
+            x = x + 1
+        end
+        print(line)
+        y = y + 1
+    end
+    print(f"Step: Ant at ({ant.x}, {ant.y}) Dir: {ant.dir}")
+end
+
+func run_simulation(steps: int)
+    let ant: Ant = Ant(WIDTH / 2, HEIGHT / 2, 0) // Start at center, facing Up
+    
+    let step: int = 0
+    while step < steps do
+        // Get current cell color
+        let idx: int = ant.y * WIDTH + ant.x
+        let current_color: int = grid[idx]
+
+        if current_color == 0 then
+            // White: Turn Right (Clockwise)
+            ant.dir = (ant.dir + 1) % 4
+            // Flip to Black
+            grid[idx] = 1
+        else
+            // Black: Turn Left (Counter-Clockwise)
+            ant.dir = (ant.dir - 1 + 4) % 4
+            // Flip to White
+            grid[idx] = 0
+        end
+
+        // Move forward
+        ant.x = ant.x + dx[ant.dir]
+        ant.y = ant.y + dy[ant.dir]
+        
+        // Toroidal wrapping (Pac-Man style)
+        ant.x = (ant.x % WIDTH + WIDTH) % WIDTH
+        ant.y = (ant.y % HEIGHT + HEIGHT) % HEIGHT
+
+        // Print every step (or every N steps for speed)
+        // print_grid(grid, ref ant) // Uncomment to see animation (slows down)
+        
+        step = step + 1
+    end
+    print_grid(grid, ref ant)
+end
+
+func main()
+    print("Starting Langton's Ant Simulation...")
+    // 11000 steps is usually enough to see the "highway" formation
+    run_simulation(11000)
+end
+
+main()

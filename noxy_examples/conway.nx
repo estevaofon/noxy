@@ -1,0 +1,149 @@
+
+// Conway's Game of Life
+//
+// Rules:
+// 1. Any live cell with fewer than two live neighbours dies, as if by underpopulation.
+// 2. Any live cell with two or three live neighbours lives on to the next generation.
+// 3. Any live cell with more than three live neighbours dies, as if by overpopulation.
+// 4. Any dead cell with exactly three live neighbours becomes a live cell, as if by reproduction.
+
+let WIDTH: int = 40
+let HEIGHT: int = 20
+let AREA: int = WIDTH * HEIGHT
+
+// Directions to check neighbors (8 directions)
+let dx: int[] = [-1,  0,  1, -1, 1, -1, 0, 1]
+let dy: int[] = [-1, -1, -1,  0, 0,  1, 1, 1]
+
+func get_idx(x: int, y: int) -> int
+    // Wrap around coordinates (Toroidal)
+    let wx: int = (x % WIDTH + WIDTH) % WIDTH
+    let wy: int = (y % HEIGHT + HEIGHT) % HEIGHT
+    return wy * WIDTH + wx
+end
+
+func count_neighbors(grid: int[], x: int, y: int) -> int
+    let count: int = 0
+    let i: int = 0
+    while i < 8 do
+        let nx: int = x + dx[i]
+        let ny: int = y + dy[i]
+        
+        let idx: int = get_idx(nx, ny)
+        if grid[idx] == 1 then
+            count = count + 1
+        end
+        i = i + 1
+    end
+    return count
+end
+
+func print_grid(grid: int[], gen: int)
+    // Clear screen
+    let buffer: string = "\u001b[H\u001b[2J"
+    
+    buffer = buffer + f"Generation: {gen}\n"
+    let y: int = 0
+    while y < HEIGHT do
+        let x: int = 0
+        while x < WIDTH do
+            let idx: int = get_idx(x, y)
+            if grid[idx] == 1 then
+                buffer = buffer + "O" // Alive
+            else
+                buffer = buffer + " " // Dead
+            end
+            x = x + 1
+        end
+        buffer = buffer + "\n"
+        y = y + 1
+    end
+    print(buffer)
+end
+
+func run_simulation(generations: int)
+    // Init grids (current and next state)
+    let grid: int[] = []
+    let next_grid: int[] = []
+    
+    // Initialize with zeros
+    let i: int = 0
+    while i < AREA do
+        append(grid, 0)
+        append(next_grid, 0)
+        i = i + 1
+    end
+
+    // Initialize with a Glider
+    // 0 1 0
+    // 0 0 1
+    // 1 1 1
+    let start_x: int = 5
+    let start_y: int = 5
+    
+    let idx1: int = get_idx(start_x + 1, start_y)
+    grid[idx1] = 1
+    
+    let idx2: int = get_idx(start_x + 2, start_y + 1)
+    grid[idx2] = 1
+    
+    let idx3: int = get_idx(start_x, start_y + 2)
+    grid[idx3] = 1
+    
+    let idx4: int = get_idx(start_x + 1, start_y + 2)
+    grid[idx4] = 1
+    
+    let idx5: int = get_idx(start_x + 2, start_y + 2)
+    grid[idx5] = 1
+
+    let gen: int = 0
+    while gen < generations do
+        print_grid(grid, gen)
+        
+        // Compute next generation
+        let y: int = 0
+        while y < HEIGHT do
+            let x: int = 0
+            while x < WIDTH do
+                let neighbors: int = count_neighbors(grid, x, y)
+                let idx: int = get_idx(x, y)
+                let is_alive: int = grid[idx]
+                
+                if is_alive == 1 then
+                    if neighbors < 2 || neighbors > 3 then
+                        next_grid[idx] = 0 // Dies
+                    else
+                        next_grid[idx] = 1 // Lives
+                    end
+                else
+                    if neighbors == 3 then
+                        next_grid[idx] = 1 // Reproduction
+                    else
+                        next_grid[idx] = 0 // Stays dead
+                    end
+                end
+                
+                x = x + 1
+            end
+            y = y + 1
+        end
+        
+        // Swap grids (Copy next to current)
+        let k: int = 0
+        while k < AREA do
+            grid[k] = next_grid[k]
+            k = k + 1
+        end
+
+        // Wait 50ms for smooth animation
+        time_sleep(50)
+        
+        gen = gen + 1
+    end
+end
+
+func main()
+    run_simulation(500)
+end
+
+main()

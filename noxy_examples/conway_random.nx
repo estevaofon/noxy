@@ -1,0 +1,123 @@
+use rand select *
+use time select *
+
+// Conway's Game of Life - Random Dense Pattern
+
+let WIDTH: int = 60 // Wider for better effect
+let HEIGHT: int = 30
+let AREA: int = WIDTH * HEIGHT
+
+// Directions to check neighbors (8 directions)
+let dx: int[] = [-1,  0,  1, -1, 1, -1, 0, 1]
+let dy: int[] = [-1, -1, -1,  0, 0,  1, 1, 1]
+
+func get_idx(x: int, y: int) -> int
+    let wx: int = (x % WIDTH + WIDTH) % WIDTH
+    let wy: int = (y % HEIGHT + HEIGHT) % HEIGHT
+    return wy * WIDTH + wx
+end
+
+func count_neighbors(grid: int[], x: int, y: int) -> int
+    let count: int = 0
+    let i: int = 0
+    while i < 8 do
+        let nx: int = x + dx[i]
+        let ny: int = y + dy[i]
+        let idx: int = get_idx(nx, ny)
+        if grid[idx] == 1 then
+            count = count + 1
+        end
+        i = i + 1
+    end
+    return count
+end
+
+func print_grid(grid: int[], gen: int)
+    // Clear screen
+    let buffer: string = "\u001b[H\u001b[2J"
+    buffer = buffer + f"Generation: {gen}\n"
+    
+    let y: int = 0
+    while y < HEIGHT do
+        let x: int = 0
+        while x < WIDTH do
+            let idx: int = get_idx(x, y)
+            if grid[idx] == 1 then
+                buffer = buffer + "█" // Block character for denser look
+            else
+                buffer = buffer + " "
+            end
+            x = x + 1
+        end
+        buffer = buffer + "\n"
+        y = y + 1
+    end
+    print(buffer)
+end
+
+func run_simulation(generations: int)
+    let grid: int[] = []
+    let next_grid: int[] = []
+    
+    // Init with random density
+    let i: int = 0
+    while i < AREA do
+        // ~50% density
+        let r: int = random_int(0, 100)
+        if r < 50 then
+            append(grid, 1)
+        else
+            append(grid, 0)
+        end
+        append(next_grid, 0)
+        i = i + 1
+    end
+
+    let gen: int = 0
+    while gen < generations do
+        print_grid(grid, gen)
+        
+        let y: int = 0
+        while y < HEIGHT do
+            let x: int = 0
+            while x < WIDTH do
+                let neighbors: int = count_neighbors(grid, x, y)
+                let idx: int = get_idx(x, y)
+                let is_alive: int = grid[idx]
+                
+                if is_alive == 1 then
+                    if neighbors < 2 || neighbors > 3 then
+                        next_grid[idx] = 0
+                    else
+                        next_grid[idx] = 1
+                    end
+                else
+                    if neighbors == 3 then
+                        next_grid[idx] = 1
+                    else
+                        next_grid[idx] = 0
+                    end
+                end
+                x = x + 1
+            end
+            y = y + 1
+        end
+        
+        // Copy next state to current
+        let k: int = 0
+        while k < AREA do
+            grid[k] = next_grid[k]
+            k = k + 1
+        end
+
+        // 100ms for stable view
+        time_sleep(100)
+        gen = gen + 1
+    end
+end
+
+func main()
+    run_simulation(1000)
+end
+
+main()

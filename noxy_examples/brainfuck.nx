@@ -1,0 +1,105 @@
+
+// Brainfuck Interpreter in Noxy
+//
+// Commands:
+// > 	Increment the data pointer (to point to the next cell to the right).
+// < 	Decrement the data pointer (to point to the next cell to the left).
+// + 	Increment the byte at the data pointer.
+// - 	Decrement the byte at the data pointer.
+// . 	Output the byte at the data pointer.
+// , 	Accept one byte of input, storing its value in the byte at the data pointer.
+// [ 	If the byte at the data pointer is zero, then instead of moving the instruction pointer forward to the next command, jump it forward to the command after the matching ] command.
+// ] 	If the byte at the data pointer is nonzero, then instead of moving the instruction pointer forward to the next command, jump it back to the command after the matching [ command.
+
+let TAPE_SIZE: int = 3000
+
+
+
+func run_brainfuck(program_str: string)
+    // Convert to bytes for easy indexing and integer comparison
+    let program: bytes = to_bytes(program_str)
+    let len: int = length(program)
+    
+    let tape: int[] = []
+    let k: int = 0
+    while k < TAPE_SIZE do
+        append(tape, 0)
+        k = k + 1
+    end
+    
+    let ptr: int = 0
+    let pc: int = 0
+    
+    // Pre-compute loops
+    let bracket_map: map[int, int] = {}
+    let stack: int[] = []
+    
+    let i: int = 0
+    while i < len do
+        let c: int = program[i] // Access byte as int
+        
+        if c == 91 then // '['
+            append(stack, i)
+        elif c == 93 then // ']'
+            let target: int = pop(stack)
+            bracket_map[i] = target
+            bracket_map[target] = i
+        end
+        
+        i = i + 1
+    end
+    
+    // Execution Loop
+    while pc < len do
+        let c: int = program[pc]
+        
+        if c == 62 then // >
+            ptr = ptr + 1
+            if ptr >= TAPE_SIZE then
+                ptr = 0 // Wrap? or Error. Let's wrap.
+            end
+        elif c == 60 then // <
+            ptr = ptr - 1
+            if ptr < 0 then
+                ptr = TAPE_SIZE - 1
+            end
+        elif c == 43 then // +
+            tape[ptr] = (tape[ptr] + 1) % 256
+        elif c == 45 then // -
+            tape[ptr] = (tape[ptr] - 1 + 256) % 256
+        elif c == 46 then // .
+            // Print char inline using the native `iprint` to avoid newlines.
+            iprint(fmt("%c", tape[ptr])) 
+        elif c == 91 then // [
+            if tape[ptr] == 0 then
+                if has_key(bracket_map, pc) then
+                    pc = bracket_map[pc]
+                end // Else ignore (unmatched?)
+            end
+        elif c == 93 then // ]
+            if tape[ptr] != 0 then
+                if has_key(bracket_map, pc) then
+                    pc = bracket_map[pc]
+                end
+            end
+        end
+        
+        pc = pc + 1
+    end
+    print("") // Newline at end
+end
+
+func main()
+    print("--- Hello World ---")
+    let hello: string = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>."
+    run_brainfuck(hello)
+    
+    print("\n--- Sierpinski Triangle ---")
+    // This code generates a Sierpinski Triangle
+    // Logic involves 80-byte header, loop that subtracts and prints logic.
+    // It relies on cell wrapping (which we support).
+    let sierpinski: string = "++++++++[>+>++++<<-]>++>>+<[-[>>+<<-]+>>]>+[-<<<[->[+[-]+>++>>>-<<]<[<]>>++++++[<<+++++>>-]+<<++.[-]<<]>.>+[>>]>+]"
+    run_brainfuck(sierpinski)
+end
+
+main()

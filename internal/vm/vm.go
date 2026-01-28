@@ -147,6 +147,16 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewNull()
 	})
 
+	// Define 'iprint' native (inline print)
+	vm.DefineNative("iprint", func(args []value.Value) value.Value {
+		var parts []string
+		for _, arg := range args {
+			parts = append(parts, arg.String())
+		}
+		fmt.Print(strings.Join(parts, " "))
+		return value.NewNull()
+	})
+
 	// Concurrency Primitives
 	vm.DefineNative("spawn", func(args []value.Value) value.Value {
 		if len(args) < 1 {
