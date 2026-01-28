@@ -248,6 +248,7 @@ func (c *Chunk) AddConstant(v value.Value) int {
 
 func (c *Chunk) Disassemble(name string) {
 	fmt.Printf("== %s ==\n", name)
+	fmt.Printf("Addr Line Opcode           Indx Value\n")
 
 	for offset := 0; offset < len(c.Code); {
 		offset = c.disassembleInstruction(offset)

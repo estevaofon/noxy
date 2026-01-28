@@ -124,7 +124,7 @@ Maps are passed by **VALUE** (Copy) by default. To modify the original map in a 
 
 ```noxy
 struct Person
-    name: string,
+    name: string
     age: int
 end
 ```
@@ -376,7 +376,7 @@ Structs can reference themselves using `ref`.
 
 ```noxy
 struct Node
-    value: int,
+    value: int
     next: ref Node
 end
 ```
@@ -557,6 +557,6 @@ Noxy comes with a comprehensive standard library. Available modules include:
     - **Function Calls**: Performs a **Deep Copy** (or Shallow Copy of top-level container) to ensure Pass-by-Value semantics, unless `ref` is specified.
 
 ---
-*Version: 1.2*
+*Version: 1.3.0*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*

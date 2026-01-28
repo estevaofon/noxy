@@ -35,24 +35,24 @@
 
 // --- Phase 1: Struct Metadata ---
 struct Metadata
-    criado_em: int,
-    modificado_em: int,
+    criado_em: int
+    modificado_em: int
     permissoes: int
 end
 
 // --- Phase 2: Struct File ---
 struct File
-    nome: string,
-    tamanho: int,
+    nome: string
+    tamanho: int
     meta: ref Metadata
 end
 
 // --- Phase 3: Struct Directory ---
 struct Directory
-    nome: string,
-    meta: ref Metadata,
-    parent: ref Directory,
-    arquivos: list,
+    nome: string
+    meta: ref Metadata
+    parent: ref Directory
+    arquivos: list
     subdirs: list
 end
 
