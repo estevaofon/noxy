@@ -4602,18 +4602,37 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 	var isDir bool
 	// found := false // Unused
 
-	// Helper to check 4 locations
+	// Helper to check locations
 	checkLocations := func(suffix string) bool {
-		candidates := []string{
-			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix, suffix+".nx"), // noxy_libs/mod/mod.nx (file in dir)
-			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix),               // noxy_libs/mod (dir)
-			filepath.Join(vm.Config.RootPath, "stdlib", suffix),
-			filepath.Join(vm.Config.RootPath, suffix),
-			filepath.Join("noxy_libs", suffix, suffix+".nx"),
-			filepath.Join("noxy_libs", suffix),
-			filepath.Join("stdlib", suffix),
-			suffix,
+		candidates := []string{}
+
+		// 0. NOXY_PATH Environment Variable
+		noxyPath := os.Getenv("NOXY_PATH")
+		if noxyPath != "" {
+			paths := filepath.SplitList(noxyPath)
+			for _, p := range paths {
+				// Check for:
+				// $PATH/mod/mod.nx
+				// $PATH/mod (dir)
+				// $PATH/mod.nx (file)
+				candidates = append(candidates, filepath.Join(p, suffix, suffix+".nx"))
+				candidates = append(candidates, filepath.Join(p, suffix))
+				candidates = append(candidates, filepath.Join(p, suffix+".nx"))
+			}
 		}
+
+		// 1. RootPath (Config)
+		candidates = append(candidates, filepath.Join(vm.Config.RootPath, "noxy_libs", suffix, suffix+".nx"))
+		candidates = append(candidates, filepath.Join(vm.Config.RootPath, "noxy_libs", suffix))
+		candidates = append(candidates, filepath.Join(vm.Config.RootPath, "stdlib", suffix))
+		candidates = append(candidates, filepath.Join(vm.Config.RootPath, suffix))
+
+		// 2. Fallbacks (Working Directory)
+		candidates = append(candidates, filepath.Join("noxy_libs", suffix, suffix+".nx"))
+		candidates = append(candidates, filepath.Join("noxy_libs", suffix))
+		candidates = append(candidates, filepath.Join("stdlib", suffix))
+		candidates = append(candidates, suffix)
+
 		for _, p := range candidates {
 			// fmt.Printf("Checking path: %s\n", p)
 			info, err := os.Stat(p)

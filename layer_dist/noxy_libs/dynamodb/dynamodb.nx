@@ -1,0 +1,97 @@
+// internal/stdlib/dynamodb.nx
+// DynamoDB Library (Plugin Wrapper)
+
+// Load the plugin
+// This expects 'noxy-plugin-dynamodb' to be in PATH or current directory.
+// It defines 'dynamodb_request(method, params)' native function.
+let loaded: bool = sys_load_plugin("dynamodb", "noxy-plugin-dynamodb")
+
+if !loaded then
+    print("Warning: Failed to load DynamoDB plugin. Ensure 'noxy-plugin-dynamodb' is built and in PATH.")
+end
+
+struct Client
+    id: string
+end
+
+struct PutOpt
+    // Placeholder for future options
+end
+
+// Connect to DynamoDB
+// options: {region: "us-east-1"}
+func connect(options: map[string, any]) -> Client
+    if !loaded then return Client("") end
+    
+    // Call plugin
+    // Request: {method: "connect", params: [options]}
+    // Response: client_id (string)
+    
+    // Note: dynamodb_request takes method name and *list* of params?
+    // In vm.go: params := pArgs[1:] (slice of values)
+    // So dynamodb_request("connect", options) -> params=[options]
+    
+    let id: string = "error"
+    let result: any = dynamodb_request("connect", options)
+    
+    if result != null then
+        id = to_str(result)
+    end
+    
+    return Client(id)
+end
+
+func put_item(client: Client, table: string, item: map[string, any]) -> bool
+    if !loaded then return false end
+    
+    // Request: {method: "put_item", params: [client.id, table, item]}
+    // dynamodb_request("put_item", client.id, table, item)
+    
+    let res: any = dynamodb_request("put_item", client.id, table, item)
+    return res != null
+end
+
+func get_item(client: Client, table: string, key: map[string, any]) -> map[string, any]
+    if !loaded then return null end
+    
+    // Request: {method: "get_item", params: [client.id, table, key]}
+    let res: any = dynamodb_request("get_item", client.id, table, key)
+    
+    if res == null then return null end
+    
+    // Should be a map
+    // We can cast? Noxy is structurally typed or ?
+    // 'any' to 'map' conversion?
+    // Noxy doesn't have explicit cast for map yet?
+    // Return 'any' usually works if treated as map.
+    return res
+end
+
+func update_item(client: Client, table: string, key: map[string, any], updateExpr: string, exprVals: map[string, any]) -> bool
+    if !loaded then return false end
+    
+    // Request: {method: "update_item", params: [client.id, table, key, updateExpr, exprVals]}
+    
+    let res: any = dynamodb_request("update_item", client.id, table, key, updateExpr, exprVals)
+    return res != null
+end
+
+func delete_item(client: Client, table: string, key: map[string, any]) -> bool
+    if !loaded then return false end
+    
+    // Request: {method: "delete_item", params: [client.id, table, key]}
+    let res: any = dynamodb_request("delete_item", client.id, table, key)
+    return res != null
+end
+
+func scan(client: Client, table: string) -> any
+    if !loaded then return null end
+    // Request: {method: "scan", params: [client.id, table]}
+    return dynamodb_request("scan", client.id, table)
+end
+
+func query(client: Client, table: string, keyCond: string, exprVals: map[string, any]) -> any
+    if !loaded then return null end
+    // Request: {method: "query", params: [client.id, table, keyCond, exprVals]}
+    return dynamodb_request("query", client.id, table, keyCond, exprVals)
+end

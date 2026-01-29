@@ -1,0 +1,7 @@
+#!/bin/sh
+set -euo pipefail
+export PATH=$PATH:/opt/bin
+export NOXY_PATH=/opt/noxy_libs:/opt/runtime
+
+# Run the runtime entry point located in the layer
+/opt/bin/noxy /opt/runtime/exec_runtime.nx

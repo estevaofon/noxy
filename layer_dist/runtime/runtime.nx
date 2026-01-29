@@ -1,0 +1,111 @@
+// noxy_examples/aws_lambda/runtime.nx
+// Pure Noxy AWS Lambda Runtime (Native HTTP Client)
+
+use http_client select *
+use http_parser select *
+use json_parser select *
+use json_helpers select *
+use sys select *
+use strings select *
+use lambda_types select *
+use function select * // The user handler
+
+// ============================================
+// Config
+// ============================================
+
+func get_env_str(key: string, def: string) -> string
+    let res: EnvResult = getenv(key)
+    if res.ok then return res.value end
+    return def
+end
+
+// Function Static Config
+let FUNC_NAME: string = get_env_str("AWS_LAMBDA_FUNCTION_NAME", "test-function")
+// let FUNC_MEM: int = get_env_int("AWS_LAMBDA_FUNCTION_MEMORY_SIZE", 128)
+// Just hardcode mem for now to avoid int parsing issues if 'to_int' not avail globally
+let FUNC_MEM: int = 128 
+let LOG_GROUP: string = get_env_str("AWS_LAMBDA_LOG_GROUP_NAME", "/aws/lambda/test")
+let LOG_STREAM: string = get_env_str("AWS_LAMBDA_LOG_STREAM_NAME", "timestamp/ver")
+
+func get_runtime_api() -> string
+    let api: EnvResult = getenv("AWS_LAMBDA_RUNTIME_API")
+    if !api.ok || api.value == "" then
+        return "127.0.0.1:8080" // Local fallback
+    end
+    return strings_trim(api.value)
+end
+
+let RUNTIME_API: string = get_runtime_api()
+let BASE_URL: string = "http://" + RUNTIME_API + "/2018-06-01/runtime/invocation/"
+
+// ============================================
+// Runtime Loop
+// ============================================
+
+func run_runtime() -> void
+    print("Noxy Runtime starting... (Ctx Support)")
+    print("Runtime API: " + RUNTIME_API)
+    
+    while true do
+        // 1. Next Invocation (GET)
+        let next_url: string = BASE_URL + "next"
+        let res: ClientResponse = get(next_url)
+        
+        if !res.ok then
+             print("Runtime Network Error: " + res.error)
+             sleep(1000)
+        else
+            if res.status_code != 200 then
+                 print("Runtime API Error: Status " + to_str(res.status_code))
+                 print("Body: " + to_str(res.body))
+                 sleep(1000)
+            else
+                 // 2. Extract Context Info
+                 let req_id: string = ""
+                 let deadline_ms: int = 0
+                 let trace_id: string = ""
+                 let arn: string = ""
+                 
+                 let i: int = 0
+                 while i < res.header_count do
+                     let h: string = res.headers[i]
+                     let parts: SplitResult = split(h, ":")
+                     if parts.count >= 2 then
+                         let k: string = strings_trim(parts.parts[0]) 
+                         let v: string = strings_trim(parts.parts[1]) 
+                         
+                         if strings_contains(k, "Lambda-Runtime-Aws-Request-Id") then req_id = v end
+                         // if strings_contains(k, "Lambda-Runtime-Deadline-Ms") then deadline_ms = to_int(v) end
+                         if strings_contains(k, "Lambda-Runtime-Invoked-Function-Arn") then arn = v end
+                         if strings_contains(k, "Lambda-Runtime-Trace-Id") then trace_id = v end
+                     end
+                     i = i + 1
+                 end
+                 
+                 if req_id == "" then
+                     print("Error: No Request ID found in headers")
+                 else
+                     // 3. Invoke Handler with Context
+                     let event_body: string = to_str(res.body)
+                     
+                     let ctx: LambdaContext = LambdaContext(req_id, deadline_ms, arn, trace_id, FUNC_NAME, FUNC_MEM, LOG_GROUP, LOG_STREAM)
+                     
+                     let handler_resp: string = handler(event_body, ctx)
+                     
+                     // 4. Send Response (POST)
+                     let resp_url: string = BASE_URL + req_id + "/response"
+                     let post_res: ClientResponse = post(resp_url, to_bytes(handler_resp))
+                     
+                     if !post_res.ok then
+                         print("Error sending response: " + post_res.error)
+                     else
+                         if post_res.status_code >= 300 then
+                             print("API rejected response: " + to_str(post_res.status_code))
+                         end
+                     end
+                 end
+            end
+        end
+    end
+end
