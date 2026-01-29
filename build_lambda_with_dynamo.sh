@@ -12,7 +12,7 @@ echo "Compiling noxy..."
 go build -o noxy ./cmd/noxy
 
 echo "Compiling noxy-plugin-dynamodb..."
-go -C noxy_libs/dynamodb/plugin build -o ../../../noxy-plugin-dynamodb
+go -C noxy_libs/github_com/estevaofon/noxy_dynamodb build -o ../../../../noxy-plugin-dynamodb
 
 # 2. Prepare Distribution Directory
 echo "Preparing artifacts..."
@@ -37,7 +37,7 @@ cp noxy_examples/aws_lambda/function.nx lambda_dist_dynamo/function.nx
 # Copy Noxy Libs (DynamoDB)
 mkdir -p lambda_dist_dynamo/noxy_libs/dynamodb
 cp noxy-plugin-dynamodb lambda_dist_dynamo/noxy_libs/dynamodb/
-cp noxy_libs/dynamodb/dynamodb.nx lambda_dist_dynamo/noxy_libs/dynamodb/
+cp noxy_libs/github_com/estevaofon/noxy_dynamodb/dynamodb.nx lambda_dist_dynamo/noxy_libs/dynamodb/
 
 # 3. Set Permissions (Critical for AWS Lambda)
 echo "Setting permissions..."
