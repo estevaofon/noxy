@@ -33,13 +33,13 @@ cp noxy_examples/aws_lambda/lambda_types.nx layer_dist/runtime/
 cp noxy_examples/aws_lambda/exec_runtime.nx layer_dist/runtime/
 
 # Copy Libraries
-cp noxy-plugin-dynamodb layer_dist/noxy_libs/dynamodb/
+cp noxy-plugin-dynamodb layer_dist/bin/
 cp noxy_libs/github_com/estevaofon/noxy_dynamodb/dynamodb.nx layer_dist/noxy_libs/dynamodb/
 
 # Set Permissions (Critical for AWS Lambda)
 chmod +x layer_dist/bootstrap
 chmod +x layer_dist/bin/noxy
-chmod +x layer_dist/noxy_libs/dynamodb/noxy-plugin-dynamodb
+chmod +x layer_dist/bin/noxy-plugin-dynamodb
 
 # 3. Zip it up
 echo "Creating noxy_layer.zip..."
