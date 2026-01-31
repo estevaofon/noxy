@@ -1,0 +1,20 @@
+use statics
+
+func main()
+    let data: int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    
+    // Go-style: Create directly as a reference (pointer)
+    // s is type 'ref Statics'
+    let s: ref statics.Statics = statics.new_statics(data)
+    
+    // Pass the reference directly
+    statics.compute(s)
+    
+    // Access fields (auto-dereference handles the pointer)
+    print("Mean: " + to_str(s.mean))
+    print("Median: " + to_str(s.median))
+    print("Mode: " + to_str(s.mode))
+    print("Standard Deviation: " + to_str(s.std_dev))
+end
+
+main()
