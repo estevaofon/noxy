@@ -1,0 +1,241 @@
+use http_server
+use http_parser
+use io
+use sqlite
+use strings
+use time
+
+// No need for 'use json' if they are built-ins, but if it fails I'll add it.
+// Assuming they are global per instructions.
+
+// ============================================
+// Data Structures
+// ============================================
+
+struct PasswordRequest
+    title: string
+    username: string
+    password: string
+end
+
+struct PasswordEntry
+    id: int
+    title: string
+    username: string
+    password: string
+    created_at: string
+end
+
+// ============================================
+// Database Setup
+// ============================================
+
+let db: sqlite.Database = sqlite.open("passwords.db")
+
+if !db.open then
+    print("Failed to open passwords.db")
+    return
+end
+
+let init_sql: string = "CREATE TABLE IF NOT EXISTS passwords (id INTEGER PRIMARY KEY, title TEXT, username TEXT, encrypted_password TEXT, created_at TEXT)"
+let res: sqlite.ExecResult = sqlite.exec(db, init_sql)
+
+if !res.ok then
+    print("Failed to create table: " + res.error)
+    return
+end
+
+print("Password Manager Database Opened successfully.")
+
+// ============================================
+// Encryption Logic (Simple XOR)
+// ============================================
+
+let XOR_KEY: int = 0xA5
+
+// Helper to convert char hex to int
+func hex_char_to_int(c: int) -> int
+    if c >= 48 && c <= 57 then return c - 48 end
+    if c >= 97 && c <= 102 then return c - 87 end
+    if c >= 65 && c <= 70 then return c - 55 end
+    return 0
+end
+
+func encrypt(plain: string) -> string
+    let input: bytes = to_bytes(plain)
+    let len_input: int = length(input)
+    let hex_res: string = ""
+    
+    let i: int = 0
+    while i < len_input do
+        let b: int = input[i]
+        let xored: int = b ^ XOR_KEY
+        hex_res = hex_res + fmt("%02x", xored)
+        i = i + 1
+    end
+    return hex_res
+end
+
+func decrypt(hex_str: string) -> string
+    let len: int = length(hex_str)
+    if len % 2 != 0 then return "" end
+    
+    let hex_bytes: bytes = to_bytes(hex_str)
+    let res: string = ""
+    
+    let i: int = 0
+    while i < len do
+        let char1: int = hex_bytes[i]
+        let char2: int = hex_bytes[i+1]
+        
+        let high: int = hex_char_to_int(char1)
+        let low: int = hex_char_to_int(char2)
+        let val: int = (high << 4) | low
+        
+        let original: int = val ^ XOR_KEY
+        res = res + strings.from_char_code(original) // from_char_code is in strings module or global? Using strings. per previous fix
+        i = i + 2
+    end
+    return res
+end
+
+// ============================================
+// Helpers
+// ============================================
+
+func read_file(path: string) -> string
+    let f: io.File = io.open("noxy_examples/password_manager/" + path, "r")
+    if !f.open then return "" end
+    let res: io.IOResult = io.read(f)
+    io.close(f)
+    if res.ok then return res.data end
+    return ""
+end
+
+// ============================================
+// Handlers
+// ============================================
+
+func handle_save_password(body: bytes) -> http_parser.HttpResponse
+    let json_str: string = to_str(body)
+    
+    // Usage of json_loads
+    let req: PasswordRequest = PasswordRequest("", "", "")
+    
+    // Tries to populate 'req' from 'json_str'
+    if !json_loads(json_str, ref req) then
+        return http_server.response_error(400, "Invalid JSON")
+    end
+    
+    if strings.is_empty(req.title) || strings.is_empty(req.password) then
+        return http_server.response_error(400, "Missing title or password")
+    end
+    
+    let encrypted_pass: string = encrypt(req.password)
+    let created_at: string = time.format(time.now_datetime())
+    
+    let params: any[]
+    append(params, req.title)
+    append(params, req.username)
+    append(params, encrypted_pass)
+    append(params, created_at)
+    
+    let res: sqlite.ExecResult = sqlite.execute_params(db, "INSERT INTO passwords (title, username, encrypted_password, created_at) VALUES (?, ?, ?, ?)", params)
+    
+    if res == null || !res.ok then
+        return http_server.response_error(500, "DB Error: " + res.error)
+    end
+    
+    // Return simple JSON response
+    return http_server.response_json("{\"status\": \"ok\", \"id\": " + to_str(res.last_insert_id) + "}")
+end
+
+func handle_list_passwords() -> http_parser.HttpResponse
+    let res: sqlite.QueryResult = sqlite.query(db, "SELECT id, title, username, encrypted_password, created_at FROM passwords ORDER BY id DESC")
+    
+    if res == null || !res.ok then
+        return http_server.response_error(500, "DB Query Error")
+    end
+    
+    let items: PasswordEntry[]
+    
+    let i: int = 0
+    while i < res.row_count do
+        let row: sqlite.Row = res.rows[i]
+        
+        let id_val: string = row.values[0]
+        let title: string = row.values[1]
+        let username: string = row.values[2]
+        let enc_pass: string = row.values[3]
+        let created_at: string = row.values[4]
+        
+        let dec_pass: string = decrypt(enc_pass)
+        
+        let entry: PasswordEntry = PasswordEntry(to_int(id_val), title, username, dec_pass, created_at)
+        append(items, entry)
+        
+        i = i + 1
+    end
+    
+    // Native json_dumps for array of structs
+    let json_resp: string = json_dumps(items)
+    return http_server.response_json(json_resp)
+end
+
+func handle_delete_password(id_str: string) -> http_parser.HttpResponse
+    let id: int = to_int(id_str)
+    if id <= 0 then
+        return http_server.response_error(400, "Invalid ID")
+    end
+    
+    let sql: string = "DELETE FROM passwords WHERE id = " + id_str
+    let res: sqlite.ExecResult = sqlite.exec(db, sql)
+    
+    if !res.ok then
+        return http_server.response_error(500, "DB Error")
+    end
+    
+    return http_server.response_json("{\"status\": \"deleted\"}")
+end
+
+// ============================================
+// Router & Main
+// ============================================
+
+func router(req: http_parser.HttpRequest) -> http_parser.HttpResponse
+    print(fmt("%s %s", req.method, req.path))
+    
+    if req.method == "GET" && req.path == "/api/passwords" then
+        return handle_list_passwords()
+    end
+    
+    if req.method == "POST" && req.path == "/api/passwords" then
+        return handle_save_password(req.body)
+    end
+    
+    if req.method == "DELETE" && strings.starts_with(req.path, "/api/passwords/") then
+        let id_part: string = strings.substring(req.path, 15, length(req.path))
+        return handle_delete_password(id_part)
+    end
+    
+    if req.method == "GET" then
+        if req.path == "/" || req.path == "/index.html" then
+            return http_server.response_html(read_file("public/index.html"))
+        end
+        if req.path == "/style.css" then
+            return http_server.response_ok(to_bytes(read_file("public/style.css")), "text/css")
+        end
+        if req.path == "/script.js" then
+            return http_server.response_ok(to_bytes(read_file("public/script.js")), "application/javascript")
+        end
+    end
+    
+    return http_server.response_404()
+end
+
+let host: string = "127.0.0.1"
+let port: int = 9000
+let server: http_server.HttpServer = http_server.new_server(host, port)
+
+print(fmt("Password Manager running at http://%s:%d", host, port))
+http_server.serve(server, router)
