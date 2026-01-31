@@ -1,87 +1,9 @@
 // noxy_examples/aws_lambda/function.nx
 // User handler
 
-use json_parser select *
-use json_helpers select *
 use dynamodb
 use lambda_types select *
 use strings select *
-
-// ==========================================
-// Helper: JSON Serialization
-// ==========================================
-func escape_json_string(s: string) -> string
-    // Replace " with \"
-    return replace(s, "\"", "\\\"")
-end
-
-func serialize_any(val: any) -> string
-    if val == null then return "null" end
-    
-    // Type checking by trial
-    // We don't have 'typeof' operator returning string yet?
-    // We rely on 'to_str' validation or just structure.
-    
-    // Check if it's a list (plugin returns list of maps for scan)
-    if length(val) > 0 || length(val) == 0 then
-        // It *might* be a list or map or string.
-        // Noxy's length() works on all.
-        
-        // Try to access index 0?
-        // If it's a list, we can iterate.
-        // If it's a map, we can get keys?
-        
-        // LIMITATION: In Noxy 'any' is hard to type-switch at runtime without explicit 'typeof' native.
-        // But for DynamoDB scan result, we KNOW it is a list of maps.
-        // element 0 is a map.
-        
-        // Let's assume it is a LIST of MAPS.
-        let json_arr: string = "["
-        let count: int = length(val)
-        let i: int = 0
-        while i < count do
-            if i > 0 then json_arr = json_arr + "," end
-            let item: any = val[i]
-            json_arr = json_arr + serialize_map(item)
-            i = i + 1
-        end
-        return json_arr + "]"
-    end
-    
-    return "\"" + to_str(val) + "\""
-end
-
-func serialize_map(m: any) -> string
-    // Accessing map keys?
-    // We need 'keys(m)' native function if available.
-    // VM defines "keys" native! (saw it in vm.go)
-    let ks: any = keys(m) 
-    let json_obj: string = "{"
-    let count: int = length(ks)
-    let i: int = 0
-    while i < count do
-        if i > 0 then json_obj = json_obj + "," end
-        let k: string = to_str(ks[i])
-        let v: any = m[k]
-        
-        // Value serialization
-        let v_str: string = "\"" + to_str(v) + "\"" // Default to string for simplicity
-        
-        // Try to detect bool? 
-        // to_str(true) -> "true"
-        // if v == true ... Noxy strict equality might work if v is bool.
-        if v == true then v_str = "true" end
-        if v == false then v_str = "false" end
-        
-        // If v is map? Recurse?
-        // For simple DynamoDB types (S, N, BOOL), string is safe enough for MVP.
-        
-        json_obj = json_obj + "\"" + k + "\":" + v_str
-        i = i + 1
-    end
-    return json_obj + "}"
-end
-
 
 func handler(event: string, context: LambdaContext) -> string
     print("Handler Invoke: " + context.request_id)
@@ -97,17 +19,22 @@ func handler(event: string, context: LambdaContext) -> string
     
     let items: any = dynamodb.scan(client, table)
     
-    // 3. Serialize to JSON
+    // 3. Serialize to JSON (Body)
     let body_json: string = "[]"
     if items != null then
-        body_json = serialize_any(items)
+        body_json = json_dumps(items)
     end
     
     // 4. Return API Gateway Response
-    // IMPORTANT: 'body' must be a STRINGified JSON for Proxy Integration
-    // We already have body_json as a valid JSON string (e.g., "[{...}]")
-    // We need to enclose it in quotes and escape internal quotes to put inside the response JSON
-    let escaped_body: string = escape_json_string(body_json)
+    // Construct the response object directly using a Map
+    let response: map[string, any] = {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json"
+        },
+        "body": body_json
+    }
     
-    return "{\"statusCode\": 200, \"headers\": {\"Content-Type\": \"application/json\"}, \"body\": \"" + escaped_body + "\"}"
+    // Serialize the entire response to JSON string
+    return json_dumps(response)
 end
