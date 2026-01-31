@@ -63,7 +63,7 @@ func main() -> void
     // 3. Benchmark JSON Loads (Deserialization Generic)
     print("Deserializing (Generic)...")
     start = now_ms()
-    let loaded_generic: any = json_loads(json_str)
+    let loaded_generic: any = json_parse(json_str)
     end_time = now_ms()
     print(f"Deserialized (Generic) in {end_time - start} ms")
     

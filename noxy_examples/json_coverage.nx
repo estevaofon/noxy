@@ -54,7 +54,7 @@ func main() -> void
     // 3. Generic Map/Array Decoding (Schemaless)
     print("\n[TEST 3] Generic Reference Decoding")
     // When decoding without a struct target, we get Maps/Arrays
-    let generic_data: any = json_loads(json_str)
+    let generic_data: any = json_parse(json_str)
     
     // Verify structure
     // generic_data["nested"] should be a map

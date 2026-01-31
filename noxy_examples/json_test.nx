@@ -22,7 +22,7 @@ func main() -> void
     
     // 2. Test generic parsing (loads without target)
     print("\nGeneric Parsing:")
-    let generic: any = json_loads(json_str) 
+    let generic: any = json_parse(json_str) 
     print(generic)
     
     // 3. Test Struct Deserialization (loads with target ref)

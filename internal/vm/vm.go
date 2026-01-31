@@ -3035,35 +3035,40 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewString(string(bytes))
 	})
 
-	vm.DefineNative("json_loads", func(args []value.Value) value.Value {
-		// args: json_string, [target]
+	// json_parse(str) -> Value
+	vm.DefineNative("json_parse", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
 		jsonStr := args[0].String()
 
-		// strict behavior: unmarshal directly to Go interface{}
+		var result interface{}
+		err := json.Unmarshal([]byte(jsonStr), &result)
+		if err != nil {
+			return value.NewNull()
+		}
+		return goValToNoxy(result)
+	})
+
+	// json_loads(str, target) -> Bool
+	vm.DefineNative("json_loads", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		jsonStr := args[0].String()
+		target := args[1]
+
 		var result interface{}
 		err := json.Unmarshal([]byte(jsonStr), &result)
 		if err != nil {
 			return value.NewBool(false)
 		}
 
-		if len(args) >= 2 {
-			// Try to populate the target in-place
-			// Support both Reference (if passed correctly) and Object (pointer-semantics in Natives)
-			target := args[1]
-			if populateTarget(vm, target, result) {
-				return value.NewBool(true)
-			}
-			// If population failed (e.g. target is immutable primitive passed by value), return null/false?
-			// But maybe we should return the result anyway?
-			// The user expects void/bool for in-place.
-			return value.NewBool(false)
+		// Try to populate target
+		if populateTarget(vm, target, result) {
+			return value.NewBool(true)
 		}
-
-		// If no target, return the value directly
-		return goValToNoxy(result)
+		return value.NewBool(false)
 	})
 
 	return vm
