@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -3022,7 +3023,238 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewString(fmt.Sprintf(newFormatBuilder.String(), newArgs...))
 	})
 
+	vm.DefineNative("json_dumps", func(args []value.Value) value.Value {
+		if len(args) < 1 {
+			return value.NewString("null")
+		}
+		goVal := jsonValToGo(args[0])
+		bytes, err := json.Marshal(goVal)
+		if err != nil {
+			return value.NewString("null") // Or error?
+		}
+		return value.NewString(string(bytes))
+	})
+
+	vm.DefineNative("json_loads", func(args []value.Value) value.Value {
+		// args: json_string, [target]
+		if len(args) < 1 {
+			return value.NewNull()
+		}
+		jsonStr := args[0].String()
+
+		// strict behavior: unmarshal directly to Go interface{}
+		var result interface{}
+		err := json.Unmarshal([]byte(jsonStr), &result)
+		if err != nil {
+			return value.NewBool(false)
+		}
+
+		if len(args) >= 2 {
+			// Try to populate the target in-place
+			// Support both Reference (if passed correctly) and Object (pointer-semantics in Natives)
+			target := args[1]
+			if populateTarget(vm, target, result) {
+				return value.NewBool(true)
+			}
+			// If population failed (e.g. target is immutable primitive passed by value), return null/false?
+			// But maybe we should return the result anyway?
+			// The user expects void/bool for in-place.
+			return value.NewBool(false)
+		}
+
+		// If no target, return the value directly
+		return goValToNoxy(result)
+	})
+
 	return vm
+}
+
+// Helper: Convert Noxy Value to Go Interface for JSON Marshal
+func jsonValToGo(v value.Value) interface{} {
+	switch v.Type {
+	case value.VAL_NULL:
+		return nil
+	case value.VAL_BOOL:
+		return v.AsBool
+	case value.VAL_INT:
+		return v.AsInt
+	case value.VAL_FLOAT:
+		return v.AsFloat
+	case value.VAL_OBJ:
+		switch o := v.Obj.(type) {
+		case string:
+			return o
+		case *value.ObjArray:
+			arr := make([]interface{}, len(o.Elements))
+			for i, el := range o.Elements {
+				arr[i] = jsonValToGo(el)
+			}
+			return arr
+		case *value.ObjMap:
+			m := make(map[string]interface{})
+			for k, val := range o.Data {
+				keyStr := fmt.Sprintf("%v", k)
+				m[keyStr] = jsonValToGo(val)
+			}
+			return m
+		case *value.ObjInstance:
+			m := make(map[string]interface{})
+			for k, val := range o.Fields {
+				m[k] = jsonValToGo(val)
+			}
+			return m
+		case *value.ObjStruct:
+			return o.Name
+		}
+	case value.VAL_BYTES:
+		// Base64 encode bytes? Or generic string?
+		return v.Obj.(string)
+	}
+	return v.String()
+}
+
+// Helper: Convert Go Interface to Noxy Value
+func goValToNoxy(i interface{}) value.Value {
+	if i == nil {
+		return value.NewNull()
+	}
+	switch v := i.(type) {
+	case bool:
+		return value.NewBool(v)
+	case float64:
+		// JSON numbers are float64 by default
+		// Try to see if it's an int
+		if v == float64(int64(v)) {
+			return value.NewInt(int64(v))
+		}
+		return value.NewFloat(v)
+	case string:
+		return value.NewString(v)
+	case []interface{}:
+		arr := make([]value.Value, len(v))
+		for idx, el := range v {
+			arr[idx] = goValToNoxy(el)
+		}
+		return value.NewArray(arr)
+	case map[string]interface{}:
+		m := make(map[string]value.Value)
+		for k, val := range v {
+			m[k] = goValToNoxy(val)
+		}
+		return value.NewMapWithData(m)
+	}
+	return value.NewString(fmt.Sprintf("%v", i))
+}
+
+// Helper: Populate Target
+func populateTarget(vm *VM, target value.Value, data interface{}) bool {
+	if target.Type == value.VAL_REF {
+		ref := target.Obj.(*value.ObjRef)
+		populateRef(vm, ref, data)
+		return true
+	} else if target.Type == value.VAL_OBJ {
+		// Populate Object In-Place
+		populateObj(vm, target, data)
+		return true
+	}
+	// Cannot populate primitive value passed by value
+	return false
+}
+
+func populateObj(vm *VM, currentVal value.Value, data interface{}) {
+	if inst, ok := currentVal.Obj.(*value.ObjInstance); ok {
+		if dataMap, ok := data.(map[string]interface{}); ok {
+			for _, fieldName := range inst.Struct.Fields {
+				if val, exists := dataMap[fieldName]; exists {
+					// Check if field is instance -> recurse
+					fieldType := inst.Fields[fieldName]
+					if fieldType.Type == value.VAL_OBJ {
+						if _, isInst := fieldType.Obj.(*value.ObjInstance); isInst {
+							populateObj(vm, fieldType, val)
+							continue
+						}
+					}
+					inst.Fields[fieldName] = goValToNoxy(val)
+				}
+			}
+		}
+	} else if m, ok := currentVal.Obj.(*value.ObjMap); ok {
+		if dataMap, ok := data.(map[string]interface{}); ok {
+			// Clear logic? Or merge? Go unmarshal merges.
+			for k, v := range dataMap {
+				m.Data[k] = goValToNoxy(v)
+			}
+		}
+	} else if arr, ok := currentVal.Obj.(*value.ObjArray); ok {
+		if dataArr, ok := data.([]interface{}); ok {
+			// Replace array content (slice behavior)
+			// Or should we merge? slice unmarshal replaces.
+			// But we can't resize easily in place?
+			// Actually we can just replace Elements slice.
+			newElems := make([]value.Value, len(dataArr))
+			for i, el := range dataArr {
+				newElems[i] = goValToNoxy(el)
+			}
+			arr.Elements = newElems
+		}
+	}
+}
+
+// Helper: Populate a Reference with Go Data (Deeply)
+func populateRef(vm *VM, ref *value.ObjRef, data interface{}) {
+	var currentVal value.Value
+
+	// Dereference
+	switch ref.RefType {
+	case value.REF_GLOBAL:
+		v, ok := vm.GetGlobal(ref.Name)
+		if ok {
+			currentVal = v
+		}
+	case value.REF_UPVALUE:
+		currentVal = *ref.Upvalue.Location
+	case value.REF_PTR:
+		currentVal = *ref.Ptr
+	case value.REF_PROPERTY:
+		if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+			currentVal = inst.Fields[ref.Name]
+		}
+	case value.REF_INDEX:
+		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+			idx := int(ref.Index.AsInt)
+			if idx >= 0 && idx < len(arr.Elements) {
+				currentVal = arr.Elements[idx]
+			}
+		}
+	}
+
+	// Logic to update: if object, update in place
+	if currentVal.Type == value.VAL_OBJ {
+		populateObj(vm, currentVal, data)
+		return
+	}
+
+	// Replace reference
+	newValue := goValToNoxy(data)
+	switch ref.RefType {
+	case value.REF_GLOBAL:
+		vm.SetGlobal(ref.Name, newValue)
+	case value.REF_UPVALUE:
+		*ref.Upvalue.Location = newValue
+	case value.REF_PTR:
+		*ref.Ptr = newValue
+	case value.REF_PROPERTY:
+		if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
+			inst.Fields[ref.Name] = newValue
+		}
+	case value.REF_INDEX:
+		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+			idx := int(ref.Index.AsInt)
+			if idx >= 0 && idx < len(arr.Elements) {
+				arr.Elements[idx] = newValue
+			}
+		}
+	}
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
