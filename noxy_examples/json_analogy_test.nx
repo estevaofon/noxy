@@ -52,7 +52,17 @@ func main() -> void
     // Using formatted string for date/time parity with Go example JSON
     let dt_str: string = time.format(time.now_datetime())
 
-    let usuario: Usuario = Usuario(1, "Joao Silva", "joao@email.com", true, 1500.75, ["premium", "developer", "early-adopter"], addr, [c1, c2], config, meta, dt_str, "senha123")
+    let usuario: Usuario = Usuario(
+        1, 
+        "Joao Silva", 
+        "joao@email.com", 
+        true, 1500.75, 
+        ["premium", "developer", "early-adopter"], 
+        addr, 
+        [c1, c2], 
+        config, 
+        meta, 
+        dt_str, "senha123")
 
     // 2. Marshal (Serialization)
     // Noxy json_dumps produces compact JSON by default (no indentation option yet)
