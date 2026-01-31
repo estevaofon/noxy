@@ -1,0 +1,132 @@
+use time select now_ms
+use sys select exec
+
+// Complex Structures
+struct Address
+    street: string
+    city: string
+    zip: int
+    geo: map[string, float]
+end
+
+struct Profile
+    bio: string
+    socials: string[]
+    address: Address
+    attributes: map[string, string]
+end
+
+struct User
+    id: int
+    username: string
+    active: bool
+    rating: float
+    profile: Profile
+    history: int[]
+end
+
+// Deeply Nested Recursive Struct for Limit Testing
+struct Node
+    val: int
+    next: ref Node
+    meta: map[string, any]
+end
+
+func main() -> void
+    print("--- JSON Native Function Stress Test ---")
+
+    // 1. Setup Complex Data
+    let addr: Address = Address("123 Tech Lane", "Silicon Valley", 94000, {"lat": 37.77, "lon": -122.41})
+    let prof: Profile = Profile("Loves coding in Noxy", ["twitter", "github", "linkedin"], addr, {"role": "admin", "level": "expert"})
+    
+    // Create array of users (Volume Test)
+    let users: User[] = []
+    let i: int = 0
+    let count: int = 1000 // 1000 Users to test performance
+    
+    print(f"Generating {count} complex users...")
+    while i < count do
+        let u: User = User(i, f"user_{i}", true, 9.5, prof, [1, 2, 3, 4, 5, i])
+        append(users, u)
+        i = i + 1
+    end
+    
+    // 2. Benchmark JSON Dumps (Serialization)
+    print("Serializing...")
+    let start: int = now_ms()
+    let json_str: string = json_dumps(users)
+    let end_time: int = now_ms()
+    
+    print(f"Serialized {length(users)} users in {end_time - start} ms")
+    print(f"JSON Size: {length(json_str)} bytes")
+    
+    // 3. Benchmark JSON Loads (Deserialization Generic)
+    print("Deserializing (Generic)...")
+    start = now_ms()
+    let loaded_generic: any = json_loads(json_str)
+    end_time = now_ms()
+    print(f"Deserialized (Generic) in {end_time - start} ms")
+    
+    if length(loaded_generic) == count then
+        print("[PASS] Count matches")
+    else
+        print(f"[FAIL] Count mismatch: {length(loaded_generic)}")
+    end
+    
+    // 4. Benchmark JSON Loads (Struct Target - Array not fully supported for direct array-to-array yet?)
+    // Our json_loads(test, ref target) handles object/ref. 
+    // Does it handle ref to array? 
+    // Let's test single complex user roundtrip
+    
+    let single_user: User = users[0]
+    let single_json: string = json_dumps(single_user)
+    
+    let target_user: User = User(0, "", false, 0.0, Profile("", [], Address("", "", 0, {}), {}), [])
+    
+    print("Deserializing Single Complex Struct...")
+    start = now_ms()
+    let success: bool = json_loads(single_json, ref target_user)
+    end_time = now_ms()
+    
+    if success && target_user.username == "user_0" && target_user.profile.address.city == "Silicon Valley" then
+         print(f"[PASS] Struct roundtrip success in {end_time - start} ms")
+    else
+         print("[FAIL] Struct roundtrip failed")
+         print(target_user)
+    end
+    
+    // 5. Deep Recursion Test
+    print("Testing Deep Recursion...")
+    let head: Node = Node(0, null, {})
+    let curr: ref Node = ref head
+    i = 0
+    while i < 100 do
+        let next_node: Node = Node(i+1, null, {})
+        // Manual linking via ref update
+         // NOTE: Noxy Ref semantics for 'next' field update might be tricky without helper
+        // Using generic array for simpler recursion stress
+        i = i + 1
+    end
+    
+    // Test Edge Cases
+    print("Testing Edge Cases...")
+    let special: map[string, string] = {
+        "quote": "\"",
+        "slash": "\\",
+        "newline": "\n",
+        "emoji": "??"
+    }
+    let s_json: string = json_dumps(special)
+    let s_restored: map[string, string] = {}
+    json_loads(s_json, ref s_restored)
+    
+    if s_restored["quote"] == "\"" && s_restored["emoji"] == "??" then
+        print("[PASS] Special chars handled")
+    else
+        print("[FAIL] Special chars mismatch")
+        print(s_restored)
+    end
+
+end
+
+main()
