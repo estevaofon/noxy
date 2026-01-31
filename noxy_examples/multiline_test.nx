@@ -1,0 +1,34 @@
+func main() -> void
+    print("--- Multiline Syntax Test ---")
+
+    // 1. Multiline Map
+    let m: map[string, int] = {
+        "one": 1,
+        "two": 
+        2,
+        "three": 3
+    }
+    print("Map parsed:", m)
+
+    // 2. Multiline Struct Instantiation (Function Call)
+    struct Point
+        x: int
+        y: int
+    end
+
+    let p: Point = Point(
+        10,
+        20
+    )
+    print("Point parsed:", p)
+
+    // 3. Array (Should already work, checking for regression)
+    let arr: int[] = [
+        1,
+        2,
+        3
+    ]
+    print("Array parsed:", arr)
+end
+
+main()

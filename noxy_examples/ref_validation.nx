@@ -1,0 +1,58 @@
+
+struct Data
+    val: int
+end
+
+// User Function expecting explicit Reference
+func user_ref_func(d: ref Data) -> void
+    d.val = 999
+end
+
+func main() -> void
+    print("--- Reference Semantics Validation ---")
+    
+    // 1. Test Native json_loads (Implicit Ref / Pointer Semantics)
+    print("\n[TEST 1] Native json_loads (Object as Target)")
+    let d1: Data = Data(10)
+    let json: string = "{\"val\": 20}"
+    
+    // Passing d1 directly (It is an Object, which is a pointer in VM)
+    // Does json_loads accept it and modify it in-place?
+    json_loads(json, d1)
+    
+    print(f"Value after json_loads(obj): {d1.val}")
+    if d1.val == 20 then
+        print("[PASS] Native function modified object in-place (Implicit Ref)")
+    else
+        print("[FAIL] Native function did NOT modify object (Copy behavior?)")
+    end
+    
+    // 2. Test User Function (Explicit Ref Signature)
+    print("\n[TEST 2] User Function (ref T)")
+    let d2: Data = Data(10)
+    
+    // Can we pass 'd2' to 'user_ref_func(ref Data)' without 'ref' keyword?
+    // user_ref_func(d2) // Uncommenting this line should trigger compile error if strict
+    
+    // Let's try calling with explicit ref first to prove it works
+    user_ref_func(ref d2)
+    print(f"Value after explicit ref call: {d2.val}")
+    
+    if d2.val == 999 then
+        print("[PASS] Explicit 'ref' keyword works as expected")
+    end
+    
+    // HYPOTHESIS TEST:
+    // Try passing object directly. If this compiles and works, then Objects satisfy 'ref T'.
+    // If it fails to compile, then strict syntax is required.
+    // I will comment this out initially to ensure script runs, then enable it via tool 
+    // or just assume if run succeeds so far.
+    // actually let's try it. If it crashes, we know.
+    
+    print("Attempting implicit ref call...")
+    user_ref_func(d2) 
+    print("Implicit call compiled?")
+
+end
+
+main()

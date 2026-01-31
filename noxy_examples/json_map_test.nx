@@ -1,0 +1,74 @@
+func main() -> void
+    print("--- JSON Loads with Map Target Test ---")
+
+    // 1. Serialization of Map
+    let data: map[string, int] = {"one": 1, "two": 2, "three": 3}
+    let json_str: string = json_dumps(data)
+    print(f"Serialized Map: {json_str}")
+
+    // 2. Targeted Loading into Typed Map
+    // Initialize empty target map
+    let target_map: map[string, int] = {}
+    
+    // We expect json_loads to populate this map in-place
+    // Note: Since target_map is typed [string, int], the runtime should handle type conversions if possible,
+    // or 'populateObj' logic recursively sets values.
+    // In Noxy, maps are generic 'objMap', types are checked at runtime/compile time bounds?
+    // Actually, 'populateObj' puts values into the map.
+    
+    let success: bool = json_loads(json_str, target_map)
+    
+    if success then
+        print("[PASS] json_loads returned success for map target")
+    else
+        print("[FAIL] json_loads returned failure for map target")
+    end
+
+    print(f"Target Map Content: {target_map}")
+    
+    if target_map["two"] == 2 then
+        print("[PASS] Value 'two' is correct")
+    else
+        print(f"[FAIL] Value 'two' lookup failed. Got: {target_map['two']}")
+    end
+
+    // 3. Merging Behavior
+    // If map already has data, does it merge or clear? 
+    // Go's Unmarshal merges/overwrites fields. 
+    // Our implementation iterates keys and sets them. So it should merge.
+    
+    let merge_target: map[string, int] = {"existing": 999, "one": 100} 
+    // 'one' should be overwritten by 1 (from json), 'existing' should remain.
+    
+    print("\nTesting Merge Behavior:")
+    json_loads(json_str, merge_target)
+    
+    print(merge_target)
+    if merge_target["existing"] == 999 && merge_target["one"] == 1 then
+        print("[PASS] Map merged correctly (existing kept, collision overwritten)")
+    else
+        print("[FAIL] Map merge logic incorrect")
+    end
+
+    // 4. Nested Map
+    // Targeted loading into map[string, any] containing sub-maps
+    print("\nTesting Nested Map (any value):")
+    let nested_json: string = "{\"meta\": {\"id\": 123}, \"tags\": [\"a\", \"b\"]}"
+    let complex_map: map[string, any] = {}
+    
+    json_loads(nested_json, complex_map)
+    print(complex_map)
+    
+    // Accessing nested
+    // Note: Noxy syntax for complex_map["meta"]["id"] depends on parser support for chained index.
+    // Assuming it works or we assign temp.
+    let meta: map[string, any] = complex_map["meta"]
+    if meta["id"] == 123 then
+        print("[PASS] Nested map populated via 'any' type")
+    else
+        print("[FAIL] Nested map access failed")
+    end
+
+end
+
+main()

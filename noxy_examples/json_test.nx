@@ -1,0 +1,54 @@
+
+struct User
+    name: string
+    age: int
+    active: bool
+    tags: string[]
+    metadata: map[string, int]
+end
+
+func main() -> void
+    print("--- JSON Native Function Test ---")
+
+    // 1. Test Struct Serialization (dumps)
+    let u: User = User("Alice", 30, true, ["admin", "editor"], {"login_count": 42})
+    
+    print("Original User:")
+    print(u)
+    
+    let json_str: string = json_dumps(u)
+    print("\nSerialized JSON:")
+    print(json_str)
+    
+    // 2. Test generic parsing (loads without target)
+    print("\nGeneric Parsing:")
+    let generic: any = json_parse(json_str) 
+    print(generic)
+    
+    // 3. Test Struct Deserialization (loads with target ref)
+    print("\nStruct Deserialization:")
+    let u2: User = User("", 0, false, [], {})
+    let ok: bool = json_loads(json_str, ref u2)
+    
+    print(f"Success: {ok}")
+    print("Restored User:")
+    print(u2)
+    // print u2.name
+    print(u2.name)
+    // print u2.age
+    print(u2.age)
+    // print u2.active
+    print(u2.active)
+    // print u2.tags
+    print(u2.tags)
+    // print u2.metadata
+    print(u2.metadata)
+    
+    if u2.name == "Alice" && u2.age == 30 && u2.active == true && u2.tags[0] == "admin" then
+        print("\n[PASS] Struct data restored correctly.")
+    else
+        print("\n[FAIL] Data mismatch.")
+    end
+end
+
+main()

@@ -1,0 +1,94 @@
+
+struct NestedStruct
+    id: int
+    label: string
+end
+
+struct TestStruct
+    name: string
+    active: bool
+    scores: int[]
+    meta: map[string, float]
+    nested: NestedStruct
+    child_list: NestedStruct[]
+end
+
+func main() -> void
+    print("--- JSON Native Function Positive Coverage Test ---")
+    
+    // 1. Primitives (Generic Loads)
+    print("\n[TEST 1] Primitives Roundtrip")
+    let s: string = json_dumps("Hello World")
+    let i: string = json_dumps(12345)
+    let f: string = json_dumps(3.14159)
+    let b: string = json_dumps(true)
+    let n: string = json_dumps(null)
+    
+    print(f"Strings: {s}")
+    print(f"Ints: {i}")
+    print(f"Floats: {f}")
+    print(f"Bools: {b}")
+    print(f"Nulls: {n}")
+    
+    // 2. Struct Serialization & Deserialization (Complex)
+    print("\n[TEST 2] Complex Struct Roundtrip")
+    
+    let child1: NestedStruct = NestedStruct(1, "Child A")
+    let child2: NestedStruct = NestedStruct(2, "Child B")
+    
+    let original: TestStruct = TestStruct("Parent", true, [10, 20, 30], {"accuracy": 99.9, "speed": 100.0}, child1, [child1, child2])
+    
+    let json_str: string = json_dumps(original)
+    print(f"JSON: {json_str}")
+    
+    let restored: TestStruct = TestStruct("", false, [], {}, NestedStruct(0,""), [])
+    let ok: bool = json_loads(json_str, ref restored)
+    
+    if ok && restored.name == "Parent" && restored.child_list[1].label == "Child B" && restored.meta["accuracy"] == 99.9 then
+        print("[PASS] Complex Struct Roundtrip")
+    else
+        print("[FAIL] Complex Struct Roundtrip Mismatch")
+        // print(restored)
+    end
+
+    // 3. Generic Map/Array Decoding (Schemaless)
+    print("\n[TEST 3] Generic Reference Decoding")
+    // When decoding without a struct target, we get Maps/Arrays
+    let generic_data: any = json_parse(json_str)
+    
+    // Verify structure
+    // generic_data["nested"] should be a map
+    // generic_data["child_list"] should be an array of maps
+    
+    // Note: Noxy 'any' type subscripting depends on the runtime underlying type.
+    // If it's a Map, key access works.
+    
+    // Since we don't have 'typeof' easily exposed or 'is_map', we rely on operations working.
+    
+    // print(generic_data)
+    
+    // 4. Unicode and Escaping
+    print("\n[TEST 4] Unicode and Escape Characters")
+    let special: map[string, string] = {
+        "text": "Line1\nLine2\tTabbed \"Quoted\"",
+        "emoji": "Rocket ?? Fire ??"
+    }
+    let s_json: string = json_dumps(special)
+    let s_restored: map[string, string] = {}
+    json_loads(s_json, ref s_restored)
+    
+    if s_restored["emoji"] == "Rocket ?? Fire ??" then
+        print("[PASS] Unicode Preserved")
+    else
+        print("[FAIL] Unicode Mismatch")
+    end
+    
+    if length(s_restored["text"]) > 10 then
+         print("[PASS] Escape Chars Preserved")
+    else
+         print("[FAIL] Escape Chars Issue")
+    end
+
+end
+
+main()

@@ -1141,6 +1141,11 @@ func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
 func (p *Parser) parseCallArguments() []ast.Expression {
 	args := []ast.Expression{}
 
+	// Skip initial newlines
+	for p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
+
 	if p.peekTokenIs(token.RPAREN) {
 		p.nextToken()
 		return args
@@ -1149,10 +1154,32 @@ func (p *Parser) parseCallArguments() []ast.Expression {
 	p.nextToken()
 	args = append(args, p.parseExpression(LOWEST))
 
-	for p.peekTokenIs(token.COMMA) {
-		p.nextToken()
+	for p.peekTokenIs(token.COMMA) || p.peekTokenIs(token.NEWLINE) {
+		// Just skip newlines effectively
+		if p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+			continue
+		}
+
+		p.nextToken() // eat COMMA
+
+		// Skip newlines after comma
+		for p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+		}
+
+		// Check for trailing comma + closing paren
+		if p.peekTokenIs(token.RPAREN) {
+			break
+		}
+
 		p.nextToken()
 		args = append(args, p.parseExpression(LOWEST))
+	}
+
+	// Skip trailing newlines before closing paren
+	for p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
 	}
 
 	if !p.expectPeek(token.RPAREN) {
@@ -1243,44 +1270,47 @@ func (p *Parser) parseMapLiteral() ast.Expression {
 	}
 
 	for !p.peekTokenIs(token.RBRACE) {
+		// Skip newlines between entries or before key
+		for p.peekTokenIs(token.NEWLINE) {
+			p.nextToken()
+		}
+
+		// Recheck end after skipping newlines
+		if p.peekTokenIs(token.RBRACE) {
+			break
+		}
+
 		p.nextToken()
-		// Parse Key
+		// Parse Key (curToken is expected to be part of key)
 		key := p.parseExpression(LOWEST)
 
 		if !p.expectPeek(token.COLON) {
 			return nil
 		}
 
+		// ExpectPeek moves to COLON. cur=COLON.
+		// Next token should be start of value.
 		p.nextToken()
-		// Parse Value
+
+		// Skip newlines after colon before value
+		for p.curTokenIs(token.NEWLINE) {
+			p.nextToken()
+		}
+
+		// Parse Value (curToken MUST be valid start of expression)
 		value := p.parseExpression(LOWEST)
 
 		hash.Keys = append(hash.Keys, key)
 		hash.Values = append(hash.Values, value)
 
-		// Check for newline/comma
-		if p.peekTokenIs(token.NEWLINE) {
+		// Check for comma or newline as separator
+		if p.peekTokenIs(token.COMMA) {
 			p.nextToken()
-			// Skip extra newlines
-			for p.peekTokenIs(token.NEWLINE) {
-				p.nextToken()
-			}
-			// Optional comma
-			if p.peekTokenIs(token.COMMA) {
-				p.nextToken()
-				// Skip newlines after comma
-				for p.peekTokenIs(token.NEWLINE) {
-					p.nextToken()
-				}
-			}
-		} else if p.peekTokenIs(token.COMMA) {
-			p.nextToken()
-			// Skip newlines after comma
-			for p.peekTokenIs(token.NEWLINE) {
-				p.nextToken()
-			}
+		} else if p.peekTokenIs(token.NEWLINE) {
+			// Newline is implicit separator, allow it loop to handle it at start of next iteration
 		} else if !p.peekTokenIs(token.RBRACE) {
-			// If not RBRACE and no comma/newline, error
+			// Missing separator?
+			// If neither comma nor newline nor brace, error.
 			if !p.expectPeek(token.COMMA) {
 				return nil
 			}

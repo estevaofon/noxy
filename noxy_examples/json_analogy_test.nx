@@ -1,0 +1,107 @@
+use time
+
+// Endereco (Address)
+struct Endereco
+    rua: string
+    cidade: string
+    estado: string
+    cep: string
+end
+
+// Contato (Contact)
+struct Contato
+    tipo: string
+    valor: string
+end
+
+// Configuracoes (Settings)
+struct Configuracoes
+    notificacoes: bool
+    tema: string
+    extras: map[string, any]
+end
+
+// Usuario (User)
+struct Usuario
+    id: int
+    nome: string
+    email: string
+    ativo: bool
+    saldo: float
+    tags: string[]
+    endereco: Endereco
+    contatos: Contato[]
+    configuracoes: Configuracoes
+    metadata: map[string, any]
+    criado_em: string
+    senha: string
+end
+
+func main() -> void
+    // 1. Criar estrutura complexa (Create complex structure)
+    let addr: Endereco = Endereco("Rua das Flores, 123", "Sao Paulo", "SP", "01234-567")
+    
+    let c1: Contato = Contato("telefone", "+55 11 99999-9999")
+    let c2: Contato = Contato("linkedin", "linkedin.com/in/joaosilva")
+    
+    let extras: map[string, any] = {"idioma": "pt-BR", "timezone": "America/Sao_Paulo", "beta": true}
+    let config: Configuracoes = Configuracoes(true, "dark", extras)
+    
+    let meta: map[string, any] = {"origem": "organic", "campanhaId": 42, "score": 98.5, "permissoes": ["read", "write", "admin"], "ultimoLogin": null}
+
+    // Using formatted string for date/time parity with Go example JSON
+    let dt_str: string = time.format(time.now_datetime())
+
+    let usuario: Usuario = Usuario(
+        1, 
+        "Joao Silva", 
+        "joao@email.com", 
+        true, 1500.75, 
+        ["premium", "developer", "early-adopter"], 
+        addr, 
+        [c1, c2], 
+        config, 
+        meta, 
+        dt_str, "senha123")
+
+    // 2. Marshal (Serialization)
+    // Noxy json_dumps produces compact JSON by default (no indentation option yet)
+    let json_str: string = json_dumps(usuario)
+
+    print("=== MARSHAL (Noxy) ===")
+    print(json_str)
+
+    // 3. Unmarshal (Deserialization)
+    // Create empty struct to populate
+    let end_empty: Endereco = Endereco("", "", "", "")
+    let conf_empty: Configuracoes = Configuracoes(false, "", {})
+    let usuario_recuperado: Usuario = Usuario(0, "", "", false, 0.0, [], end_empty, [], conf_empty, {}, "", "")
+
+    let ok: bool = json_loads(json_str, ref usuario_recuperado)
+
+    if !ok then
+        print("\n[ERROR] Failed to unmarshal")
+        return
+    end
+
+    print("\n=== UNMARSHAL (Noxy) ===")
+    print(f"Nome: {usuario_recuperado.nome}")
+    print(f"Saldo: R$ {usuario_recuperado.saldo}")
+    print(f"Cidade: {usuario_recuperado.endereco.cidade}")
+    print(f"Tags: {usuario_recuperado.tags}")
+    
+    // Check contact existence before access to satisfy safety
+    if length(usuario_recuperado.contatos) > 0 then
+        print(f"Primeiro contato: {usuario_recuperado.contatos[0].tipo} - {usuario_recuperado.contatos[0].valor}")
+    end
+    
+    print(f"Tema: {usuario_recuperado.configuracoes.tema}")
+    print(f"Idioma: {usuario_recuperado.configuracoes.extras['idioma']}")
+    print(f"Origem: {usuario_recuperado.metadata['origem']}")
+    
+    // Note: 'senha' is populated because Noxy dumps/loads everything by default.
+    print(f"Senha recuperada: '{usuario_recuperado.senha}' (Noxy serializa tudo por padrao)")
+
+end
+
+main()
