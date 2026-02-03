@@ -123,7 +123,7 @@ How to run the interpreter tests:
 go test ./...
  
 # Run integration tests (Noxy scripts)
-go run cmd/noxy/main.go noxy_examples/run_all_tests.nx
+go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
 ```
  
 ## Architecture
