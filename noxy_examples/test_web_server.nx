@@ -2,7 +2,7 @@
 // Verification Script: test_web_server.nx
 use http_server select *
 use http_client select *
-use json_parser select *
+
 use time select *
 
 // Handler
@@ -10,9 +10,9 @@ func my_handler(req: HttpRequest) -> HttpResponse
     // print("Handler received: " + req.method + " " + req.path)
     if req.method == "POST" && req.path == "/echo" then
         // Echo JSON
-        let node: ref JsonNode = json_parse(to_str(req.body))
-        if node != null then
-            let json_str: string = json_stringify(node)
+        let val: any = json_parse(to_str(req.body))
+        if val != null then
+            let json_str: string = json_dumps(val)
             return response_json(json_str) 
         end
         return response_error(400, "Invalid JSON")

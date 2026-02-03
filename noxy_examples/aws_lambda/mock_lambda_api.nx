@@ -4,8 +4,7 @@
 
 use http_server select *
 use http_parser select *
-use json_parser select *
-use json_helpers select *
+
 use strings select *
 
 // Global Event Queue (Channel)
@@ -33,7 +32,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
     
     // 2. GET /2018-06-01/runtime/invocation/next - Runtime polls for event
     // This blocks until an event is available in the channel!
-    if req.method == "GET" && strings_contains(req.path, "/runtime/invocation/next") then
+    if req.method == "GET" && contains(req.path, "/runtime/invocation/next") then
         print("[MOCK API] Runtime waiting for event...")
         let event_body: string = to_str(chan_recv(event_queue))
         print("[MOCK API] Sending event to runtime")
@@ -54,7 +53,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
     end
     
     // 3. POST /2018-06-01/runtime/invocation/{AwsRequestId}/response
-    if req.method == "POST" && strings_contains(req.path, "/response") then
+    if req.method == "POST" && contains(req.path, "/response") then
         let result: string = to_str(req.body)
         print("[MOCK API] Received execution result: " + result)
         // Store for verification
@@ -63,7 +62,7 @@ func api_handler(req: HttpRequest) -> HttpResponse
     end
     
     // 4. POST /2018-06-01/runtime/invocation/{AwsRequestId}/error
-    if req.method == "POST" && strings_contains(req.path, "/error") then
+    if req.method == "POST" && contains(req.path, "/error") then
         let err: string = to_str(req.body)
         print("[MOCK API] Received execution error: " + err)
         chan_send(result_queue, "ERROR: " + err)
@@ -85,3 +84,6 @@ func run_mock()
     let s: HttpServer = new_server(host, port)
     serve(s, api_handler)
 end
+
+run_mock()
+

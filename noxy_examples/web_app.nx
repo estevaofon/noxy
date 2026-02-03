@@ -1,71 +1,10 @@
-use json_parser select *
+
 
 // ============================================
 // NOXY WEB APP - API REST
 // ============================================
 
-// Constantes de tipo JSON
-global TYPE_NULL: int = 0
-global TYPE_BOOL: int = 1
-global TYPE_NUMBER: int = 2
-global TYPE_STRING: int = 3
-global TYPE_ARRAY: int = 4
-global TYPE_OBJECT: int = 5
 
-// ============================================
-// Funções de Auxílio para Extração de Dados JSON
-// ============================================
-
-func get_string(node: ref JsonNode, key: string) -> string
-    if node == null then return "" end
-    if node.type != TYPE_OBJECT then return "" end
-    
-    let current: ref JsonNode = node.child
-    while current != null do
-        if current.key == key then
-            if current.type == TYPE_STRING then
-                return current.string_val
-            end
-            return ""
-        end
-        current = current.next
-    end
-    return ""
-end
-
-func get_object(node: ref JsonNode, key: string) -> ref JsonNode
-    if node == null then return null end
-    if node.type != TYPE_OBJECT then return null end
-    
-    let current: ref JsonNode = node.child
-    while current != null do
-        if current.key == key then
-            if current.type == TYPE_OBJECT then
-                return current
-            end
-            return null
-        end
-        current = current.next
-    end
-    return null
-end
-
-func get_int(node: ref JsonNode, key: string) -> int
-    if node == null then return 0 end
-    if node.type != TYPE_OBJECT then return 0 end
-    
-    let current: ref JsonNode = node.child
-    while current != null do
-        if current.key == key then
-            if current.type == TYPE_NUMBER then
-                return to_int(current.number_val)
-            end
-            return 0
-        end
-        current = current.next
-    end
-    return 0
-end
 
 // ============================================
 // HTTP Response Struct
@@ -106,9 +45,15 @@ global user_count: int = 0
 // Controllers - Retornam Response
 // ============================================
 
-func handle_users_post(requestBody: ref JsonNode) -> Response
-    let name: string = get_string(requestBody, "name")
-    let age: int = get_int(requestBody, "age")
+
+struct UserRequest
+    name: string
+    age: int
+end
+
+func handle_users_post(requestBody: ref UserRequest) -> Response
+    let name: string = requestBody.name
+    let age: int = requestBody.age
     
     if (strlen(name) == 0) | (age == 0) then
         return error_response(400, "Campos 'name' e 'age' obrigatorios")
@@ -122,12 +67,14 @@ func handle_users_post(requestBody: ref JsonNode) -> Response
     
     print(f"LOG: Usuario criado - ID={new_id}, name={name}, age={age}")
     
-    let body: string = "{\"status\": \"created\", \"id\": " + to_str(new_id) + ", \"link\": \"/users/" + to_str(new_id) + "\"}"
-    return json_response(201, body)
+    let resp: map = {"status": "created", "id": new_id, "link": "/users/" + to_str(new_id)}
+    return json_response(201, json_dumps(resp))
 end
 
 func handle_users_get() -> Response
-    // Monta JSON array iterando a lista encadeada
+    // Monta JSON array manual pois lista encadeada não é facilmente serializavel direto
+    // A menos que convertamos para array primeiro.
+    
     let result: string = "["
     let current: ref User = users_head
     let first: int = 1
@@ -136,8 +83,9 @@ func handle_users_get() -> Response
             result = result + ", "
         end
         first = 0
-        let user_json: string = "{\"id\": " + to_str(current.id) + ", \"name\": \"" + current.name + "\", \"age\": " + to_str(current.age) + "}"
-        result = result + user_json
+        // Use manual construction or struct map
+        let item: map = {"id": current.id, "name": current.name, "age": current.age}
+        result = result + json_dumps(item)
         current = current.next
     end
     result = result + "]"
@@ -149,24 +97,57 @@ end
 // Router Principal
 // ============================================
 
+
+struct WebRequest
+    method: string
+    path: string
+    body: UserRequest // Targeted for users post. generic body handling is complex without `any` map support in struct fields fully
+end
+
 func handle_request(raw_json: string) -> Response
     print(f"Servidor recebeu raw: {raw_json}")
     
-    let root: ref JsonNode = json_parse(raw_json)
+    // Parse generic map first to get method/path? 
+    // Or just partial decode? The example structure suggests the outer wrapper is a request object?
+    // It seems the "web app" receives a JSON payload representing the HTTP request? Unusual but ok.
     
-    let method: string = get_string(root, "method")
-    let path: string = get_string(root, "path")
-    let body: ref JsonNode = get_object(root, "body")
+    // Let's use generic parsing for the root object since `body` can be diverse.
+    let root: map = json_parse(raw_json)
+    if root == null then return error_response(400, "Invalid JSON Request") end
+    
+    let method: string = root["method"]
+    let path: string = root["path"]
+    
+    // Note: accessing "body" from map returns a generic value (likely map or null)
+    let body_map: any = root["body"]
     
     print(f"Processando: {method} {path}")
     
     // Roteamento
     if path == "/users" then
         if method == "POST" then
-            if body == null then
+            if body_map == null then
                 return error_response(400, "Body ausente")
             else
-                return handle_users_post(body)
+                // Convert body map to UserRequest struct or pass map?
+                // For safety let's re-encode and decode to struct or just manually extract
+                // Or update handle_users_post to take map. Let's update handle_users_post to take struct
+                // and populate it here.
+                
+                // Simulating json_loads behavior for nested object:
+                // ideally: json_loads(json_dumps(body_map), ref req)
+                // But that's inefficient.
+                // Let's just manually extract from map for this example as it is simple.
+                // Wait, handle_users_post expects UserRequest.
+                
+                let req: UserRequest = UserRequest("", 0)
+                // Use the map directly if possible? No.
+                // Let's populate manually:
+                let m: map = body_map // Cast
+                if has_key(m, "name") then req.name = m["name"] end
+                if has_key(m, "age") then req.age = to_int(m["age"]) end
+
+                return handle_users_post(ref req)
             end
         else
             if method == "GET" then

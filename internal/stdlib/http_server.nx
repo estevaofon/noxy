@@ -147,7 +147,7 @@ end
 
 func serve_static(path: string) -> HttpResponse
     // Basic security check (prevent directory traversal)
-    if strings_contains(path, "..") then
+    if contains(path, "..") then
         return response_error(403, "Forbidden")
     end
     
@@ -168,18 +168,12 @@ func serve_static(path: string) -> HttpResponse
     
     // Mime
     let mime: string = "application/octet-stream"
-    if strings_contains(path, ".html") then mime = "text/html" end
-    if strings_contains(path, ".css") then mime = "text/css" end
-    if strings_contains(path, ".js") then mime = "application/javascript" end
-    if strings_contains(path, ".json") then mime = "application/json" end
-    if strings_contains(path, ".png") then mime = "image/png" end
-    if strings_contains(path, ".jpg") then mime = "image/jpeg" end
+    if contains(path, ".html") then mime = "text/html" end
+    if contains(path, ".css") then mime = "text/css" end
+    if contains(path, ".js") then mime = "application/javascript" end
+    if contains(path, ".json") then mime = "application/json" end
+    if contains(path, ".png") then mime = "image/png" end
+    if contains(path, ".jpg") then mime = "image/jpeg" end
     
     return response_ok(body, mime)
-end
-
-// Helper
-func strings_contains(s: string, sub: string) -> bool
-    // Wrapper for strings module functionality.
-    return contains(s, sub) 
 end

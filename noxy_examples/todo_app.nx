@@ -4,8 +4,7 @@ use net select *
 use io
 use sqlite
 use strings select *
-use json_parser select *
-use json_helpers select *
+
 use sys select *
 
 // ============================================
@@ -36,6 +35,13 @@ end
 // Handlers
 // ============================================
 
+
+struct TodoItem
+    id: int
+    title: string
+    completed: int
+end
+
 func handle_get_todos() -> HttpResponse
     let sql_query: string = "SELECT id, title, completed FROM todos"
     let res: sqlite.QueryResult = sqlite.query(db, sql_query)
@@ -44,8 +50,7 @@ func handle_get_todos() -> HttpResponse
         return response_error(500, "DB Error: " + res.error)
     end
     
-    // Build JSON using strings.join for cleaner code
-    let items: string[100] // Limitation: max 100 items per page/request for now
+    let items: TodoItem[]
     let count: int = 0
     
     let i: int = 0
@@ -55,39 +60,33 @@ func handle_get_todos() -> HttpResponse
         end
         
         let row: Row = res.rows[i]
-        let id: int = row.values[0]
-        let title: string = row.values[1]
-        let completed: int = row.values[2]
-        
-        // Escape title? For MVP we assume simple titles, or use a strings.replace if available
-        // Simple escape of quotes
-        let safe_title: string = replace(title, "\"", "\\\"")
-        
-        let item: string = "{\"id\": " + to_str(id) + ", \"title\": \"" + safe_title + "\", \"completed\": " + to_str(completed) + "}"
-        items[count] = item
+        let item: TodoItem = TodoItem(row.values[0], row.values[1], row.values[2])
+        append(items, item)
         count = count + 1
-        
         i = i + 1
     end
     
-    let joined: string = join_count(items, ",", count)
-    let json: string = "[" + joined + "]"
-    
-    return response_json(json)
+    return response_json(json_dumps(items))
+end
+
+
+struct AddTodoRequest
+    title: string
 end
 
 func handle_add_todo(body: bytes) -> HttpResponse
     let json_str: string = to_str(body)
-    let node: ref JsonNode = json_parse(json_str)
+    let req: AddTodoRequest = AddTodoRequest("")
+    if !json_loads(json_str, ref req) then
+         return response_error(400, "Invalid JSON")
+    end
     
-    let title: string = get_string(node, "title")
-    
-    if is_empty(title) then
+    if is_empty(req.title) then
         return response_error(400, "Missing title")
     end
     
     let stmt: sqlite.Statement = sqlite.prepare(db, "INSERT INTO todos (title, completed) VALUES (?, 0)")
-    sqlite.bind_text(stmt, 1, title)
+    sqlite.bind_text(stmt, 1, req.title)
     let res: sqlite.ExecResult = sqlite.step_exec(stmt)
     sqlite.finalize(stmt)
     
@@ -95,27 +94,26 @@ func handle_add_todo(body: bytes) -> HttpResponse
         return response_error(500, "Failed to insert: " + res.error)
     end
     
-    return response_json("{\"status\": \"ok\", \"id\": " + to_str(res.last_insert_id) + "}")
+    let resp: map = {"status": "ok", "id": res.last_insert_id}
+    return response_json(json_dumps(resp))
+end
+
+
+struct DeleteTodoRequest
+    id: int
 end
 
 func handle_toggle_todo(body: bytes) -> HttpResponse
     let json_str: string = to_str(body)
-    let node: ref JsonNode = json_parse(json_str)
+    let req: DeleteTodoRequest = DeleteTodoRequest(0) // Reuse reuse struct for toggle as it also needs ID only
     
-    if node == null then
+    if !json_loads(json_str, ref req) then
         return response_error(400, "Invalid JSON")
     end
     
-    // Check if ID exists (it's an int)
-    if !has_key(node, "id") then
-        return response_error(400, "Missing id")
-    end
-    
-    let id: int = get_int(node, "id")
-    
     let sql: string = "UPDATE todos SET completed = CASE WHEN completed = 0 THEN 1 ELSE 0 END WHERE id = ?"
     let stmt: sqlite.Statement = sqlite.prepare(db, sql)
-    sqlite.bind_int(stmt, 1, id)
+    sqlite.bind_int(stmt, 1, req.id)
     let res: sqlite.ExecResult = sqlite.step_exec(stmt)
     sqlite.finalize(stmt)
     
@@ -123,25 +121,20 @@ func handle_toggle_todo(body: bytes) -> HttpResponse
         return response_error(500, "DB Error")
     end
     
-    return response_json("{\"status\": \"ok\"}")
+    let resp: map = {"status": "ok"}
+    return response_json(json_dumps(resp))
 end
 
 func handle_delete_todo(body: bytes) -> HttpResponse
     let json_str: string = to_str(body)
-    let node: ref JsonNode = json_parse(json_str)
+    let req: DeleteTodoRequest = DeleteTodoRequest(0)
     
-    if node == null then
+    if !json_loads(json_str, ref req) then
         return response_error(400, "Invalid JSON")
     end
-
-    if !has_key(node, "id") then
-        return response_error(400, "Missing id")
-    end
-    
-    let id: int = get_int(node, "id")
     
     let stmt: sqlite.Statement = sqlite.prepare(db, "DELETE FROM todos WHERE id = ?")
-    sqlite.bind_int(stmt, 1, id)
+    sqlite.bind_int(stmt, 1, req.id)
     let res: sqlite.ExecResult = sqlite.step_exec(stmt)
     sqlite.finalize(stmt)
     
@@ -149,7 +142,8 @@ func handle_delete_todo(body: bytes) -> HttpResponse
         return response_error(500, "DB Error")
     end
     
-    return response_json("{\"status\": \"ok\"}")
+    let resp: map = {"status": "ok"}
+    return response_json(json_dumps(resp))
 end
 
 // ============================================

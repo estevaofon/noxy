@@ -4,8 +4,7 @@ use net select *
 use io select *
 use sqlite
 use strings select *
-use json_parser select *
-use json_helpers select *
+
 use sys select *
 use time
 use rand select *
@@ -82,17 +81,20 @@ end
 // Handlers
 // ============================================
 
+
+struct ShortenRequest
+    url: string
+end
+
 func handle_shorten(body: bytes) -> HttpResponse
     let json_str: string = to_str(body)
     
-    let node: ref JsonNode = json_parse(json_str) 
-    
-    if node == null then 
-        return response_error(400, "Invalid JSON") 
+    let req: ShortenRequest = ShortenRequest("")
+    if !json_loads(json_str, ref req) then
+        return response_error(400, "Invalid JSON")
     end
     
-    let url: string = get_string(node, "url")
-    if is_empty(url) then 
+    if is_empty(req.url) then 
         return response_error(400, "Missing url field") 
     end
     
@@ -102,7 +104,7 @@ func handle_shorten(body: bytes) -> HttpResponse
     // Using execute_params to avoid manual statement handling issues
     let params: any[]
     append(params, code)
-    append(params, url)
+    append(params, req.url)
     append(params, created_at)
     
     // Workaround: Open local connection for thread safety
@@ -127,9 +129,10 @@ func handle_shorten(body: bytes) -> HttpResponse
         return response_error(500, "DB Error: " + res.error) 
     end
     
-    let json_resp: string = "{\"code\": \"" + code + "\", \"short_url\": \"/" + code + "\"}"
-    return response_json(json_resp)
+    let resp_map: map = {"code": code, "short_url": "/" + code}
+    return response_json(json_dumps(resp_map))
 end
+
 
 func handle_list() -> HttpResponse
     // Using simple query
@@ -148,31 +151,20 @@ func handle_list() -> HttpResponse
         return response_error(500, "DB Error: " + res.error) 
     end
     
-    let items: string[20]
-    let count: int = 0
+    let items: map[]
     let i: int = 0
     
     while i < res.row_count do
-        if count >= 20 then
-            break 
-        end
-        
         let row: Row = res.rows[i]
         let code: string = row.values[0]
         let url: string = row.values[1]
         
-        // Escape quotes manually if needed, or assume clean for now. 
-        // Better to be safe:
-        let safe_url: string = replace(url, "\"", "\\\"")
-        
-        let item: string = "{\"code\": \"" + code + "\", \"original_url\": \"" + safe_url + "\"}"
-        items[count] = item
-        count = count + 1
+        let item: map = {"code": code, "original_url": url}
+        append(items, item)
         i = i + 1
     end
     
-    let joined: string = join_count(items, ",", count)
-    return response_json("[" + joined + "]")
+    return response_json(json_dumps(items))
 end
 
 func handle_redirect(req: HttpRequest, code: string) -> HttpResponse

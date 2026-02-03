@@ -3,8 +3,7 @@
 
 use http_client select *
 use http_parser select *
-use json_parser select *
-use json_helpers select *
+
 use sys select *
 use strings select *
 use lambda_types select *
@@ -75,10 +74,10 @@ func run_runtime() -> void
                          let k: string = strings_trim(parts.parts[0]) 
                          let v: string = strings_trim(parts.parts[1]) 
                          
-                         if strings_contains(k, "Lambda-Runtime-Aws-Request-Id") then req_id = v end
-                         // if strings_contains(k, "Lambda-Runtime-Deadline-Ms") then deadline_ms = to_int(v) end
-                         if strings_contains(k, "Lambda-Runtime-Invoked-Function-Arn") then arn = v end
-                         if strings_contains(k, "Lambda-Runtime-Trace-Id") then trace_id = v end
+                         if contains(k, "Lambda-Runtime-Aws-Request-Id") then req_id = v end
+                         // if contains(k, "Lambda-Runtime-Deadline-Ms") then deadline_ms = to_int(v) end
+                         if contains(k, "Lambda-Runtime-Invoked-Function-Arn") then arn = v end
+                         if contains(k, "Lambda-Runtime-Trace-Id") then trace_id = v end
                      end
                      i = i + 1
                  end
