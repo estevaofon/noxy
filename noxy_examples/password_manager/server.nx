@@ -4,6 +4,7 @@ use io
 use sqlite
 use strings
 use time
+use crypto
 
 // No need for 'use json' if they are built-ins, but if it fails I'll add it.
 // Assuming they are global per instructions.
@@ -48,55 +49,71 @@ end
 print("Password Manager Database Opened successfully.")
 
 // ============================================
-// Encryption Logic (Simple XOR)
+// Encryption Logic (AES-256-GCM + PBKDF2)
 // ============================================
 
-let XOR_KEY: int = 0xA5
+let VAULT_FILE: string = "vault.key"
+let ITERATIONS: int = 200000
+let KEY_SIZE: int = 32
 
-// Helper to convert char hex to int
-func hex_char_to_int(c: int) -> int
-    if c >= 48 && c <= 57 then return c - 48 end
-    if c >= 97 && c <= 102 then return c - 87 end
-    if c >= 65 && c <= 70 then return c - 55 end
-    return 0
+// Chave derivada (inicializada no startup)
+let master_key: bytes = b""
+let vault_salt: bytes = b""
+
+// Inicializa a chave mestra a partir da senha
+func init_master_key(password: string) -> bool
+    // Verificar se vault.key existe (contém salt)
+    let f: io.File = io.open("noxy_examples/password_manager/" + VAULT_FILE, "r")
+    
+    if f.open then
+        // Vault existe - ler salt
+        let res: io.IOBytesResult = io.read_bytes(f)
+        io.close(f)
+        if res.ok then
+            vault_salt = res.data
+        else
+            return false
+        end
+    else
+        // Novo vault - gerar salt
+        vault_salt = crypto.random_bytes(16)
+        let fw: io.File = io.open("noxy_examples/password_manager/" + VAULT_FILE, "w")
+        if fw.open then
+            io.write(fw, to_str(vault_salt))
+            io.close(fw)
+            print("Novo vault criado com salt seguro.")
+        else
+            print("Erro ao criar vault.key")
+            return false
+        end
+    end
+    
+    // Derivar chave da senha
+    master_key = crypto.pbkdf2_sha256(password, vault_salt, ITERATIONS, KEY_SIZE)
+    return true
 end
 
 func encrypt(plain: string) -> string
-    let input: bytes = to_bytes(plain)
-    let len_input: int = length(input)
-    let hex_res: string = ""
-    
-    let i: int = 0
-    while i < len_input do
-        let b: int = input[i]
-        let xored: int = b ^ XOR_KEY
-        hex_res = hex_res + fmt("%02x", xored)
-        i = i + 1
+    if master_key == b"" then
+        print("ERRO: master_key não inicializada!")
+        return ""
     end
-    return hex_res
+    let plain_bytes: bytes = to_bytes(plain)
+    let encrypted: bytes = crypto.aes256_gcm_encrypt(master_key, plain_bytes)
+    return hex_encode(encrypted)
 end
 
 func decrypt(hex_str: string) -> string
-    let len: int = length(hex_str)
-    if len % 2 != 0 then return "" end
-    
-    let hex_bytes: bytes = to_bytes(hex_str)
-    let res: string = ""
-    
-    let i: int = 0
-    while i < len do
-        let char1: int = hex_bytes[i]
-        let char2: int = hex_bytes[i+1]
-        
-        let high: int = hex_char_to_int(char1)
-        let low: int = hex_char_to_int(char2)
-        let val: int = (high << 4) | low
-        
-        let original: int = val ^ XOR_KEY
-        res = res + strings.from_char_code(original) // from_char_code is in strings module or global? Using strings. per previous fix
-        i = i + 2
+    if master_key == b"" then
+        print("ERRO: master_key não inicializada!")
+        return ""
     end
-    return res
+    let encrypted_bytes: bytes = hex_decode(hex_str)
+    let decrypted: bytes = crypto.aes256_gcm_decrypt(master_key, encrypted_bytes)
+    if decrypted == null then
+        return "[ERRO: falha na descriptografia]"
+    end
+    return to_str(decrypted)
 end
 
 // ============================================
@@ -235,6 +252,28 @@ end
 
 let host: string = "127.0.0.1"
 let port: int = 9000
+
+// ============================================
+// Inicialização da Senha Mestra
+// ============================================
+print("")
+print("=== Password Manager com AES-256-GCM ===")
+print("")
+let master_password: string = input("Digite a senha mestra: ")
+
+if strings.is_empty(master_password) then
+    print("Erro: Senha mestra não pode ser vazia.")
+    return
+end
+
+print("Derivando chave (pode levar alguns segundos)...")
+if !init_master_key(master_password) then
+    print("Erro ao inicializar chave mestra.")
+    return
+end
+print("Chave mestra derivada com sucesso!")
+print("")
+
 let server: http_server.HttpServer = http_server.new_server(host, port)
 
 print(fmt("Password Manager running at http://%s:%d", host, port))

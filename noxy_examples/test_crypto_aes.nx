@@ -1,0 +1,72 @@
+use crypto
+
+// ============================================
+// TESTE: Módulo Crypto Expandido
+// ============================================
+
+print("=== Teste crypto.random_bytes ===")
+let salt: bytes = crypto.random_bytes(16)
+let salt_str: string = fmt("%q", salt)
+print(f"Salt gerado (16 bytes): {salt_str}")
+
+if salt != b"" then
+    print("PASS: random_bytes retornou dados")
+else
+    print("FAIL: random_bytes retornou vazio")
+end
+
+print("")
+print("=== Teste crypto.pbkdf2_sha256 ===")
+let senha_mestra: string = "minha_senha_forte_123"
+let chave: bytes = crypto.pbkdf2_sha256(senha_mestra, salt, 100000, 32)
+let chave_str: string = fmt("%q", chave)
+print(f"Chave derivada (32 bytes): {chave_str}")
+if chave != b"" then
+    print("PASS: pbkdf2_sha256 retornou chave")
+else
+    print("FAIL: pbkdf2_sha256 retornou vazio")
+end
+
+print("")
+print("=== Teste crypto.aes256_gcm_encrypt ===")
+let senha_facebook: bytes = b"fb_pass_456"
+let dados_criptografados: bytes = crypto.aes256_gcm_encrypt(chave, senha_facebook)
+let dados_criptografados_str: string = fmt("%q", dados_criptografados)
+print(f"Dados criptografados: {dados_criptografados_str}")
+if dados_criptografados != b"" then
+    print("PASS: aes256_gcm_encrypt retornou dados")
+else
+    print("FAIL: aes256_gcm_encrypt retornou vazio")
+end
+
+print("")
+print("=== Teste crypto.aes256_gcm_decrypt ===")
+let senha_recuperada: bytes = crypto.aes256_gcm_decrypt(chave, dados_criptografados)
+print(f"Senha recuperada: {to_str(senha_recuperada)}")
+if to_str(senha_recuperada) == "fb_pass_456" then
+    print("PASS: Descriptografia bem sucedida!")
+else
+    print("FAIL: Senha recuperada diferente da original")
+end
+
+print("")
+print("=== Teste ciclo completo ===")
+// Gerar novo salt e chave
+let salt2: bytes = crypto.random_bytes(16)
+let chave2: bytes = crypto.pbkdf2_sha256("outra_senha", salt2, 10000, 32)
+
+// Criptografar e descriptografar
+let segredo: bytes = b"Meu segredo super importante!"
+let cifrado: bytes = crypto.aes256_gcm_encrypt(chave2, segredo)
+let decifrado: bytes = crypto.aes256_gcm_decrypt(chave2, cifrado)
+
+if to_str(decifrado) == "Meu segredo super importante!" then
+    print("PASS: Ciclo completo encrypt/decrypt funcionando!")
+else
+    print("FAIL: Ciclo falhou")
+    print(f"Esperado: Meu segredo super importante!")
+    print(f"Obtido: {to_str(decifrado)}")
+end
+
+print("")
+print("=== Todos os testes concluídos ===")

@@ -1,0 +1,113 @@
+use crypto
+use strings
+
+// Teste isolado de encrypt/decrypt
+
+print("=== Teste Isolado ===")
+
+// 1. Criar salt e chave
+let salt: bytes = crypto.random_bytes(16)
+print(f"Salt length: {length(salt)}")
+
+let chave: bytes = crypto.pbkdf2_sha256("minha_senha", salt, 10000, 32)
+print(f"Chave length: {length(chave)}")
+
+// 2. Testar encrypt/decrypt diretamente
+let texto: string = "minha_senha_secreta"
+let texto_bytes: bytes = to_bytes(texto)
+print(f"Texto bytes length: {length(texto_bytes)}")
+
+let encrypted: bytes = crypto.aes256_gcm_encrypt(chave, texto_bytes)
+print(f"Encrypted length: {length(encrypted)}")
+
+if encrypted == null then
+    print("ERRO: encrypted é null!")
+    return
+end
+
+let decrypted: bytes = crypto.aes256_gcm_decrypt(chave, encrypted)
+print(f"Decrypted: {to_str(decrypted)}")
+
+if to_str(decrypted) == texto then
+    print("PASS: Ciclo direto funciona!")
+else
+    print("FAIL: Ciclo direto falhou")
+end
+
+print("")
+print("=== Teste com Hex ===")
+
+// 3. Testar com conversão hex
+func bytes_to_hex(data: bytes) -> string
+    let len_data: int = length(data)
+    let result: string = ""
+    let i: int = 0
+    while i < len_data do
+        result = result + fmt("%02x", data[i])
+        i = i + 1
+    end
+    return result
+end
+
+func hex_char_to_int(c: int) -> int
+    if c >= 48 && c <= 57 then return c - 48 end
+    if c >= 97 && c <= 102 then return c - 87 end
+    if c >= 65 && c <= 70 then return c - 55 end
+    return 0
+end
+
+func hex_to_bytes(hex_str: string) -> bytes
+    let len: int = length(hex_str)
+    if len % 2 != 0 then return b"" end
+    
+    let hex_bytes: bytes = to_bytes(hex_str)
+    let result: int[] = []
+    
+    let i: int = 0
+    while i < len do
+        let char1: int = hex_bytes[i]
+        let char2: int = hex_bytes[i+1]
+        
+        let high: int = hex_char_to_int(char1)
+        let low: int = hex_char_to_int(char2)
+        let val: int = (high << 4) | low
+        
+        append(result, val)
+        i = i + 2
+    end
+    
+    // Converter int[] para bytes
+    let byte_str: string = ""
+    let j: int = 0
+    while j < length(result) do
+        byte_str = byte_str + strings.from_char_code(result[j])
+        j = j + 1
+    end
+    return to_bytes(byte_str)
+end
+
+let hex_enc: string = bytes_to_hex(encrypted)
+print(f"Hex encoded: {hex_enc}")
+print(f"Hex length: {length(hex_enc)}")
+
+let back_to_bytes: bytes = hex_to_bytes(hex_enc)
+print(f"Back to bytes length: {length(back_to_bytes)}")
+
+// Verificar se são iguais
+if length(back_to_bytes) == length(encrypted) then
+    print("PASS: Tamanhos iguais")
+else
+    print(f"FAIL: Tamanhos diferentes! {length(back_to_bytes)} vs {length(encrypted)}")
+end
+
+let decrypted2: bytes = crypto.aes256_gcm_decrypt(chave, back_to_bytes)
+if decrypted2 == null then
+    print("FAIL: Descriptografia após hex falhou")
+else
+    print(f"Decrypted2: {to_str(decrypted2)}")
+    if to_str(decrypted2) == texto then
+        print("PASS: Ciclo com hex funciona!")
+    else
+        print("FAIL: Texto diferente após hex")
+    end
+end

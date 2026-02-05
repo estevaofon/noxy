@@ -177,3 +177,27 @@ func sha256(data_input: bytes) -> string
     // Produzir string hex final
     return fmt("%08x%08x%08x%08x%08x%08x%08x%08x", h0, h1, h2, h3, h4, h5, h6, h7)
 end
+
+// ============================================
+// Funções de Criptografia Simétrica (Nativas)
+// ============================================
+
+// Gera n bytes criptograficamente seguros
+func random_bytes(n: int) -> bytes
+    return crypto_random_bytes(n)
+end
+
+// Deriva chave usando PBKDF2 com HMAC-SHA256
+func pbkdf2_sha256(senha: string, salt: bytes, iteracoes: int, tamanho: int) -> bytes
+    return crypto_pbkdf2_sha256(senha, salt, iteracoes, tamanho)
+end
+
+// Criptografa com AES-256-GCM (retorna nonce + ciphertext + tag)
+func aes256_gcm_encrypt(chave: bytes, texto: bytes) -> bytes
+    return crypto_aes256_gcm_encrypt(chave, texto)
+end
+
+// Descriptografa AES-256-GCM (valida autenticação)
+func aes256_gcm_decrypt(chave: bytes, dados: bytes) -> bytes
+    return crypto_aes256_gcm_decrypt(chave, dados)
+end

@@ -482,6 +482,8 @@ print(f"Hello, {name}!")
 ### Utils
 - `addr(ref var)`: Returns the memory address/identity of a variable as a string.
 - `zeros(n)`: create zeroed array.
+- `hex_encode(data: bytes) -> string`: Converts bytes to hexadecimal string.
+- `hex_decode(hex: string) -> bytes`: Converts hexadecimal string to bytes.
 - `fmt(format, args...)`: printf-style formatting.
   - `%s`: String
   - `%d`: Integer (Base 10)
@@ -497,6 +499,11 @@ print(f"Hello, {name}!")
 ```noxy
 let msg: string = fmt("Value: %d, Hex: %x", 255, 255)
 // "Value: 255, Hex: ff"
+
+// Hex encoding example
+let data: bytes = b"Hello"
+let hex: string = hex_encode(data)  // "48656c6c6f"
+let back: bytes = hex_decode(hex)   // b"Hello"
 ```
 
 ---
