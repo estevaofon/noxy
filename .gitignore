@@ -26,3 +26,4 @@ AWS_DEPLOY_GUIDE.md
 *.exe
 .gemini/
 SAFE_MODE_PROMPT.md
+vault.key
