@@ -30,6 +30,18 @@ func main() -> void
     // Case 5: Struct with nested list
     let matrix_container: MatrixContainer = MatrixContainer([[1, 0], [0, 1]])
     print(f"Matrix[0][0]: {matrix_container.data[0][0]}")
+
+    let list_of_structs: MatrixContainer[] = [MatrixContainer([[1, 0], [0, 1]]), MatrixContainer([[2, 0], [0, 2]])]
+    print(f"List of structs[0][0]: {list_of_structs[0].data[0][0]}")
+
+    let map_of_structs: map[string, MatrixContainer] = {
+        "matrix1": MatrixContainer([[1, 0], [0, 1]]),
+        "matrix2": MatrixContainer([[2, 0], [0, 2]])
+    }
+    print(f"Map of structs['matrix1'][0][0]: {map_of_structs['matrix1'].data[0][0]}")
+
+    let list_of_lists_of_strings: string[][] = [["a", "b"], ["c", "d"]]
+    print(f"List of lists of strings[0][0]: {list_of_lists_of_strings[0][0]}")
 end
 
 struct MatrixContainer
