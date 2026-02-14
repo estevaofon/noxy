@@ -1140,6 +1140,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.patchJump(jumpToExit)
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
 
+		c.endScope() // Close Wrapper Scope ($collection, $index, $len)
+
 		return c.currentChunk, nil, nil
 
 	case *ast.WhenStatement:

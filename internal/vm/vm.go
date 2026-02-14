@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
@@ -1139,24 +1140,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		return value.NewString(strings.Repeat(args[0].String(), int(args[1].AsInt)))
 	})
-	vm.DefineNative("strings_substring", func(args []value.Value) value.Value {
-		if len(args) < 3 {
-			return value.NewString("")
-		}
-		s := args[0].String()
-		start := int(args[1].AsInt)
-		end := int(args[2].AsInt)
-		if start < 0 {
-			start = 0
-		}
-		if end > len(s) {
-			end = len(s)
-		}
-		if start > end {
-			return value.NewString("")
-		}
-		return value.NewString(s[start:end])
-	})
+
 	vm.DefineNative("strings_replace", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewString("")
@@ -1257,24 +1241,28 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewString(strings.ReplaceAll(s, old, new))
 	})
 	vm.DefineNative("strings_substring", func(args []value.Value) value.Value {
+		// args: string, start, length
 		if len(args) < 3 {
 			return value.NewString("")
 		}
 		s := args[0].String()
+		runes := []rune(s)
 		start := int(args[1].AsInt)
-		end := int(args[2].AsInt)
+		length := int(args[2].AsInt)
 
 		if start < 0 {
 			start = 0
 		}
-		if end > len(s) {
-			end = len(s)
-		}
-		if start >= end {
+		if start >= len(runes) {
 			return value.NewString("")
 		}
 
-		return value.NewString(s[start:end])
+		end := start + length
+		if end > len(runes) {
+			end = len(runes)
+		}
+
+		return value.NewString(string(runes[start:end]))
 	})
 	vm.DefineNative("strings_is_empty", func(args []value.Value) value.Value {
 		if len(args) < 1 {
@@ -1349,11 +1337,12 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 			return value.NewString("")
 		}
 		s := args[0].String()
+		runes := []rune(s)
 		idx := int(args[1].AsInt)
-		if idx < 0 || idx >= len(s) {
+		if idx < 0 || idx >= len(runes) {
 			return value.NewString("")
 		}
-		return value.NewString(string(s[idx]))
+		return value.NewString(string(runes[idx]))
 	})
 	vm.DefineNative("strings_from_char_code", func(args []value.Value) value.Value {
 		if len(args) < 1 {
@@ -1770,7 +1759,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		if arg.Type == value.VAL_OBJ {
 			if str, ok := arg.Obj.(string); ok {
-				return value.NewInt(int64(len(str)))
+				return value.NewInt(int64(utf8.RuneCountInString(str)))
 			}
 			if arr, ok := arg.Obj.(*value.ObjArray); ok {
 				return value.NewInt(int64(len(arr.Elements)))
@@ -4059,7 +4048,7 @@ func (vm *VM) run(minFrameCount int) error {
 				} else if m, ok := val.Obj.(*value.ObjMap); ok {
 					vm.push(value.NewInt(int64(len(m.Data))))
 				} else if s, ok := val.Obj.(string); ok {
-					vm.push(value.NewInt(int64(len(s))))
+					vm.push(value.NewInt(int64(utf8.RuneCountInString(s))))
 				} else {
 					vm.push(value.NewInt(0)) // Or error?
 				}
@@ -4286,9 +4275,14 @@ func (vm *VM) run(minFrameCount int) error {
 			// Only supporting int/float comparison for now
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewBool(a.AsInt > b.AsInt))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewBool(a.AsFloat > b.AsFloat))
+			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewBool(float64(a.AsInt) > b.AsFloat))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+				vm.push(value.NewBool(a.AsFloat > float64(b.AsInt)))
 			} else {
-				// TODO: floats
-				vm.push(value.NewBool(false))
+				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_GREATER_INT:
 			b := vm.pop()
@@ -4299,8 +4293,14 @@ func (vm *VM) run(minFrameCount int) error {
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewBool(a.AsInt < b.AsInt))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewBool(a.AsFloat < b.AsFloat))
+			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+				vm.push(value.NewBool(float64(a.AsInt) < b.AsFloat))
+			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+				vm.push(value.NewBool(a.AsFloat < float64(b.AsInt)))
 			} else {
-				vm.push(value.NewBool(false))
+				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_LESS_INT:
 			// Inline pop/pop/push
@@ -4538,10 +4538,11 @@ func (vm *VM) run(minFrameCount int) error {
 						return vm.runtimeError(c, ip, "string index must be integer")
 					}
 					idx := int(indexVal.AsInt)
-					if idx < 0 || idx >= len(str) {
+					runes := []rune(str) // Expensive but correct for now
+					if idx < 0 || idx >= len(runes) {
 						return vm.runtimeError(c, ip, "string index out of bounds")
 					}
-					vm.push(value.NewString(string(str[idx])))
+					vm.push(value.NewString(string(runes[idx])))
 					continue
 				}
 			}
@@ -4933,25 +4934,34 @@ func isFalsey(v value.Value) bool {
 }
 
 func valuesEqual(a, b value.Value) bool {
-	if a.Type != b.Type {
-		return false
+	if a.Type == b.Type {
+		switch a.Type {
+		case value.VAL_BOOL:
+			return a.AsBool == b.AsBool
+		case value.VAL_NULL:
+			return true
+		case value.VAL_INT:
+			return a.AsInt == b.AsInt
+		case value.VAL_FLOAT:
+			return a.AsFloat == b.AsFloat
+		case value.VAL_OBJ:
+			return a.Obj == b.Obj // Simple pointer/string comparison
+		case value.VAL_BYTES:
+			return a.Obj.(string) == b.Obj.(string)
+		default:
+			return false
+		}
 	}
-	switch a.Type {
-	case value.VAL_BOOL:
-		return a.AsBool == b.AsBool
-	case value.VAL_NULL:
-		return true
-	case value.VAL_INT:
-		return a.AsInt == b.AsInt
-	case value.VAL_FLOAT:
-		return a.AsFloat == b.AsFloat
-	case value.VAL_OBJ:
-		return a.Obj == b.Obj // Simple pointer/string comparison
-	case value.VAL_BYTES:
-		return a.Obj.(string) == b.Obj.(string)
-	default:
-		return false
+
+	// Mixed types
+	if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
+		return float64(a.AsInt) == b.AsFloat
 	}
+	if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
+		return a.AsFloat == float64(b.AsInt)
+	}
+
+	return false
 }
 
 func (vm *VM) readConstant() value.Value {
