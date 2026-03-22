@@ -27,3 +27,4 @@ AWS_DEPLOY_GUIDE.md
 .gemini/
 SAFE_MODE_PROMPT.md
 vault.key
+.arc/
