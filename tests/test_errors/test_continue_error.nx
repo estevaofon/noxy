@@ -1,0 +1,6 @@
+// Test continue outside of loop should fail
+func test()
+    continue  // Error: continue outside of loop
+end
+
+test()

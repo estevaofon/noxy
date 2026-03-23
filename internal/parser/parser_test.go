@@ -110,3 +110,52 @@ func TestParseMap(t *testing.T) {
 		t.Fatalf("map.Keys has wrong length. got=%d", len(mapLit.Keys))
 	}
 }
+
+func TestContinueStatement(t *testing.T) {
+	input := `
+while true do
+    if x == 5 then
+        continue
+    end
+    print(x)
+end
+`
+	l := lexer.New(input)
+	p := New(l)
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	if len(program.Statements) != 1 {
+		t.Fatalf("program.Statements does not contain 1 statement. got=%d",
+			len(program.Statements))
+	}
+
+	whileStmt, ok := program.Statements[0].(*ast.WhileStatement)
+	if !ok {
+		t.Fatalf("stmt is not WhileStatement. got=%T", program.Statements[0])
+	}
+
+	// Should have an if statement in body
+	if len(whileStmt.Body.Statements) == 0 {
+		t.Fatalf("while body is empty")
+	}
+
+	ifStmt, ok := whileStmt.Body.Statements[0].(*ast.IfStatement)
+	if !ok {
+		t.Fatalf("first statement is not IfStatement. got=%T", whileStmt.Body.Statements[0])
+	}
+
+	// Check that consequence contains continue
+	if len(ifStmt.Consequence.Statements) == 0 {
+		t.Fatalf("if consequence is empty")
+	}
+
+	continueStmt, ok := ifStmt.Consequence.Statements[0].(*ast.ContinueStmt)
+	if !ok {
+		t.Fatalf("statement is not ContinueStmt. got=%T", ifStmt.Consequence.Statements[0])
+	}
+
+	if continueStmt.TokenLiteral() != "continue" {
+		t.Errorf("TokenLiteral not 'continue'. got=%q", continueStmt.TokenLiteral())
+	}
+}

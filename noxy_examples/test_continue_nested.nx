@@ -1,0 +1,41 @@
+// Test continue in nested loops
+print("=== Test Continue in Nested Loops ===")
+
+let outer: int = 0
+let inner_count: int = 0
+
+while outer < 3 do
+    outer = outer + 1
+    print(f"\nOuter iteration: {outer}")
+    
+    let nums: int[] = [1, 2, 3, 4, 5]
+    
+    for n in nums do
+        inner_count = inner_count + 1
+        
+        // Continue in inner loop should only skip inner iteration
+        if n == 3 then
+            print(f"  Skipping {n} in inner loop")
+            continue
+        end
+        
+        print(f"  Processing {n}")
+    end
+end
+
+print(f"\nTotal inner iterations: {inner_count}")
+print(f"Total outer iterations: {outer}")
+
+// Should process: 3 outer * 5 inner = 15 iterations
+// But skip 3 items (one per outer iteration)
+if inner_count == 15 then
+    print("✓ PASS: Nested continue works correctly")
+else
+    print(f"✗ FAIL: Expected 15 iterations, got {inner_count}")
+end
+
+if outer == 3 then
+    print("✓ PASS: Outer loop completed")
+else
+    print(f"✗ FAIL: Expected 3 outer iterations, got {outer}")
+end

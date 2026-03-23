@@ -20,7 +20,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 | Category | Keywords |
 |----------|----------|
 | Declarations | `let`, `global`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in` |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in` |
 | Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
@@ -405,6 +405,29 @@ end
 
 ### For Loop
 Use `for ... in` to iterate over collections (arrays or maps).
+
+### Loop Control Statements
+
+**break** - Exits the loop immediately:
+```noxy
+while true do
+    if condition then
+        break  // Exit loop
+    end
+end
+```
+
+**continue** - Skips to the next iteration:
+```noxy
+for item in array do
+    if item < 0 then
+        continue  // Skip negative values
+    end
+    print(item)
+end
+```
+
+Both `break` and `continue` can only be used inside loops (`while` or `for`). Using them outside a loop results in a compile-time error.
 
 **Arrays** (Iterates over values):
 ```noxy

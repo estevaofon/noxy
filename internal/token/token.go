@@ -27,12 +27,13 @@ const (
 	ELSE    TokenType = "ELSE"
 	ELIF    TokenType = "ELIF"
 	END     TokenType = "END"
-	WHILE   TokenType = "WHILE"
-	DO      TokenType = "DO"
-	RETURN  TokenType = "RETURN"
-	BREAK   TokenType = "BREAK"
-	FOR     TokenType = "FOR"
-	IN      TokenType = "IN"
+	WHILE    TokenType = "WHILE"
+	DO       TokenType = "DO"
+	RETURN   TokenType = "RETURN"
+	BREAK    TokenType = "BREAK"
+	CONTINUE TokenType = "CONTINUE"
+	FOR      TokenType = "FOR"
+	IN       TokenType = "IN"
 	WHEN    TokenType = "WHEN"
 	CASE    TokenType = "CASE"
 	DEFAULT TokenType = "DEFAULT"
@@ -122,12 +123,13 @@ var keywords = map[string]TokenType{
 	"if":      IF,
 	"then":    THEN,
 	"else":    ELSE,
-	"end":     END,
-	"while":   WHILE,
-	"do":      DO,
-	"return":  RETURN,
-	"break":   BREAK,
-	"int":     TYPE_INT,
+	"end":      END,
+	"while":    WHILE,
+	"do":       DO,
+	"return":   RETURN,
+	"break":    BREAK,
+	"continue": CONTINUE,
+	"int":      TYPE_INT,
 	"float":   TYPE_FLOAT,
 	"string":  TYPE_STRING,
 	"str":     TYPE_STR,

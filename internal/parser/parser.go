@@ -135,6 +135,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseFunctionStatement()
 	case token.BREAK:
 		return p.parseBreakStatement()
+	case token.CONTINUE:
+		return p.parseContinueStatement()
 	case token.USE:
 		return p.parseUseStatement()
 	case token.WHEN:
@@ -328,6 +330,16 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStmt {
 func (p *Parser) parseBreakStatement() *ast.BreakStmt {
 	stmt := &ast.BreakStmt{Token: p.curToken}
 	p.nextToken() // eat 'break'
+	// Optional newline
+	if p.peekToken.Type == token.NEWLINE {
+		p.nextToken()
+	}
+	return stmt
+}
+
+func (p *Parser) parseContinueStatement() *ast.ContinueStmt {
+	stmt := &ast.ContinueStmt{Token: p.curToken}
+	p.nextToken() // eat 'continue'
 	// Optional newline
 	if p.peekToken.Type == token.NEWLINE {
 		p.nextToken()

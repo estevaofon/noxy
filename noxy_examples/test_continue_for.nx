@@ -1,0 +1,35 @@
+// Test continue statement with for loop
+print("=== Test Continue in For Loop ===")
+
+let nums: int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+let sum: int = 0
+let processed: int = 0
+
+for n in nums do
+    processed = processed + 1
+    
+    // Skip multiples of 3
+    if n % 3 == 0 then
+        print(f"Skipping {n} (multiple of 3)")
+        continue
+    end
+    
+    sum = sum + n
+    print(f"Adding {n}")
+end
+
+print(f"Total processed: {processed}")
+print(f"Sum (excluding multiples of 3): {sum}")
+
+// Sum: 1+2+4+5+7+8+10 = 37
+if sum == 37 then
+    print("✓ PASS: For continue works correctly")
+else
+    print(f"✗ FAIL: Expected 37, got {sum}")
+end
+
+if processed == 10 then
+    print("✓ PASS: All iterations executed")
+else
+    print(f"✗ FAIL: Expected 10 iterations, got {processed}")
+end

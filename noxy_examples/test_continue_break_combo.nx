@@ -1,0 +1,41 @@
+// Test continue and break together
+print("=== Test Continue and Break Combination ===")
+
+let nums: int[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+let sum: int = 0
+let count: int = 0
+
+for n in nums do
+    count = count + 1
+    
+    // Break at 8
+    if n == 8 then
+        print(f"Breaking at {n}")
+        break
+    end
+    
+    // Skip even numbers
+    if n % 2 == 0 then
+        print(f"Skipping even {n}")
+        continue
+    end
+    
+    sum = sum + n
+    print(f"Adding odd {n}")
+end
+
+print(f"Sum: {sum}")
+print(f"Count: {count}")
+
+// Sum: 1 + 3 + 5 + 7 = 16 (stopped at 8)
+if sum == 16 then
+    print("✓ PASS: Continue and break work together")
+else
+    print(f"✗ FAIL: Expected 16, got {sum}")
+end
+
+if count == 8 then
+    print("✓ PASS: Stopped at correct iteration")
+else
+    print(f"✗ FAIL: Expected 8 iterations, got {count}")
+end

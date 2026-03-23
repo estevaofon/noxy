@@ -19,6 +19,8 @@ type Local struct {
 type Loop struct {
 	EnclosingLocals int
 	BreakJumps      []int
+	ContinueJumps   []int
+	LoopStart       int // Position to jump back for continue
 }
 
 type Upvalue struct {
@@ -1014,7 +1016,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		loopStart := len(c.currentChunk.Code)
 
 		// Push Loop
-		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
+		loop := &Loop{
+			EnclosingLocals: len(c.locals),
+			BreakJumps:      []int{},
+			ContinueJumps:   []int{},
+			LoopStart:       loopStart,
+		}
 		c.loops = append(c.loops, loop)
 
 		_, condType, err := c.Compile(n.Condition)
@@ -1033,6 +1040,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		_, _, err = c.Compile(n.Body)
 		if err != nil {
 			return nil, nil, err
+		}
+
+		// Patch Continue Jumps (jump to loop start before condition)
+		for _, jump := range loop.ContinueJumps {
+			c.patchJump(jump)
 		}
 
 		// Loop back
@@ -1097,7 +1109,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		// 6. Loop Setup
 		loopStart := len(c.currentChunk.Code)
-		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
+		loop := &Loop{
+			EnclosingLocals: len(c.locals),
+			BreakJumps:      []int{},
+			ContinueJumps:   []int{},
+			LoopStart:       loopStart,
+		}
 		c.loops = append(c.loops, loop)
 
 		// 7. Condition: $index < $len
@@ -1126,19 +1143,32 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		c.endScope() // Pops User Variable
 
-		// 10. Increment Index
+		// 10. Continue point - patch continue jumps here (before increment)
+		for _, jump := range loop.ContinueJumps {
+			c.patchJump(jump)
+		}
+
+		// 11. Increment Index
 		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
 		c.emitConstant(value.NewInt(1))
 		c.emitByte(byte(chunk.OP_ADD_INT))
 		c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(len(c.locals)-2)) // set $index
 		c.emitByte(byte(chunk.OP_POP))
 
-		// 11. Loop Back
+		// 12. Loop Back
 		c.emitLoop(loopStart)
 
-		// 12. Patch Exit
+		// 13. Patch Exit
 		c.patchJump(jumpToExit)
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+
+		// 14. Patch Break Jumps
+		for _, jump := range loop.BreakJumps {
+			c.patchJump(jump)
+		}
+
+		// 15. Pop Loop
+		c.loops = c.loops[:len(c.loops)-1]
 
 		c.endScope() // Close Wrapper Scope ($collection, $index, $len)
 
@@ -1330,6 +1360,23 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Emit Jump
 		jump := c.emitJump(chunk.OP_JUMP)
 		loop.BreakJumps = append(loop.BreakJumps, jump)
+		return c.currentChunk, nil, nil
+
+	case *ast.ContinueStmt:
+		if len(c.loops) == 0 {
+			return nil, nil, fmt.Errorf("continue outside of loop")
+		}
+		loop := c.loops[len(c.loops)-1]
+
+		// Pop locals (same as break, but jump to loop start instead of end)
+		toPop := len(c.locals) - loop.EnclosingLocals
+		for i := 0; i < toPop; i++ {
+			c.emitByte(byte(chunk.OP_POP))
+		}
+
+		// Emit Jump to continue point
+		jump := c.emitJump(chunk.OP_JUMP)
+		loop.ContinueJumps = append(loop.ContinueJumps, jump)
 		return c.currentChunk, nil, nil
 
 	case *ast.UseStmt:

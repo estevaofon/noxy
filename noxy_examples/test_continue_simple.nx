@@ -1,0 +1,11 @@
+print("Start")
+
+let nums: int[] = [1, 2, 3]
+for n in nums do
+    if n == 2 then
+        continue
+    end
+    print(n)
+end
+
+print("After loop")

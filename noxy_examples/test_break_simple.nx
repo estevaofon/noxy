@@ -1,0 +1,12 @@
+print("Start")
+
+let nums: int[] = [1, 2, 3, 4, 5]
+for n in nums do
+    if n == 3 then
+        print("Breaking")
+        break
+    end
+    print(n)
+end
+
+print("After loop")

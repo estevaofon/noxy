@@ -1,0 +1,26 @@
+// Test continue statement with while loop
+print("=== Test Continue in While Loop ===")
+
+let counter: int = 0
+let sum: int = 0
+
+while counter < 10 do
+    counter = counter + 1
+    
+    // Skip even numbers
+    if counter % 2 == 0 then
+        continue
+    end
+    
+    sum = sum + counter
+    print(f"Adding odd number: {counter}")
+end
+
+print(f"Sum of odd numbers (1,3,5,7,9): {sum}")
+
+// Expected: 1 + 3 + 5 + 7 + 9 = 25
+if sum == 25 then
+    print("✓ PASS: While continue works correctly")
+else
+    print(f"✗ FAIL: Expected 25, got {sum}")
+end
