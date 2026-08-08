@@ -4,6 +4,7 @@ import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,73 @@ let callbacks: func[] = [
         return value
     end
 ]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPredeclaresForwardFunctionSignature(t *testing.T) {
+	c, err := compileFunctionSource(t, `
+func first() -> int
+    return second()
+end
+func second() -> int
+    return 42
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := c.GetGlobals()["second"].(*ast.FunctionType)
+	if !ok || got.Return.String() != "int" {
+		t.Fatalf("second signature=%v", c.GetGlobals()["second"])
+	}
+}
+
+func TestPredeclaresMutualRecursion(t *testing.T) {
+	c, err := compileFunctionSource(t, `
+func even(n: int) -> bool
+    if n == 0 then
+        return true
+    else
+        return odd(n - 1)
+    end
+end
+func odd(n: int) -> bool
+    if n == 0 then
+        return false
+    else
+        return even(n - 1)
+    end
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"even", "odd"} {
+		got, ok := c.GetGlobals()[name].(*ast.FunctionType)
+		if !ok || got.Return.String() != "bool" {
+			t.Fatalf("%s signature=%v", name, c.GetGlobals()[name])
+		}
+	}
+}
+
+func TestRejectsDuplicateTopLevelFunctionNames(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func same() -> int
+    return 1
+end
+func same() -> int
+    return 2
+end`)
+	if err == nil || !strings.Contains(err.Error(), "duplicate function 'same'") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestFunctionLiteralKeepsExactSignature(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let stringify: func(int) -> string = func(v: int) -> string
+    return "value"
+end`)
 	if err != nil {
 		t.Fatal(err)
 	}

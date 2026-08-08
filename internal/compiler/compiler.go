@@ -85,6 +85,9 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		if err := c.predeclareFunctions(n.Statements); err != nil {
+			return nil, nil, err
+		}
 		for _, stmt := range n.Statements {
 			if _, _, err := c.Compile(stmt); err != nil {
 				return nil, nil, err
@@ -1408,18 +1411,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.FunctionStatement:
 		c.setLine(n.Token.Line)
 
-		// Construct FunctionType for the global registry (Pre-register for recursion)
-		paramTypes := []ast.NoxyType{}
-		for _, p := range n.Parameters {
-			paramTypes = append(paramTypes, p.Type)
-		}
-		// Return type undefined for now (any/void), ast doesn't strictly enforce it yet
-		funcType := &ast.FunctionType{
-			Params: paramTypes,
-			Return: &ast.PrimitiveType{Name: "any"},
-		}
-		// Store in Global
-		c.globals[n.Name] = funcType
+		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
 		if err != nil {
@@ -1473,17 +1465,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(up.Index)
 		}
 
-		// Construct FunctionType
-		paramTypes := []ast.NoxyType{}
-		for _, p := range n.Parameters {
-			paramTypes = append(paramTypes, p.Type)
-		}
-		funcType := &ast.FunctionType{
-			Params: paramTypes,
-			Return: &ast.PrimitiveType{Name: "any"},
-		}
-
-		return c.currentChunk, funcType, nil
+		return c.currentChunk, newFunctionType(n.Parameters, n.ReturnType), nil
 
 	case *ast.BlockStatement:
 		c.beginScope()

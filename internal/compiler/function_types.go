@@ -1,6 +1,9 @@
 package compiler
 
-import "noxy-vm/internal/ast"
+import (
+	"fmt"
+	"noxy-vm/internal/ast"
+)
 
 func normalizeReturnType(t ast.NoxyType) ast.NoxyType {
 	if t == nil {
@@ -117,4 +120,20 @@ func commonInferredType(left, right ast.NoxyType) ast.NoxyType {
 		return &ast.PrimitiveType{Name: "func"}
 	}
 	return &ast.PrimitiveType{Name: "any"}
+}
+
+func (c *Compiler) predeclareFunctions(statements []ast.Statement) error {
+	seen := make(map[string]struct{})
+	for _, statement := range statements {
+		fn, ok := statement.(*ast.FunctionStatement)
+		if !ok {
+			continue
+		}
+		if _, duplicate := seen[fn.Name]; duplicate {
+			return fmt.Errorf("[line %d] duplicate function '%s'", fn.Token.Line, fn.Name)
+		}
+		seen[fn.Name] = struct{}{}
+		c.globals[fn.Name] = newFunctionType(fn.Parameters, fn.ReturnType)
+	}
+	return nil
 }
