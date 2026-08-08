@@ -24,6 +24,7 @@ type Loop struct {
 type Upvalue struct {
 	Index   uint8
 	IsLocal bool
+	Type    ast.NoxyType
 }
 
 type Compiler struct {
@@ -284,7 +285,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 					c.emitByte(byte(chunk.OP_POP))
 				}
-			} else if arg := c.resolveUpvalue(ident.Value); arg != -1 {
+			} else if arg, _ := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
 				// TODO: Implement type checking for upvalues.
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
@@ -660,9 +661,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if arg, t := c.resolveLocal(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(arg))
 			return c.currentChunk, t, nil
-		} else if arg := c.resolveUpvalue(n.Value); arg != -1 {
+		} else if arg, upvalueType := c.resolveUpvalue(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(arg))
-			return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil // Types for upvalues not tracked yet
+			return c.currentChunk, upvalueType, nil
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Value))
@@ -1640,7 +1641,7 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 			c.locals[slot].IsCaptured = true
 			return declared, nil
 		}
-		if c.resolveUpvalue(target.Value) != -1 {
+		if upvalue, _ := c.resolveUpvalue(target.Value); upvalue != -1 {
 			return nil, fmt.Errorf("[line %d] captured variables cannot be passed by reference", c.currentLine)
 		}
 		name := c.makeConstant(value.NewString(target.Value))
@@ -1870,28 +1871,28 @@ func isAny(t ast.NoxyType) bool {
 	return ok && primitive.Name == "any"
 }
 
-func (c *Compiler) resolveUpvalue(name string) int {
+func (c *Compiler) resolveUpvalue(name string) (int, ast.NoxyType) {
 	if c.enclosing == nil {
-		return -1
+		return -1, nil
 	}
 
 	// 1. Check immediate parent's locals
-	local, _ := c.enclosing.resolveLocal(name)
+	local, localType := c.enclosing.resolveLocal(name)
 	if local != -1 {
 		c.enclosing.locals[local].IsCaptured = true // Mark as captured!
-		return c.addUpvalue(uint8(local), true)
+		return c.addUpvalue(uint8(local), true, localType), localType
 	}
 
 	// 2. Check immediate parent's upvalues
-	upvalue := c.enclosing.resolveUpvalue(name)
+	upvalue, upvalueType := c.enclosing.resolveUpvalue(name)
 	if upvalue != -1 {
-		return c.addUpvalue(uint8(upvalue), false)
+		return c.addUpvalue(uint8(upvalue), false, upvalueType), upvalueType
 	}
 
-	return -1
+	return -1, nil
 }
 
-func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
+func (c *Compiler) addUpvalue(index uint8, isLocal bool, upvalueType ast.NoxyType) int {
 	// Check for existing upvalue
 	for i, u := range c.upvalues {
 		if u.Index == index && u.IsLocal == isLocal {
@@ -1903,7 +1904,7 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
 		// Error: too many upvalues
 	}
 
-	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal})
+	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal, Type: upvalueType})
 	return len(c.upvalues) - 1
 }
 

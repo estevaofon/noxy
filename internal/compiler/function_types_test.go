@@ -265,3 +265,43 @@ func TestWhenGuaranteesReturnOnlyWithReturningDefault(t *testing.T) {
 		t.Fatal("when without default must not guarantee return")
 	}
 }
+
+func TestBareFunctionCompatibility(t *testing.T) {
+	valid := []string{
+		`let f: func = func(v: int) -> int
+    return v
+end
+f(1)`,
+		`func apply(f: func, value: int) -> any
+    return f(value)
+end`,
+		`func decorate(f: func) -> func
+    return f
+end`,
+		`func register_handler(handler: func) -> void
+    return
+end`,
+		`let fs: func[] = [
+    func() -> int
+        return 1
+    end,
+    func(v: int) -> int
+        return v
+    end
+]`,
+	}
+	for _, input := range valid {
+		if _, err := compileFunctionSource(t, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := compileFunctionSource(t, `
+let dynamic: func = func(v: int) -> int
+    return v
+end
+let exact: func(int) -> int = dynamic`)
+	if err == nil || !strings.Contains(err.Error(), "expected func(int) -> int, got func") {
+		t.Fatalf("error=%v", err)
+	}
+}
