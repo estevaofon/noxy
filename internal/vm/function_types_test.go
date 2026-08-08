@@ -85,3 +85,15 @@ fill(head.next)
 test_report(head.next.value)`)
 	testExpectedObject(t, 42, got)
 }
+
+func TestExplicitReferenceSurvivesBareFunctionCall(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+let dynamic: func = increment
+let answer: int = 41
+dynamic(ref answer)
+test_report(answer)`)
+	testExpectedObject(t, 42, got)
+}

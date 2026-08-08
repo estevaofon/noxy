@@ -133,9 +133,11 @@ For a callee whose type is an exact `ast.FunctionType`, `CallExpression` perform
 4. A `ref` parameter receives an addressable identifier, member, or index with a compatible element type, or `null` where references currently permit it.
 5. The expression type of the call is the signature's declared return type.
 
+The compiler represents `null` separately from an unknown dynamic type. `null` is compatible with `ref`, struct values, and `any`, but it does not satisfy primitive value types or either callable type. Struct compatibility preserves the language's existing nullable recursive-structure and result-pattern conventions. An unknown native value also cannot be implicitly narrowed to an exact function signature.
+
 Calls through an explicitly dynamic or currently untyped boundary (`any`, native functions, plugins, or untyped module exports) retain the existing runtime behavior in this branch. They do not receive a false exact type. Fully typing those boundaries is separate follow-up work.
 
-Bare `func` is also an explicit dynamic boundary. The compiler verifies that values assigned to it are callable, but it does not perform static arity, argument, or return-type checking for calls through that variable. Direct calls to named user functions remain statically checked because their symbols retain exact signatures.
+Bare `func` is also an explicit dynamic boundary. The compiler verifies that values assigned to it are callable, but it does not perform static arity, argument, or return-type checking for calls through that variable. An explicit `ref` argument is preserved rather than auto-dereferenced at this boundary. Direct calls to named user functions remain statically checked because their symbols retain exact signatures.
 
 ### Returns
 

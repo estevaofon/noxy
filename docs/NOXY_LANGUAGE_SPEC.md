@@ -353,7 +353,7 @@ func apply(f: func(int) -> int, value: int) -> int
 end
 ```
 
-Calls through exact types are checked during compilation: arity, argument types, `ref` addressability, and return types must match. Exact signatures are invariant; parameter count, parameter types, `ref` modifiers, and return types must be identical. An omitted return annotation on a function declaration or literal means `void`.
+Calls through exact types are checked during compilation: arity, argument types, `ref` addressability, and return types must match. Exact signatures are invariant; parameter count, parameter types, `ref` modifiers, and return types must be identical. `null` satisfies `ref`, struct, and `any` contracts, but not primitive value or callable contracts. An omitted return annotation on a function declaration or literal means `void`.
 
 Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
 
@@ -362,7 +362,7 @@ let dynamic: func = exact       // exact-to-dynamic widening is valid
 let exact_again: func(int) -> int = dynamic // ERROR: no implicit narrowing
 ```
 
-Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, so a function returning their result must either declare `any` or replace the bare callable with an exact signature. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
+Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, so a function returning their result must either declare `any` or replace the bare callable with an exact signature. Explicit `ref` arguments remain references across this dynamic boundary. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
 
 ```noxy
 let callbacks: func[] = [no_arguments, two_arguments]
@@ -375,7 +375,7 @@ let transforms: (func(int) -> int)[] = [double, increment]
 let factory: func(int) -> int[]
 ```
 
-Exact function types may also appear in parameters, returns, struct fields, map values, channels, and references. `any`, native functions, plugins, and untyped module exports remain dynamic boundaries and retain runtime validation.
+Exact function types may also appear in parameters, returns, struct fields, map values, channels, and references. `any`, native functions, plugins, and untyped module exports remain dynamic boundaries and retain runtime validation; an unknown native value cannot be implicitly narrowed to an exact function type.
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 

@@ -49,3 +49,34 @@ func TestRejectMalformedFunctionTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestVoidIsRestrictedToFunctionReturns(t *testing.T) {
+	invalid := []string{
+		"let value: void = null",
+		"func invalid(value: void) end",
+		"let callback: func(void) -> int",
+		"let values: void[] = []",
+		"func invalid() -> void[] end",
+		"struct Invalid\n    value: void\nend",
+	}
+	for _, input := range invalid {
+		l := lexer.New(input)
+		p := New(l)
+		p.ParseProgram()
+		if len(p.Errors()) == 0 {
+			t.Fatalf("expected parser error for %q", input)
+		}
+	}
+
+	valid := []string{
+		"func valid() -> void\nend",
+		"let callback: func(int) -> void",
+		"func factory() -> func(int) -> void\n    return func(value: int) -> void\n    end\nend",
+	}
+	for _, input := range valid {
+		l := lexer.New(input)
+		p := New(l)
+		p.ParseProgram()
+		checkParserErrors(t, p)
+	}
+}

@@ -33,6 +33,26 @@ func isCallableType(t ast.NoxyType) bool {
 	return ok
 }
 
+func isNullType(t ast.NoxyType) bool {
+	p, ok := t.(*ast.PrimitiveType)
+	return ok && p.Name == "null"
+}
+
+func (c *Compiler) acceptsNull(t ast.NoxyType) bool {
+	if isAny(t) || isNullType(t) {
+		return true
+	}
+	if _, ok := t.(*ast.RefType); ok {
+		return true
+	}
+	primitive, ok := t.(*ast.PrimitiveType)
+	if !ok {
+		return false
+	}
+	_, isStruct := c.structs[primitive.Name]
+	return isStruct
+}
+
 func noxyTypeName(t ast.NoxyType) string {
 	if t == nil {
 		return "unknown"
@@ -102,11 +122,17 @@ func sameExactType(left, right ast.NoxyType) bool {
 }
 
 func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool {
-	if expected == nil || actual == nil {
+	if expected == nil {
 		return true
+	}
+	if actual == nil {
+		return !isCallableType(expected)
 	}
 	if isAny(expected) {
 		return true
+	}
+	if isNullType(actual) {
+		return c.acceptsNull(expected)
 	}
 	if isAny(actual) {
 		return false

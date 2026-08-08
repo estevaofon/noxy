@@ -130,7 +130,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			if !c.areTypesCompatible(n.Type, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), valType.String())
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType))
 			}
 		}
 
@@ -259,7 +259,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 					// REBIND: ref = ref OR ref = nil (dynamic/unknown)
 					// Enable rebind if valType is nil (unknown, e.g. from imports) or explicitly ref
-					if isRefVal || valType == nil {
+					if isRefVal || valType == nil || isNullType(valType) {
 						if valType != nil && !c.areTypesCompatible(refType, valType) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 						}
@@ -285,9 +285,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 					c.emitByte(byte(chunk.OP_POP))
 				}
-			} else if arg, _ := c.resolveUpvalue(ident.Value); arg != -1 {
+			} else if arg, upvalueType := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
-				// TODO: Implement type checking for upvalues.
+				if !c.areTypesCompatible(upvalueType, valType) {
+					return nil, nil, fmt.Errorf(
+						"[line %d] type mismatch in assignment to '%s': expected %s, got %s",
+						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType),
+					)
+				}
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
@@ -299,7 +304,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						_, isRefVal := valType.(*ast.RefType)
 
 						// Allow rebind if valType is Ref or nil (dynamic/unknown)
-						if isRefVal || valType == nil {
+						if isRefVal || valType == nil || isNullType(valType) {
 							if valType != nil && !c.areTypesCompatible(globalType, valType) {
 								return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 							}
@@ -443,7 +448,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					}
 
 					// Assuming null is compatible
-					if isRefVal || valType == nil {
+					if isRefVal || valType == nil || isNullType(valType) {
 						if valType != nil && !c.areTypesCompatible(fieldType, valType) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 						}
@@ -899,7 +904,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))
-		return c.currentChunk, nil, nil // Null type?
+		return c.currentChunk, &ast.PrimitiveType{Name: "null"}, nil
 
 	case *ast.ZerosLiteral:
 		_, _, err := c.Compile(n.Size)
@@ -1579,7 +1584,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if ref, ok := argType.(*ast.RefType); ok {
+			explicitReference := false
+			if prefix, ok := arg.(*ast.PrefixExpression); ok {
+				explicitReference = prefix.Operator == "ref"
+			}
+			if ref, ok := argType.(*ast.RefType); ok && !explicitReference {
 				c.emitByte(byte(chunk.OP_DEREF))
 				argType = ref.ElementType
 			}
@@ -1843,8 +1852,14 @@ func (c *Compiler) resolveGlobalType(name string) (ast.NoxyType, bool) {
 }
 
 func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
-	if expected == nil || actual == nil {
+	if expected == nil {
 		return true
+	}
+	if actual == nil {
+		return !isCallableType(expected)
+	}
+	if isNullType(actual) {
+		return c.acceptsNull(expected)
 	}
 	if isBareFunctionType(expected) {
 		return isCallableType(actual)

@@ -352,3 +352,67 @@ accept(head.next)`)
 		t.Fatal(err)
 	}
 }
+
+func TestNullDoesNotSatisfyConcreteOrCallableContracts(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"argument", `func identity(value: int) -> int
+    return value
+end
+identity(null)`, "expected int, got null"},
+		{"return", `func invalid() -> int
+    return null
+end`, "expected int, got null"},
+		{"bare callable", `let operation: func = null`, "expected func, got null"},
+		{"exact callable", `let operation: func(int) -> int = null`, "expected func(int) -> int, got null"},
+		{"unknown native callable", `let operation: func(int) -> int = print`, "expected func(int) -> int, got unknown"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNullRemainsCompatibleWithReferencesStructsAndAny(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+struct Node
+    value: int
+end
+let node: ref Node = null
+let nullable_node: Node = null
+let nested: Node = Node(1)
+let dynamic: any = null
+func accept(node: ref Node) -> void
+    return
+end
+accept(null)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCapturedFunctionReassignmentIsTypeChecked(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func integer(value: int) -> int
+    return value
+end
+func text(value: string) -> int
+    return 7
+end
+func outer() -> void
+    let operation: func(int) -> int = integer
+    func mutate() -> void
+        operation = text
+    end
+end`)
+	if err == nil || !strings.Contains(err.Error(), "expected func(int) -> int, got func(string) -> int") {
+		t.Fatalf("error=%v", err)
+	}
+}

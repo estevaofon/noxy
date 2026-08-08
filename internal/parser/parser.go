@@ -294,7 +294,7 @@ func (p *Parser) parseLetStatement() *ast.LetStmt {
 
 	p.nextToken() // Eat COLON
 
-	stmt.Type = p.parseType()
+	stmt.Type = p.parseValueType()
 
 	if p.peekToken.Type == token.ASSIGN {
 		p.nextToken() // Eat ASSIGN
@@ -573,6 +573,55 @@ func (p *Parser) parseType() ast.NoxyType {
 	return t
 }
 
+func (p *Parser) parseValueType() ast.NoxyType {
+	t := p.parseType()
+	if t != nil && hasInvalidVoidPosition(t, false) {
+		p.errors = append(p.errors, fmt.Sprintf(
+			"[%d:%d] SyntaxError: void is only valid as a function return type",
+			p.curToken.Line, p.curToken.Column,
+		))
+		return nil
+	}
+	return t
+}
+
+func (p *Parser) parseReturnType() ast.NoxyType {
+	t := p.parseType()
+	if t != nil && hasInvalidVoidPosition(t, true) {
+		p.errors = append(p.errors, fmt.Sprintf(
+			"[%d:%d] SyntaxError: void is only valid as a function return type",
+			p.curToken.Line, p.curToken.Column,
+		))
+		return nil
+	}
+	return t
+}
+
+func hasInvalidVoidPosition(t ast.NoxyType, allowVoid bool) bool {
+	switch typed := t.(type) {
+	case *ast.PrimitiveType:
+		return typed.Name == "void" && !allowVoid
+	case *ast.ArrayType:
+		return hasInvalidVoidPosition(typed.ElementType, false)
+	case *ast.MapType:
+		return hasInvalidVoidPosition(typed.KeyType, false) ||
+			hasInvalidVoidPosition(typed.ValueType, false)
+	case *ast.RefType:
+		return hasInvalidVoidPosition(typed.ElementType, false)
+	case *ast.ChanType:
+		return hasInvalidVoidPosition(typed.ElementType, false)
+	case *ast.FunctionType:
+		for _, param := range typed.Params {
+			if hasInvalidVoidPosition(param, false) {
+				return true
+			}
+		}
+		return hasInvalidVoidPosition(typed.Return, true)
+	default:
+		return false
+	}
+}
+
 func (p *Parser) parseAtomicType() ast.NoxyType {
 	// Note: 'ref' keyword is handled in parseType (not here) to enforce prefix precedence.
 	// To achieve "Array of References" like '(ref T)[]', the user must use parentheses.
@@ -673,7 +722,7 @@ func (p *Parser) parseFunctionType() ast.NoxyType {
 	}
 	if !p.peekTokenIs(token.RPAREN) {
 		p.nextToken()
-		param := p.parseType()
+		param := p.parseValueType()
 		if param == nil {
 			return nil
 		}
@@ -681,7 +730,7 @@ func (p *Parser) parseFunctionType() ast.NoxyType {
 		for p.peekTokenIs(token.COMMA) {
 			p.nextToken()
 			p.nextToken()
-			param = p.parseType()
+			param = p.parseValueType()
 			if param == nil {
 				return nil
 			}
@@ -692,7 +741,7 @@ func (p *Parser) parseFunctionType() ast.NoxyType {
 		return nil
 	}
 	p.nextToken()
-	result := p.parseType()
+	result := p.parseReturnType()
 	if result == nil {
 		return nil
 	}
@@ -1046,9 +1095,9 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 
 	// Return type arrow? `-> type`
 	if p.peekTokenIs(token.ARROW) {
-		p.nextToken()                   // eat )
-		p.nextToken()                   // eat ->
-		stmt.ReturnType = p.parseType() // Consumes type tokens.
+		p.nextToken()                         // eat )
+		p.nextToken()                         // eat ->
+		stmt.ReturnType = p.parseReturnType() // Consumes type tokens.
 	}
 
 	stmt.Body = p.parseBlockStatement()
@@ -1092,7 +1141,7 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	if p.peekTokenIs(token.ARROW) {
 		p.nextToken() // eat )
 		p.nextToken() // eat ->
-		lit.ReturnType = p.parseType()
+		lit.ReturnType = p.parseReturnType()
 	}
 
 	lit.Body = p.parseBlockStatement()
@@ -1139,8 +1188,8 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 	if !p.expectPeek(token.COLON) {
 		return nil
 	}
-	p.nextToken()          // eat COLON
-	pType := p.parseType() // eat Type
+	p.nextToken()               // eat COLON
+	pType := p.parseValueType() // eat Type
 
 	parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType})
 
@@ -1162,7 +1211,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 			return nil
 		}
 		p.nextToken()
-		pType = p.parseType()
+		pType = p.parseValueType()
 
 		parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType})
 	}
@@ -1397,7 +1446,7 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 			return nil
 		}
 		p.nextToken() // eat COLON
-		field.Type = p.parseType()
+		field.Type = p.parseValueType()
 
 		stmt.FieldsList = append(stmt.FieldsList, field)
 		p.nextToken() // eat Type (parseType ends at type token)
