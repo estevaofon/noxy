@@ -1,6 +1,6 @@
 # Consistent Reference Semantics Design
 
-**Status:** Revised draft for user review
+**Status:** Approved for implementation
 **Branch:** `feat/consistent-reference-semantics`
 
 ## Summary
@@ -91,7 +91,7 @@ Returning a composite adds no new implicit copy. A non-reference parameter has a
 
 ### 2.1 Exact reference parameters
 
-When an exact signature expects `ref T`, an addressable expression of type `T` is borrowed for the duration of the call.
+When an exact signature expects `ref T`, an addressable expression of type `T` is converted contextually to a reference argument at the call site. The reference is not lifetime-limited to the call and may escape under the rules in Section 2.3.
 
 ```noxy
 func increment(value: ref int) -> void
@@ -184,7 +184,7 @@ Rebinding a reference parameter changes only the parameter's local reference val
 
 ### 3.4 Null
 
-`null` remains a valid `ref T` value. It has no target and may be stored, compared, returned, or rebound. Dereferencing it is a runtime error.
+`null` remains a valid `ref T` value. It has no target and may be stored, compared, returned, or rebound. Reading through automatic dereference propagates `null`, which keeps nullable-reference comparisons usable. Updating through `null` is a runtime error.
 
 A field or index slot whose stored reference is currently `null` remains addressable; a contextual borrow can pass that slot so the callee may fill it. The literal `null` itself has no addressable slot.
 
@@ -244,15 +244,15 @@ Public native APIs receive descriptors containing:
 
 - name;
 - arity and variadic behavior;
-- parameter types or compiler-recognized generic constraints;
+- parameter type names for diagnostics;
 - parameter reference modes;
 - return type.
 
-The Go `NativeFunc` ABI remains unchanged. The descriptor validates the public contract before invoking the Go closure.
+The Go `NativeFunc` ABI remains unchanged. The VM descriptor validates arity and reference modes before invoking the Go closure. Exact static type validation belongs to a compiler-visible signature or typed `.nx` wrapper; the native implementation retains its domain validation at a dynamic boundary.
 
 ### 6.2 Same contextual rule
 
-An exact public native signature uses the same contextual borrowing rule as an exact Noxy function.
+A compiler-visible public native signature uses the same contextual borrowing rule as an exact Noxy function. The runtime descriptor and the compiler signature are paired parts of one public contract; a descriptor registered only inside the VM cannot retroactively give the compiler exact call-site information.
 
 Conceptual builtin signatures:
 
@@ -272,7 +272,7 @@ delete(mapping, key)
 json_loads(json, target)
 ```
 
-Because the signatures are exact, the compiler borrows the addressable arguments contextually. These builtins no longer depend on an undocumented native exception.
+Because these signatures are known by the compiler, it borrows the addressable arguments contextually. Their matching VM descriptors verify the reference modes again before native execution. These builtins no longer depend on an undocumented native exception.
 
 Generic collection builtins remain compiler-recognized because Noxy does not yet expose user-defined generics.
 
@@ -284,13 +284,13 @@ Identity-bearing channels, wait groups, files, sockets, statements, and database
 
 ### 6.4 Stdlib and internal primitives
 
-Public stdlib APIs must be typed `.nx` wrappers or typed native descriptors. Raw implementation primitives remain dynamic internals and are not documented public APIs.
+Public stdlib APIs must be typed `.nx` wrappers or paired compiler/VM native contracts. Raw implementation primitives and VM-only descriptors remain dynamic internals and are not documented public APIs.
 
-Enforcing module-private native visibility is desirable but is a separate module-system change. Until then, direct calls to raw primitives are documented dynamic boundaries and receive runtime validation only.
+Enforcing module-private native visibility is desirable but is a separate module-system change. Until then, direct calls to raw primitives are documented dynamic boundaries and receive only the runtime checks implemented by those primitives; they never gain contextual borrowing.
 
 ### 6.5 Contract errors
 
-Descriptor-level arity, reference-mode, and type failures become VM runtime errors and never invoke the native closure. Domain errors may continue using existing Noxy `Result` contracts. Replacing every legacy `null` error convention is outside this feature.
+Descriptor-level arity and reference-mode failures become VM runtime errors and never invoke the native closure. Compiler-visible contracts reject exact type mismatches at compile time. Native domain errors may continue using existing Noxy `Result` contracts. Replacing every legacy `null` error convention is outside this feature.
 
 ## 7. Static and Dynamic Boundaries
 
@@ -306,7 +306,7 @@ Normative rules:
 - concrete values widen to `any`;
 - `any` does not narrow implicitly to concrete or exact callable types;
 - dynamic boundaries validate what is known at runtime and never manufacture references;
-- plugin exports with signature metadata follow exact-call rules; other plugin exports remain dynamic.
+- current plugin exports remain dynamic and never receive contextual borrowing; adding compiler-visible plugin signatures is separate work.
 
 The misleading phrase "immutable types" will be replaced by "type-stable variables": a variable's declared type does not change, although values may be mutable.
 
@@ -315,8 +315,8 @@ The misleading phrase "immutable types" will be replaced by "type-stable variabl
 Required compile-time diagnostics include:
 
 ```text
-argument 1 to 'increment' expects ref int, but 41 is not addressable
-hint: store the value in a variable before passing it
+reference argument '41' is not addressable
+hint: use a variable, property, index, or null
 ```
 
 ```text
@@ -327,11 +327,11 @@ hint: use '*value = ...' to update the referenced value
 Required runtime diagnostics include:
 
 ```text
-function 'increment' argument 1: expected a reference value, got int
+function 'increment' argument 1: expected ref int, got int
 ```
 
 ```text
-cannot dereference null reference
+cannot update null reference
 ```
 
 ## 9. Compatibility
@@ -361,7 +361,7 @@ No compatibility flag or mass source migration is required.
 
 - Preserve contextual borrowing for exact `ref T` parameters.
 - Preserve direct passing of existing reference values.
-- Add contextual borrowing for typed public natives.
+- Add contextual borrowing for compiler-known public natives.
 - Add `OP_REF_UPVALUE` generation.
 - Improve diagnostics for non-addressable reference arguments and invalid ref assignment.
 
@@ -386,14 +386,14 @@ No compatibility flag or mass source migration is required.
 - explicit and existing references still work;
 - literals and non-reference temporaries are rejected;
 - update and rebind diagnostics are distinct;
-- native signatures apply the same contextual rules;
+- compiler-known native signatures apply the same contextual rules;
 - exact-call return propagation remains unchanged.
 
 ### VM tests
 
 - updates through local, global, property, index, and upvalue references reach the intended slot;
 - dynamic calls accept explicit references and reject plain values for ref parameters;
-- null dereference is a runtime error;
+- nullable reference reads propagate `null`, while updates through `null` fail at runtime;
 - reference rebind remains local to the reference variable;
 - ordinary parameters retain top-level isolation and nested sharing;
 - public native parameter modes match user-function behavior.
@@ -407,7 +407,7 @@ No compatibility flag or mass source migration is required.
 
 ## 12. Acceptance Criteria
 
-1. Exact user and typed-native calls use the same contextual borrowing rule.
+1. Exact user calls and compiler-known public native calls use the same contextual borrowing rule.
 2. Existing valid call syntax remains valid.
 3. Dynamic calls never infer or manufacture references.
 4. Reference read, update, and rebind semantics match compiler behavior and documentation.
