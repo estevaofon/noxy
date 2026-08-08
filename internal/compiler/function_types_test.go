@@ -274,7 +274,7 @@ items[0] = 1`,
 let number: int = 0
 let items: map[string, ref int] = {"item": ref number}
 items["item"] = 1`,
-			hint: "use '*items[item] = ...'",
+			hint: "use '*items[\"item\"] = ...'",
 		},
 	}
 

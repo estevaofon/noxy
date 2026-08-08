@@ -1887,10 +1887,12 @@ func assignmentTargetName(expression ast.Expression) string {
 	switch target := expression.(type) {
 	case *ast.Identifier:
 		return target.Value
+	case *ast.StringLiteral:
+		return fmt.Sprintf("%q", target.Value)
 	case *ast.MemberAccessExpression:
 		return assignmentTargetName(target.Left) + "." + target.Member
 	case *ast.IndexExpression:
-		return assignmentTargetName(target.Left) + "[" + target.Index.String() + "]"
+		return assignmentTargetName(target.Left) + "[" + assignmentTargetName(target.Index) + "]"
 	default:
 		return expression.String()
 	}
