@@ -1999,7 +1999,10 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 		if _, ok := param.Type.(*ast.RefType); ok {
 			isRef = true
 		}
-		paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
+		paramsInfo = append(paramsInfo, value.ParamInfo{
+			IsRef:    isRef,
+			TypeName: param.Type.String(),
+		})
 	}
 	if declaredReturn.String() != "void" && !blockGuaranteesReturn(body) {
 		return value.Value{}, nil, fmt.Errorf(

@@ -30,7 +30,8 @@ type Value struct {
 }
 
 type ParamInfo struct {
-	IsRef bool
+	IsRef    bool
+	TypeName string
 }
 
 type ObjFunction struct {

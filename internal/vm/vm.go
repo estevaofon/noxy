@@ -3895,8 +3895,11 @@ func (vm *VM) run(minFrameCount int) error {
 			val := vm.pop()    // Value to assign
 			refVal := vm.pop() // The reference itself (popped from stack)
 
+			if refVal.Type == value.VAL_NULL {
+				return vm.runtimeError(c, ip, "cannot update null reference")
+			}
 			if refVal.Type != value.VAL_REF {
-				return vm.runtimeError(c, ip, "Cannot store via non-ref value")
+				return vm.runtimeError(c, ip, "cannot store via non-reference value")
 			}
 
 			ref := refVal.Obj.(*value.ObjRef)
@@ -4887,6 +4890,10 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 	// Handle Pass-by-Value (Copy) for non-ref parameters
 	// Args are at vm.stackTop - argCount
 	baseArgs := vm.stackTop - argCount
+	args := vm.stack[baseArgs:vm.stackTop]
+	if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
+		return false, vm.runtimeError(c, ip, "%s", err)
+	}
 	for i := 0; i < argCount; i++ {
 		if i < len(fn.Params) {
 			param := fn.Params[i]

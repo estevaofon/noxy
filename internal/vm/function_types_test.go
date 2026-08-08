@@ -5,6 +5,7 @@ import (
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +33,68 @@ func runTypedFunctionProgram(t *testing.T, input string) value.Value {
 		t.Fatalf("vm error: %v", err)
 	}
 	return captured
+}
+
+func runTypedFunctionProgramError(t *testing.T, input string) error {
+	t.Helper()
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	bytecode, _, err := compiler.New().Compile(program)
+	if err != nil {
+		t.Fatalf("compiler error: %v", err)
+	}
+	return New().Interpret(bytecode)
+}
+
+func TestDynamicCallRejectsPlainValueForReferenceParameter(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func increment(value: ref int) -> void
+    return
+end
+let dynamic: func = increment
+let answer: int = 41
+dynamic(answer)`)
+	if err == nil || !strings.Contains(err.Error(), "argument 1: expected ref int, got int") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestDynamicCallRejectsReferenceForValueParameter(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func consume(value: int) -> void
+    return
+end
+let dynamic: func = consume
+let answer: int = 41
+dynamic(ref answer)`)
+	if err == nil || !strings.Contains(err.Error(), "argument 1: expected int, got ref") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestDynamicReferenceParameterAcceptsNull(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func consume(value: ref int) -> void
+    return
+end
+let dynamic: func = consume
+dynamic(null)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdatingNullReferenceFailsClearly(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+let pointer: ref int = null
+*pointer = 1`)
+	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
+		t.Fatalf("error=%v", err)
+	}
 }
 
 func TestExecutesExactHigherOrderFunction(t *testing.T) {
