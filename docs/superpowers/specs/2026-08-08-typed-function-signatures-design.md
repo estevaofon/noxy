@@ -18,6 +18,8 @@ Consequently, a function declared as returning `int` can return `string`, and th
 - Reject non-`void` functions that can finish without returning a value.
 - Support forward calls and recursion without compiling bodies twice.
 - Support exact function types in variables, parameters, fields, arrays, maps, and returns.
+- Preserve bare `func` as the dynamic callable type used by existing Noxy programs.
+- Allow existing first-class function, closure, decorator, handler, and heterogeneous callable collection patterns to remain viable without mandatory migration.
 - Keep compilation linear and add a benchmark that detects material regressions.
 - Preserve runtime arity checks as defensive validation for dynamic boundaries.
 
@@ -68,14 +70,34 @@ func apply(operation: func(int, int) -> int, a: int, b: int) -> int
 end
 ```
 
-The existing bare `func` type remains available only as an inferable annotation. When a declaration has a function initializer, the stored variable type becomes the initializer's exact signature:
+The existing bare `func` type remains the dynamic callable type. It guarantees that a value is callable but deliberately does not describe its parameters or return type:
 
 ```noxy
 let operation: func = add
-// Stored type: func(int, int) -> int
+// The variable accepts any function value. Calls through it are dynamic.
 ```
 
-A bare `func` without an initializer, or in a parameter, field, collection element, or return annotation, is rejected with a diagnostic requesting an exact signature. This prevents a silent dynamic call boundary.
+Bare `func` remains valid in variables, parameters, fields, collection elements, and return annotations. This preserves current code such as dynamic callbacks and heterogeneous callable collections:
+
+```noxy
+func apply_dynamic(operation: func, value: int) -> any
+    return operation(value)
+end
+
+let dynamic_functions: func[] = [function_with_no_args, function_with_two_args]
+```
+
+Calls through bare `func` retain runtime arity and type behavior. The dynamic boundary is explicit in the annotation and must be documented as such.
+
+Exact callable collections use an exact function type. Parentheses disambiguate an array of functions from a function returning an array:
+
+```noxy
+let integer_functions: (func(int) -> int)[] = [double, increment]
+let handlers: map[string, func(HttpRequest) -> HttpResponse] = {
+    "home": home_handler,
+    "health": health_handler
+}
+```
 
 Function type compatibility is invariant in this version: parameter counts, parameter types, `ref` modifiers, and return types must match exactly. `any` inside an explicitly written signature remains explicit and follows normal `any` compatibility rules.
 
@@ -97,7 +119,7 @@ The normal compiler pass then visits the AST once and emits bytecode as it does 
 
 ### Function literals
 
-Compiling a function literal returns an exact `ast.FunctionType`. A missing return annotation means `void`. When a `let` declaration uses bare `func`, its local or global type is replaced by the exact initializer type before registration.
+Compiling a function literal produces its exact intrinsic `ast.FunctionType`. A missing return annotation means `void`. When that value is assigned to a variable declared with an exact signature, compatibility is checked. When it is assigned to bare `func`, the variable retains the declared dynamic callable type; the signature is intentionally widened at that boundary.
 
 ### Calls
 
@@ -110,6 +132,8 @@ For a callee whose type is an exact `ast.FunctionType`, `CallExpression` perform
 5. The expression type of the call is the signature's declared return type.
 
 Calls through an explicitly dynamic or currently untyped boundary (`any`, native functions, plugins, or untyped module exports) retain the existing runtime behavior in this branch. They do not receive a false exact type. Fully typing those boundaries is separate follow-up work.
+
+Bare `func` is also an explicit dynamic boundary. The compiler verifies that values assigned to it are callable, but it does not perform static arity, argument, or return-type checking for calls through that variable. Direct calls to named user functions remain statically checked because their symbols retain exact signatures.
 
 ### Returns
 
@@ -141,7 +165,9 @@ The current compatibility behavior that accepts an unknown (`nil`) type remains 
 - parameter and return types are compared structurally;
 - an expected `any` accepts any actual value;
 - an actual `any` does not satisfy a concrete expected type inside a statically known user-function call or return;
-- bare `func` is not treated as equivalent to every exact function type except during initializer inference;
+- an exact function value may widen to bare `func` without losing runtime callability;
+- bare `func` does not narrow implicitly to an exact function type;
+- calls through bare `func` retain the existing dynamic behavior;
 - arrays, maps, channels, references, and exact function types recurse through the same compatibility function.
 
 This targeted strictness prevents the known unsound user-function cases without forcing native and module metadata into the same branch.
@@ -181,7 +207,9 @@ Compiler tests cover:
 - missing returns and complete conditional returns;
 - exact function assignment and incompatibility;
 - anonymous and higher-order functions;
-- bare `func` inference and invalid non-inferable uses;
+- widening exact functions to bare `func`;
+- dynamic callbacks, decorators, handler parameters, and heterogeneous `func[]` collections remaining valid;
+- rejection of implicit narrowing from bare `func` to an exact signature;
 - explicit dynamic boundaries retaining their documented behavior.
 
 VM tests confirm that valid typed calls, closures, higher-order functions, and references continue to execute correctly. Existing examples remain integration coverage, but the feature's correctness must be established by Go tests that compile source strings using the current packages.
@@ -199,4 +227,4 @@ The integration runner's use of a pre-existing executable will be reported expli
 
 ## Rollout
 
-This branch implements typed user-defined functions as one focused change. Native/module signature metadata, VM file organization, and a hermetic integration runner remain separate follow-up branches so each can be reviewed and benchmarked independently.
+This branch implements exact typed user-defined functions as an additive, gradual feature while preserving bare `func` as the existing dynamic callable type. Existing programs do not require immediate migration; replacing bare `func` annotations with exact signatures opts individual APIs into compile-time checking. Native/module signature metadata, VM file organization, and a hermetic integration runner remain separate follow-up branches so each can be reviewed and benchmarked independently.
