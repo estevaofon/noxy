@@ -1,0 +1,80 @@
+use sys select exit
+
+struct Box
+    values: int[]
+end
+
+func assert(condition: bool, message: string) -> void
+    if condition then
+        print("[PASS] " + message)
+    else
+        print("[FAIL] " + message)
+        exit(1)
+    end
+end
+
+// Cria um novo array e copia os valores primitivos elemento a elemento.
+func copy_int_array(source: int[]) -> int[]
+    let result: int[] = []
+    let i: int = 0
+
+    while i < length(source) do
+        append(result, source[i])
+        i = i + 1
+    end
+
+    return result
+end
+
+// Deep copy tipado para Box, escrito inteiramente em Noxy.
+// Como values recebe um novo array, a cópia não compartilha dados mutáveis.
+func deep_copy_box(source: Box) -> Box
+    let values_copy: int[] = copy_int_array(source.values)
+    return Box(values_copy)
+end
+
+// Recebe uma cópia rasa de Box.
+// Substituir um campo da cópia não altera a Box original.
+func replace_top(box: Box)
+    box.values = [100, 200]
+end
+
+// A Box é copiada, mas o array interno continua compartilhado.
+// Modificar o conteúdo do array afeta o original.
+func mutate_nested(box: Box)
+    box.values[0] = 99
+end
+
+// Com ref, nem a Box externa é copiada.
+// Substituir o campo afeta diretamente a Box original.
+func replace_by_ref(box: ref Box)
+    box.values = [7, 8]
+end
+
+let original_values: int[] = [1, 2]
+let box: Box = Box(original_values)
+
+print("Inicial:", box.values)
+
+replace_top(box)
+print("Após replace_top:", box.values)
+
+mutate_nested(box)
+print("Após mutate_nested:", box.values)
+print("Array original:", original_values)
+
+replace_by_ref(box)
+print("Após replace_by_ref:", box.values)
+
+// Deep copy manual em Noxy: a cópia deve ter seu próprio array interno.
+let deep_source_values: int[] = [10, 20]
+let deep_source: Box = Box(deep_source_values)
+let deep_copy: Box = deep_copy_box(deep_source)
+
+deep_copy.values[0] = 999
+
+assert(deep_source.values[0] == 10, "deep_copy_box não deve compartilhar o array interno")
+assert(deep_copy.values[0] == 999, "a cópia deve poder ser modificada independentemente")
+
+print("Original após deep copy:", deep_source.values)
+print("Cópia profunda modificada:", deep_copy.values)

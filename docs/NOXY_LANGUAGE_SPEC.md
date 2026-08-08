@@ -88,6 +88,19 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
 
 ### 2.2 Composite Types
 
+#### Shallow-Copy Semantics
+
+Arrays, maps, and structs are heap-backed composite values. When one of these values is passed to a function parameter that is not declared with `ref`, Noxy creates a **shallow copy**:
+
+1. A new top-level array, map, or struct instance is created for the parameter.
+2. Immediate elements, entries, or fields are copied into that new container.
+3. Primitive values are independent after the copy.
+4. Nested composite values keep their identity and therefore remain shared with the caller.
+
+Consequently, replacing or directly mutating the top-level copy does not affect the caller, but mutating a nested composite value can be observed by the caller. This is **not** a deep copy.
+
+Parameters declared with `ref` skip the shallow copy and access the caller's original value directly.
+
 #### Arrays (Dynamic and Fixed)
 
 **1. Dynamic Arrays (Recommended)**
@@ -107,7 +120,7 @@ let zeroed: int[100] = zeros(100)
 ```
 
 **Pass-by-Value Behavior**:
-Arrays are passed by **VALUE** (Copy) by default. To modify the original array in a function, use `ref`.
+Arrays are passed by **VALUE** using a shallow copy by default. The outer array is independent, but nested arrays, maps, or structs remain shared. Use `ref` when the function must modify the caller's outer array directly.
 
 #### Maps (Hashmaps)
 
@@ -118,7 +131,7 @@ scores["Bob"] = 50
 ```
 
 **Pass-by-Value Behavior**:
-Maps are passed by **VALUE** (Copy) by default. To modify the original map in a function, use `ref`.
+Maps are passed by **VALUE** using a shallow copy by default. The outer map is independent, but nested composite values remain shared. Use `ref` when the function must modify the caller's outer map directly.
 
 #### Structs
 
@@ -130,7 +143,7 @@ end
 ```
 
 **Pass-by-Value Behavior**:
-Structs are passed by **VALUE** (Copy) by default. A deep copy is performed. To pass by reference (so modifications affect the original), use `ref`.
+Structs are passed by **VALUE** using a shallow copy by default. Direct fields belong to the copied instance, but nested composite fields remain shared. Use `ref` when the function must modify the caller's original struct instance directly.
 
 ---
 ### 2.3 The `ref` Operator
@@ -324,10 +337,11 @@ end
 
 ### 4.2 Parameter Passing Semantics (CRITICAL)
 
-Noxy uses **Pass-by-Value** by default for ALL types, including composite types (Arrays, Maps, Structs).
+Noxy uses **Pass-by-Value** by default. Primitive values are copied directly. Composite values (arrays, maps, and structs) receive a **shallow copy** of their top-level container.
 
-#### Pass-by-Value (Default)
-When a variable is passed to a function, a **COPY** is made. Modifications inside the function **DO NOT** affect the original variable.
+#### Pass-by-Value / Shallow Copy (Default)
+
+When a composite value is passed to a parameter without `ref`, the function receives a new top-level container. Replacing or directly mutating that top-level container does not affect the caller:
 
 ```noxy
 func modify(arr: int[]) -> void
@@ -339,8 +353,34 @@ modify(list)
 // list is still [1, 2, 3]
 ```
 
+The copy is shallow. Nested composite values are not recursively copied and remain shared:
+
+```noxy
+struct Box
+    values: int[]
+end
+
+func replace_nested(box: Box) -> void
+    box.values = [100, 200] // Replaces a field only in the copied Box
+end
+
+func mutate_nested(box: Box) -> void
+    box.values[0] = 99 // Mutates the shared nested array
+end
+
+let values: int[] = [1, 2]
+let box: Box = Box(values)
+
+replace_nested(box)
+// box.values is still [1, 2]
+
+mutate_nested(box)
+// box.values is now [99, 2]
+// values is also [99, 2]
+```
+
 #### Pass-by-Reference (`ref`)
-To allow a function to modify the original variable, you must explicitly use the `ref` keyword in the parameter type.
+To skip the shallow copy and let a function access the caller's original top-level value, use `ref` in the parameter type.
 
 ```noxy
 func modify(arr: ref int[]) -> void
@@ -558,10 +598,11 @@ Noxy comes with a comprehensive standard library. Available modules include:
 
 ### Memory Model
 - **Value Types**: Primitives (`int`, `float`, `bool`) are stored directly on the stack.
-- **Reference Types**: Objects (`struct`, `array`, `map`) are allocated on the heap.
+- **Heap-Backed Composite Types**: Objects (`struct`, `array`, `map`) are allocated on the heap.
     - **Variables**: Store a pointer to the heap object.
-    - **Assignment/Casting**: By default, assigns the pointer (reference copy) for variables within the same scope.
-    - **Function Calls**: Performs a **Deep Copy** (or Shallow Copy of top-level container) to ensure Pass-by-Value semantics, unless `ref` is specified.
+    - **Assignment/Casting**: Within the same scope, assigning a composite value copies its pointer, so both variables refer to the same object.
+    - **Function Calls**: A parameter without `ref` receives a **shallow copy** of the top-level composite container. Nested composite values remain shared.
+    - **Reference Parameters**: A parameter declared with `ref` receives access to the caller's original value and no shallow copy is performed.
 
 ---
 *Version: 1.3.0*
