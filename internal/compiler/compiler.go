@@ -544,8 +544,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				elemType = t
 			} else {
 				if !c.areTypesCompatible(elemType, t) {
-					// Mixed types detected, promote to any[]
-					elemType = &ast.PrimitiveType{Name: "any"}
+					elemType = commonInferredType(elemType, t)
 				}
 			}
 		}
@@ -583,8 +582,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, fmt.Errorf("[line %d] mixed key types in map", c.currentLine)
 				}
 				if !c.areTypesCompatible(valType, vt) {
-					// Mixed values: Promote to ANY
-					valType = &ast.PrimitiveType{Name: "any"}
+					valType = commonInferredType(valType, vt)
 					// Once valType is "any", areTypesCompatible(any, T) returns true.
 				}
 			}
@@ -1869,63 +1867,39 @@ func (c *Compiler) resolveGlobalType(name string) (ast.NoxyType, bool) {
 
 func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if expected == nil || actual == nil {
-		return true // Allow lenient check for now/unknowns
-	}
-	expStr := expected.String()
-	actStr := actual.String()
-
-	if expStr == actStr {
 		return true
 	}
-	// Structural Check for Maps and Arrays
-	if expMap, ok := expected.(*ast.MapType); ok {
-		if actMap, ok := actual.(*ast.MapType); ok {
-			// Check Keys
-			if !c.areTypesCompatible(expMap.KeyType, actMap.KeyType) {
-				return false
-			}
-			// Check Values
-			// If expected value is 'any', accept any actual value type
-			if isAny(expMap.ValueType) {
-				return true
-			}
-			return c.areTypesCompatible(expMap.ValueType, actMap.ValueType)
-		}
+	if isBareFunctionType(expected) {
+		return isCallableType(actual)
 	}
-
-	if expArr, ok := expected.(*ast.ArrayType); ok {
-		if actArr, ok := actual.(*ast.ArrayType); ok {
-			// If expected element is 'any', accept any actual element type
-			if isAny(expArr.ElementType) {
-				return true
-			}
-			return c.areTypesCompatible(expArr.ElementType, actArr.ElementType)
-		}
+	if isBareFunctionType(actual) {
+		return isBareFunctionType(expected) || isAny(expected)
 	}
-
-	// 'any' type compatibility (if we had it explicitly)
-	if expStr == "any" || isAny(expected) {
-		return true // Expected 'any', accept anything
+	if _, ok := expected.(*ast.FunctionType); ok {
+		return c.areStrictTypesCompatible(expected, actual)
 	}
-	// 'any' in actual? (Unsafe? or Dynamic?)
-	if actStr == "any" || isAny(actual) {
-		return true // Actual is 'any', allow assignment to anything (dynamic)? Or strict?
-		// Let's allow it for flexibility (like TypeScript 'any')
+	if expected.String() == actual.String() {
+		return true
 	}
-
+	if expectedMap, ok := expected.(*ast.MapType); ok {
+		actualMap, ok := actual.(*ast.MapType)
+		return ok && c.areTypesCompatible(expectedMap.KeyType, actualMap.KeyType) &&
+			c.areTypesCompatible(expectedMap.ValueType, actualMap.ValueType)
+	}
+	if expectedArray, ok := expected.(*ast.ArrayType); ok {
+		actualArray, ok := actual.(*ast.ArrayType)
+		return ok && (expectedArray.Size == 0 || expectedArray.Size == actualArray.Size) &&
+			c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
+	}
+	if isAny(expected) || isAny(actual) {
+		return true
+	}
 	return false
 }
 
 func isAny(t ast.NoxyType) bool {
-	if t == nil {
-		return false
-	}
-	if pt, ok := t.(*ast.PrimitiveType); ok {
-		if pt.Name == "any" || pt.Name == "func" {
-			return true
-		}
-	}
-	return false
+	primitive, ok := t.(*ast.PrimitiveType)
+	return ok && primitive.Name == "any"
 }
 
 func (c *Compiler) resolveUpvalue(name string) int {
