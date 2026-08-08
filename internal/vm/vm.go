@@ -3408,6 +3408,13 @@ func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
 	vm.SetGlobal(name, value.NewNative(name, fn))
 }
 
+func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSignature, fn value.NativeFunc) {
+	if _, ok := vm.GetGlobal(name); ok {
+		return
+	}
+	vm.SetGlobal(name, value.NewNativeWithSignature(name, signature, fn))
+}
+
 func (vm *VM) SetGlobal(name string, val value.Value) {
 	vm.shared.GlobalsLock.Lock()
 	defer vm.shared.GlobalsLock.Unlock()
@@ -4865,6 +4872,40 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 	if callee.Type == value.VAL_NATIVE {
 		native := callee.Obj.(*value.ObjNative)
 		args := vm.stack[vm.stackTop-argCount : vm.stackTop]
+		if native.Signature != nil {
+			sig := native.Signature
+			if !sig.Variadic && argCount != sig.Arity {
+				return false, vm.runtimeError(c, ip, "native '%s' expects %d arguments, got %d", native.Name, sig.Arity, argCount)
+			}
+			if sig.Variadic && argCount < sig.Arity {
+				return false, vm.runtimeError(c, ip, "native '%s' expects at least %d arguments, got %d", native.Name, sig.Arity, argCount)
+			}
+
+			params := sig.Params
+			if sig.Variadic && len(params) > 0 && argCount > len(params) {
+				expanded := make([]value.ParamInfo, argCount)
+				copy(expanded, params)
+				for i := len(params); i < argCount; i++ {
+					expanded[i] = params[len(params)-1]
+				}
+				params = expanded
+			}
+			if err := validateParameterModes(native.Name, params, args); err != nil {
+				return false, vm.runtimeError(c, ip, "%s", err)
+			}
+
+			callArgs := make([]value.Value, len(args))
+			copy(callArgs, args)
+			for i, param := range params {
+				if i >= len(callArgs) {
+					break
+				}
+				if !param.IsRef {
+					callArgs[i] = vm.copyValue(callArgs[i])
+				}
+			}
+			args = callArgs
+		}
 		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
 		result := native.Fn(args)
 		vm.stackTop -= argCount + 1 // args + function

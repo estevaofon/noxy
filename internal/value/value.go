@@ -34,6 +34,13 @@ type ParamInfo struct {
 	TypeName string
 }
 
+type NativeSignature struct {
+	Arity      int
+	Variadic   bool
+	Params     []ParamInfo
+	ReturnType string
+}
+
 type ObjFunction struct {
 	Name         string
 	Arity        int
@@ -66,8 +73,9 @@ func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 type NativeFunc func(args []Value) Value
 
 type ObjNative struct {
-	Name string
-	Fn   NativeFunc
+	Name      string
+	Fn        NativeFunc
+	Signature *NativeSignature
 }
 
 type ObjArray struct {
@@ -372,7 +380,14 @@ func NewClosure(fn *ObjFunction) Value {
 func NewNative(name string, fn NativeFunc) Value {
 	return Value{
 		Type: VAL_NATIVE,
-		Obj:  &ObjNative{Name: name, Fn: fn},
+		Obj:  &ObjNative{Name: name, Fn: fn, Signature: nil},
+	}
+}
+
+func NewNativeWithSignature(name string, signature NativeSignature, fn NativeFunc) Value {
+	return Value{
+		Type: VAL_NATIVE,
+		Obj:  &ObjNative{Name: name, Fn: fn, Signature: &signature},
 	}
 }
 
