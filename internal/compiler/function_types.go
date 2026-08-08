@@ -162,3 +162,42 @@ func (c *Compiler) predeclareFunctions(statements []ast.Statement) error {
 	}
 	return nil
 }
+
+func blockGuaranteesReturn(block *ast.BlockStatement) bool {
+	if block == nil {
+		return false
+	}
+	for _, statement := range block.Statements {
+		if statementGuaranteesReturn(statement) {
+			return true
+		}
+	}
+	return false
+}
+
+func statementGuaranteesReturn(statement ast.Statement) bool {
+	switch s := statement.(type) {
+	case *ast.ReturnStmt:
+		return true
+	case *ast.BlockStatement:
+		return blockGuaranteesReturn(s)
+	case *ast.IfStatement:
+		return s.Alternative != nil &&
+			blockGuaranteesReturn(s.Consequence) &&
+			blockGuaranteesReturn(s.Alternative)
+	case *ast.WhenStatement:
+		if len(s.Cases) == 0 {
+			return false
+		}
+		hasDefault := false
+		for _, clause := range s.Cases {
+			hasDefault = hasDefault || clause.IsDefault
+			if !blockGuaranteesReturn(clause.Body) {
+				return false
+			}
+		}
+		return hasDefault
+	default:
+		return false
+	}
+}

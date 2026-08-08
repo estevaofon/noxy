@@ -27,17 +27,18 @@ type Upvalue struct {
 }
 
 type Compiler struct {
-	enclosing      *Compiler
-	currentChunk   *chunk.Chunk
-	locals         []Local
-	globals        map[string]ast.NoxyType
-	upvalues       []Upvalue
-	scopeDepth     int
-	loops          []*Loop
-	currentLine    int
-	FileName       string
-	funcReturnType ast.NoxyType // Expected return type for current function context
-	structs        map[string]*ast.StructStatement
+	enclosing           *Compiler
+	currentChunk        *chunk.Chunk
+	locals              []Local
+	globals             map[string]ast.NoxyType
+	upvalues            []Upvalue
+	scopeDepth          int
+	loops               []*Loop
+	currentLine         int
+	FileName            string
+	funcReturnType      ast.NoxyType // Expected return type for current function context
+	currentFunctionName string
+	structs             map[string]*ast.StructStatement
 }
 
 func New() *Compiler {
@@ -1320,29 +1321,47 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.ReturnStmt:
-		if n.ReturnValue != nil {
-			_, valType, err := c.Compile(n.ReturnValue)
-			if err != nil {
-				return nil, nil, err
+		expected := c.funcReturnType
+		functionName := c.currentFunctionName
+
+		if n.ReturnValue == nil {
+			if expected != nil && expected.String() != "void" {
+				return nil, nil, fmt.Errorf(
+					"[line %d] function '%s' must return %s",
+					n.Token.Line, functionName, expected.String(),
+				)
 			}
-
-			// Auto-dereference if returning Ref but function expects Value
-			if c.funcReturnType != nil {
-				// Check if func returns Ref?
-				_, expectingRef := c.funcReturnType.(*ast.RefType)
-				// Check if val is Ref
-				_, isRef := valType.(*ast.RefType)
-
-				if isRef && !expectingRef {
-					// Implicit Dereference
-					c.emitByte(byte(chunk.OP_DEREF))
-					// Implicit Copy to ensure Value Semantics isolation on return
-					c.emitByte(byte(chunk.OP_COPY))
-				}
-			}
-
-		} else {
 			c.emitByte(byte(chunk.OP_NULL))
+			c.emitByte(byte(chunk.OP_RETURN))
+			return c.currentChunk, nil, nil
+		}
+
+		_, actual, err := c.Compile(n.ReturnValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		if expected == nil {
+			c.emitByte(byte(chunk.OP_RETURN))
+			return c.currentChunk, nil, nil
+		}
+		if expected.String() == "void" {
+			return nil, nil, fmt.Errorf(
+				"[line %d] void function '%s' cannot return %s",
+				n.Token.Line, functionName, noxyTypeName(actual),
+			)
+		}
+		if ref, ok := actual.(*ast.RefType); ok {
+			if _, expectsRef := expected.(*ast.RefType); !expectsRef {
+				c.emitByte(byte(chunk.OP_DEREF))
+				c.emitByte(byte(chunk.OP_COPY))
+				actual = ref.ElementType
+			}
+		}
+		if !c.areStrictTypesCompatible(expected, actual) {
+			return nil, nil, fmt.Errorf(
+				"[line %d] return type mismatch in '%s': expected %s, got %s",
+				n.Token.Line, functionName, expected.String(), noxyTypeName(actual),
+			)
 		}
 		c.emitByte(byte(chunk.OP_RETURN))
 		return c.currentChunk, nil, nil
@@ -1892,7 +1911,9 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 	fnCompiler := NewChild(c)
 	fnCompiler.scopeDepth = 1    // Inside function body
 	fnCompiler.addLocal("", nil) // Reserve slot 0 for function instance
-	fnCompiler.funcReturnType = returnType
+	declaredReturn := normalizeReturnType(returnType)
+	fnCompiler.funcReturnType = declaredReturn
+	fnCompiler.currentFunctionName = name
 
 	paramsInfo := []value.ParamInfo{}
 	for _, param := range params {
@@ -1904,14 +1925,21 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 		}
 		paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
 	}
+	if declaredReturn.String() != "void" && !blockGuaranteesReturn(body) {
+		return value.Value{}, nil, fmt.Errorf(
+			"[line %d] function '%s' may finish without returning %s",
+			body.Token.Line, name, declaredReturn.String(),
+		)
+	}
 
 	_, _, err := fnCompiler.Compile(body)
 	if err != nil {
 		return value.Value{}, nil, err
 	}
 
-	// Implicit return null
-	fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
+	if declaredReturn.String() == "void" {
+		fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
+	}
 
 	upvalueCount := len(fnCompiler.upvalues)
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)

@@ -204,3 +204,64 @@ set(values[0])`)
 		t.Fatal(err)
 	}
 }
+
+func TestReturnChecking(t *testing.T) {
+	tests := []struct{ name, input, want string }{
+		{"wrong type", `func bad() -> int
+    return "x"
+end`, "return type mismatch in 'bad': expected int, got string"},
+		{"missing value", `func bad() -> int
+    return
+end`, "must return int"},
+		{"void value", `func bad() -> void
+    return 1
+end`, "void function 'bad' cannot return int"},
+		{"fallthrough", `func bad(v: bool) -> int
+    if v then
+        return 1
+    end
+end`, "may finish without returning int"},
+		{"actual any", `func bad(v: any) -> int
+    return v
+end`, "expected int, got any"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllConditionalBranchesReturn(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func classify(v: int) -> string
+    if v > 0 then
+        return "positive"
+    else
+        return "other"
+    end
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWhenGuaranteesReturnOnlyWithReturningDefault(t *testing.T) {
+	returning := func() *ast.BlockStatement {
+		return &ast.BlockStatement{Statements: []ast.Statement{&ast.ReturnStmt{}}}
+	}
+	complete := &ast.WhenStatement{Cases: []*ast.CaseClause{
+		{Body: returning()},
+		{IsDefault: true, Body: returning()},
+	}}
+	if !statementGuaranteesReturn(complete) {
+		t.Fatal("when with a default and returning bodies must guarantee return")
+	}
+	withoutDefault := &ast.WhenStatement{Cases: []*ast.CaseClause{{Body: returning()}}}
+	if statementGuaranteesReturn(withoutDefault) {
+		t.Fatal("when without default must not guarantee return")
+	}
+}
