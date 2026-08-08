@@ -53,6 +53,46 @@ func (c *Compiler) acceptsNull(t ast.NoxyType) bool {
 	return isStruct
 }
 
+func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool) bool {
+	switch typed := t.(type) {
+	case *ast.FunctionType:
+		return true
+	case *ast.PrimitiveType:
+		if typed.Name == "func" {
+			return true
+		}
+		definition, ok := c.structs[typed.Name]
+		if !ok {
+			return false
+		}
+		if visiting == nil {
+			visiting = make(map[string]bool)
+		}
+		if visiting[typed.Name] {
+			return false
+		}
+		visiting[typed.Name] = true
+		defer delete(visiting, typed.Name)
+		for _, field := range definition.FieldsList {
+			if c.containsCallableType(field.Type, visiting) {
+				return true
+			}
+		}
+		return false
+	case *ast.ArrayType:
+		return c.containsCallableType(typed.ElementType, visiting)
+	case *ast.MapType:
+		return c.containsCallableType(typed.KeyType, visiting) ||
+			c.containsCallableType(typed.ValueType, visiting)
+	case *ast.ChanType:
+		return c.containsCallableType(typed.ElementType, visiting)
+	case *ast.RefType:
+		return c.containsCallableType(typed.ElementType, visiting)
+	default:
+		return false
+	}
+}
+
 func noxyTypeName(t ast.NoxyType) string {
 	if t == nil {
 		return "unknown"
@@ -126,7 +166,7 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 		return true
 	}
 	if actual == nil {
-		return !isCallableType(expected)
+		return !c.containsCallableType(expected, nil)
 	}
 	if isAny(expected) {
 		return true
@@ -187,6 +227,15 @@ func (c *Compiler) predeclareFunctions(statements []ast.Statement) error {
 		c.globals[fn.Name] = newFunctionType(fn.Parameters, fn.ReturnType)
 	}
 	return nil
+}
+
+func (c *Compiler) predeclareStructs(statements []ast.Statement) {
+	for _, statement := range statements {
+		definition, ok := statement.(*ast.StructStatement)
+		if ok {
+			c.structs[definition.Name] = definition
+		}
+	}
 }
 
 func blockGuaranteesReturn(block *ast.BlockStatement) bool {

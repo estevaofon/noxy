@@ -87,6 +87,7 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		c.predeclareStructs(n.Statements)
 		if err := c.predeclareFunctions(n.Statements); err != nil {
 			return nil, nil, err
 		}
@@ -1856,7 +1857,7 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 		return true
 	}
 	if actual == nil {
-		return !isCallableType(expected)
+		return !c.containsCallableType(expected, nil)
 	}
 	if isNullType(actual) {
 		return c.acceptsNull(expected)

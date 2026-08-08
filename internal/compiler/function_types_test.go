@@ -416,3 +416,45 @@ end`)
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestUnknownCannotNarrowToNestedCallableContract(t *testing.T) {
+	tests := []string{
+		`func invalid() -> (func(int) -> int)[]
+    return native_callbacks()
+end`,
+		`func invalid() -> map[string, func(int) -> int]
+    return native_callbacks()
+end`,
+		`func invalid() -> chan func(int) -> int
+    return native_callbacks()
+end`,
+		`func invalid() -> ref func(int) -> int
+    return native_callbacks()
+end`,
+		`struct Handler
+    callback: func(int) -> int
+end
+func invalid() -> Handler
+    return native_handler()
+end`,
+	}
+	for _, input := range tests {
+		_, err := compileFunctionSource(t, input)
+		if err == nil || !strings.Contains(err.Error(), "got unknown") {
+			t.Fatalf("error=%v for %q", err, input)
+		}
+	}
+}
+
+func TestForwardDeclaredStructAcceptsNull(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func missing() -> Node
+    return null
+end
+struct Node
+    value: int
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
