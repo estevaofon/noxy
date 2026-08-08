@@ -647,6 +647,6 @@ Noxy comes with a comprehensive standard library. Available modules include:
     - **Reference Parameters**: A parameter declared with `ref` receives access to the caller's original value and no shallow copy is performed.
 
 ---
-*Version: 1.3.0*
+*Version: 1.4.0*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*
