@@ -140,3 +140,67 @@ end`)
 		t.Fatal(err)
 	}
 }
+
+func TestExactCallDiagnostics(t *testing.T) {
+	tests := []struct{ name, input, want string }{
+		{"few", `func add(a: int, b: int) -> int
+    return a + b
+end
+add(1)`, "expects 2 arguments, got 1"},
+		{"many", `func add(a: int) -> int
+    return a
+end
+add(1, 2)`, "expects 1 arguments, got 2"},
+		{"type", `func add(a: int) -> int
+    return a
+end
+add("x")`, "argument 1 to 'add': expected int, got string"},
+		{"any", `func add(a: int) -> int
+    return a
+end
+let x: any = 1
+add(x)`, "expected int, got any"},
+		{"ref", `func set(v: ref int) -> void
+    return
+end
+set(1)`, "reference argument must be a variable, property, index, or null"},
+		{"ref type", `func set(v: ref int) -> void
+    return
+end
+let text: string = "x"
+set(text)`, "argument 1 to 'set': expected ref int, got ref string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestExactCallPropagatesReturnType(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func bad() -> string
+    return "x"
+end
+let value: int = bad()`)
+	if err == nil || !strings.Contains(err.Error(), "expected int, got string") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestExactReferenceCallsCompile(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func set(v: ref int) -> void
+    return
+end
+let value: int = 1
+let values: int[] = [1]
+set(value)
+set(values[0])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

@@ -40,6 +40,31 @@ func noxyTypeName(t ast.NoxyType) string {
 	return t.String()
 }
 
+func callableName(expression ast.Expression) string {
+	if identifier, ok := expression.(*ast.Identifier); ok {
+		return identifier.Value
+	}
+	return expression.String()
+}
+
+func unwrapRefType(t ast.NoxyType) ast.NoxyType {
+	if ref, ok := t.(*ast.RefType); ok {
+		return ref.ElementType
+	}
+	return t
+}
+
+func indexElementType(container ast.NoxyType) ast.NoxyType {
+	switch typed := unwrapRefType(container).(type) {
+	case *ast.ArrayType:
+		return typed.ElementType
+	case *ast.MapType:
+		return typed.ValueType
+	default:
+		return nil
+	}
+}
+
 func sameExactType(left, right ast.NoxyType) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil

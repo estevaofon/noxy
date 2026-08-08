@@ -865,72 +865,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.PrefixExpression:
 		// Handle 'ref' operator specially - don't compile Right first
 		if n.Operator == "ref" {
-			// Handle 'ref' operator: ref x
-			// Same logic as CallExpression 'isRefParam' block basically, but generalized?
-			// But for now, just support what's needed.
-			// Actually, 'ref x' should return a RefType wrapping type of x.
-
-			// We MUST check what 'Right' is.
-			if ident, ok := n.Right.(*ast.Identifier); ok {
-				if argSlot, argType := c.resolveLocal(ident.Value); argSlot != -1 {
-					if _, isRef := argType.(*ast.RefType); isRef {
-						c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(argSlot))
-					} else {
-						c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(argSlot))
-						c.locals[argSlot].IsCaptured = true // Mark as captured
-					}
-					return c.currentChunk, &ast.RefType{ElementType: argType}, nil
-				} else {
-					// Global or Upvalue logic...
-					// Upvalue...
-					if -1 != c.resolveUpvalue(ident.Value) {
-						return nil, nil, fmt.Errorf("[line %d] captured variables cannot be taken by reference", c.currentLine)
-					}
-					// Global
-					nameConst := c.makeConstant(value.NewString(ident.Value))
-					c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
-
-					// Type?
-					var t ast.NoxyType = &ast.PrimitiveType{Name: "any"}
-					if gt, ok := c.resolveGlobalType(ident.Value); ok {
-						t = gt
-					}
-					return c.currentChunk, &ast.RefType{ElementType: t}, nil
-				}
-			} else if memberExp, ok := n.Right.(*ast.MemberAccessExpression); ok {
-				_, leftType, err := c.Compile(memberExp.Left)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := leftType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
-
-				nameConst := c.makeConstant(value.NewString(memberExp.Member))
-				c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(nameConst))
-				return c.currentChunk, &ast.RefType{ElementType: &ast.PrimitiveType{Name: "any"}}, nil // Type approximation
-			} else if indexExp, ok := n.Right.(*ast.IndexExpression); ok {
-				_, leftType, err := c.Compile(indexExp.Left)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := leftType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
-
-				_, idxType, err := c.Compile(indexExp.Index)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := idxType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
-
-				c.emitByte(byte(chunk.OP_REF_INDEX))
-				return c.currentChunk, &ast.RefType{ElementType: &ast.PrimitiveType{Name: "any"}}, nil
-			} else {
-				return nil, nil, fmt.Errorf("[line %d] invalid operand for 'ref' operator", c.currentLine)
+			element, err := c.compileReferenceArgument(n.Right)
+			if err != nil {
+				return nil, nil, err
 			}
+			return c.currentChunk, &ast.RefType{ElementType: element}, nil
 		}
 
 		// For other operators (-, !, ~), compile Right first
@@ -1591,121 +1530,149 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
-		funcType, isFunc := fnType.(*ast.FunctionType)
+		funcType, isExact := fnType.(*ast.FunctionType)
+		if isExact && len(n.Arguments) != len(funcType.Params) {
+			return nil, nil, fmt.Errorf(
+				"[line %d] function '%s' expects %d arguments, got %d",
+				c.currentLine, callableName(n.Function), len(funcType.Params), len(n.Arguments),
+			)
+		}
 
-		// Compile Arguments
 		for i, arg := range n.Arguments {
-			isRefParam := false
-			if isFunc && i < len(funcType.Params) {
-				if _, ok := funcType.Params[i].(*ast.RefType); ok {
-					isRefParam = true
+			if isExact {
+				if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
+					actualElement, err := c.compileReferenceArgument(arg)
+					if err != nil {
+						return nil, nil, err
+					}
+					if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
+						actual := &ast.RefType{ElementType: actualElement}
+						return nil, nil, fmt.Errorf(
+							"[line %d] argument %d to '%s': expected %s, got %s",
+							c.currentLine, i+1, callableName(n.Function), expectedRef.String(), actual.String(),
+						)
+					}
+					continue
 				}
 			}
 
-			if isRefParam {
-				// Handle explicit 'ref' operator in arguments
-				// e.g. func(ref x) called as foo(ref x) or foo(x)
-				// If user wrote 'ref x', it comes as PrefixExpression("-", x) (wait, token is REF?)
-				// AST uses "ref" string for operator?
-				// Let's check PrefixExpression below.
-				// But first, UNWRAP if it is a "ref" prefix expression.
-
-				actualArg := arg
-				if prefixExp, ok := arg.(*ast.PrefixExpression); ok {
-					if prefixExp.Operator == "ref" {
-						actualArg = prefixExp.Right
-					}
-				}
-
-				if ident, ok := actualArg.(*ast.Identifier); ok {
-					if argSlot, argType := c.resolveLocal(ident.Value); argSlot != -1 {
-						if _, isRef := argType.(*ast.RefType); isRef {
-							// Already a reference, just pass it along
-							c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(argSlot))
-						} else {
-							c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(argSlot))
-							c.locals[argSlot].IsCaptured = true // Mark as captured so it survives stack pop
-						}
-					} else if -1 != c.resolveUpvalue(ident.Value) {
-						return nil, nil, fmt.Errorf("[line %d] captured variables (upvalues) cannot be passed by reference yet", c.currentLine)
-					} else {
-						// Check global type
-						if globalType, ok := c.resolveGlobalType(ident.Value); ok {
-							if _, isRef := globalType.(*ast.RefType); isRef {
-								nameConst := c.makeConstant(value.NewString(ident.Value))
-								c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConst))
-							} else {
-								// Global value, create ref to it
-								nameConst := c.makeConstant(value.NewString(ident.Value))
-								c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
-							}
-						} else {
-							// Unknown global (imported dynamic?), assume we need ref if param says so
-							nameConst := c.makeConstant(value.NewString(ident.Value))
-							c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
-						}
-					}
-				} else if memberExp, ok := actualArg.(*ast.MemberAccessExpression); ok {
-					// Member Access Ref: obj.prop
-					_, leftType, err := c.Compile(memberExp.Left)
-					if err != nil {
-						return nil, nil, err
-					}
-					// Deref base object if ref
-					if _, ok := leftType.(*ast.RefType); ok {
-						c.emitByte(byte(chunk.OP_DEREF))
-					}
-
-					nameConst := c.makeConstant(value.NewString(memberExp.Member))
-					c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(nameConst))
-				} else if indexExp, ok := actualArg.(*ast.IndexExpression); ok {
-					// Index Ref: arr[i]
-
-					var leftType ast.NoxyType
-					_, leftType, err = c.Compile(indexExp.Left) // Container
-					if err != nil {
-						return nil, nil, err
-					}
-					if _, ok := leftType.(*ast.RefType); ok {
-						c.emitByte(byte(chunk.OP_DEREF))
-					}
-
-					var idxType ast.NoxyType
-					_, idxType, err = c.Compile(indexExp.Index) // Index
-					if err != nil {
-						return nil, nil, err
-					}
-					if _, ok := idxType.(*ast.RefType); ok {
-						c.emitByte(byte(chunk.OP_DEREF))
-					}
-
-					c.emitByte(byte(chunk.OP_REF_INDEX))
-				} else if _, ok := actualArg.(*ast.NullLiteral); ok {
-					// Pass NULL for Ref
-					c.emitByte(byte(chunk.OP_NULL))
-				} else {
-					return nil, nil, fmt.Errorf("[line %d] argument %d is 'ref', must pass a variable, property, index, or null", c.currentLine, i+1)
-				}
-			} else {
-				_, argType, err := c.Compile(arg)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := argType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
+			_, argType, err := c.Compile(arg)
+			if err != nil {
+				return nil, nil, err
+			}
+			if ref, ok := argType.(*ast.RefType); ok {
+				c.emitByte(byte(chunk.OP_DEREF))
+				argType = ref.ElementType
+			}
+			if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
+				return nil, nil, fmt.Errorf(
+					"[line %d] argument %d to '%s': expected %s, got %s",
+					c.currentLine, i+1, callableName(n.Function),
+					funcType.Params[i].String(), noxyTypeName(argType),
+				)
 			}
 		}
 
-		// Emit Call
 		c.emitBytes(byte(chunk.OP_CALL), byte(len(n.Arguments)))
-		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil // Return type unknown for now
+		if isExact {
+			return c.currentChunk, funcType.Return, nil
+		}
+		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil
 
 	case nil:
 		// Skip
 		return c.currentChunk, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported node type %T", n)
+	}
+}
+
+func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
+	owner = unwrapRefType(owner)
+	primitive, ok := owner.(*ast.PrimitiveType)
+	if !ok {
+		return nil
+	}
+	definition, ok := c.structs[primitive.Name]
+	if !ok {
+		return nil
+	}
+	for _, field := range definition.FieldsList {
+		if field.Name == member {
+			return field.Type
+		}
+	}
+	return nil
+}
+
+func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.NoxyType, error) {
+	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
+		expression = prefix.Right
+	}
+
+	switch target := expression.(type) {
+	case *ast.Identifier:
+		if slot, declared := c.resolveLocal(target.Value); slot != -1 {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			c.locals[slot].IsCaptured = true
+			return declared, nil
+		}
+		if c.resolveUpvalue(target.Value) != -1 {
+			return nil, fmt.Errorf("[line %d] captured variables cannot be passed by reference", c.currentLine)
+		}
+		name := c.makeConstant(value.NewString(target.Value))
+		if declared, ok := c.resolveGlobalType(target.Value); ok {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(name))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(name))
+			return declared, nil
+		}
+		c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(name))
+		return nil, nil
+	case *ast.MemberAccessExpression:
+		_, owner, err := c.Compile(target.Left)
+		if err != nil {
+			return nil, err
+		}
+		element := c.memberType(owner, target.Member)
+		if _, ok := owner.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+		}
+		name := c.makeConstant(value.NewString(target.Member))
+		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
+		return element, nil
+	case *ast.IndexExpression:
+		_, container, err := c.Compile(target.Left)
+		if err != nil {
+			return nil, err
+		}
+		element := indexElementType(container)
+		if _, ok := container.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+		}
+		_, indexType, err := c.Compile(target.Index)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := indexType.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+		}
+		c.emitByte(byte(chunk.OP_REF_INDEX))
+		return element, nil
+	case *ast.NullLiteral:
+		c.emitByte(byte(chunk.OP_NULL))
+		return nil, nil
+	default:
+		return nil, fmt.Errorf(
+			"[line %d] reference argument must be a variable, property, index, or null",
+			c.currentLine,
+		)
 	}
 }
 
