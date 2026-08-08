@@ -62,7 +62,11 @@ func (at *ArrayType) String() string {
 	if at.ElementType == nil {
 		return "any[]"
 	}
-	return at.ElementType.String() + "[]"
+	element := at.ElementType.String()
+	if _, ok := at.ElementType.(*FunctionType); ok {
+		element = "(" + element + ")"
+	}
+	return element + "[]"
 }
 
 type MapType struct {

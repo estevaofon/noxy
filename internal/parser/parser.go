@@ -613,7 +613,12 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.TYPE_ANY:
 		t = &ast.PrimitiveType{Name: "any"}
+	case token.TYPE_VOID:
+		t = &ast.PrimitiveType{Name: "void"}
 	case token.FUNC:
+		if p.peekTokenIs(token.LPAREN) {
+			return p.parseFunctionType()
+		}
 		t = &ast.PrimitiveType{Name: "func"}
 	case token.BYTES: // This is Literal 'b"..."'.
 		t = &ast.PrimitiveType{Name: "bytes"}
@@ -652,9 +657,46 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		t = &ast.MapType{KeyType: keyType, ValueType: valueType}
 		return t
 	default:
-		t = &ast.PrimitiveType{Name: "int"} // Default fallback
+		p.errors = append(p.errors, fmt.Sprintf(
+			"[%d:%d] SyntaxError: expected type, found %s",
+			p.curToken.Line, p.curToken.Column, p.curToken.Type.Display(),
+		))
+		return nil
 	}
 	return t
+}
+
+func (p *Parser) parseFunctionType() ast.NoxyType {
+	params := []ast.NoxyType{}
+	if !p.expectPeek(token.LPAREN) {
+		return nil
+	}
+	if !p.peekTokenIs(token.RPAREN) {
+		p.nextToken()
+		param := p.parseType()
+		if param == nil {
+			return nil
+		}
+		params = append(params, param)
+		for p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+			p.nextToken()
+			param = p.parseType()
+			if param == nil {
+				return nil
+			}
+			params = append(params, param)
+		}
+	}
+	if !p.expectPeek(token.RPAREN) || !p.expectPeek(token.ARROW) {
+		return nil
+	}
+	p.nextToken()
+	result := p.parseType()
+	if result == nil {
+		return nil
+	}
+	return &ast.FunctionType{Params: params, Return: result}
 }
 
 // Precedence system setup
