@@ -52,8 +52,8 @@ struct Directory
     nome: string
     meta: ref Metadata
     parent: ref Directory
-    arquivos: list
-    subdirs: list
+    arquivos: (ref File)[]
+    subdirs: (ref Directory)[]
 end
 
 // --- Phase 4: Creation Functions ---

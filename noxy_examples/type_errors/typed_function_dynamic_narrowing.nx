@@ -1,0 +1,6 @@
+func identity(value: int) -> int
+    return value
+end
+
+let dynamic_operation: func = identity
+let exact_operation: func(int) -> int = dynamic_operation

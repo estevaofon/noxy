@@ -6,7 +6,7 @@ let double: func = func(x: int) -> int
 end
 
 // 2. Pass as argument
-func apply(f: func, val: int) -> int
+func apply(f: func, val: int) -> any
     return f(val)
 end
 

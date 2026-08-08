@@ -42,10 +42,10 @@ print("Triple 5: " + to_str(triple(5))) // 15
 print("\n=== Exemplo 3: Memoization Simples (Cache) ===")
 // Cacheia o resultado de uma operação pesada
 func heavyCompute() -> func
-    let cache: map[int, any] = {}
+    let cache: map[int, int] = {}
     
     return func(x: int) -> int
-        let cached: any = cache[x]
+        let cached: int = cache[x]
         if cached != null then
             print("Cache hit para " + to_str(x))
             return cached

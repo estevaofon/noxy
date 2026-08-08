@@ -28,3 +28,4 @@ AWS_DEPLOY_GUIDE.md
 SAFE_MODE_PROMPT.md
 vault.key
 .arc/
+.worktrees/

@@ -1,0 +1,41 @@
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("typed function conformance: FAIL - " + message)
+        exit(1)
+    end
+end
+
+func add(a: int, b: int) -> int
+    return a + b
+end
+
+func apply(operation: func(int, int) -> int, a: int, b: int) -> int
+    return operation(a, b)
+end
+
+func make_multiplier(factor: int) -> func(int) -> int
+    return func(value: int) -> int
+        return value * factor
+    end
+end
+
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+
+let operation: func(int, int) -> int = add
+assert(apply(operation, 20, 22) == 42, "exact higher-order function must return 42")
+
+let double: func(int) -> int = make_multiplier(2)
+assert(double(21) == 42, "typed closure must preserve its signature")
+
+let answer: int = 41
+increment(answer)
+assert(answer == 42, "ref parameter must update the caller")
+
+let dynamic_operation: func = operation
+assert(dynamic_operation(20, 22) == 42, "exact function must widen to bare func")
+
+print("typed function conformance: PASS")

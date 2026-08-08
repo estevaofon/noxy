@@ -41,13 +41,13 @@ use array_utils
 struct Vertex
     id: int
     nome: string
-    vizinhos: list   // list of ref Vertex
+    vizinhos: (ref Vertex)[]
     visitado: bool
 end
 
 // --- Phase 3: Struct Graph ---
 struct Graph
-    vertices: list   // list of ref Vertex
+    vertices: (ref Vertex)[]
 end
 
 // --- Phase 3 & 4: Helper Functions ---

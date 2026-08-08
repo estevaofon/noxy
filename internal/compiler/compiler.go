@@ -24,20 +24,22 @@ type Loop struct {
 type Upvalue struct {
 	Index   uint8
 	IsLocal bool
+	Type    ast.NoxyType
 }
 
 type Compiler struct {
-	enclosing      *Compiler
-	currentChunk   *chunk.Chunk
-	locals         []Local
-	globals        map[string]ast.NoxyType
-	upvalues       []Upvalue
-	scopeDepth     int
-	loops          []*Loop
-	currentLine    int
-	FileName       string
-	funcReturnType ast.NoxyType // Expected return type for current function context
-	structs        map[string]*ast.StructStatement
+	enclosing           *Compiler
+	currentChunk        *chunk.Chunk
+	locals              []Local
+	globals             map[string]ast.NoxyType
+	upvalues            []Upvalue
+	scopeDepth          int
+	loops               []*Loop
+	currentLine         int
+	FileName            string
+	funcReturnType      ast.NoxyType // Expected return type for current function context
+	currentFunctionName string
+	structs             map[string]*ast.StructStatement
 }
 
 func New() *Compiler {
@@ -85,6 +87,10 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		c.predeclareStructs(n.Statements)
+		if err := c.predeclareFunctions(n.Statements); err != nil {
+			return nil, nil, err
+		}
 		for _, stmt := range n.Statements {
 			if _, _, err := c.Compile(stmt); err != nil {
 				return nil, nil, err
@@ -125,7 +131,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			if !c.areTypesCompatible(n.Type, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), valType.String())
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType))
 			}
 		}
 
@@ -254,7 +260,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 					// REBIND: ref = ref OR ref = nil (dynamic/unknown)
 					// Enable rebind if valType is nil (unknown, e.g. from imports) or explicitly ref
-					if isRefVal || valType == nil {
+					if isRefVal || valType == nil || isNullType(valType) {
 						if valType != nil && !c.areTypesCompatible(refType, valType) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 						}
@@ -280,9 +286,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 					c.emitByte(byte(chunk.OP_POP))
 				}
-			} else if arg := c.resolveUpvalue(ident.Value); arg != -1 {
+			} else if arg, upvalueType := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
-				// TODO: Implement type checking for upvalues.
+				if !c.areTypesCompatible(upvalueType, valType) {
+					return nil, nil, fmt.Errorf(
+						"[line %d] type mismatch in assignment to '%s': expected %s, got %s",
+						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType),
+					)
+				}
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
@@ -294,7 +305,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						_, isRefVal := valType.(*ast.RefType)
 
 						// Allow rebind if valType is Ref or nil (dynamic/unknown)
-						if isRefVal || valType == nil {
+						if isRefVal || valType == nil || isNullType(valType) {
 							if valType != nil && !c.areTypesCompatible(globalType, valType) {
 								return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 							}
@@ -438,7 +449,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					}
 
 					// Assuming null is compatible
-					if isRefVal || valType == nil {
+					if isRefVal || valType == nil || isNullType(valType) {
 						if valType != nil && !c.areTypesCompatible(fieldType, valType) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 						}
@@ -544,8 +555,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				elemType = t
 			} else {
 				if !c.areTypesCompatible(elemType, t) {
-					// Mixed types detected, promote to any[]
-					elemType = &ast.PrimitiveType{Name: "any"}
+					elemType = commonInferredType(elemType, t)
 				}
 			}
 		}
@@ -583,8 +593,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, fmt.Errorf("[line %d] mixed key types in map", c.currentLine)
 				}
 				if !c.areTypesCompatible(valType, vt) {
-					// Mixed values: Promote to ANY
-					valType = &ast.PrimitiveType{Name: "any"}
+					valType = commonInferredType(valType, vt)
 					// Once valType is "any", areTypesCompatible(any, T) returns true.
 				}
 			}
@@ -658,9 +667,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if arg, t := c.resolveLocal(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(arg))
 			return c.currentChunk, t, nil
-		} else if arg := c.resolveUpvalue(n.Value); arg != -1 {
+		} else if arg, upvalueType := c.resolveUpvalue(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(arg))
-			return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil // Types for upvalues not tracked yet
+			return c.currentChunk, upvalueType, nil
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Value))
@@ -864,72 +873,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.PrefixExpression:
 		// Handle 'ref' operator specially - don't compile Right first
 		if n.Operator == "ref" {
-			// Handle 'ref' operator: ref x
-			// Same logic as CallExpression 'isRefParam' block basically, but generalized?
-			// But for now, just support what's needed.
-			// Actually, 'ref x' should return a RefType wrapping type of x.
-
-			// We MUST check what 'Right' is.
-			if ident, ok := n.Right.(*ast.Identifier); ok {
-				if argSlot, argType := c.resolveLocal(ident.Value); argSlot != -1 {
-					if _, isRef := argType.(*ast.RefType); isRef {
-						c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(argSlot))
-					} else {
-						c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(argSlot))
-						c.locals[argSlot].IsCaptured = true // Mark as captured
-					}
-					return c.currentChunk, &ast.RefType{ElementType: argType}, nil
-				} else {
-					// Global or Upvalue logic...
-					// Upvalue...
-					if -1 != c.resolveUpvalue(ident.Value) {
-						return nil, nil, fmt.Errorf("[line %d] captured variables cannot be taken by reference", c.currentLine)
-					}
-					// Global
-					nameConst := c.makeConstant(value.NewString(ident.Value))
-					c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
-
-					// Type?
-					var t ast.NoxyType = &ast.PrimitiveType{Name: "any"}
-					if gt, ok := c.resolveGlobalType(ident.Value); ok {
-						t = gt
-					}
-					return c.currentChunk, &ast.RefType{ElementType: t}, nil
-				}
-			} else if memberExp, ok := n.Right.(*ast.MemberAccessExpression); ok {
-				_, leftType, err := c.Compile(memberExp.Left)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := leftType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
-
-				nameConst := c.makeConstant(value.NewString(memberExp.Member))
-				c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(nameConst))
-				return c.currentChunk, &ast.RefType{ElementType: &ast.PrimitiveType{Name: "any"}}, nil // Type approximation
-			} else if indexExp, ok := n.Right.(*ast.IndexExpression); ok {
-				_, leftType, err := c.Compile(indexExp.Left)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := leftType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
-
-				_, idxType, err := c.Compile(indexExp.Index)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := idxType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
-
-				c.emitByte(byte(chunk.OP_REF_INDEX))
-				return c.currentChunk, &ast.RefType{ElementType: &ast.PrimitiveType{Name: "any"}}, nil
-			} else {
-				return nil, nil, fmt.Errorf("[line %d] invalid operand for 'ref' operator", c.currentLine)
+			element, err := c.compileReferenceArgument(n.Right)
+			if err != nil {
+				return nil, nil, err
 			}
+			return c.currentChunk, &ast.RefType{ElementType: element}, nil
 		}
 
 		// For other operators (-, !, ~), compile Right first
@@ -957,7 +905,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))
-		return c.currentChunk, nil, nil // Null type?
+		return c.currentChunk, &ast.PrimitiveType{Name: "null"}, nil
 
 	case *ast.ZerosLiteral:
 		_, _, err := c.Compile(n.Size)
@@ -965,7 +913,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		c.emitByte(byte(chunk.OP_ZEROS))
-		return c.currentChunk, &ast.PrimitiveType{Name: "bytes"}, nil
+		size := 0
+		if literal, ok := n.Size.(*ast.IntegerLiteral); ok {
+			size = int(literal.Value)
+		}
+		return c.currentChunk, &ast.ArrayType{
+			ElementType: &ast.PrimitiveType{Name: "int"},
+			Size:        size,
+		}, nil
 
 	case *ast.IfStatement:
 		c.setLine(n.Token.Line)
@@ -1307,14 +1262,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		return c.currentChunk, nil, nil
 
-		// Pop Loop info
-		c.loops = c.loops[:len(c.loops)-1]
-
-		// 13. End Wrapper Scope (pops iterator vars)
-		c.endScope()
-
-		return c.currentChunk, nil, nil
-
 	case *ast.BreakStmt:
 		if len(c.loops) == 0 {
 			return nil, nil, fmt.Errorf("break outside of loop")
@@ -1380,29 +1327,47 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.ReturnStmt:
-		if n.ReturnValue != nil {
-			_, valType, err := c.Compile(n.ReturnValue)
-			if err != nil {
-				return nil, nil, err
+		expected := c.funcReturnType
+		functionName := c.currentFunctionName
+
+		if n.ReturnValue == nil {
+			if expected != nil && expected.String() != "void" {
+				return nil, nil, fmt.Errorf(
+					"[line %d] function '%s' must return %s",
+					n.Token.Line, functionName, expected.String(),
+				)
 			}
-
-			// Auto-dereference if returning Ref but function expects Value
-			if c.funcReturnType != nil {
-				// Check if func returns Ref?
-				_, expectingRef := c.funcReturnType.(*ast.RefType)
-				// Check if val is Ref
-				_, isRef := valType.(*ast.RefType)
-
-				if isRef && !expectingRef {
-					// Implicit Dereference
-					c.emitByte(byte(chunk.OP_DEREF))
-					// Implicit Copy to ensure Value Semantics isolation on return
-					c.emitByte(byte(chunk.OP_COPY))
-				}
-			}
-
-		} else {
 			c.emitByte(byte(chunk.OP_NULL))
+			c.emitByte(byte(chunk.OP_RETURN))
+			return c.currentChunk, nil, nil
+		}
+
+		_, actual, err := c.Compile(n.ReturnValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		if expected == nil {
+			c.emitByte(byte(chunk.OP_RETURN))
+			return c.currentChunk, nil, nil
+		}
+		if expected.String() == "void" {
+			return nil, nil, fmt.Errorf(
+				"[line %d] void function '%s' cannot return %s",
+				n.Token.Line, functionName, noxyTypeName(actual),
+			)
+		}
+		if ref, ok := actual.(*ast.RefType); ok {
+			if _, expectsRef := expected.(*ast.RefType); !expectsRef {
+				c.emitByte(byte(chunk.OP_DEREF))
+				c.emitByte(byte(chunk.OP_COPY))
+				actual = ref.ElementType
+			}
+		}
+		if !c.areStrictTypesCompatible(expected, actual) {
+			return nil, nil, fmt.Errorf(
+				"[line %d] return type mismatch in '%s': expected %s, got %s",
+				n.Token.Line, functionName, expected.String(), noxyTypeName(actual),
+			)
 		}
 		c.emitByte(byte(chunk.OP_RETURN))
 		return c.currentChunk, nil, nil
@@ -1410,18 +1375,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.FunctionStatement:
 		c.setLine(n.Token.Line)
 
-		// Construct FunctionType for the global registry (Pre-register for recursion)
-		paramTypes := []ast.NoxyType{}
-		for _, p := range n.Parameters {
-			paramTypes = append(paramTypes, p.Type)
-		}
-		// Return type undefined for now (any/void), ast doesn't strictly enforce it yet
-		funcType := &ast.FunctionType{
-			Params: paramTypes,
-			Return: &ast.PrimitiveType{Name: "any"},
-		}
-		// Store in Global
-		c.globals[n.Name] = funcType
+		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
 		if err != nil {
@@ -1475,17 +1429,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(up.Index)
 		}
 
-		// Construct FunctionType
-		paramTypes := []ast.NoxyType{}
-		for _, p := range n.Parameters {
-			paramTypes = append(paramTypes, p.Type)
-		}
-		funcType := &ast.FunctionType{
-			Params: paramTypes,
-			Return: &ast.PrimitiveType{Name: "any"},
-		}
-
-		return c.currentChunk, funcType, nil
+		return c.currentChunk, newFunctionType(n.Parameters, n.ReturnType), nil
 
 	case *ast.BlockStatement:
 		c.beginScope()
@@ -1611,121 +1555,162 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
-		funcType, isFunc := fnType.(*ast.FunctionType)
+		funcType, isExact := fnType.(*ast.FunctionType)
+		if isExact && len(n.Arguments) != len(funcType.Params) {
+			return nil, nil, fmt.Errorf(
+				"[line %d] function '%s' expects %d arguments, got %d",
+				c.currentLine, callableName(n.Function), len(funcType.Params), len(n.Arguments),
+			)
+		}
 
-		// Compile Arguments
 		for i, arg := range n.Arguments {
-			isRefParam := false
-			if isFunc && i < len(funcType.Params) {
-				if _, ok := funcType.Params[i].(*ast.RefType); ok {
-					isRefParam = true
+			if isExact {
+				if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
+					actualElement, err := c.compileReferenceArgument(arg)
+					if err != nil {
+						return nil, nil, err
+					}
+					if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
+						actual := &ast.RefType{ElementType: actualElement}
+						return nil, nil, fmt.Errorf(
+							"[line %d] argument %d to '%s': expected %s, got %s",
+							c.currentLine, i+1, callableName(n.Function), expectedRef.String(), actual.String(),
+						)
+					}
+					continue
 				}
 			}
 
-			if isRefParam {
-				// Handle explicit 'ref' operator in arguments
-				// e.g. func(ref x) called as foo(ref x) or foo(x)
-				// If user wrote 'ref x', it comes as PrefixExpression("-", x) (wait, token is REF?)
-				// AST uses "ref" string for operator?
-				// Let's check PrefixExpression below.
-				// But first, UNWRAP if it is a "ref" prefix expression.
-
-				actualArg := arg
-				if prefixExp, ok := arg.(*ast.PrefixExpression); ok {
-					if prefixExp.Operator == "ref" {
-						actualArg = prefixExp.Right
-					}
-				}
-
-				if ident, ok := actualArg.(*ast.Identifier); ok {
-					if argSlot, argType := c.resolveLocal(ident.Value); argSlot != -1 {
-						if _, isRef := argType.(*ast.RefType); isRef {
-							// Already a reference, just pass it along
-							c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(argSlot))
-						} else {
-							c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(argSlot))
-							c.locals[argSlot].IsCaptured = true // Mark as captured so it survives stack pop
-						}
-					} else if -1 != c.resolveUpvalue(ident.Value) {
-						return nil, nil, fmt.Errorf("[line %d] captured variables (upvalues) cannot be passed by reference yet", c.currentLine)
-					} else {
-						// Check global type
-						if globalType, ok := c.resolveGlobalType(ident.Value); ok {
-							if _, isRef := globalType.(*ast.RefType); isRef {
-								nameConst := c.makeConstant(value.NewString(ident.Value))
-								c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConst))
-							} else {
-								// Global value, create ref to it
-								nameConst := c.makeConstant(value.NewString(ident.Value))
-								c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
-							}
-						} else {
-							// Unknown global (imported dynamic?), assume we need ref if param says so
-							nameConst := c.makeConstant(value.NewString(ident.Value))
-							c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(nameConst))
-						}
-					}
-				} else if memberExp, ok := actualArg.(*ast.MemberAccessExpression); ok {
-					// Member Access Ref: obj.prop
-					_, leftType, err := c.Compile(memberExp.Left)
-					if err != nil {
-						return nil, nil, err
-					}
-					// Deref base object if ref
-					if _, ok := leftType.(*ast.RefType); ok {
-						c.emitByte(byte(chunk.OP_DEREF))
-					}
-
-					nameConst := c.makeConstant(value.NewString(memberExp.Member))
-					c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(nameConst))
-				} else if indexExp, ok := actualArg.(*ast.IndexExpression); ok {
-					// Index Ref: arr[i]
-
-					var leftType ast.NoxyType
-					_, leftType, err = c.Compile(indexExp.Left) // Container
-					if err != nil {
-						return nil, nil, err
-					}
-					if _, ok := leftType.(*ast.RefType); ok {
-						c.emitByte(byte(chunk.OP_DEREF))
-					}
-
-					var idxType ast.NoxyType
-					_, idxType, err = c.Compile(indexExp.Index) // Index
-					if err != nil {
-						return nil, nil, err
-					}
-					if _, ok := idxType.(*ast.RefType); ok {
-						c.emitByte(byte(chunk.OP_DEREF))
-					}
-
-					c.emitByte(byte(chunk.OP_REF_INDEX))
-				} else if _, ok := actualArg.(*ast.NullLiteral); ok {
-					// Pass NULL for Ref
-					c.emitByte(byte(chunk.OP_NULL))
-				} else {
-					return nil, nil, fmt.Errorf("[line %d] argument %d is 'ref', must pass a variable, property, index, or null", c.currentLine, i+1)
-				}
-			} else {
-				_, argType, err := c.Compile(arg)
-				if err != nil {
-					return nil, nil, err
-				}
-				if _, ok := argType.(*ast.RefType); ok {
-					c.emitByte(byte(chunk.OP_DEREF))
-				}
+			_, argType, err := c.Compile(arg)
+			if err != nil {
+				return nil, nil, err
+			}
+			explicitReference := false
+			if prefix, ok := arg.(*ast.PrefixExpression); ok {
+				explicitReference = prefix.Operator == "ref"
+			}
+			if ref, ok := argType.(*ast.RefType); ok && !explicitReference {
+				c.emitByte(byte(chunk.OP_DEREF))
+				argType = ref.ElementType
+			}
+			if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
+				return nil, nil, fmt.Errorf(
+					"[line %d] argument %d to '%s': expected %s, got %s",
+					c.currentLine, i+1, callableName(n.Function),
+					funcType.Params[i].String(), noxyTypeName(argType),
+				)
 			}
 		}
 
-		// Emit Call
 		c.emitBytes(byte(chunk.OP_CALL), byte(len(n.Arguments)))
-		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil // Return type unknown for now
+		if isExact {
+			return c.currentChunk, funcType.Return, nil
+		}
+		if fnType == nil {
+			return c.currentChunk, nil, nil
+		}
+		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil
 
 	case nil:
 		// Skip
 		return c.currentChunk, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported node type %T", n)
+	}
+}
+
+func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
+	owner = unwrapRefType(owner)
+	primitive, ok := owner.(*ast.PrimitiveType)
+	if !ok {
+		return nil
+	}
+	definition, ok := c.structs[primitive.Name]
+	if !ok {
+		return nil
+	}
+	for _, field := range definition.FieldsList {
+		if field.Name == member {
+			return field.Type
+		}
+	}
+	return nil
+}
+
+func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.NoxyType, error) {
+	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
+		expression = prefix.Right
+	}
+
+	switch target := expression.(type) {
+	case *ast.Identifier:
+		if slot, declared := c.resolveLocal(target.Value); slot != -1 {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			c.locals[slot].IsCaptured = true
+			return declared, nil
+		}
+		if upvalue, _ := c.resolveUpvalue(target.Value); upvalue != -1 {
+			return nil, fmt.Errorf("[line %d] captured variables cannot be passed by reference", c.currentLine)
+		}
+		name := c.makeConstant(value.NewString(target.Value))
+		if declared, ok := c.resolveGlobalType(target.Value); ok {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(name))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(name))
+			return declared, nil
+		}
+		c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(name))
+		return nil, nil
+	case *ast.MemberAccessExpression:
+		_, owner, err := c.Compile(target.Left)
+		if err != nil {
+			return nil, err
+		}
+		element := c.memberType(owner, target.Member)
+		if _, ok := owner.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+		}
+		name := c.makeConstant(value.NewString(target.Member))
+		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
+		if ref, ok := element.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
+		return element, nil
+	case *ast.IndexExpression:
+		_, container, err := c.Compile(target.Left)
+		if err != nil {
+			return nil, err
+		}
+		element := indexElementType(container)
+		if _, ok := container.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+		}
+		_, indexType, err := c.Compile(target.Index)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := indexType.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+		}
+		c.emitByte(byte(chunk.OP_REF_INDEX))
+		if ref, ok := element.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
+		return element, nil
+	case *ast.NullLiteral:
+		c.emitByte(byte(chunk.OP_NULL))
+		return nil, nil
+	default:
+		return nil, fmt.Errorf(
+			"[line %d] reference argument must be a variable, property, index, or null",
+			c.currentLine,
+		)
 	}
 }
 
@@ -1868,88 +1853,70 @@ func (c *Compiler) resolveGlobalType(name string) (ast.NoxyType, bool) {
 }
 
 func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
-	if expected == nil || actual == nil {
-		return true // Allow lenient check for now/unknowns
-	}
-	expStr := expected.String()
-	actStr := actual.String()
-
-	if expStr == actStr {
+	if expected == nil {
 		return true
 	}
-	// Structural Check for Maps and Arrays
-	if expMap, ok := expected.(*ast.MapType); ok {
-		if actMap, ok := actual.(*ast.MapType); ok {
-			// Check Keys
-			if !c.areTypesCompatible(expMap.KeyType, actMap.KeyType) {
-				return false
-			}
-			// Check Values
-			// If expected value is 'any', accept any actual value type
-			if isAny(expMap.ValueType) {
-				return true
-			}
-			return c.areTypesCompatible(expMap.ValueType, actMap.ValueType)
-		}
+	if actual == nil {
+		return !c.containsCallableType(expected, nil)
 	}
-
-	if expArr, ok := expected.(*ast.ArrayType); ok {
-		if actArr, ok := actual.(*ast.ArrayType); ok {
-			// If expected element is 'any', accept any actual element type
-			if isAny(expArr.ElementType) {
-				return true
-			}
-			return c.areTypesCompatible(expArr.ElementType, actArr.ElementType)
-		}
+	if isNullType(actual) {
+		return c.acceptsNull(expected)
 	}
-
-	// 'any' type compatibility (if we had it explicitly)
-	if expStr == "any" || isAny(expected) {
-		return true // Expected 'any', accept anything
+	if isBareFunctionType(expected) {
+		return isCallableType(actual)
 	}
-	// 'any' in actual? (Unsafe? or Dynamic?)
-	if actStr == "any" || isAny(actual) {
-		return true // Actual is 'any', allow assignment to anything (dynamic)? Or strict?
-		// Let's allow it for flexibility (like TypeScript 'any')
+	if isBareFunctionType(actual) {
+		return isBareFunctionType(expected) || isAny(expected)
 	}
-
+	if _, ok := expected.(*ast.FunctionType); ok {
+		return c.areStrictTypesCompatible(expected, actual)
+	}
+	if expected.String() == actual.String() {
+		return true
+	}
+	if isAny(expected) || isAny(actual) {
+		return true
+	}
+	if expectedMap, ok := expected.(*ast.MapType); ok {
+		actualMap, ok := actual.(*ast.MapType)
+		return ok && c.areTypesCompatible(expectedMap.KeyType, actualMap.KeyType) &&
+			c.areTypesCompatible(expectedMap.ValueType, actualMap.ValueType)
+	}
+	if expectedArray, ok := expected.(*ast.ArrayType); ok {
+		actualArray, ok := actual.(*ast.ArrayType)
+		return ok && (expectedArray.Size == 0 || expectedArray.Size == actualArray.Size) &&
+			c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
+	}
 	return false
 }
 
 func isAny(t ast.NoxyType) bool {
-	if t == nil {
-		return false
-	}
-	if pt, ok := t.(*ast.PrimitiveType); ok {
-		if pt.Name == "any" || pt.Name == "func" {
-			return true
-		}
-	}
-	return false
+	primitive, ok := t.(*ast.PrimitiveType)
+	return ok && primitive.Name == "any"
 }
 
-func (c *Compiler) resolveUpvalue(name string) int {
+func (c *Compiler) resolveUpvalue(name string) (int, ast.NoxyType) {
 	if c.enclosing == nil {
-		return -1
+		return -1, nil
 	}
 
 	// 1. Check immediate parent's locals
-	local, _ := c.enclosing.resolveLocal(name)
+	local, localType := c.enclosing.resolveLocal(name)
 	if local != -1 {
 		c.enclosing.locals[local].IsCaptured = true // Mark as captured!
-		return c.addUpvalue(uint8(local), true)
+		return c.addUpvalue(uint8(local), true, localType), localType
 	}
 
 	// 2. Check immediate parent's upvalues
-	upvalue := c.enclosing.resolveUpvalue(name)
+	upvalue, upvalueType := c.enclosing.resolveUpvalue(name)
 	if upvalue != -1 {
-		return c.addUpvalue(uint8(upvalue), false)
+		return c.addUpvalue(uint8(upvalue), false, upvalueType), upvalueType
 	}
 
-	return -1
+	return -1, nil
 }
 
-func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
+func (c *Compiler) addUpvalue(index uint8, isLocal bool, upvalueType ast.NoxyType) int {
 	// Check for existing upvalue
 	for i, u := range c.upvalues {
 		if u.Index == index && u.IsLocal == isLocal {
@@ -1961,7 +1928,7 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool) int {
 		// Error: too many upvalues
 	}
 
-	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal})
+	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal, Type: upvalueType})
 	return len(c.upvalues) - 1
 }
 
@@ -1969,7 +1936,9 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 	fnCompiler := NewChild(c)
 	fnCompiler.scopeDepth = 1    // Inside function body
 	fnCompiler.addLocal("", nil) // Reserve slot 0 for function instance
-	fnCompiler.funcReturnType = returnType
+	declaredReturn := normalizeReturnType(returnType)
+	fnCompiler.funcReturnType = declaredReturn
+	fnCompiler.currentFunctionName = name
 
 	paramsInfo := []value.ParamInfo{}
 	for _, param := range params {
@@ -1981,14 +1950,21 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 		}
 		paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
 	}
+	if declaredReturn.String() != "void" && !blockGuaranteesReturn(body) {
+		return value.Value{}, nil, fmt.Errorf(
+			"[line %d] function '%s' may finish without returning %s",
+			body.Token.Line, name, declaredReturn.String(),
+		)
+	}
 
 	_, _, err := fnCompiler.Compile(body)
 	if err != nil {
 		return value.Value{}, nil, err
 	}
 
-	// Implicit return null
-	fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
+	if declaredReturn.String() == "void" {
+		fnCompiler.emitBytes(byte(chunk.OP_NULL), byte(chunk.OP_RETURN))
+	}
 
 	upvalueCount := len(fnCompiler.upvalues)
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
