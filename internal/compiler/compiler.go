@@ -1672,8 +1672,13 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 			c.locals[slot].IsCaptured = true
 			return declared, nil
 		}
-		if upvalue, _ := c.resolveUpvalue(target.Value); upvalue != -1 {
-			return nil, fmt.Errorf("[line %d] captured variables cannot be passed by reference", c.currentLine)
+		if upvalue, declared := c.resolveUpvalue(target.Value); upvalue != -1 {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(upvalue))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_UPVALUE), byte(upvalue))
+			return declared, nil
 		}
 		name := c.makeConstant(value.NewString(target.Value))
 		if declared, ok := c.resolveGlobalType(target.Value); ok {

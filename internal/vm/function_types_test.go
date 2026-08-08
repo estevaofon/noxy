@@ -97,3 +97,36 @@ dynamic(ref answer)
 test_report(answer)`)
 	testExpectedObject(t, 42, got)
 }
+
+func TestContextualReferenceUpdatesClosedUpvalue(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+func make_incrementer() -> func() -> int
+    let value: int = 40
+    return func() -> int
+        increment(value)
+        return value
+    end
+end
+let incrementer: func() -> int = make_incrementer()
+incrementer()
+test_report(incrementer())`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestExplicitReferenceToClosedUpvalueCanEscape(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func make_reference_factory() -> func() -> ref int
+    let value: int = 41
+    return func() -> ref int
+        return ref value
+    end
+end
+let get_reference: func() -> ref int = make_reference_factory()
+let pointer: ref int = get_reference()
+*pointer = 42
+test_report(pointer)`)
+	testExpectedObject(t, 42, got)
+}

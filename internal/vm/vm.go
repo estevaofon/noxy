@@ -3642,6 +3642,20 @@ func (vm *VM) run(minFrameCount int) error {
 				},
 			})
 
+		case chunk.OP_REF_UPVALUE:
+			slot := int(c.Code[ip])
+			ip++
+			if slot < 0 || slot >= len(frame.Closure.Upvalues) {
+				return vm.runtimeError(c, ip, "upvalue reference index out of bounds: %d", slot)
+			}
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType: value.REF_UPVALUE,
+					Upvalue: frame.Closure.Upvalues[slot],
+				},
+			})
+
 		case chunk.OP_REF_GLOBAL:
 			index := c.Code[ip]
 			ip++

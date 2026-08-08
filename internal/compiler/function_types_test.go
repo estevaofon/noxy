@@ -544,3 +544,20 @@ end`)
 		t.Fatal(err)
 	}
 }
+
+func TestExactReferenceCallAcceptsCapturedVariable(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+func make_incrementer() -> func() -> int
+    let value: int = 0
+    return func() -> int
+        increment(value)
+        return value
+    end
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

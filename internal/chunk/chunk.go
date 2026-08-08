@@ -69,6 +69,7 @@ const (
 	OP_CLOSURE       // [const_index] [upvalue_count] [is_local, index]...
 	OP_CLOSE_UPVALUE // Explicit instruction to close upvalues
 	OP_REF_LOCAL
+	OP_REF_UPVALUE
 	OP_REF_GLOBAL
 	OP_REF_PROPERTY
 	OP_REF_INDEX
@@ -177,6 +178,8 @@ func (op OpCode) String() string {
 		return "OP_CLOSE_UPVALUE"
 	case OP_REF_LOCAL:
 		return "OP_REF_LOCAL"
+	case OP_REF_UPVALUE:
+		return "OP_REF_UPVALUE"
 	case OP_REF_GLOBAL:
 		return "OP_REF_GLOBAL"
 	case OP_REF_PROPERTY:
@@ -398,6 +401,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_CLOSE_UPVALUE", offset)
 	case OP_REF_LOCAL:
 		return c.byteInstruction("OP_REF_LOCAL", offset)
+	case OP_REF_UPVALUE:
+		return c.byteInstruction("OP_REF_UPVALUE", offset)
 	case OP_REF_GLOBAL:
 		return c.constantInstruction("OP_REF_GLOBAL", offset)
 	case OP_REF_PROPERTY:
