@@ -276,6 +276,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						return c.currentChunk, nil, nil
 					}
 
+					if c.areTypesCompatible(refType.ElementType, valType) {
+						return nil, nil, referenceAssignmentTypeError(c.currentLine, ident.Value, localType, valType)
+					}
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 
 				} else {
@@ -288,6 +291,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				}
 			} else if arg, upvalueType := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
+				if refType, isRef := upvalueType.(*ast.RefType); isRef &&
+					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
+					c.areTypesCompatible(refType.ElementType, valType) {
+					return nil, nil, referenceAssignmentTypeError(c.currentLine, ident.Value, upvalueType, valType)
+				}
 				if !c.areTypesCompatible(upvalueType, valType) {
 					return nil, nil, fmt.Errorf(
 						"[line %d] type mismatch in assignment to '%s': expected %s, got %s",
@@ -316,7 +324,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						} else {
 							// User tried `ref = val`. Explicitly FORBID update via name.
 							if c.areTypesCompatible(refType.ElementType, valType) {
-								return nil, nil, fmt.Errorf("[line %d] cannot assign value to global reference '%s'.\n  hint: Did you mean to update the value? Use '*%s = ...'", c.currentLine, ident.Value, ident.Value)
+								return nil, nil, referenceAssignmentTypeError(c.currentLine, ident.Value, globalType, valType)
 							}
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 						}
@@ -384,12 +392,22 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				// Implict deref/update via assignment is NOT allowed if types don't match.
 				// User must use `*arr[i] = val` for updates.
 
+				if refType, isRef := arrType.ElementType.(*ast.RefType); isRef &&
+					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
+					c.areTypesCompatible(refType.ElementType, valType) {
+					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), arrType.ElementType, valType)
+				}
 				if !c.areTypesCompatible(arrType.ElementType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
 				}
 			} else if mapType, ok := leftType.(*ast.MapType); ok {
 				if !c.areTypesCompatible(mapType.KeyType, idxType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map key: expected %s, got %s", c.currentLine, mapType.KeyType.String(), idxType.String())
+				}
+				if refType, isRef := mapType.ValueType.(*ast.RefType); isRef &&
+					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
+					c.areTypesCompatible(refType.ElementType, valType) {
+					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), mapType.ValueType, valType)
 				}
 				if !c.areTypesCompatible(mapType.ValueType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s", c.currentLine, mapType.ValueType.String(), valType.String())
@@ -441,7 +459,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// TYPE-BASED ASSIGNMENT LOGIC:
 			if fieldType != nil {
 				// If Field is Ref, Value MUST be compatible Ref (Rebind).
-				if _, isRefField := fieldType.(*ast.RefType); isRefField {
+				if refType, isRefField := fieldType.(*ast.RefType); isRefField {
 					// Check Compatibility
 					isRefVal := false
 					if valType != nil {
@@ -453,9 +471,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if valType != nil && !c.areTypesCompatible(fieldType, valType) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 						}
+					} else if c.areTypesCompatible(refType.ElementType, valType) {
+						return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(memberExp), fieldType, valType)
 					} else {
-						// Error: Trying to assign Value to Ref Field
-						return nil, nil, fmt.Errorf("[line %d] cannot assign value to reference field '%s'.\n  hint: Did you mean to update the value? Use '*%s.%s = ...'", c.currentLine, memberExp.Member, "...", memberExp.Member)
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 					}
 				} else {
 					// Standard Field
@@ -1850,6 +1869,31 @@ func (c *Compiler) resolveLocal(name string) (int, ast.NoxyType) {
 func (c *Compiler) resolveGlobalType(name string) (ast.NoxyType, bool) {
 	t, ok := c.globals[name]
 	return t, ok
+}
+
+func referenceAssignmentTypeError(line int, name string, expected, actual ast.NoxyType) error {
+	return fmt.Errorf(
+		"[line %d] cannot assign %s to %s\n  hint: use '*%s = ...' to update the referenced value",
+		line, noxyTypeName(actual), noxyTypeName(expected), name,
+	)
+}
+
+func isReferenceType(t ast.NoxyType) bool {
+	_, ok := t.(*ast.RefType)
+	return ok
+}
+
+func assignmentTargetName(expression ast.Expression) string {
+	switch target := expression.(type) {
+	case *ast.Identifier:
+		return target.Value
+	case *ast.MemberAccessExpression:
+		return assignmentTargetName(target.Left) + "." + target.Member
+	case *ast.IndexExpression:
+		return assignmentTargetName(target.Left) + "[" + target.Index.String() + "]"
+	default:
+		return expression.String()
+	}
 }
 
 func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
