@@ -907,7 +907,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		c.emitByte(byte(chunk.OP_ZEROS))
-		return c.currentChunk, &ast.PrimitiveType{Name: "bytes"}, nil
+		size := 0
+		if literal, ok := n.Size.(*ast.IntegerLiteral); ok {
+			size = int(literal.Value)
+		}
+		return c.currentChunk, &ast.ArrayType{
+			ElementType: &ast.PrimitiveType{Name: "int"},
+			Size:        size,
+		}, nil
 
 	case *ast.IfStatement:
 		c.setLine(n.Token.Line)
@@ -1246,14 +1253,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		c.endScope() // Pops $sel_idx, $sel_val, $sel_ok (3 values)
-
-		return c.currentChunk, nil, nil
-
-		// Pop Loop info
-		c.loops = c.loops[:len(c.loops)-1]
-
-		// 13. End Wrapper Scope (pops iterator vars)
-		c.endScope()
 
 		return c.currentChunk, nil, nil
 
@@ -1597,6 +1596,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if isExact {
 			return c.currentChunk, funcType.Return, nil
 		}
+		if fnType == nil {
+			return c.currentChunk, nil, nil
+		}
 		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil
 
 	case nil:
@@ -1666,6 +1668,9 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 		}
 		name := c.makeConstant(value.NewString(target.Member))
 		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
+		if ref, ok := element.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
 		return element, nil
 	case *ast.IndexExpression:
 		_, container, err := c.Compile(target.Left)
@@ -1684,6 +1689,9 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 			c.emitByte(byte(chunk.OP_DEREF))
 		}
 		c.emitByte(byte(chunk.OP_REF_INDEX))
+		if ref, ok := element.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
 		return element, nil
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))
@@ -1850,6 +1858,9 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if expected.String() == actual.String() {
 		return true
 	}
+	if isAny(expected) || isAny(actual) {
+		return true
+	}
 	if expectedMap, ok := expected.(*ast.MapType); ok {
 		actualMap, ok := actual.(*ast.MapType)
 		return ok && c.areTypesCompatible(expectedMap.KeyType, actualMap.KeyType) &&
@@ -1859,9 +1870,6 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 		actualArray, ok := actual.(*ast.ArrayType)
 		return ok && (expectedArray.Size == 0 || expectedArray.Size == actualArray.Size) &&
 			c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
-	}
-	if isAny(expected) || isAny(actual) {
-		return true
 	}
 	return false
 }

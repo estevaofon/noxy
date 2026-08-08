@@ -19,7 +19,7 @@ Consequently, a function declared as returning `int` can return `string`, and th
 - Support forward calls and recursion without compiling bodies twice.
 - Support exact function types in variables, parameters, fields, arrays, maps, and returns.
 - Preserve bare `func` as the dynamic callable type used by existing Noxy programs.
-- Allow existing first-class function, closure, decorator, handler, and heterogeneous callable collection patterns to remain viable without mandatory migration.
+- Keep first-class function, closure, decorator, handler, and heterogeneous callable collection patterns available; code that claims a concrete result from a bare dynamic call must change that result to `any` or adopt an exact callable signature.
 - Keep compilation linear and add a benchmark that detects material regressions.
 - Preserve runtime arity checks as defensive validation for dynamic boundaries.
 
@@ -120,6 +120,8 @@ The normal compiler pass then visits the AST once and emits bytecode as it does 
 ### Function literals
 
 Compiling a function literal produces its exact intrinsic `ast.FunctionType`. A missing return annotation means `void`. When that value is assigned to a variable declared with an exact signature, compatibility is checked. When it is assigned to bare `func`, the variable retains the declared dynamic callable type; the signature is intentionally widened at that boundary.
+
+Compiler upvalues retain the declared type of the captured local/upvalue. Without this metadata, a typed closure would degrade captured operands to `any` and could not satisfy its own exact return contract.
 
 ### Calls
 
@@ -227,4 +229,4 @@ The integration runner's use of a pre-existing executable will be reported expli
 
 ## Rollout
 
-This branch implements exact typed user-defined functions as an additive, gradual feature while preserving bare `func` as the existing dynamic callable type. Existing programs do not require immediate migration; replacing bare `func` annotations with exact signatures opts individual APIs into compile-time checking. Native/module signature metadata, VM file organization, and a hermetic integration runner remain separate follow-up branches so each can be reviewed and benchmarked independently.
+This branch implements exact typed user-defined functions as a gradual feature while preserving bare `func` as the existing dynamic callable type. Replacing bare `func` annotations with exact signatures opts individual APIs into compile-time checking. A bare call has compile-time result `any`; therefore, existing code that returned such a call from a concretely typed function must either declare the result as `any` or make the callable parameter exact. Native/module signature metadata, VM file organization, and a hermetic integration runner remain separate follow-up branches so each can be reviewed and benchmarked independently.

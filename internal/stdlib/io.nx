@@ -19,7 +19,7 @@ end
 
 struct IOLinesResult
     ok: bool
-    data: []string
+    data: string[]
     error: string
 end
 

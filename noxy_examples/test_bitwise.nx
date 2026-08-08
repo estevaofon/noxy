@@ -30,7 +30,7 @@ else
 end
 
 // Test Short Circuit
-func check_side_effect()
+func check_side_effect() -> bool
     print("SIDE EFFECT")
     return true
 end

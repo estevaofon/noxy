@@ -51,7 +51,7 @@ func put_item(client: Client, table: string, item: map[string, any]) -> bool
     return res != null
 end
 
-func get_item(client: Client, table: string, key: map[string, any]) -> map[string, any]
+func get_item(client: Client, table: string, key: map[string, any]) -> any
     if !loaded then return null end
     
     // Request: {method: "get_item", params: [client.id, table, key]}

@@ -68,3 +68,20 @@ increment(answer)
 test_report(answer)`)
 	testExpectedObject(t, 42, got)
 }
+
+func TestReferenceFieldArgumentCanFillNullSlot(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Node
+    value: int
+    next: ref Node
+end
+func fill(node: ref Node) -> void
+    if node == null then
+        *node = Node(42, null)
+    end
+end
+let head: Node = Node(1, null)
+fill(head.next)
+test_report(head.next.value)`)
+	testExpectedObject(t, 42, got)
+}

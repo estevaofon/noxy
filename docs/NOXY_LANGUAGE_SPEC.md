@@ -335,7 +335,49 @@ func makeAdder(x: int) -> func
 end
 ```
 
-### 4.2 Parameter Passing Semantics (CRITICAL)
+### 4.2 Function Types
+
+Every function value is callable. Noxy provides two ways to describe how precisely it may be called.
+
+An **exact function type** records parameter and return types:
+
+```noxy
+func(int, int) -> int
+func(string) -> void
+func(ref int) -> void
+
+let exact: func(int) -> int = double
+
+func apply(f: func(int) -> int, value: int) -> int
+    return f(value)
+end
+```
+
+Calls through exact types are checked during compilation: arity, argument types, `ref` addressability, and return types must match. Exact signatures are invariant; parameter count, parameter types, `ref` modifiers, and return types must be identical. An omitted return annotation on a function declaration or literal means `void`.
+
+Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
+
+```noxy
+let dynamic: func = exact       // exact-to-dynamic widening is valid
+let exact_again: func(int) -> int = dynamic // ERROR: no implicit narrowing
+```
+
+Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, so a function returning their result must either declare `any` or replace the bare callable with an exact signature. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
+
+```noxy
+let callbacks: func[] = [no_arguments, two_arguments]
+```
+
+Use parentheses for an array whose elements are exact functions. Without parentheses, the array belongs to the return type:
+
+```noxy
+let transforms: (func(int) -> int)[] = [double, increment]
+let factory: func(int) -> int[]
+```
+
+Exact function types may also appear in parameters, returns, struct fields, map values, channels, and references. `any`, native functions, plugins, and untyped module exports remain dynamic boundaries and retain runtime validation.
+
+### 4.3 Parameter Passing Semantics (CRITICAL)
 
 Noxy uses **Pass-by-Value** by default. Primitive values are copied directly. Composite values (arrays, maps, and structs) receive a **shallow copy** of their top-level container.
 

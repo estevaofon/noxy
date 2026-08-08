@@ -305,3 +305,50 @@ let exact: func(int) -> int = dynamic`)
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestUnresolvedNativeCallCanCrossDynamicBoundary(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func wrapper() -> int
+    return native_value()
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLegacyDynamicCompositeCompatibility(t *testing.T) {
+	c := New()
+	expected := &ast.MapType{KeyType: primitive("string"), ValueType: primitive("any")}
+	if !c.areTypesCompatible(expected, primitive("any")) {
+		t.Fatal("explicit any must remain assignable at a legacy composite boundary")
+	}
+}
+
+func TestZerosProducesIntegerArrayType(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func consume(values: int[4]) -> void
+    return
+end
+let dynamic_values: int[] = zeros(4)
+consume(zeros(4))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReferenceFieldPassesItsExistingReference(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+struct Node
+    value: int
+    next: ref Node
+end
+func accept(node: ref Node) -> void
+    return
+end
+let tail: Node = Node(1, null)
+let head: Node = Node(2, ref tail)
+accept(head.next)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
