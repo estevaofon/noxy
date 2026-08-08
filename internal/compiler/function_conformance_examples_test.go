@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,17 @@ func TestTypedFunctionValidConformanceExampleCompiles(t *testing.T) {
 	}
 }
 
+func TestConformanceDiagnosticMatcherRejectsLongerFunctionType(t *testing.T) {
+	err := fmt.Errorf("[line 7] expected func(int) -> int, got func(string) -> int")
+	if conformanceDiagnosticMatches(err, "expected func(int) -> int, got func") {
+		t.Fatal("bare func diagnostic must not match a longer exact function type")
+	}
+}
+
+func conformanceDiagnosticMatches(err error, want string) bool {
+	return err != nil && strings.HasSuffix(err.Error(), want)
+}
+
 func TestTypedFunctionInvalidConformanceExamplesFail(t *testing.T) {
 	tests := []struct {
 		name string
@@ -42,7 +54,7 @@ func TestTypedFunctionInvalidConformanceExamplesFail(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := readConformanceFixture(t, "type_errors", tt.file)
 			_, err := compileFunctionSource(t, input)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
+			if !conformanceDiagnosticMatches(err, tt.want) {
 				t.Fatalf("error=%v, want diagnostic containing %q", err, tt.want)
 			}
 		})
