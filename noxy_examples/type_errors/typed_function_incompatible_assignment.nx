@@ -1,0 +1,5 @@
+func text_length(value: string) -> int
+    return strlen(value)
+end
+
+let operation: func(int) -> int = text_length

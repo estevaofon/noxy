@@ -3,6 +3,7 @@ package compiler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,5 +21,30 @@ func TestTypedFunctionValidConformanceExampleCompiles(t *testing.T) {
 	input := readConformanceFixture(t, "typed_function_conformance.nx")
 	if _, err := compileFunctionSource(t, input); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTypedFunctionInvalidConformanceExamplesFail(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+		want string
+	}{
+		{"wrong arity", "typed_function_wrong_arity.nx", "expects 2 arguments, got 1"},
+		{"wrong argument", "typed_function_wrong_argument.nx", "argument 1 to 'add': expected int, got string"},
+		{"wrong return", "typed_function_wrong_return.nx", "return type mismatch in 'invalid': expected int, got string"},
+		{"incompatible assignment", "typed_function_incompatible_assignment.nx", "expected func(int) -> int, got func(string) -> int"},
+		{"dynamic narrowing", "typed_function_dynamic_narrowing.nx", "expected func(int) -> int, got func"},
+		{"invalid ref argument", "typed_function_invalid_ref_argument.nx", "reference argument must be a variable, property, index, or null"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := readConformanceFixture(t, "type_errors", tt.file)
+			_, err := compileFunctionSource(t, input)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want diagnostic containing %q", err, tt.want)
+			}
+		})
 	}
 }
