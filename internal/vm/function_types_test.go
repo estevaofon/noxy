@@ -88,6 +88,20 @@ dynamic(null)`)
 	}
 }
 
+func TestExactCallableReferenceParameterReceivesNullValue(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func accept(value: ref func() -> int) -> void
+    test_report(ref value)
+end
+accept(null)`)
+	if got.Type != value.VAL_NULL {
+		t.Fatalf("argument=%v (%v), want VAL_NULL", got, got.Type)
+	}
+	if got.Obj != nil {
+		t.Fatalf("null argument object=%T, want nil (no ObjRef)", got.Obj)
+	}
+}
+
 func TestUpdatingNullReferenceFailsClearly(t *testing.T) {
 	err := runTypedFunctionProgramError(t, `
 let pointer: ref int = null

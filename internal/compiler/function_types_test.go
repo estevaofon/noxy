@@ -484,6 +484,27 @@ accept(null)`)
 	}
 }
 
+func TestExactReferenceCallAcceptsNullForCallableElement(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func accept(value: ref func() -> int) -> void
+end
+accept(null)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExactReferenceCallDoesNotTreatAnyAsNull(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func accept(value: ref func() -> int) -> void
+end
+let dynamic: any = null
+accept(dynamic)`)
+	if err == nil || !strings.Contains(err.Error(), "expected ref func() -> int, got ref any") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestCapturedFunctionReassignmentIsTypeChecked(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func integer(value: int) -> int

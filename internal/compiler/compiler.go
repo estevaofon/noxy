@@ -1643,6 +1643,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if err != nil {
 						return nil, nil, err
 					}
+					if _, isNull := arg.(*ast.NullLiteral); isNull {
+						continue
+					}
 					if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
 						actual := &ast.RefType{ElementType: actualElement}
 						return nil, nil, fmt.Errorf(

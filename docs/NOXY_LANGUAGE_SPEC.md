@@ -154,11 +154,24 @@ Structs are passed by **VALUE** using a shallow copy by default. Direct fields b
 ---
 ### 2.3 The `ref` Operator
 
-The `ref` operator creates a reference (pointer) to an existing variable.
+The `ref` operator produces an explicit first-class reference value according
+to the operand's type:
+
+1. For an addressable operand of type `T`, `ref value` creates a `ref T` that
+   points to that operand's storage.
+2. For an operand whose type is already `ref T`, `ref reference` forwards the
+   existing reference value. Its result remains `ref T`; it does not take the
+   address of the reference variable or create `ref ref T`.
+
+The forwarding form is useful when an existing reference crosses a dynamic
+boundary whose signature is not available for contextual conversion.
 
 #### L-Value Requirement
-You can **ONLY** take a reference of an **addressable value** (L-Value). This means the operand must be a variable, a struct field, or an array/map index.
-**You CANNOT take a reference of a temporary value (R-Value), such as a function call result or a literal.**
+Creating a new reference requires an **addressable value** (L-Value). The
+operand must be a variable, a struct field, or an array/map index. A non-reference
+temporary, such as an ordinary function result or a literal, is not
+addressable. Forwarding an expression that already has type `ref T` does not
+create a new reference and therefore does not require a second storage slot.
 
 Captured variables are addressable through their upvalue storage. Non-null
 literals and plain function-result temporaries are not addressable. A function
@@ -170,6 +183,7 @@ accepted without pretending that it owns a storage slot.
 ```noxy
 let err: Error = Error("msg")
 let r: ref Error = ref err      // OK: 'err' is a variable
+let forwarded: ref Error = ref r // OK: forwards the existing ref Error
 ```
 
 **Incorrect Usage:**
@@ -178,7 +192,9 @@ let r: ref Error = ref Error("msg") // ERROR: Cannot take reference of temporary
 ```
 
 ### 2.3 Reference Semantics (`ref`)
-The `ref` keyword allows creating pointers to existing values. Noxy unifies reference usage through **"Automatic Dereference"** and **"Type-Based Assignment"**.
+The `ref` keyword creates references to addressable values or explicitly
+forwards existing reference values. Noxy unifies reference usage through
+**"Automatic Dereference"** and **"Type-Based Assignment"**.
 
 #### 1. Automatic Dereference (Expressions)
 You can use a reference (`ref T`) in expressions just like a normal value. The compiler automatically assumes you want the **value**.
