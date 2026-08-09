@@ -1110,6 +1110,199 @@ func TestRuntimeCallableValidationProjectsOnlyCompleteNativeSignatures(t *testin
 	}
 }
 
+func TestRuntimeCallableValidationMatchesExactCallableArraySpelling(t *testing.T) {
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	callback := &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     []*value.RuntimeTypeInfo{integer},
+		ParamIsRef: []bool{false},
+		Return:     integer,
+	}
+	callbacks := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: callback}
+	expected := &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     []*value.RuntimeTypeInfo{callbacks},
+		ParamIsRef: []bool{false},
+		Return:     callbacks,
+	}
+	typed := value.NewNativeWithSignature("callbacks", value.NativeSignature{
+		Arity:      1,
+		Params:     []value.ParamInfo{{TypeName: "(func(int) -> int)[]"}},
+		ReturnType: "(func(int) -> int)[]",
+	}, func(args []value.Value) value.Value { return args[0] })
+	if !runtimeCallableMatchesType(typed, expected) {
+		t.Fatal("typed native callable-array signature did not match canonical type spelling")
+	}
+}
+
+func TestDynamicAppendRequiresInvariantExactCallableSchema(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "any parameter does not accept concrete declaration",
+			source: `
+func seed(value: any) -> int return 1 end
+func wrong(value: int) -> int return value end
+let invoke: any = append
+let target: (func(any) -> int)[] = [seed]
+pop(target)
+invoke(ref target, wrong)
+test_report(length(target))`,
+		},
+		{
+			name: "concrete parameter does not accept any declaration",
+			source: `
+func seed(value: int) -> int return value end
+func wrong(value: any) -> int return 1 end
+let invoke: any = append
+let target: (func(int) -> int)[] = [seed]
+pop(target)
+invoke(ref target, wrong)
+test_report(length(target))`,
+		},
+		{
+			name: "any return does not accept concrete declaration",
+			source: `
+func seed() -> any return 1 end
+func wrong() -> int return 1 end
+let invoke: any = append
+let target: (func() -> any)[] = [seed]
+pop(target)
+invoke(ref target, wrong)
+test_report(length(target))`,
+		},
+		{
+			name: "concrete return does not accept any declaration",
+			source: `
+func seed() -> int return 1 end
+func wrong() -> any return 1 end
+let invoke: any = append
+let target: (func() -> int)[] = [seed]
+pop(target)
+invoke(ref target, wrong)
+test_report(length(target))`,
+		},
+		{
+			name: "fixed array parameter size is exact",
+			source: `
+func seed(values: int[4]) -> int return length(values) end
+func wrong(values: int[5]) -> int return length(values) end
+let invoke: any = append
+let target: (func(int[4]) -> int)[] = [seed]
+pop(target)
+invoke(ref target, wrong)
+test_report(length(target))`,
+		},
+		{
+			name: "fixed array return size is exact",
+			source: `
+func seed() -> int[4]
+    let values: int[4]
+    return values
+end
+func wrong() -> int[5]
+    let values: int[5]
+    return values
+end
+let invoke: any = append
+let target: (func() -> int[4])[] = [seed]
+pop(target)
+invoke(ref target, wrong)
+test_report(length(target))`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testExpectedObject(t, 0, runTypedFunctionProgram(t, tt.source))
+		})
+	}
+}
+
+func TestRuntimeCallableValidationIsInvariantAndFailClosed(t *testing.T) {
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	dynamic := &value.RuntimeTypeInfo{Kind: value.TYPE_ANY}
+	fixedFour := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer, Size: 4}
+	tests := []struct {
+		name      string
+		expected  *value.RuntimeTypeInfo
+		signature value.NativeSignature
+		fn        value.NativeFunc
+		want      bool
+	}{
+		{
+			name:      "matching any parameter and return",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{dynamic}, ParamIsRef: []bool{false}, Return: dynamic},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "any"}}, ReturnType: "any"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+			want:      true,
+		},
+		{
+			name:      "any parameter rejects concrete native declaration",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{dynamic}, ParamIsRef: []bool{false}, Return: integer},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int"}}, ReturnType: "int"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+		{
+			name:      "concrete parameter rejects any native declaration",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, ParamIsRef: []bool{false}, Return: integer},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "any"}}, ReturnType: "int"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+		{
+			name:      "any return rejects concrete native declaration",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, ParamIsRef: []bool{false}, Return: dynamic},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int"}}, ReturnType: "int"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+		{
+			name:      "concrete return rejects any native declaration",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, ParamIsRef: []bool{false}, Return: integer},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int"}}, ReturnType: "any"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+		{
+			name:      "matching fixed array size",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{fixedFour}, ParamIsRef: []bool{false}, Return: fixedFour},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int[4]"}}, ReturnType: "int[4]"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+			want:      true,
+		},
+		{
+			name:      "wrong fixed array size",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{fixedFour}, ParamIsRef: []bool{false}, Return: fixedFour},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int[5]"}}, ReturnType: "int[4]"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+		{
+			name:      "wrong fixed array return size",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{fixedFour}, ParamIsRef: []bool{false}, Return: fixedFour},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int[4]"}}, ReturnType: "int[5]"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+		{
+			name:      "nil native function",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, ParamIsRef: []bool{false}, Return: integer},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int"}}, ReturnType: "int"},
+		},
+		{
+			name:      "partial parameter schema",
+			expected:  &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{nil}, ParamIsRef: []bool{false}, Return: integer},
+			signature: value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "unknown"}}, ReturnType: "int"},
+			fn:        func(args []value.Value) value.Value { return args[0] },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			native := value.NewNativeWithSignature("typed", tt.signature, tt.fn)
+			if got := runtimeCallableMatchesType(native, tt.expected); got != tt.want {
+				t.Fatalf("runtimeCallableMatchesType=%v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTypedJSONLoadsRejectsCallableAndChannelConstruction(t *testing.T) {
 	t.Run("empty bare function array after pop", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `

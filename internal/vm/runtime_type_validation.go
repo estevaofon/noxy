@@ -169,14 +169,14 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 		return actualType != nil && runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool))
 	case value.VAL_NATIVE:
 		native, ok := actual.Obj.(*value.ObjNative)
-		return ok && native != nil && nativeSignatureMatchesRuntimeType(native.Signature, expected)
+		return ok && native != nil && native.Fn != nil && nativeSignatureMatchesRuntimeType(native.Signature, expected)
 	default:
 		return false
 	}
 }
 
 func nativeSignatureMatchesRuntimeType(signature *value.NativeSignature, expected *value.RuntimeTypeInfo) bool {
-	if signature == nil || signature.Variadic || signature.Arity != len(expected.Params) || len(signature.Params) != len(expected.Params) || len(expected.ParamIsRef) != len(expected.Params) || expected.Return == nil {
+	if signature == nil || !runtimeTypeComplete(expected, make(map[*value.RuntimeTypeInfo]bool)) || signature.Variadic || signature.Arity != len(expected.Params) || len(signature.Params) != len(expected.Params) || len(expected.ParamIsRef) != len(expected.Params) || expected.Return == nil {
 		return false
 	}
 	if signature.ReturnType == "" || signature.ReturnType != expected.Return.String() {
@@ -325,7 +325,9 @@ func runtimeTypeAccepts(expected, actual *value.RuntimeTypeInfo, seen map[runtim
 	}
 	seen[pair] = true
 	switch expected.Kind {
-	case value.TYPE_ARRAY, value.TYPE_REF, value.TYPE_CHANNEL:
+	case value.TYPE_ARRAY:
+		return (expected.Size == 0 || expected.Size == actual.Size) && runtimeTypeAccepts(expected.Element, actual.Element, seen)
+	case value.TYPE_REF, value.TYPE_CHANNEL:
 		return runtimeTypeAccepts(expected.Element, actual.Element, seen)
 	case value.TYPE_MAP:
 		return runtimeTypeAccepts(expected.Key, actual.Key, seen) && runtimeTypeAccepts(expected.Value, actual.Value, seen)
@@ -335,16 +337,87 @@ func runtimeTypeAccepts(expected, actual *value.RuntimeTypeInfo, seen map[runtim
 		if expected.CallableBare {
 			return true
 		}
-		if actual.CallableBare || len(expected.Params) != len(actual.Params) || len(expected.ParamIsRef) != len(expected.Params) || len(actual.ParamIsRef) != len(actual.Params) {
+		return runtimeTypesEqual(expected, actual, make(map[runtimeTypePair]bool))
+	default:
+		return true
+	}
+}
+
+func runtimeTypesEqual(left, right *value.RuntimeTypeInfo, seen map[runtimeTypePair]bool) bool {
+	if left == nil || right == nil || left.Kind != right.Kind {
+		return false
+	}
+	pair := runtimeTypePair{expected: left, actual: right}
+	if seen[pair] {
+		return true
+	}
+	seen[pair] = true
+	switch left.Kind {
+	case value.TYPE_ARRAY:
+		return left.Size == right.Size && runtimeTypesEqual(left.Element, right.Element, seen)
+	case value.TYPE_MAP:
+		return runtimeTypesEqual(left.Key, right.Key, seen) && runtimeTypesEqual(left.Value, right.Value, seen)
+	case value.TYPE_REF, value.TYPE_CHANNEL:
+		return runtimeTypesEqual(left.Element, right.Element, seen)
+	case value.TYPE_STRUCT:
+		return left.Name == right.Name
+	case value.TYPE_CALLABLE:
+		if left.CallableBare || right.CallableBare {
+			return left.CallableBare == right.CallableBare
+		}
+		if len(left.Params) != len(right.Params) || len(left.ParamIsRef) != len(left.Params) || len(right.ParamIsRef) != len(right.Params) {
 			return false
 		}
-		for i := range expected.Params {
-			if expected.ParamIsRef[i] != actual.ParamIsRef[i] || !runtimeTypeAccepts(expected.Params[i], actual.Params[i], seen) {
+		for i := range left.Params {
+			if left.ParamIsRef[i] != right.ParamIsRef[i] || !runtimeTypesEqual(left.Params[i], right.Params[i], seen) {
 				return false
 			}
 		}
-		return runtimeTypeAccepts(expected.Return, actual.Return, seen)
+		return runtimeTypesEqual(left.Return, right.Return, seen)
 	default:
 		return true
+	}
+}
+
+func runtimeTypeComplete(schema *value.RuntimeTypeInfo, seen map[*value.RuntimeTypeInfo]bool) bool {
+	if schema == nil {
+		return false
+	}
+	if seen[schema] {
+		return true
+	}
+	seen[schema] = true
+	switch schema.Kind {
+	case value.TYPE_ARRAY, value.TYPE_REF, value.TYPE_CHANNEL:
+		return runtimeTypeComplete(schema.Element, seen)
+	case value.TYPE_MAP:
+		return runtimeTypeComplete(schema.Key, seen) && runtimeTypeComplete(schema.Value, seen)
+	case value.TYPE_STRUCT:
+		if schema.Name == "" {
+			return false
+		}
+		for _, field := range schema.Fields {
+			if !runtimeTypeComplete(field, seen) {
+				return false
+			}
+		}
+		return true
+	case value.TYPE_CALLABLE:
+		if schema.CallableBare {
+			return true
+		}
+		if len(schema.ParamIsRef) != len(schema.Params) || !runtimeTypeComplete(schema.Return, seen) {
+			return false
+		}
+		for _, param := range schema.Params {
+			if !runtimeTypeComplete(param, seen) {
+				return false
+			}
+		}
+		return true
+	case value.TYPE_ANY, value.TYPE_NULL, value.TYPE_BOOL, value.TYPE_INT, value.TYPE_FLOAT, value.TYPE_STRING, value.TYPE_BYTES, value.TYPE_VOID:
+		return true
+	default:
+		return false
 	}
 }

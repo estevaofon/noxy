@@ -116,7 +116,7 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[string
 		if !ok {
 			return nil, false
 		}
-		return &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: element}, true
+		return &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: element, Size: typed.Size}, true
 	case *ast.MapType:
 		key, ok := c.runtimeTypeInfoWithStructs(typed.KeyType, structs)
 		if !ok {

@@ -65,3 +65,25 @@ func TestRuntimeTypeInfoHandlesRecursiveStructSchema(t *testing.T) {
 		t.Fatalf("recursive struct schema=%#v", got)
 	}
 }
+
+func TestRuntimeTypeInfoUsesCanonicalNestedCallableAndFixedArraySpelling(t *testing.T) {
+	c := New()
+	integer := &ast.PrimitiveType{Name: "int"}
+	callable := &ast.FunctionType{Params: []ast.NoxyType{integer}, Return: integer}
+	tests := []ast.NoxyType{
+		&ast.ArrayType{ElementType: callable},
+		&ast.MapType{KeyType: &ast.PrimitiveType{Name: "string"}, ValueType: callable},
+		&ast.RefType{ElementType: callable},
+		&ast.ChanType{ElementType: callable},
+	}
+	for _, staticType := range tests {
+		runtimeType := c.runtimeTypeInfo(staticType)
+		if runtimeType == nil || runtimeType.String() != staticType.String() {
+			t.Fatalf("runtime spelling=%q, want AST spelling %q", runtimeType.String(), staticType.String())
+		}
+	}
+	fixed := c.runtimeTypeInfo(&ast.ArrayType{ElementType: callable, Size: 4})
+	if fixed == nil || fixed.String() != "(func(int) -> int)[4]" {
+		t.Fatalf("fixed callable array spelling=%q", fixed.String())
+	}
+}

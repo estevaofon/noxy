@@ -71,6 +71,7 @@ type RuntimeTypeInfo struct {
 	Key          *RuntimeTypeInfo
 	Value        *RuntimeTypeInfo
 	Fields       map[string]*RuntimeTypeInfo
+	Size         int
 	Params       []*RuntimeTypeInfo
 	ParamIsRef   []bool
 	Return       *RuntimeTypeInfo
@@ -97,7 +98,14 @@ func (t *RuntimeTypeInfo) String() string {
 	case TYPE_BYTES:
 		return "bytes"
 	case TYPE_ARRAY:
-		return t.Element.String() + "[]"
+		element := t.Element.String()
+		if t.Element != nil && t.Element.Kind == TYPE_CALLABLE && !t.Element.CallableBare {
+			element = "(" + element + ")"
+		}
+		if t.Size > 0 {
+			return fmt.Sprintf("%s[%d]", element, t.Size)
+		}
+		return element + "[]"
 	case TYPE_MAP:
 		return "map[" + t.Key.String() + ", " + t.Value.String() + "]"
 	case TYPE_REF:
