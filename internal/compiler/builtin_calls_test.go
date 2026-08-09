@@ -217,15 +217,35 @@ use http_client select *`)
 	}
 }
 
-func TestCachedWildcardWrapperDoesNotShadowLaterUserBinding(t *testing.T) {
+func TestWildcardWrapperCollisionUsesDynamicCallPathOnFirstLoad(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+use http select *
+let url: string = "http://example.invalid"
+delete(url)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCachedWildcardWrapperShadowsLaterUserBinding(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 use http
 func delete(left: int, right: int) -> int
     return left + right
 end
 use http select *
-delete(20)`)
-	if err == nil || !strings.Contains(err.Error(), "function 'delete' expects 2 arguments, got 1") {
+let url: string = "http://example.invalid"
+delete(url)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlainWrapperImportDoesNotShadowUnqualifiedBuiltin(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+use http
+delete({"a": 1}, "a")`)
+	if err == nil || !strings.Contains(err.Error(), "not addressable") {
 		t.Fatalf("error=%v", err)
 	}
 }

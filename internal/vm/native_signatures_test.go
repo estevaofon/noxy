@@ -501,15 +501,37 @@ test_report(length(keys(mapping)))`)
 	testExpectedObject(t, 0, got)
 }
 
-func TestCachedWildcardWrapperKeepsLaterUserBindingAtRuntime(t *testing.T) {
-	got := runTypedFunctionProgram(t, `
+func TestWildcardWrapperFirstAndCachedLoadsExposeImportedBinding(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "first load", source: "use http select *\ntest_report(delete)"},
+		{name: "cached load", source: `
 use http
 func delete(left: int, right: int) -> int
     return left + right
 end
 use http select *
-test_report(delete(20, 22))`)
-	testExpectedObject(t, 42, got)
+test_report(delete)`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runTypedFunctionProgram(t, tt.source)
+			closure, ok := got.Obj.(*value.ObjClosure)
+			if got.Type != value.VAL_FUNCTION || !ok || closure.Function.Arity != 1 {
+				t.Fatalf("delete binding=%v, want imported one-argument closure", got)
+			}
+		})
+	}
+}
+
+func TestPlainWrapperImportDoesNotLeakUnqualifiedBindings(t *testing.T) {
+	got := runTypedFunctionProgram(t, "use http\ntest_report(delete)")
+	if got.Type != value.VAL_NATIVE {
+		t.Fatalf("delete binding=%v, want shared native builtin", got)
+	}
 }
 
 func TestContextualReferenceCallsForwardStoredReferences(t *testing.T) {

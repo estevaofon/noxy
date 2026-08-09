@@ -7,15 +7,21 @@ import (
 	"testing"
 )
 
-func TestEmbeddedWildcardExportsOnlyDirectModuleGlobals(t *testing.T) {
+func TestEmbeddedWildcardExportsIncludeDurableWrapperBindings(t *testing.T) {
 	compiler := New()
-	direct := compiler.discoverModuleExports("http_client")
+	direct, loadable := compiler.discoverModuleExports("http_client")
+	if !loadable {
+		t.Fatal("http_client was not loadable")
+	}
 	if _, ok := direct["delete"]; !ok {
 		t.Fatal("http_client direct delete export was not discovered")
 	}
-	wrapper := compiler.discoverModuleExports("http")
-	if _, ok := wrapper["delete"]; ok {
-		t.Fatal("http wildcard side effect was incorrectly modeled as a durable module export")
+	wrapper, loadable := compiler.discoverModuleExports("http")
+	if !loadable {
+		t.Fatal("http wrapper was not loadable")
+	}
+	if _, ok := wrapper["delete"]; !ok {
+		t.Fatal("http wildcard delete export was not discovered")
 	}
 }
 
@@ -26,7 +32,11 @@ func TestFileModuleDirectExportsAreDiscovered(t *testing.T) {
 		t.Fatal(err)
 	}
 	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
-	if _, ok := compiler.discoverModuleExports("collision")["delete"]; !ok {
+	exports, loadable := compiler.discoverModuleExports("collision")
+	if !loadable {
+		t.Fatal("direct file module was not loadable")
+	}
+	if _, ok := exports["delete"]; !ok {
 		t.Fatal("direct file-module export was not discovered")
 	}
 }
@@ -45,7 +55,10 @@ func TestDirectoryModuleExportsOnlyLoadableChildren(t *testing.T) {
 	}
 
 	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
-	exports := compiler.discoverModuleExports("bundle")
+	exports, loadable := compiler.discoverModuleExports("bundle")
+	if !loadable {
+		t.Fatal("directory module was not loadable")
+	}
 	if _, ok := exports["delete"]; !ok {
 		t.Fatal("loadable file child was not exported")
 	}
@@ -68,7 +81,7 @@ func TestDirectoryModuleWithUnloadableFileHasNoExports(t *testing.T) {
 	}
 
 	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
-	if exports := compiler.discoverModuleExports("broken"); len(exports) != 0 {
+	if exports, loadable := compiler.discoverModuleExports("broken"); loadable || len(exports) != 0 {
 		t.Fatalf("unloadable directory module exports=%v, want none", exports)
 	}
 }
@@ -105,8 +118,48 @@ func TestModuleExportDiscoveryRejectsWildcardImportCycles(t *testing.T) {
 				}
 			}
 			compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
-			if exports := compiler.discoverModuleExports(tt.root); len(exports) != 0 {
+			if exports, loadable := compiler.discoverModuleExports(tt.root); loadable || len(exports) != 0 {
 				t.Fatalf("cyclic module exports=%v, want none", exports)
+			}
+		})
+	}
+}
+
+func TestCompilerRejectsTopLevelWildcardImportCycles(t *testing.T) {
+	tests := []struct {
+		name       string
+		files      map[string]string
+		dependency string
+	}{
+		{
+			name: "self cycle",
+			files: map[string]string{
+				"cycle.nx": "use cycle select *\n",
+			},
+			dependency: "cycle",
+		},
+		{
+			name: "mutual cycle",
+			files: map[string]string{
+				"left.nx":  "use right select *\n",
+				"right.nx": "use left select *\n",
+			},
+			dependency: "left",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, source := range tt.files {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("NOXY_PATH", root)
+			_, err := compileFunctionSource(t, "use "+tt.dependency+" select *")
+			if err == nil {
+				t.Fatal("compiler accepted a cyclic top-level wildcard import")
 			}
 		})
 	}
@@ -119,7 +172,7 @@ func TestFileModuleWithMissingDirectImportHasNoExports(t *testing.T) {
 		t.Fatal(err)
 	}
 	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
-	if exports := compiler.discoverModuleExports("collision"); len(exports) != 0 {
+	if exports, loadable := compiler.discoverModuleExports("collision"); loadable || len(exports) != 0 {
 		t.Fatalf("module with missing direct import exports=%v, want none", exports)
 	}
 }
@@ -134,7 +187,70 @@ func TestFileModuleWithMissingSelectedExportHasNoExports(t *testing.T) {
 		t.Fatal(err)
 	}
 	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
-	if exports := compiler.discoverModuleExports("collision"); len(exports) != 0 {
+	if exports, loadable := compiler.discoverModuleExports("collision"); loadable || len(exports) != 0 {
 		t.Fatalf("module with missing selected export exports=%v, want none", exports)
+	}
+}
+
+func TestTopLevelWildcardDependencyMustBeLoadable(t *testing.T) {
+	tests := []struct {
+		name       string
+		dependency string
+		wantDelete bool
+	}{
+		{name: "missing", dependency: "definitely_missing_task5_module"},
+		{name: "compile invalid", dependency: "broken"},
+		{name: "valid empty", dependency: "empty", wantDelete: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "broken.nx"), []byte("let marker: int = \"wrong\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "empty.nx"), []byte("// deliberately empty\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wrapper := "use " + tt.dependency + " select *\nfunc delete(url: string) -> void\nend\n"
+			if err := os.WriteFile(filepath.Join(root, "wrapper.nx"), []byte(wrapper), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
+			exports, loadable := compiler.discoverModuleExports("wrapper")
+			_, hasDelete := exports["delete"]
+			if loadable != tt.wantDelete || hasDelete != tt.wantDelete {
+				t.Fatalf("exports=%v, loadable=%v, delete present=%v, want %v", exports, loadable, hasDelete, tt.wantDelete)
+			}
+		})
+	}
+}
+
+func TestFunctionBodyOnlyWildcardDoesNotAffectModuleLoadability(t *testing.T) {
+	tests := []struct {
+		name       string
+		dependency string
+	}{
+		{name: "missing", dependency: "definitely_missing_task5_module"},
+		{name: "self cycle", dependency: "safe"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			source := "func unused() -> void\n    use " + tt.dependency + " select *\nend\nfunc delete(url: string) -> void\nend\n"
+			if err := os.WriteFile(filepath.Join(root, "safe.nx"), []byte(source), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
+			exports, loadable := compiler.discoverModuleExports("safe")
+			if !loadable {
+				t.Fatal("function-body-only wildcard invalidated module loadability")
+			}
+			if _, ok := exports["delete"]; !ok {
+				t.Fatalf("function-body-only wildcard invalidated module exports: %v", exports)
+			}
+		})
 	}
 }

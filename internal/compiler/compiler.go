@@ -1333,7 +1333,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 3. Handle Result
 		if n.SelectAll {
 			// use pkg select *
-			for name := range c.discoverModuleExports(n.Module) {
+			exports, loadable := c.discoverModuleExports(n.Module)
+			if !loadable && c.enclosing == nil {
+				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'", n.Token.Line, n.Module)
+			}
+			for name := range exports {
 				c.globals[name] = nil
 			}
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))

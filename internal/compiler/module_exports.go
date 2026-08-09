@@ -11,11 +11,10 @@ import (
 )
 
 type moduleDiscoveryState struct {
-	active   map[string]bool
-	failures int
+	active map[string]bool
 }
 
-func (c *Compiler) discoverModuleExports(module string) map[string]struct{} {
+func (c *Compiler) discoverModuleExports(module string) (map[string]struct{}, bool) {
 	state := c.moduleDiscovery
 	if state == nil {
 		state = &moduleDiscoveryState{active: make(map[string]bool)}
@@ -23,17 +22,17 @@ func (c *Compiler) discoverModuleExports(module string) map[string]struct{} {
 	return c.discoverModuleExportsWithState(module, state)
 }
 
-func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDiscoveryState) map[string]struct{} {
+func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDiscoveryState) (map[string]struct{}, bool) {
 	exports := make(map[string]struct{})
 	program, directoryExports, ok := c.loadModuleDeclarations(module, state)
 	if !ok {
-		return exports
+		return exports, false
 	}
 	for _, name := range directoryExports {
 		exports[name] = struct{}{}
 	}
 	if program == nil {
-		return exports
+		return exports, true
 	}
 
 	for _, statement := range program.Statements {
@@ -47,8 +46,13 @@ func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDi
 		case *ast.UseStmt:
 			switch {
 			case declaration.SelectAll:
-				// OP_IMPORT_FROM_ALL writes shared VM globals, not the module's
-				// returned moduleGlobals map, so wildcard side effects are not exports.
+				imported, loadable := c.discoverModuleExportsWithState(declaration.Module, state)
+				if !loadable {
+					return make(map[string]struct{}), false
+				}
+				for name := range imported {
+					exports[name] = struct{}{}
+				}
 			case len(declaration.Selectors) > 0:
 				for _, name := range declaration.Selectors {
 					exports[name] = struct{}{}
@@ -63,13 +67,14 @@ func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDi
 			}
 		}
 	}
-	return exports
+	return exports, true
 }
 
 func (c *Compiler) predeclareImport(declaration *ast.UseStmt) {
 	switch {
 	case declaration.SelectAll:
-		for name := range c.discoverModuleExports(declaration.Module) {
+		exports, _ := c.discoverModuleExports(declaration.Module)
+		for name := range exports {
 			c.globals[name] = nil
 		}
 	case len(declaration.Selectors) > 0:
@@ -88,7 +93,6 @@ func (c *Compiler) predeclareImport(declaration *ast.UseStmt) {
 
 func (c *Compiler) loadModuleDeclarations(module string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
 	if state.active[module] {
-		state.failures++
 		return nil, nil, false
 	}
 	state.active[module] = true
@@ -191,14 +195,22 @@ func (c *Compiler) parseModuleDeclarations(content []byte, fileName string, stat
 	if len(p.Errors()) > 0 {
 		return nil, nil, false
 	}
-	failuresBefore := state.failures
 	for _, statement := range program.Statements {
 		declaration, ok := statement.(*ast.UseStmt)
-		if !ok || declaration.SelectAll {
+		if !ok {
+			continue
+		}
+		if declaration.SelectAll {
+			if _, loadable := c.discoverModuleExportsWithState(declaration.Module, state); !loadable {
+				return nil, nil, false
+			}
 			continue
 		}
 		if len(declaration.Selectors) > 0 {
-			exports := c.discoverModuleExportsWithState(declaration.Module, state)
+			exports, loadable := c.discoverModuleExportsWithState(declaration.Module, state)
+			if !loadable {
+				return nil, nil, false
+			}
 			for _, selector := range declaration.Selectors {
 				if _, exists := exports[selector]; !exists {
 					return nil, nil, false
@@ -213,9 +225,6 @@ func (c *Compiler) parseModuleDeclarations(content []byte, fileName string, stat
 	validator := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), fileName)
 	validator.moduleDiscovery = state
 	if _, _, err := validator.Compile(program); err != nil {
-		return nil, nil, false
-	}
-	if state.failures != failuresBefore {
 		return nil, nil, false
 	}
 	return program, nil, true

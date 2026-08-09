@@ -4643,7 +4643,11 @@ func (vm *VM) run(minFrameCount int) error {
 				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
 					for k, v := range modMap.Data {
 						if keyStr, ok := k.(string); ok {
-							vm.SetGlobal(keyStr, v)
+							if frame.Globals != nil {
+								frame.Globals[keyStr] = v
+							} else {
+								vm.SetGlobal(keyStr, v)
+							}
 						}
 					}
 				} else {
