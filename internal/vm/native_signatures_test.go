@@ -240,7 +240,7 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 	moduleTarget := value.NewMapWithData(map[string]value.Value{"old": value.NewInt(0)})
 	moduleGlobals := map[string]value.Value{"target": moduleTarget}
 	machine.currentFrame = &CallFrame{Globals: moduleGlobals}
-	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target"}}
+	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target", GlobalOwner: &moduleGlobals}}
 
 	jsonLoadsValue, ok := machine.GetGlobal("json_loads")
 	if !ok {
@@ -261,6 +261,7 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 
 func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	machine := New()
+	missingGlobals := map[string]value.Value{}
 	instance := value.NewInstance(&value.ObjStruct{Name: "Holder", Fields: []string{"known"}})
 	instance.Obj.(*value.ObjInstance).Fields["known"] = value.NewInt(1)
 	tests := []struct {
@@ -269,7 +270,7 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	}{
 		{
 			name: "missing global",
-			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing"},
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &missingGlobals},
 		},
 		{
 			name: "missing property",

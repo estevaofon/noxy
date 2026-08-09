@@ -440,16 +440,11 @@ func jsonReferenceStorage(vm *VM, ref *value.ObjRef) (value.Value, jsonSetter, b
 	}
 	switch ref.RefType {
 	case value.REF_GLOBAL:
-		if vm.currentFrame != nil && vm.currentFrame.Globals != nil {
-			if stored, ok := vm.currentFrame.Globals[ref.Name]; ok {
-				return stored, func(updated value.Value) { vm.currentFrame.Globals[ref.Name] = updated }, true
-			}
-		}
-		stored, ok := vm.GetGlobal(ref.Name)
-		if !ok {
+		stored, err := vm.lookupGlobalReferenceValue(ref)
+		if err != nil {
 			return value.Value{}, nil, false
 		}
-		return stored, func(updated value.Value) { vm.SetGlobal(ref.Name, updated) }, true
+		return stored, func(updated value.Value) { _ = vm.storeGlobalReferenceValue(ref, updated) }, true
 	case value.REF_UPVALUE:
 		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
 			return value.Value{}, nil, false

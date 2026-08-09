@@ -298,7 +298,8 @@ type ObjRef struct {
 	RefType     RefType
 	JSONDynamic bool // Declared any target: JSON may replace its concrete runtime type.
 	TargetType  *RuntimeTypeInfo
-	Name        string      // For Global or Property Name
+	Name        string // For Global or Property Name
+	GlobalOwner *map[string]Value
 	Ptr         *Value      // For Local (unsafe if escapes)
 	Upvalue     *ObjUpvalue // For Local (safe, captured)
 	Container   Value       // For Property/Index (Object, Array, Map)

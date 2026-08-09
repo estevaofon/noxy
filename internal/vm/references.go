@@ -19,19 +19,39 @@ func referenceMapKey(index value.Value) (interface{}, error) {
 	}
 }
 
-func (vm *VM) lookupReferenceValue(ref *value.ObjRef, frameGlobals map[string]value.Value) (value.Value, error) {
+func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
+	if ref.GlobalOwner == nil || *ref.GlobalOwner == nil {
+		return value.Value{}, fmt.Errorf("invalid global reference owner")
+	}
+	if ref.GlobalOwner == &vm.shared.Globals {
+		if result, ok := vm.GetGlobal(ref.Name); ok {
+			return result, nil
+		}
+	} else if result, ok := (*ref.GlobalOwner)[ref.Name]; ok {
+		return result, nil
+	}
+	return value.Value{}, fmt.Errorf("undefined global variable '%s'", ref.Name)
+}
+
+func (vm *VM) storeGlobalReferenceValue(ref *value.ObjRef, updated value.Value) error {
+	if ref.GlobalOwner == nil || *ref.GlobalOwner == nil {
+		return fmt.Errorf("invalid global reference owner")
+	}
+	if ref.GlobalOwner == &vm.shared.Globals {
+		vm.SetGlobal(ref.Name, updated)
+		return nil
+	}
+	(*ref.GlobalOwner)[ref.Name] = updated
+	return nil
+}
+
+func (vm *VM) lookupReferenceValue(ref *value.ObjRef) (value.Value, error) {
 	if ref == nil {
 		return value.Value{}, fmt.Errorf("invalid reference value")
 	}
 	switch ref.RefType {
 	case value.REF_GLOBAL:
-		if result, ok := frameGlobals[ref.Name]; ok {
-			return result, nil
-		}
-		if result, ok := vm.GetGlobal(ref.Name); ok {
-			return result, nil
-		}
-		return value.Value{}, fmt.Errorf("undefined global variable '%s'", ref.Name)
+		return vm.lookupGlobalReferenceValue(ref)
 	case value.REF_UPVALUE:
 		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
 			return value.Value{}, fmt.Errorf("invalid upvalue reference")
@@ -86,13 +106,9 @@ func (vm *VM) resolveReferenceValue(input value.Value) (value.Value, error) {
 		return value.Value{}, fmt.Errorf("expected reference value, got %s", runtimeValueMode(input))
 	}
 
-	var frameGlobals map[string]value.Value
-	if vm.currentFrame != nil {
-		frameGlobals = vm.currentFrame.Globals
-	}
 	ref, ok := input.Obj.(*value.ObjRef)
 	if !ok || ref == nil {
 		return value.Value{}, fmt.Errorf("invalid reference value")
 	}
-	return vm.lookupReferenceValue(ref, frameGlobals)
+	return vm.lookupReferenceValue(ref)
 }

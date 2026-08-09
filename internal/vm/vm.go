@@ -3378,21 +3378,12 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 	// Dereference
 	switch ref.RefType {
 	case value.REF_GLOBAL:
-		if vm.currentFrame != nil && vm.currentFrame.Globals != nil {
-			if frameValue, ok := vm.currentFrame.Globals[ref.Name]; ok {
-				currentVal = frameValue
-				store = func(updated value.Value) {
-					vm.currentFrame.Globals[ref.Name] = updated
-				}
-				break
-			}
-		}
-		sharedValue, ok := vm.GetGlobal(ref.Name)
-		if !ok {
+		var err error
+		currentVal, err = vm.lookupGlobalReferenceValue(ref)
+		if err != nil {
 			return false
 		}
-		currentVal = sharedValue
-		store = func(updated value.Value) { vm.SetGlobal(ref.Name, updated) }
+		store = func(updated value.Value) { _ = vm.storeGlobalReferenceValue(ref, updated) }
 	case value.REF_UPVALUE:
 		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
 			return false
@@ -3762,11 +3753,16 @@ func (vm *VM) run(minFrameCount int) error {
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
+			owner := &frame.Globals
+			if frame.Globals == nil {
+				owner = &vm.shared.Globals
+			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
-					RefType: value.REF_GLOBAL,
-					Name:    name,
+					RefType:     value.REF_GLOBAL,
+					Name:        name,
+					GlobalOwner: owner,
 				},
 			})
 
@@ -3784,12 +3780,9 @@ func (vm *VM) run(minFrameCount int) error {
 				ref := container.Obj.(*value.ObjRef)
 				switch ref.RefType {
 				case value.REF_GLOBAL:
-					val, ok := frame.Globals[ref.Name]
-					if !ok {
-						val, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
+					val, err := vm.lookupGlobalReferenceValue(ref)
+					if err != nil {
+						return vm.runtimeError(c, ip, "%s", err)
 					}
 					container = val
 				case value.REF_UPVALUE:
@@ -3953,7 +3946,7 @@ func (vm *VM) run(minFrameCount int) error {
 				// Not a ref - pass through as-is (already dereferenced)
 				vm.push(refVal)
 			} else {
-				resolved, err := vm.lookupReferenceValue(refVal.Obj.(*value.ObjRef), frame.Globals)
+				resolved, err := vm.lookupReferenceValue(refVal.Obj.(*value.ObjRef))
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
@@ -3975,11 +3968,8 @@ func (vm *VM) run(minFrameCount int) error {
 
 			switch ref.RefType {
 			case value.REF_GLOBAL:
-				// Global assignment
-				if _, ok := frame.Globals[ref.Name]; ok {
-					frame.Globals[ref.Name] = val
-				} else {
-					vm.SetGlobal(ref.Name, val)
+				if err := vm.storeGlobalReferenceValue(ref, val); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
 			case value.REF_UPVALUE:
 				// Write to Upvalue
@@ -4030,11 +4020,8 @@ func (vm *VM) run(minFrameCount int) error {
 
 			switch ref.RefType {
 			case value.REF_GLOBAL:
-				// Global assignment
-				if _, ok := frame.Globals[ref.Name]; ok {
-					frame.Globals[ref.Name] = val
-				} else {
-					vm.SetGlobal(ref.Name, val)
+				if err := vm.storeGlobalReferenceValue(ref, val); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
 			case value.REF_UPVALUE:
 				*ref.Upvalue.Location = val
@@ -4756,12 +4743,9 @@ func (vm *VM) run(minFrameCount int) error {
 				ref := instanceVal.Obj.(*value.ObjRef)
 				switch ref.RefType {
 				case value.REF_GLOBAL:
-					v, ok := frame.Globals[ref.Name]
-					if !ok {
-						v, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
+					v, err := vm.lookupGlobalReferenceValue(ref)
+					if err != nil {
+						return vm.runtimeError(c, ip, "%s", err)
 					}
 					instanceVal = v
 				case value.REF_UPVALUE:
@@ -4822,12 +4806,9 @@ func (vm *VM) run(minFrameCount int) error {
 				ref := instanceVal.Obj.(*value.ObjRef)
 				switch ref.RefType {
 				case value.REF_GLOBAL:
-					v, ok := frame.Globals[ref.Name]
-					if !ok {
-						v, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
+					v, err := vm.lookupGlobalReferenceValue(ref)
+					if err != nil {
+						return vm.runtimeError(c, ip, "%s", err)
 					}
 					instanceVal = v
 				case value.REF_UPVALUE:
@@ -4878,12 +4859,9 @@ func (vm *VM) run(minFrameCount int) error {
 				ref := instanceVal.Obj.(*value.ObjRef)
 				switch ref.RefType {
 				case value.REF_GLOBAL:
-					v, ok := frame.Globals[ref.Name]
-					if !ok {
-						v, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
+					v, err := vm.lookupGlobalReferenceValue(ref)
+					if err != nil {
+						return vm.runtimeError(c, ip, "%s", err)
 					}
 					instanceVal = v
 				case value.REF_UPVALUE:
@@ -4921,10 +4899,8 @@ func (vm *VM) run(minFrameCount int) error {
 			ref := fieldVal.Obj.(*value.ObjRef)
 			switch ref.RefType {
 			case value.REF_GLOBAL:
-				if _, ok := frame.Globals[ref.Name]; ok {
-					frame.Globals[ref.Name] = val
-				} else {
-					vm.SetGlobal(ref.Name, val)
+				if err := vm.storeGlobalReferenceValue(ref, val); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
 			case value.REF_UPVALUE:
 				*ref.Upvalue.Location = val

@@ -45,7 +45,7 @@ func TestResolveReferenceValueRejectsMalformedReferences(t *testing.T) {
 }
 
 func TestLookupReferenceValueRejectsNilReference(t *testing.T) {
-	if _, err := New().lookupReferenceValue(nil, nil); err == nil {
+	if _, err := New().lookupReferenceValue(nil); err == nil {
 		t.Fatal("nil reference resolved without error")
 	}
 }
