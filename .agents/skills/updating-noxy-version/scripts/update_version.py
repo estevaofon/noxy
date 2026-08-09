@@ -52,7 +52,7 @@ def normalize_version(value: str) -> tuple[str, tuple[int, int, int]]:
 
 
 def normalize_date(value: str | None) -> str:
-    normalized = value or date.today().isoformat()
+    normalized = date.today().isoformat() if value is None else value
     if not RELEASE_DATE.fullmatch(normalized):
         raise UpdateError(f"invalid release date: {normalized!r}; expected YYYY-MM-DD")
     try:

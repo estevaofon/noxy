@@ -87,6 +87,14 @@ class UpdateVersionTests(unittest.TestCase):
         with self.assertRaisesRegex(UpdateError, "release date"):
             execute_update(self.root, "1.6.0", "09-08-2026", False)
 
+    def test_rejects_explicit_empty_release_date_without_writing(self) -> None:
+        before = snapshot(self.root)
+
+        with self.assertRaisesRegex(UpdateError, "release date"):
+            execute_update(self.root, "1.6.0", "", False)
+
+        self.assertEqual(snapshot(self.root), before)
+
     def test_rejects_equal_and_lower_versions_without_writing(self) -> None:
         for target in ("1.5.0", "1.4.9"):
             with self.subTest(target=target):
