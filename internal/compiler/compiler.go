@@ -1714,6 +1714,18 @@ func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
 }
 
 func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.NoxyType, error) {
+	targetType, err := c.compileReferenceArgumentValue(expression)
+	if err != nil || targetType == nil {
+		return targetType, err
+	}
+	if runtimeType := c.runtimeTypeInfo(targetType); runtimeType != nil {
+		typeConstant := c.makeConstant(value.NewRuntimeTypeInfo(runtimeType))
+		c.emitBytes(byte(chunk.OP_MARK_REF_TARGET_TYPE), byte(typeConstant))
+	}
+	return targetType, nil
+}
+
+func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast.NoxyType, error) {
 	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
 		expression = prefix.Right
 	}

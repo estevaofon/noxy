@@ -55,6 +55,51 @@ func TestTypedNativeAcceptsExplicitReference(t *testing.T) {
 	}
 }
 
+func TestReferenceTargetMetadataPreservesForwardedReferenceIdentity(t *testing.T) {
+	source := `
+let value: int = 1
+let forwarded: ref int = ref value
+typed_test(ref forwarded)`
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.New().Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	machine := New()
+	var received *value.ObjRef
+	machine.DefineNativeWithSignature("typed_test", value.NativeSignature{
+		Arity:      1,
+		Params:     []value.ParamInfo{{IsRef: true, TypeName: "ref int"}},
+		ReturnType: "void",
+	}, func(args []value.Value) value.Value {
+		received, _ = args[0].Obj.(*value.ObjRef)
+		return value.NewNull()
+	})
+	if err := machine.Interpret(code); err != nil {
+		t.Fatal(err)
+	}
+	forwarded, ok := machine.GetGlobal("forwarded")
+	if !ok {
+		t.Fatal("missing forwarded reference")
+	}
+	stored, ok := forwarded.Obj.(*value.ObjRef)
+	if forwarded.Type != value.VAL_REF || !ok || stored == nil {
+		t.Fatalf("forwarded=%v, want reference", forwarded)
+	}
+	if received != stored {
+		t.Fatal("target metadata marker copied or rebound the forwarded reference")
+	}
+	if stored.TargetType == nil || stored.TargetType.Kind != value.TYPE_INT {
+		t.Fatalf("target metadata=%v, want int", stored.TargetType)
+	}
+}
+
 func TestTypedNativeRejectsIncorrectExactArityBeforeInvocation(t *testing.T) {
 	called := false
 	sig := value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int"}}, ReturnType: "void"}
@@ -311,14 +356,25 @@ func TestPopulateTargetSupportsCompatibleAndNullScalarReplacement(t *testing.T) 
 		}
 	})
 
-	t.Run("null remains dynamic", func(t *testing.T) {
+	t.Run("marked dynamic null", func(t *testing.T) {
 		stored := value.NewNull()
-		target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+		target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored, JSONDynamic: true}}
 		if !populateTarget(New(), target, float64(42)) {
 			t.Fatal("null target rejected dynamic scalar replacement")
 		}
 		if stored.Type != value.VAL_INT || stored.AsInt != 42 {
 			t.Fatalf("stored=%v, want int 42", stored)
+		}
+	})
+
+	t.Run("untyped null is conservative", func(t *testing.T) {
+		stored := value.NewNull()
+		target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+		if populateTarget(New(), target, float64(42)) {
+			t.Fatal("untyped null target accepted an unprovable replacement")
+		}
+		if stored.Type != value.VAL_NULL {
+			t.Fatalf("stored=%v, want unchanged null", stored)
 		}
 	})
 }
@@ -340,6 +396,135 @@ let target: Holder = Holder("before")
 json_loads("{\"data\":42}", target)
 test_report(target.data)`)
 	testExpectedObject(t, 42, got)
+}
+
+func TestTypedJSONLoadsRejectsInvalidArrayElementAtomically(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let target: int[] = [1, 2]
+let ok: bool = json_loads("[10,\"bad\"]", target)
+if ok then
+    test_report(999)
+else
+    test_report(target[0] * 10 + target[1])
+end`)
+	testExpectedObject(t, 12, got)
+}
+
+func TestTypedJSONLoadsRejectsInvalidMapValueAtomically(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let target: map[string, int] = {"a": 1, "b": 2}
+let ok: bool = json_loads("{\"a\":10,\"b\":\"bad\"}", target)
+if ok then
+    test_report(999)
+else
+    test_report(target["a"] * 10 + target["b"])
+end`)
+	testExpectedObject(t, 12, got)
+}
+
+func TestTypedJSONLoadsPreservesReferenceElementTypeForNullSlot(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let target: (ref int)[] = [null]
+let ok: bool = json_loads("[\"bad\"]", target)
+if ok then
+    test_report(999)
+elif target[0] == null then
+    test_report(42)
+else
+    test_report(0)
+end`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
+	t.Run("fill null slot with referent value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let target: (ref int)[] = [null]
+let ok: bool = json_loads("[42]", target)
+if ok then
+    test_report(target[0])
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("json null clears reference slot", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let backing: int = 7
+let target: (ref int)[] = [ref backing]
+let ok: bool = json_loads("[null]", target)
+if ok then
+    if target[0] == null then
+        test_report(backing)
+    else
+        test_report(998)
+    end
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 7, got)
+	})
+}
+
+func TestTypedJSONLoadsRejectsPartialStructAtomically(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Pair
+    a: int
+    b: int
+end
+let target: Pair = Pair(1, 2)
+let ok: bool = json_loads("{\"a\":10,\"b\":\"bad\"}", target)
+if ok then
+    test_report(999)
+else
+    test_report(target.a * 10 + target.b)
+end`)
+	testExpectedObject(t, 12, got)
+}
+
+func TestTypedJSONLoadsReplacesNonNullAnyComposite(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let target: any = [1]
+let ok: bool = json_loads("42", target)
+if ok then
+    test_report(target)
+else
+    test_report(999)
+end`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestTypedJSONLoadsPreservesCompositeIdentityForAliases(t *testing.T) {
+	t.Run("struct", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Pair
+    a: int
+    b: int
+end
+let target: Pair = Pair(1, 2)
+let alias: ref Pair = ref target
+let ok: bool = json_loads("{\"a\":3,\"b\":4}", target)
+if ok then
+    test_report(alias.a * 10 + alias.b)
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 34, got)
+	})
+
+	t.Run("array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let target: int[] = [1, 2]
+let alias: ref int[] = ref target
+let ok: bool = json_loads("[3,4]", target)
+if ok then
+    test_report(alias[0] * 10 + alias[1])
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 34, got)
+	})
 }
 
 func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {

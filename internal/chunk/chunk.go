@@ -83,6 +83,7 @@ const (
 	OP_COPY
 	OP_ADDR
 	OP_MARK_REF_JSON_DYNAMIC
+	OP_MARK_REF_TARGET_TYPE
 )
 
 func (op OpCode) String() string {
@@ -197,6 +198,8 @@ func (op OpCode) String() string {
 		return "OP_DEREF"
 	case OP_MARK_REF_JSON_DYNAMIC:
 		return "OP_MARK_REF_JSON_DYNAMIC"
+	case OP_MARK_REF_TARGET_TYPE:
+		return "OP_MARK_REF_TARGET_TYPE"
 	case OP_STORE_VIA_REF:
 		return "OP_STORE_VIA_REF"
 	case OP_DUP:
@@ -370,6 +373,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_SET_INDEX", offset)
 	case OP_GET_PROPERTY:
 		return c.constantInstruction("OP_GET_PROPERTY", offset)
+	case OP_MARK_REF_TARGET_TYPE:
+		return c.constantInstruction("OP_MARK_REF_TARGET_TYPE", offset)
 	case OP_SET_PROPERTY:
 		return c.constantInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:

@@ -3345,62 +3345,12 @@ func populateTarget(vm *VM, target value.Value, data interface{}) bool {
 }
 
 func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
-	if inst, ok := currentVal.Obj.(*value.ObjInstance); ok {
-		dataMap, ok := data.(map[string]interface{})
-		if !ok {
-			return false
-		}
-		for _, fieldName := range inst.Struct.Fields {
-			if val, exists := dataMap[fieldName]; exists {
-				// Check if field is instance -> recurse
-				fieldType := inst.Fields[fieldName]
-				if inst.Struct.JSONDynamicFields[fieldName] {
-					inst.Fields[fieldName] = goValToNoxy(val)
-					continue
-				}
-				if fieldType.Type == value.VAL_OBJ {
-					if _, isInst := fieldType.Obj.(*value.ObjInstance); isInst {
-						if !populateObj(vm, fieldType, val) {
-							return false
-						}
-						continue
-					}
-				}
-				replacement := goValToNoxy(val)
-				if !jsonReplacementCompatible(fieldType, replacement) {
-					return false
-				}
-				inst.Fields[fieldName] = replacement
-			}
-		}
-		return true
-	} else if m, ok := currentVal.Obj.(*value.ObjMap); ok {
-		dataMap, ok := data.(map[string]interface{})
-		if !ok {
-			return false
-		}
-		// Clear logic? Or merge? Go unmarshal merges.
-		for k, v := range dataMap {
-			m.Data[k] = goValToNoxy(v)
-		}
-		return true
-	} else if arr, ok := currentVal.Obj.(*value.ObjArray); ok {
-		dataArr, ok := data.([]interface{})
-		if !ok {
-			return false
-		}
-		// Replace array content (slice behavior)
-		// Or should we merge? slice unmarshal replaces.
-		// But we can't resize easily in place?
-		// Actually we can just replace Elements slice.
-		newElems := make([]value.Value, len(dataArr))
-		for i, el := range dataArr {
-			newElems[i] = goValToNoxy(el)
-		}
-		arr.Elements = newElems
-		return true
+	commit, ok := prepareJSONMutation(vm, currentVal, nil, data, nil)
+	if !ok {
+		return false
 	}
-	return false
+	commit()
+	return true
 }
 
 // Helper: Populate a Reference with Go Data (Deeply)
@@ -3479,23 +3429,18 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 		return false
 	}
 
-	// Logic to update: if object, update in place
-	if currentVal.Type == value.VAL_OBJ {
-		switch currentVal.Obj.(type) {
-		case *value.ObjInstance, *value.ObjMap, *value.ObjArray:
-			return populateObj(vm, currentVal, data)
-		}
-	}
-
-	// Replace reference
 	if store == nil {
 		return false
 	}
-	replacement := goValToNoxy(data)
-	if !ref.JSONDynamic && !jsonReplacementCompatible(currentVal, replacement) {
+	if ref.JSONDynamic {
+		store(goValToNoxy(data))
+		return true
+	}
+	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType, data, store)
+	if !ok {
 		return false
 	}
-	store(replacement)
+	commit()
 	return true
 }
 
@@ -3960,6 +3905,24 @@ func (vm *VM) run(minFrameCount int) error {
 				return vm.runtimeError(c, ip, "dynamic target marker requires a reference")
 			}
 			ref.JSONDynamic = true
+
+		case chunk.OP_MARK_REF_TARGET_TYPE:
+			index := c.Code[ip]
+			ip++
+			typeValue := c.Constants[index]
+			targetType, ok := typeValue.Obj.(*value.RuntimeTypeInfo)
+			if typeValue.Type != value.VAL_OBJ || !ok || targetType == nil {
+				return vm.runtimeError(c, ip, "reference target marker requires runtime type metadata")
+			}
+			refValue := vm.peek(0)
+			if refValue.Type == value.VAL_NULL {
+				continue
+			}
+			ref, ok := refValue.Obj.(*value.ObjRef)
+			if refValue.Type != value.VAL_REF || !ok || ref == nil {
+				return vm.runtimeError(c, ip, "reference target marker requires a reference")
+			}
+			ref.TargetType = targetType
 
 		case chunk.OP_DEREF:
 			refVal := vm.pop()

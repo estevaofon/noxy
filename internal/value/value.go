@@ -41,6 +41,65 @@ type NativeSignature struct {
 	ReturnType string
 }
 
+type RuntimeTypeKind uint8
+
+const (
+	TYPE_ANY RuntimeTypeKind = iota
+	TYPE_NULL
+	TYPE_BOOL
+	TYPE_INT
+	TYPE_FLOAT
+	TYPE_STRING
+	TYPE_BYTES
+	TYPE_ARRAY
+	TYPE_MAP
+	TYPE_REF
+	TYPE_STRUCT
+)
+
+// RuntimeTypeInfo is narrow metadata carried by references at typed native
+// boundaries. It is not a new parameter mode and does not affect Value identity.
+type RuntimeTypeInfo struct {
+	Kind    RuntimeTypeKind
+	Name    string
+	Element *RuntimeTypeInfo
+	Key     *RuntimeTypeInfo
+	Value   *RuntimeTypeInfo
+	Fields  map[string]*RuntimeTypeInfo
+}
+
+func (t *RuntimeTypeInfo) String() string {
+	if t == nil {
+		return "unknown"
+	}
+	switch t.Kind {
+	case TYPE_ANY:
+		return "any"
+	case TYPE_NULL:
+		return "null"
+	case TYPE_BOOL:
+		return "bool"
+	case TYPE_INT:
+		return "int"
+	case TYPE_FLOAT:
+		return "float"
+	case TYPE_STRING:
+		return "string"
+	case TYPE_BYTES:
+		return "bytes"
+	case TYPE_ARRAY:
+		return t.Element.String() + "[]"
+	case TYPE_MAP:
+		return "map[" + t.Key.String() + ", " + t.Value.String() + "]"
+	case TYPE_REF:
+		return "ref " + t.Element.String()
+	case TYPE_STRUCT:
+		return t.Name
+	default:
+		return "unknown"
+	}
+}
+
 type ObjFunction struct {
 	Name         string
 	Arity        int
@@ -237,7 +296,8 @@ const (
 
 type ObjRef struct {
 	RefType     RefType
-	JSONDynamic bool        // Declared any target: JSON may replace its concrete runtime type.
+	JSONDynamic bool // Declared any target: JSON may replace its concrete runtime type.
+	TargetType  *RuntimeTypeInfo
 	Name        string      // For Global or Property Name
 	Ptr         *Value      // For Local (unsafe if escapes)
 	Upvalue     *ObjUpvalue // For Local (safe, captured)
@@ -338,6 +398,10 @@ func NewNull() Value {
 }
 
 func NewString(v string) Value {
+	return Value{Type: VAL_OBJ, Obj: v}
+}
+
+func NewRuntimeTypeInfo(v *RuntimeTypeInfo) Value {
 	return Value{Type: VAL_OBJ, Obj: v}
 }
 
