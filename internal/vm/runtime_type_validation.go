@@ -21,7 +21,7 @@ func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool 
 		if item.Type == value.VAL_REF {
 			return false
 		}
-		return runtimeValueMatchesType(item, elementType)
+		return vm.runtimeValueMatchesType(item, elementType)
 	}
 	if item.Type == value.VAL_NULL {
 		return true
@@ -33,10 +33,10 @@ func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool 
 	if err != nil {
 		return false
 	}
-	return runtimeValueMatchesType(resolved, elementType.Element)
+	return vm.runtimeValueMatchesType(resolved, elementType.Element)
 }
 
-func runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo) bool {
+func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo) bool {
 	if expected == nil || expected.Kind == value.TYPE_ANY {
 		return true
 	}
@@ -66,7 +66,7 @@ func runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo
 			return false
 		}
 		for _, element := range array.Elements {
-			if !runtimeValueMatchesType(element, expected.Element) {
+			if !vm.runtimeValueMatchesType(element, expected.Element) {
 				return false
 			}
 		}
@@ -77,14 +77,18 @@ func runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo
 			return false
 		}
 		for key, element := range mapping.Data {
-			if !runtimeMapKeyMatchesType(key, expected.Key) || !runtimeValueMatchesType(element, expected.Value) {
+			if !runtimeMapKeyMatchesType(key, expected.Key) || !vm.runtimeValueMatchesType(element, expected.Value) {
 				return false
 			}
 		}
 		return true
 	case value.TYPE_REF:
 		ref, ok := actual.Obj.(*value.ObjRef)
-		return actual.Type == value.VAL_REF && ok && ref != nil
+		if actual.Type != value.VAL_REF || !ok || ref == nil || expected.Element == nil {
+			return false
+		}
+		resolved, err := vm.resolveReferenceValue(actual)
+		return err == nil && vm.runtimeValueMatchesType(resolved, expected.Element)
 	case value.TYPE_STRUCT:
 		instance, ok := actual.Obj.(*value.ObjInstance)
 		return actual.Type == value.VAL_OBJ && ok && instance.Struct != nil && instance.Struct.Name == expected.Name

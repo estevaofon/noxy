@@ -681,6 +681,17 @@ test_report(length(values))`)
 		testExpectedObject(t, 0, got)
 	})
 
+	t.Run("reject nested reference to incompatible value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let targets: ((ref int)[])[] = []
+let text: string = "bad"
+let wrong: (ref string)[] = [ref text]
+invoke(ref targets, wrong)
+test_report(length(targets))`)
+		testExpectedObject(t, 0, got)
+	})
+
 	t.Run("accept plain value", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let invoke: any = append
