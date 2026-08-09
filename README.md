@@ -12,6 +12,11 @@ For a complete guide, consult the [NOXY_LANGUAGE_SPEC.md](docs/NOXY_LANGUAGE_SPE
 
 Noxy VM is a bytecode compiler and virtual machine for the Noxy language created by Estêvão Fonseca. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
 
+Noxy is statically typed, with explicit dynamic boundaries through `any`, bare
+`func`, untyped native primitives, and plugins without signatures. Its
+variables are type-stable: the declared type does not change, while values may
+be mutable.
+
 ### Features
 
 - ✅ Bytecode compiler

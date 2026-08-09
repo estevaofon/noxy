@@ -2,7 +2,10 @@
 
 ## Overview
 
-Noxy is a statically typed programming language. Designed for educational purposes and practical applications, it supports structs, references, arrays, f-strings, and a module system.
+Noxy is statically typed, with explicit dynamic boundaries through `any`, bare
+`func`, untyped native primitives, and plugins without signatures. Designed for
+educational purposes and practical applications, it supports structs,
+references, arrays, f-strings, and a module system.
 The current implementation is a **Stack-based VM** written in **Go**.
 
 ---
@@ -55,11 +58,12 @@ The current implementation is a **Stack-based VM** written in **Go**.
 
 ### 2.0 Fundamental Typing Rules
 
-#### Static and Immutable Typing
+#### Static Typing and Type-Stable Variables
 
-Noxy is a **statically typed** language with **immutable types**:
+Noxy uses **type-stable variables**: a variable's declared type remains stable,
+while the value stored in it may be mutable.
 
-1. **The type of a variable is defined at declaration and can NEVER be changed.**
+1. **The type of a variable is defined at declaration and cannot be changed.**
 2. Attempts to assign a value of a different type result in a compilation error.
 3. There is no implicit conversion between types (except where explicitly documented).
 
@@ -72,8 +76,10 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
 
 #### Compile-Time Type Checking
 
-- All type errors are detected **before** execution.
-- The compiler checks compatibility in assignments, function calls, and operations.
+- Outside the explicit dynamic boundaries listed above, type errors are detected
+  **before** execution.
+- The compiler checks compatibility in assignments, exact function calls, and
+  operations. Dynamic boundaries validate the contracts available at runtime.
 
 ### 2.1 Primitive Types
 
@@ -154,6 +160,12 @@ The `ref` operator creates a reference (pointer) to an existing variable.
 You can **ONLY** take a reference of an **addressable value** (L-Value). This means the operand must be a variable, a struct field, or an array/map index.
 **You CANNOT take a reference of a temporary value (R-Value), such as a function call result or a literal.**
 
+Captured variables are addressable through their upvalue storage. Non-null
+literals and plain function-result temporaries are not addressable. A function
+result whose declared type is already `ref T` is a reference value and may be
+passed directly. `null` remains the explicit nullable `ref T` value: it is
+accepted without pretending that it owns a storage slot.
+
 **Correct Usage:**
 ```noxy
 let err: Error = Error("msg")
@@ -217,7 +229,7 @@ Functions can modify external variables through references:
 
 ```noxy
 func double_it(val: ref int)
-    val = val * 2  // UPDATE: writes to original variable
+    *val = val * 2  // UPDATE: writes to original variable
 end
 
 func swap(a: ref int, b: ref int)
@@ -228,7 +240,8 @@ func swap(a: ref int, b: ref int)
 end
 
 let x: int = 10
-double_it(ref x)  // x is now 20
+double_it(x)      // exact signature borrows addressable x; x is now 20
+double_it(ref x)  // explicit reference is also valid; x is now 40
 
 let a: int = 100
 let b: int = 200
@@ -355,6 +368,20 @@ end
 
 Calls through exact types are checked during compilation: arity, argument types, `ref` addressability, and return types must match. Exact signatures are invariant; parameter count, parameter types, `ref` modifiers, and return types must be identical. `null` satisfies `ref`, struct, and `any` contracts, but not primitive value or callable contracts. An omitted return annotation on a function declaration or literal means `void`.
 
+When an exact parameter is `ref T`, an addressable expression of type `T` is
+converted contextually at the call site. Both the concise and explicit forms
+are valid:
+
+```noxy
+let value: int = 10
+double_it(value)       // exact signature borrows addressable value
+double_it(ref value)   // explicit reference is also valid
+```
+
+This contextual conversion is limited to exact script signatures and public
+native contracts known by the compiler. It never applies at a dynamic
+boundary.
+
 Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
 
 ```noxy
@@ -367,6 +394,11 @@ Calls through bare `func` are checked by the runtime because their arity and res
 ```noxy
 let callbacks: func[] = [no_arguments, two_arguments]
 ```
+
+Because bare `func` has no exact signature, a reference argument must be
+written explicitly as `ref value`; `dynamic(value)` passes a plain value and
+never infers or manufactures a reference. The same rule applies to untyped
+native primitives, plugins without signatures, and dynamic module members.
 
 Use parentheses for an array whose elements are exact functions. Without parentheses, the array belongs to the return type:
 

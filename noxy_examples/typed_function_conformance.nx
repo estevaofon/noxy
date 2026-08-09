@@ -25,6 +25,14 @@ func increment(value: ref int) -> void
     *value = value + 1
 end
 
+func make_counter() -> func() -> int
+    let count: int = 40
+    return func() -> int
+        increment(count)
+        return count
+    end
+end
+
 let operation: func(int, int) -> int = add
 assert(apply(operation, 20, 22) == 42, "exact higher-order function must return 42")
 
@@ -34,6 +42,10 @@ assert(double(21) == 42, "typed closure must preserve its signature")
 let answer: int = 41
 increment(answer)
 assert(answer == 42, "ref parameter must update the caller")
+
+let counter: func() -> int = make_counter()
+assert(counter() == 41, "first captured ref update must produce 41")
+assert(counter() == 42, "second captured ref update must produce 42")
 
 let dynamic_operation: func = operation
 assert(dynamic_operation(20, 22) == 42, "exact function must widen to bare func")
