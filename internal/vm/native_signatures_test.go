@@ -1824,6 +1824,64 @@ func TestConcurrentReferenceTargetMetadataPublication(t *testing.T) {
 	}
 }
 
+func TestArrayUtilsSlicePreservesGenericCollectionRuntimeSchema(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+use array_utils
+struct Node
+    value: int
+end
+let node: Node = Node(1)
+let values: (ref Node)[] = [ref node]
+let sliced: (ref Node)[] = array_utils.slice(values, 0, 1)
+test_report(length(sliced))`)
+	testExpectedObject(t, 1, got)
+}
+
+func TestArrayUtilsWildcardExportsRemainStableAcrossModuleCache(t *testing.T) {
+	source := `
+use array_utils select *
+let numbers: int[] = [1, 2, 3]
+let sliced: int[] = slice(numbers, 1, 3)
+let generated: int[] = range(1, 4, 1)
+test_report(length(sliced) * 10 + length(generated))`
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.New().Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	machine := New()
+	results := make([]int64, 0, 2)
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		results = append(results, args[0].AsInt)
+		return value.NewNull()
+	})
+	for i := 0; i < 2; i++ {
+		if err := machine.Interpret(code); err != nil {
+			t.Fatalf("iteration %d: %v", i+1, err)
+		}
+	}
+	if len(results) != 2 || results[0] != 23 || results[1] != 23 {
+		t.Fatalf("wildcard first/cache results=%v, want [23 23]", results)
+	}
+	module, ok := machine.shared.Modules["array_utils"]
+	if !ok {
+		t.Fatal("array_utils was not cached")
+	}
+	exports := module.Obj.(*value.ObjMap).Data
+	if _, ok := exports["slice"]; !ok {
+		t.Fatal("array_utils omitted slice export")
+	}
+	if _, ok := exports["native_slice"]; ok {
+		t.Fatal("array_utils leaked closure capture as a public export")
+	}
+}
+
 func TestTypedJSONLoadsRejectsCallableAndChannelConstruction(t *testing.T) {
 	t.Run("empty bare function array after pop", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
