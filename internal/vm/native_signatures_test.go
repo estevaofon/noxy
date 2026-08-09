@@ -100,6 +100,16 @@ typed_test(ref forwarded)`
 	}
 }
 
+func TestReferenceTargetMetadataSupportsLongConstantIndex(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("func stress() -> void\n    let value: int = 1\n")
+	for i := 0; i < 260; i++ {
+		source.WriteString("    ref value\n")
+	}
+	source.WriteString("end\nstress()\ntest_report(42)")
+	testExpectedObject(t, 42, runTypedFunctionProgram(t, source.String()))
+}
+
 func TestTypedNativeRejectsIncorrectExactArityBeforeInvocation(t *testing.T) {
 	called := false
 	sig := value.NativeSignature{Arity: 1, Params: []value.ParamInfo{{TypeName: "int"}}, ReturnType: "void"}
@@ -525,6 +535,56 @@ else
     test_report(target.a * 10 + target.b)
 end`)
 	testExpectedObject(t, 12, got)
+}
+
+func TestTypedJSONLoadsRequiresAllFieldsWhenBuildingNewStruct(t *testing.T) {
+	t.Run("missing field", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Pair
+    a: int
+    b: int
+end
+let target: (ref Pair)[] = []
+let ok: bool = json_loads("[{\"a\":1}]", target)
+if ok then
+    test_report(999)
+else
+    test_report(length(target))
+end`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("complete new struct", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Pair
+    a: int
+    b: int
+end
+let target: (ref Pair)[] = []
+let ok: bool = json_loads("[{\"a\":3,\"b\":4}]", target)
+if ok then
+    test_report(target[0].a * 10 + target[0].b)
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 34, got)
+	})
+
+	t.Run("partial existing struct preserves omitted field", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Pair
+    a: int
+    b: int
+end
+let target: Pair = Pair(1, 2)
+let ok: bool = json_loads("{\"a\":3}", target)
+if ok then
+    test_report(target.a * 10 + target.b)
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 32, got)
+	})
 }
 
 func TestTypedJSONLoadsReplacesNonNullAnyComposite(t *testing.T) {

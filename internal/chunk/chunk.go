@@ -374,7 +374,7 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 	case OP_GET_PROPERTY:
 		return c.constantInstruction("OP_GET_PROPERTY", offset)
 	case OP_MARK_REF_TARGET_TYPE:
-		return c.constantInstruction("OP_MARK_REF_TARGET_TYPE", offset)
+		return c.constantLongInstruction("OP_MARK_REF_TARGET_TYPE", offset)
 	case OP_SET_PROPERTY:
 		return c.constantInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:

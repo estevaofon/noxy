@@ -90,7 +90,7 @@ end
 let values: int[] = [1]
 let holder: Holder = Holder(ref values)
 append(holder.values, 2)`,
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_CONTEXT_REF_PROPERTY), -1, int(chunk.OP_MARK_REF_TARGET_TYPE), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_CONTEXT_REF_PROPERTY), -1, int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
 		},
 		{
 			name: "array index",
@@ -98,7 +98,7 @@ append(holder.values, 2)`,
 let values: int[] = [1]
 let stored: (ref int[])[] = [ref values]
 append(stored[0], 2)`,
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
 		},
 		{
 			name: "map index",
@@ -106,7 +106,7 @@ append(stored[0], 2)`,
 let values: int[] = [1]
 let stored: map[string, ref int[]] = {"values": ref values}
 append(stored["values"], 2)`,
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_GET_GLOBAL), -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
 		},
 	}
 

@@ -3928,8 +3928,8 @@ func (vm *VM) run(minFrameCount int) error {
 			ref.JSONDynamic = true
 
 		case chunk.OP_MARK_REF_TARGET_TYPE:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			typeValue := c.Constants[index]
 			targetType, ok := typeValue.Obj.(*value.RuntimeTypeInfo)
 			if typeValue.Type != value.VAL_OBJ || !ok || targetType == nil {

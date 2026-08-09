@@ -1720,7 +1720,12 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 	}
 	if runtimeType := c.runtimeTypeInfo(targetType); runtimeType != nil {
 		typeConstant := c.makeConstant(value.NewRuntimeTypeInfo(runtimeType))
-		c.emitBytes(byte(chunk.OP_MARK_REF_TARGET_TYPE), byte(typeConstant))
+		if typeConstant > 65535 {
+			return nil, fmt.Errorf("[line %d] too many constants for reference target metadata", c.currentLine)
+		}
+		c.emitByte(byte(chunk.OP_MARK_REF_TARGET_TYPE))
+		c.emitByte(byte((typeConstant >> 8) & 0xff))
+		c.emitByte(byte(typeConstant & 0xff))
 	}
 	return targetType, nil
 }

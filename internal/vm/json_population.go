@@ -334,7 +334,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			}
 			item, exists := items[name]
 			if !exists {
-				continue
+				return value.Value{}, false
 			}
 			created, ok := buildTypedJSONValue(schema.Fields[name], item)
 			if !ok {
