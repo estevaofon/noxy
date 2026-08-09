@@ -172,6 +172,110 @@ test_report(target["answer"])`)
 	testExpectedObject(t, 42, got)
 }
 
+func TestTypedJSONLoadsPopulatesMapIndexTarget(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let targets: map[string, map[string, int]] = {"slot": {"old": 0}}
+let ok: bool = json_loads("{\"answer\":42}", targets["slot"])
+test_report(targets["slot"]["answer"])`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
+	machine := New()
+	moduleTarget := value.NewMapWithData(map[string]value.Value{"old": value.NewInt(0)})
+	moduleGlobals := map[string]value.Value{"target": moduleTarget}
+	machine.currentFrame = &CallFrame{Globals: moduleGlobals}
+	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target"}}
+
+	jsonLoadsValue, ok := machine.GetGlobal("json_loads")
+	if !ok {
+		t.Fatal("missing json_loads native")
+	}
+	jsonLoads := jsonLoadsValue.Obj.(*value.ObjNative)
+	if result := jsonLoads.Fn([]value.Value{value.NewString(`{"answer":42}`), target}); result.Type != value.VAL_BOOL || !result.AsBool {
+		t.Fatal("module-frame global target was rejected")
+	}
+	got := moduleGlobals["target"].Obj.(*value.ObjMap).Data["answer"]
+	if got.Type != value.VAL_INT || got.AsInt != 42 {
+		t.Fatalf("module target=%v, want answer=42", moduleGlobals["target"])
+	}
+	if _, leaked := machine.GetGlobal("target"); leaked {
+		t.Fatal("module target must not be written to shared globals")
+	}
+}
+
+func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
+	machine := New()
+	instance := value.NewInstance(&value.ObjStruct{Name: "Holder", Fields: []string{"known"}})
+	instance.Obj.(*value.ObjInstance).Fields["known"] = value.NewInt(1)
+	tests := []struct {
+		name string
+		ref  *value.ObjRef
+	}{
+		{
+			name: "missing global",
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing"},
+		},
+		{
+			name: "missing property",
+			ref:  &value.ObjRef{RefType: value.REF_PROPERTY, Container: instance, Name: "missing"},
+		},
+		{
+			name: "property container",
+			ref:  &value.ObjRef{RefType: value.REF_PROPERTY, Container: value.NewInt(1), Name: "missing"},
+		},
+		{
+			name: "array bounds",
+			ref: &value.ObjRef{
+				RefType: value.REF_INDEX,
+				Container: value.NewArray([]value.Value{
+					value.NewInt(1),
+				}),
+				Index: value.NewInt(2),
+			},
+		},
+		{
+			name: "array index type",
+			ref: &value.ObjRef{
+				RefType: value.REF_INDEX,
+				Container: value.NewArray([]value.Value{
+					value.NewInt(1),
+				}),
+				Index: value.NewBool(true),
+			},
+		},
+		{
+			name: "map key",
+			ref: &value.ObjRef{
+				RefType:   value.REF_INDEX,
+				Container: value.NewMap(),
+				Index:     value.NewBool(true),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := value.Value{Type: value.VAL_REF, Obj: tt.ref}
+			if populateTarget(machine, target, float64(42)) {
+				t.Fatal("invalid reference target reported successful population")
+			}
+		})
+	}
+}
+
+func TestPopulateTargetRejectsMalformedReferenceValue(t *testing.T) {
+	target := value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("populateTarget panicked for malformed reference: %v", recovered)
+		}
+	}()
+	if populateTarget(New(), target, float64(42)) {
+		t.Fatal("malformed reference reported successful population")
+	}
+}
+
 func TestTypedMutatingBuiltinResolvesCapturedTarget(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func make_mutator() -> func() -> int
@@ -216,4 +320,31 @@ append(nested["values"], 2)
 let removed: int = pop(nested["values"])
 test_report(length(nested["values"]) * 10 + removed)`)
 	testExpectedObject(t, 12, got)
+}
+
+func TestTypedAppendPreservesReferenceValuedElements(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Vertex
+    value: int
+end
+let first: Vertex = Vertex(1)
+let second: Vertex = Vertex(2)
+let existing: ref Vertex = ref second
+let values: (ref Vertex)[] = []
+append(values, ref first)
+append(values, existing)
+values[0].value = 41
+values[1].value = 42
+test_report(first.value + second.value)`)
+	testExpectedObject(t, 83, got)
+}
+
+func TestTypedAppendStoresOrdinaryCompositeItemWithoutNativeCopy(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let item: int[] = [1]
+let values: int[][] = []
+append(values, item)
+item[0] = 42
+test_report(values[0][0])`)
+	testExpectedObject(t, 42, got)
 }

@@ -40,6 +40,7 @@ type Compiler struct {
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
+	hasWildcardImport   bool
 }
 
 func New() *Compiler {
@@ -65,16 +66,17 @@ func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.Struc
 
 func NewChild(parent *Compiler) *Compiler {
 	c := &Compiler{
-		enclosing:    parent,
-		currentChunk: chunk.New(),
-		locals:       []Local{},
-		globals:      parent.globals,
-		structs:      parent.structs,
-		upvalues:     []Upvalue{},
-		scopeDepth:   0,
-		loops:        []*Loop{},
-		currentLine:  parent.currentLine,
-		FileName:     parent.FileName,
+		enclosing:         parent,
+		currentChunk:      chunk.New(),
+		locals:            []Local{},
+		globals:           parent.globals,
+		structs:           parent.structs,
+		upvalues:          []Upvalue{},
+		scopeDepth:        0,
+		loops:             []*Loop{},
+		currentLine:       parent.currentLine,
+		FileName:          parent.FileName,
+		hasWildcardImport: parent.hasWildcardImport,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -1307,10 +1309,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 3. Handle Result
 		if n.SelectAll {
 			// use pkg select *
+			c.hasWildcardImport = true
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b
 			for _, sel := range n.Selectors {
+				c.globals[sel] = nil
 				// DUP the module
 				c.emitByte(byte(chunk.OP_DUP))
 
@@ -1340,6 +1344,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			nameConst := c.makeConstant(value.NewString(bindName))
+			c.globals[bindName] = nil
 			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
@@ -1726,6 +1731,24 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 		if _, ok := indexType.(*ast.RefType); ok {
 			c.emitByte(byte(chunk.OP_DEREF))
 		}
+		indexType = unwrapRefType(indexType)
+		switch collection := unwrapRefType(container).(type) {
+		case *ast.ArrayType:
+			expected := &ast.PrimitiveType{Name: "int"}
+			if !c.areStrictTypesCompatible(expected, indexType) {
+				return nil, fmt.Errorf(
+					"[line %d] array reference index must be int, got %s",
+					c.currentLine, noxyTypeName(indexType),
+				)
+			}
+		case *ast.MapType:
+			if !c.areStrictTypesCompatible(collection.KeyType, indexType) {
+				return nil, fmt.Errorf(
+					"[line %d] map reference key must be %s, got %s",
+					c.currentLine, noxyTypeName(collection.KeyType), noxyTypeName(indexType),
+				)
+			}
+		}
 		c.emitByte(byte(chunk.OP_REF_INDEX))
 		if ref, ok := element.(*ast.RefType); ok {
 			return ref.ElementType, nil
@@ -1734,6 +1757,18 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))
 		return nil, nil
+	case *ast.CallExpression:
+		_, result, err := c.Compile(target)
+		if err != nil {
+			return nil, err
+		}
+		if ref, ok := result.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
+		return nil, fmt.Errorf(
+			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
+			c.currentLine, expression.String(),
+		)
 	default:
 		return nil, fmt.Errorf(
 			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",

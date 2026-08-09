@@ -193,3 +193,17 @@ let pointer: ref int = get_reference()
 test_report(pointer)`)
 	testExpectedObject(t, 42, got)
 }
+
+func TestContextualReferenceAcceptsReferenceReturningCall(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let answer: int = 41
+func get_reference() -> ref int
+    return ref answer
+end
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+increment(get_reference())
+test_report(answer)`)
+	testExpectedObject(t, 42, got)
+}

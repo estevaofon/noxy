@@ -1830,7 +1830,6 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		Arity: 2,
 		Params: []value.ParamInfo{
 			{IsRef: true, TypeName: "ref array"},
-			{IsRef: false, TypeName: "any"},
 		},
 		ReturnType: "void",
 	}
@@ -3332,112 +3331,154 @@ func goValToNoxy(i interface{}) value.Value {
 // Helper: Populate Target
 func populateTarget(vm *VM, target value.Value, data interface{}) bool {
 	if target.Type == value.VAL_REF {
-		ref := target.Obj.(*value.ObjRef)
-		populateRef(vm, ref, data)
-		return true
+		ref, ok := target.Obj.(*value.ObjRef)
+		if !ok || ref == nil {
+			return false
+		}
+		return populateRef(vm, ref, data)
 	} else if target.Type == value.VAL_OBJ {
 		// Populate Object In-Place
-		populateObj(vm, target, data)
-		return true
+		return populateObj(vm, target, data)
 	}
 	// Cannot populate primitive value passed by value
 	return false
 }
 
-func populateObj(vm *VM, currentVal value.Value, data interface{}) {
+func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
 	if inst, ok := currentVal.Obj.(*value.ObjInstance); ok {
-		if dataMap, ok := data.(map[string]interface{}); ok {
-			for _, fieldName := range inst.Struct.Fields {
-				if val, exists := dataMap[fieldName]; exists {
-					// Check if field is instance -> recurse
-					fieldType := inst.Fields[fieldName]
-					if fieldType.Type == value.VAL_OBJ {
-						if _, isInst := fieldType.Obj.(*value.ObjInstance); isInst {
-							populateObj(vm, fieldType, val)
-							continue
-						}
+		dataMap, ok := data.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		for _, fieldName := range inst.Struct.Fields {
+			if val, exists := dataMap[fieldName]; exists {
+				// Check if field is instance -> recurse
+				fieldType := inst.Fields[fieldName]
+				if fieldType.Type == value.VAL_OBJ {
+					if _, isInst := fieldType.Obj.(*value.ObjInstance); isInst {
+						populateObj(vm, fieldType, val)
+						continue
 					}
-					inst.Fields[fieldName] = goValToNoxy(val)
 				}
+				inst.Fields[fieldName] = goValToNoxy(val)
 			}
 		}
+		return true
 	} else if m, ok := currentVal.Obj.(*value.ObjMap); ok {
-		if dataMap, ok := data.(map[string]interface{}); ok {
-			// Clear logic? Or merge? Go unmarshal merges.
-			for k, v := range dataMap {
-				m.Data[k] = goValToNoxy(v)
-			}
+		dataMap, ok := data.(map[string]interface{})
+		if !ok {
+			return false
 		}
+		// Clear logic? Or merge? Go unmarshal merges.
+		for k, v := range dataMap {
+			m.Data[k] = goValToNoxy(v)
+		}
+		return true
 	} else if arr, ok := currentVal.Obj.(*value.ObjArray); ok {
-		if dataArr, ok := data.([]interface{}); ok {
-			// Replace array content (slice behavior)
-			// Or should we merge? slice unmarshal replaces.
-			// But we can't resize easily in place?
-			// Actually we can just replace Elements slice.
-			newElems := make([]value.Value, len(dataArr))
-			for i, el := range dataArr {
-				newElems[i] = goValToNoxy(el)
-			}
-			arr.Elements = newElems
+		dataArr, ok := data.([]interface{})
+		if !ok {
+			return false
 		}
+		// Replace array content (slice behavior)
+		// Or should we merge? slice unmarshal replaces.
+		// But we can't resize easily in place?
+		// Actually we can just replace Elements slice.
+		newElems := make([]value.Value, len(dataArr))
+		for i, el := range dataArr {
+			newElems[i] = goValToNoxy(el)
+		}
+		arr.Elements = newElems
+		return true
 	}
+	return false
 }
 
 // Helper: Populate a Reference with Go Data (Deeply)
-func populateRef(vm *VM, ref *value.ObjRef, data interface{}) {
+func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 	var currentVal value.Value
+	var store func(value.Value)
 
 	// Dereference
 	switch ref.RefType {
 	case value.REF_GLOBAL:
-		v, ok := vm.GetGlobal(ref.Name)
-		if ok {
-			currentVal = v
-		}
-	case value.REF_UPVALUE:
-		currentVal = *ref.Upvalue.Location
-	case value.REF_PTR:
-		currentVal = *ref.Ptr
-	case value.REF_PROPERTY:
-		if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-			currentVal = inst.Fields[ref.Name]
-		}
-	case value.REF_INDEX:
-		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-			idx := int(ref.Index.AsInt)
-			if idx >= 0 && idx < len(arr.Elements) {
-				currentVal = arr.Elements[idx]
+		if vm.currentFrame != nil && vm.currentFrame.Globals != nil {
+			if frameValue, ok := vm.currentFrame.Globals[ref.Name]; ok {
+				currentVal = frameValue
+				store = func(updated value.Value) {
+					vm.currentFrame.Globals[ref.Name] = updated
+				}
+				break
 			}
 		}
+		sharedValue, ok := vm.GetGlobal(ref.Name)
+		if !ok {
+			return false
+		}
+		currentVal = sharedValue
+		store = func(updated value.Value) { vm.SetGlobal(ref.Name, updated) }
+	case value.REF_UPVALUE:
+		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
+			return false
+		}
+		currentVal = *ref.Upvalue.Location
+		store = func(updated value.Value) { *ref.Upvalue.Location = updated }
+	case value.REF_PTR:
+		if ref.Ptr == nil {
+			return false
+		}
+		currentVal = *ref.Ptr
+		store = func(updated value.Value) { *ref.Ptr = updated }
+	case value.REF_PROPERTY:
+		inst, ok := ref.Container.Obj.(*value.ObjInstance)
+		if !ok {
+			return false
+		}
+		currentVal, ok = inst.Fields[ref.Name]
+		if !ok {
+			return false
+		}
+		store = func(updated value.Value) { inst.Fields[ref.Name] = updated }
+	case value.REF_INDEX:
+		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
+			if ref.Index.Type != value.VAL_INT {
+				return false
+			}
+			idx := int(ref.Index.AsInt)
+			if idx < 0 || idx >= len(arr.Elements) {
+				return false
+			}
+			currentVal = arr.Elements[idx]
+			store = func(updated value.Value) { arr.Elements[idx] = updated }
+			break
+		}
+		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ok {
+			key, err := referenceMapKey(ref.Index)
+			if err != nil {
+				return false
+			}
+			currentVal = mapping.Data[key]
+			store = func(updated value.Value) { mapping.Data[key] = updated }
+			break
+		}
+		return false
+	default:
+		return false
 	}
 
 	// Logic to update: if object, update in place
 	if currentVal.Type == value.VAL_OBJ {
-		populateObj(vm, currentVal, data)
-		return
+		switch currentVal.Obj.(type) {
+		case *value.ObjInstance, *value.ObjMap, *value.ObjArray:
+			return populateObj(vm, currentVal, data)
+		}
 	}
 
 	// Replace reference
-	newValue := goValToNoxy(data)
-	switch ref.RefType {
-	case value.REF_GLOBAL:
-		vm.SetGlobal(ref.Name, newValue)
-	case value.REF_UPVALUE:
-		*ref.Upvalue.Location = newValue
-	case value.REF_PTR:
-		*ref.Ptr = newValue
-	case value.REF_PROPERTY:
-		if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-			inst.Fields[ref.Name] = newValue
-		}
-	case value.REF_INDEX:
-		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-			idx := int(ref.Index.AsInt)
-			if idx >= 0 && idx < len(arr.Elements) {
-				arr.Elements[idx] = newValue
-			}
-		}
+	if store == nil {
+		return false
 	}
+	store(goValToNoxy(data))
+	return true
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {

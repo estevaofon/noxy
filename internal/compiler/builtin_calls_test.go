@@ -33,6 +33,43 @@ append(values, "wrong")`)
 	}
 }
 
+func TestAppendAcceptsReferenceValuedElements(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+struct Vertex
+    value: int
+end
+let first: Vertex = Vertex(1)
+let second: Vertex = Vertex(2)
+let existing: ref Vertex = ref second
+let values: (ref Vertex)[] = []
+append(values, ref first)
+append(values, first)
+append(values, existing)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAppendRejectsExplicitReferenceForOrdinaryElement(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let item: int = 1
+let values: int[] = []
+append(values, ref item)`)
+	if err == nil || !strings.Contains(err.Error(), "expected int, got ref int") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestAppendRejectsExplicitReferenceForAnyElement(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let item: int = 1
+let values: any[] = []
+append(values, ref item)`)
+	if err == nil || !strings.Contains(err.Error(), "expected any, got ref int") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestMutatingBuiltinNamesCanBeShadowed(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -74,6 +111,118 @@ end`,
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := compileFunctionSource(t, tt.source); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestImportedMutatingBuiltinNamesUseDynamicCallPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "selected append", source: "use fake_module select append\nappend(1, 2)"},
+		{name: "aliased append", source: "use fake_module as append\nappend(1, 2)"},
+		{name: "selected pop", source: "use fake_module select pop\npop(1)"},
+		{name: "aliased pop", source: "use fake_module as pop\npop(1)"},
+		{name: "selected delete", source: "use fake_module select delete\ndelete(1, 2)"},
+		{name: "aliased delete", source: "use fake_module as delete\ndelete(1, 2)"},
+		{name: "selected json_loads", source: "use fake_module select json_loads\njson_loads(1, 2)"},
+		{name: "aliased json_loads", source: "use fake_module as json_loads\njson_loads(1, 2)"},
+		{name: "wildcard import", source: "use fake_module select *\nappend(1, 2)"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := compileFunctionSource(t, tt.source); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestMutatingBuiltinArityContracts(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{name: "pop", source: "pop()", want: "pop expects 1 arguments, got 0"},
+		{name: "delete", source: "delete({})", want: "delete expects 2 arguments, got 1"},
+		{name: "json_loads", source: `json_loads("{}")`, want: "json_loads expects 2 arguments, got 1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.source)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestMutatingBuiltinAddressabilityContracts(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{name: "pop", source: "pop([1])"},
+		{name: "delete", source: `delete({"a": 1}, "a")`},
+		{name: "json_loads", source: `json_loads("{}", {"a": 1})`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.source)
+			if err == nil || !strings.Contains(err.Error(), "not addressable") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
+func TestMutatingBuiltinTypeContracts(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "pop container",
+			source: `
+let mapping: map[string, int] = {"a": 1}
+pop(mapping)`,
+			want: "pop expects an array, got map[string, int]",
+		},
+		{
+			name: "delete container",
+			source: `
+let values: int[] = [1]
+delete(values, 0)`,
+			want: "delete expects a map, got int[]",
+		},
+		{
+			name: "delete key",
+			source: `
+let mapping: map[string, int] = {"a": 1}
+delete(mapping, 0)`,
+			want: "expected string, got int",
+		},
+		{
+			name: "json text",
+			source: `
+let target: map[string, int] = {}
+json_loads(42, target)`,
+			want: "expected string, got int",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.source)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v, want %q", err, tt.want)
 			}
 		})
 	}

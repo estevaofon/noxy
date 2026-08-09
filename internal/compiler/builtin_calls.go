@@ -15,7 +15,11 @@ func (c *Compiler) compileBuiltinValueArgument(expression ast.Expression) (ast.N
 	if err != nil {
 		return nil, err
 	}
-	if ref, ok := actual.(*ast.RefType); ok {
+	explicitReference := false
+	if prefix, ok := expression.(*ast.PrefixExpression); ok {
+		explicitReference = prefix.Operator == "ref"
+	}
+	if ref, ok := actual.(*ast.RefType); ok && !explicitReference {
 		c.emitByte(byte(chunk.OP_DEREF))
 		return ref.ElementType, nil
 	}
@@ -41,6 +45,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression) (bool, ast.NoxyT
 	if _, declared := c.resolveGlobalType(name); declared {
 		return false, nil, nil
 	}
+	if c.hasWildcardImport {
+		return false, nil, nil
+	}
 
 	wantArity := map[string]int{"append": 2, "pop": 1, "delete": 2, "json_loads": 2}[name]
 	if len(call.Arguments) != wantArity {
@@ -63,15 +70,35 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression) (bool, ast.NoxyT
 		if !ok {
 			return true, nil, fmt.Errorf("[line %d] append expects an array, got %s", c.currentLine, noxyTypeName(container))
 		}
-		item, err := c.compileBuiltinValueArgument(call.Arguments[1])
-		if err != nil {
-			return true, nil, err
-		}
-		if !c.areStrictTypesCompatible(array.ElementType, item) {
-			return true, nil, fmt.Errorf(
-				"[line %d] argument 2 to 'append': expected %s, got %s",
-				c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
-			)
+		if expectedRef, ok := array.ElementType.(*ast.RefType); ok {
+			actualElement, err := c.compileReferenceArgument(call.Arguments[1])
+			if err != nil {
+				return true, nil, err
+			}
+			if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
+				actual := &ast.RefType{ElementType: actualElement}
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to 'append': expected %s, got %s",
+					c.currentLine, noxyTypeName(array.ElementType), actual.String(),
+				)
+			}
+		} else {
+			item, err := c.compileBuiltinValueArgument(call.Arguments[1])
+			if err != nil {
+				return true, nil, err
+			}
+			if _, explicitRef := item.(*ast.RefType); explicitRef {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to 'append': expected %s, got %s",
+					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
+				)
+			}
+			if !c.areStrictTypesCompatible(array.ElementType, item) {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to 'append': expected %s, got %s",
+					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
+				)
+			}
 		}
 		c.emitBytes(byte(chunk.OP_CALL), 2)
 		return true, builtinType("void"), nil
