@@ -254,3 +254,43 @@ func TestFunctionBodyOnlyWildcardDoesNotAffectModuleLoadability(t *testing.T) {
 		})
 	}
 }
+
+func TestNestedModuleDiscoveryUsesProgramRoot(t *testing.T) {
+	tests := []struct {
+		name      string
+		shadowDep string
+	}{
+		{name: "dependency only at root"},
+		{name: "invalid divergent nested dependency", shadowDep: "let marker: int = \"wrong\"\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			pkgDir := filepath.Join(root, "pkg")
+			if err := os.MkdirAll(pkgDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "dep.nx"), []byte("func delete(url: string) -> void\nend\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(pkgDir, "wrapper.nx"), []byte("use dep select *\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tt.shadowDep != "" {
+				if err := os.WriteFile(filepath.Join(pkgDir, "dep.nx"), []byte(tt.shadowDep), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
+			exports, loadable := compiler.discoverModuleExports("pkg.wrapper")
+			if !loadable {
+				t.Fatal("nested wrapper was not loadable from the program root")
+			}
+			if _, ok := exports["delete"]; !ok {
+				t.Fatalf("nested wrapper exports=%v, want root dependency delete", exports)
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
+	"path/filepath"
 	"strings"
 )
 
@@ -37,6 +38,7 @@ type Compiler struct {
 	loops               []*Loop
 	currentLine         int
 	FileName            string
+	moduleRoot          string
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
@@ -49,6 +51,17 @@ func New() *Compiler {
 }
 
 func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.StructStatement, fileName string) *Compiler {
+	moduleRoot := "."
+	if fileName != "" && fileName != "REPL" {
+		moduleRoot = filepath.Dir(fileName)
+	}
+	return NewWithStateAndRoot(globals, structs, fileName, moduleRoot)
+}
+
+func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*ast.StructStatement, fileName, moduleRoot string) *Compiler {
+	if moduleRoot == "" {
+		moduleRoot = "."
+	}
 	c := &Compiler{
 		enclosing:    nil,
 		currentChunk: chunk.New(),
@@ -60,6 +73,7 @@ func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.Struc
 		loops:        []*Loop{},
 		currentLine:  1,
 		FileName:     fileName,
+		moduleRoot:   moduleRoot,
 	}
 	c.currentChunk.FileName = fileName
 	return c
@@ -81,6 +95,7 @@ func NewChild(parent *Compiler) *Compiler {
 		loops:           []*Loop{},
 		currentLine:     parent.currentLine,
 		FileName:        parent.FileName,
+		moduleRoot:      parent.moduleRoot,
 		programBindings: parent.programBindings,
 		moduleDiscovery: parent.moduleDiscovery,
 	}

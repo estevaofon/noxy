@@ -192,3 +192,59 @@ func TestRuntimeRejectsTopLevelWildcardImportCycles(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeNestedModuleCompilerUsesVMRoot(t *testing.T) {
+	tests := []struct {
+		name      string
+		shadowDep string
+	}{
+		{name: "dependency only at root"},
+		{
+			name: "divergent nested dependency",
+			shadowDep: `
+func append(value: int) -> void
+end
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			pkgDir := filepath.Join(root, "pkg")
+			if err := os.MkdirAll(pkgDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "dep.nx"), []byte("func delete(url: string) -> void\nend\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			wrapper := `
+use dep select *
+func forward(url: string) -> void
+    delete(url)
+end
+`
+			if err := os.WriteFile(filepath.Join(pkgDir, "wrapper.nx"), []byte(wrapper), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if tt.shadowDep != "" {
+				if err := os.WriteFile(filepath.Join(pkgDir, "dep.nx"), []byte(tt.shadowDep), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			module, err := NewWithConfig(VMConfig{RootPath: root}).loadModule("pkg.wrapper")
+			if err != nil {
+				t.Fatal(err)
+			}
+			deleteBinding, ok := module.Obj.(*value.ObjMap).Data["delete"]
+			if !ok {
+				t.Fatal("nested wrapper omitted root dependency delete")
+			}
+			closure, ok := deleteBinding.Obj.(*value.ObjClosure)
+			if deleteBinding.Type != value.VAL_FUNCTION || !ok || closure.Function.Arity != 1 {
+				t.Fatalf("delete binding=%v, want root one-argument closure", deleteBinding)
+			}
+		})
+	}
+}

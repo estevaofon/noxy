@@ -242,7 +242,7 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		os.Exit(1)
 	}
 
-	c := compiler.NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename)
+	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
 	chunk, _, err := c.Compile(program)
 	if err != nil {
 		fmt.Printf("Compiler error: %s\n", err)

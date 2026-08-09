@@ -146,9 +146,9 @@ func (c *Compiler) loadModuleDeclarations(module string, state *moduleDiscoveryS
 }
 
 func (c *Compiler) moduleFileCandidates(pathName string) []string {
-	root := "."
-	if c.FileName != "" && c.FileName != "REPL" {
-		root = filepath.Dir(c.FileName)
+	root := c.moduleRoot
+	if root == "" {
+		root = "."
 	}
 
 	var searchRoots []string
@@ -222,7 +222,7 @@ func (c *Compiler) parseModuleDeclarations(content []byte, fileName string, stat
 			return nil, nil, false
 		}
 	}
-	validator := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), fileName)
+	validator := NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), fileName, c.moduleRoot)
 	validator.moduleDiscovery = state
 	if _, _, err := validator.Compile(program); err != nil {
 		return nil, nil, false
