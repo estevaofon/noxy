@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"noxy-vm/internal/value"
+	"reflect"
 )
 
 func referenceMapKey(index value.Value) (interface{}, error) {
@@ -21,6 +22,23 @@ func referenceMapKey(index value.Value) (interface{}, error) {
 
 type referenceSetter func(value.Value)
 
+func validateReferencedValue(stored value.Value) error {
+	if stored.Type != value.VAL_OBJ || stored.Obj == nil {
+		if stored.Type == value.VAL_OBJ {
+			return fmt.Errorf("invalid referenced object")
+		}
+		return nil
+	}
+	object := reflect.ValueOf(stored.Obj)
+	switch object.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		if object.IsNil() {
+			return fmt.Errorf("invalid referenced object")
+		}
+	}
+	return nil
+}
+
 func extractReferenceValue(input value.Value) (*value.ObjRef, error) {
 	if input.Type != value.VAL_REF {
 		return nil, fmt.Errorf("expected reference value, got %s", runtimeValueMode(input))
@@ -32,7 +50,15 @@ func extractReferenceValue(input value.Value) (*value.ObjRef, error) {
 	return ref, nil
 }
 
-func (vm *VM) referenceStorage(ref *value.ObjRef) (value.Value, bool, referenceSetter, error) {
+func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bool, store referenceSetter, err error) {
+	defer func() {
+		if err == nil && exists {
+			if validationErr := validateReferencedValue(stored); validationErr != nil {
+				err = validationErr
+				store = nil
+			}
+		}
+	}()
 	if ref == nil {
 		return value.Value{}, false, nil, fmt.Errorf("invalid reference value")
 	}

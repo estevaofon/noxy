@@ -3779,7 +3779,7 @@ func (vm *VM) run(minFrameCount int) error {
 			container := vm.pop()
 
 			instance, ok := container.Obj.(*value.ObjInstance)
-			if container.Type != value.VAL_OBJ || !ok {
+			if container.Type != value.VAL_OBJ || !ok || instance == nil {
 				return vm.runtimeError(c, ip, "contextual property reference base must be an instance")
 			}
 			stored, ok := instance.Fields[name]
@@ -3807,7 +3807,7 @@ func (vm *VM) run(minFrameCount int) error {
 			}
 
 			var stored value.Value
-			if array, ok := container.Obj.(*value.ObjArray); ok {
+			if array, ok := container.Obj.(*value.ObjArray); ok && array != nil {
 				if idx.Type != value.VAL_INT {
 					return vm.runtimeError(c, ip, "array index must be integer")
 				}
@@ -3816,7 +3816,7 @@ func (vm *VM) run(minFrameCount int) error {
 					return vm.runtimeError(c, ip, "array index out of bounds")
 				}
 				stored = array.Elements[arrayIndex]
-			} else if mapObj, ok := container.Obj.(*value.ObjMap); ok {
+			} else if mapObj, ok := container.Obj.(*value.ObjMap); ok && mapObj != nil {
 				key, err := referenceMapKey(idx)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
@@ -4288,6 +4288,15 @@ func (vm *VM) run(minFrameCount int) error {
 			vm.push(value.NewBool(a.AsInt == b.AsInt))
 		case chunk.OP_PRINT:
 			v := vm.pop()
+			if v.Type == value.VAL_REF {
+				ref, err := extractReferenceValue(v)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				if _, _, _, err := vm.referenceStorage(ref); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+			}
 			fmt.Println(v)
 
 		case chunk.OP_CALL:

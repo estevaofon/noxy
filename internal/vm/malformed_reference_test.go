@@ -162,3 +162,107 @@ func TestMalformedReferenceStoreViaLocalOpcodeIsRuntimeError(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestMalformedReferencePrintIsPanicSafe(t *testing.T) {
+	err := runMalformedReferenceProgram(t, `print(malformed_ref())`, value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"})
+	if err != nil {
+		t.Fatalf("print returned unexpected error: %v", err)
+	}
+}
+
+func TestMalformedReferenceStringificationIsPanicSafe(t *testing.T) {
+	tests := []struct {
+		name  string
+		input value.Value
+	}{
+		{name: "wrong object", input: value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"}},
+		{name: "typed nil", input: value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)(nil)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("malformed reference String panicked: %v", recovered)
+				}
+			}()
+			if got := tt.input.String(); got != "<invalid reference>" {
+				t.Fatalf("String()=%q, want invalid reference marker", got)
+			}
+		})
+	}
+
+	t.Run("nil ObjRef receiver", func(t *testing.T) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("nil ObjRef.String panicked: %v", recovered)
+			}
+		}()
+		var nilRef *value.ObjRef
+		if got := nilRef.String(); got != "<invalid reference>" {
+			t.Fatalf("nil ObjRef.String()=%q, want invalid reference marker", got)
+		}
+	})
+}
+
+func TestReferencesToTypedNilObjectsAreRuntimeErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored value.Value
+	}{
+		{name: "array", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjArray)(nil)}},
+		{name: "map", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjMap)(nil)}},
+		{name: "instance", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjInstance)(nil)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored := tt.stored
+			input := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+			if _, err := New().resolveReferenceValue(input); err == nil {
+				t.Fatal("typed-nil referenced object resolved without runtime error")
+			}
+		})
+	}
+}
+
+func TestContextualReferenceOpcodesRejectTypedNilContainers(t *testing.T) {
+	arrayIndex := value.NewInt(0)
+	mapIndex := value.NewString("key")
+	tests := []struct {
+		name       string
+		container  value.Value
+		indexValue *value.Value
+	}{
+		{name: "property", container: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjInstance)(nil)}},
+		{name: "array index", container: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjArray)(nil)}, indexValue: &arrayIndex},
+		{name: "map index", container: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjMap)(nil)}, indexValue: &mapIndex},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code := chunk.New()
+			code.FileName = "typed_nil_context_reference"
+			containerConstant := code.AddConstant(tt.container)
+			code.Write(byte(chunk.OP_CONSTANT), 1)
+			code.Write(byte(containerConstant), 1)
+			if tt.indexValue == nil {
+				nameConstant := code.AddConstant(value.NewString("field"))
+				code.Write(byte(chunk.OP_CONTEXT_REF_PROPERTY), 1)
+				code.Write(byte(nameConstant), 1)
+			} else {
+				indexConstant := code.AddConstant(*tt.indexValue)
+				code.Write(byte(chunk.OP_CONSTANT), 1)
+				code.Write(byte(indexConstant), 1)
+				code.Write(byte(chunk.OP_CONTEXT_REF_INDEX), 1)
+			}
+			code.Write(byte(chunk.OP_RETURN), 1)
+
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("typed-nil contextual reference caused Go panic: %v", recovered)
+				}
+			}()
+			if err := New().Interpret(code); err == nil {
+				t.Fatal("typed-nil contextual reference completed without runtime error")
+			}
+		})
+	}
+}

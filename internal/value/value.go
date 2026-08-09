@@ -307,6 +307,9 @@ type ObjRef struct {
 }
 
 func (or *ObjRef) String() string {
+	if or == nil {
+		return "<invalid reference>"
+	}
 	switch or.RefType {
 	case REF_GLOBAL:
 		return fmt.Sprintf("<ref global %s>", or.Name)
@@ -375,7 +378,11 @@ func (v Value) String() string {
 	case VAL_WAITGROUP:
 		return v.Obj.(*ObjWaitGroup).String()
 	case VAL_REF:
-		return v.Obj.(*ObjRef).String()
+		ref, ok := v.Obj.(*ObjRef)
+		if !ok || ref == nil {
+			return "<invalid reference>"
+		}
+		return ref.String()
 	default:
 		return "unknown"
 	}
