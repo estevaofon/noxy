@@ -16,7 +16,7 @@ func (c *Compiler) runtimeTypeInfo(t ast.NoxyType) *value.RuntimeTypeInfo {
 }
 
 func (c *Compiler) emitRuntimeValueType(t ast.NoxyType) error {
-	if !containsChannelType(t, make(map[string]bool), c.structs) {
+	if !requiresRuntimeValueType(t, make(map[string]bool), c.structs) {
 		return nil
 	}
 	runtimeType := c.runtimeTypeInfo(t)
@@ -33,16 +33,14 @@ func (c *Compiler) emitRuntimeValueType(t ast.NoxyType) error {
 	return nil
 }
 
-func containsChannelType(t ast.NoxyType, visiting map[string]bool, structs map[string]*ast.StructStatement) bool {
+func requiresRuntimeValueType(t ast.NoxyType, visiting map[string]bool, structs map[string]*ast.StructStatement) bool {
 	switch typed := t.(type) {
 	case *ast.ChanType:
 		return true
-	case *ast.ArrayType:
-		return containsChannelType(typed.ElementType, visiting, structs)
-	case *ast.MapType:
-		return containsChannelType(typed.KeyType, visiting, structs) || containsChannelType(typed.ValueType, visiting, structs)
+	case *ast.ArrayType, *ast.MapType:
+		return true
 	case *ast.RefType:
-		return containsChannelType(typed.ElementType, visiting, structs)
+		return requiresRuntimeValueType(typed.ElementType, visiting, structs)
 	case *ast.FunctionType:
 		// Callable signatures carry their own immutable runtime schema. Channels
 		// named by that signature are not values embedded in the callable object.
@@ -55,7 +53,7 @@ func containsChannelType(t ast.NoxyType, visiting map[string]bool, structs map[s
 		visiting[typed.Name] = true
 		defer delete(visiting, typed.Name)
 		for _, field := range definition.FieldsList {
-			if containsChannelType(field.Type, visiting, structs) {
+			if requiresRuntimeValueType(field.Type, visiting, structs) {
 				return true
 			}
 		}

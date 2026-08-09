@@ -169,7 +169,8 @@ type ObjNative struct {
 }
 
 type ObjArray struct {
-	Elements []Value
+	Elements    []Value
+	RuntimeType *RuntimeTypeInfo
 }
 
 func (oa *ObjArray) String() string {
@@ -206,7 +207,8 @@ func (oa *ObjArray) Format(f fmt.State, verb rune) {
 }
 
 type ObjMap struct {
-	Data map[interface{}]Value
+	Data        map[interface{}]Value
+	RuntimeType *RuntimeTypeInfo
 }
 
 func (om *ObjMap) String() string {

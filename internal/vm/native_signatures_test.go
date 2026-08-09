@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -1009,23 +1010,15 @@ test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
 	})
 
-	t.Run("conflicting assignment preserves original metadata", func(t *testing.T) {
-		got := runTypedFunctionProgram(t, `
-let invoke: any = append
+	t.Run("conflicting assignment fails", func(t *testing.T) {
+		err := runTypedFunctionProgramError(t, `
 let text: chan string = make_chan(1)
 let dynamic: any = text
 let integer: chan int = make_chan(1)
-integer = dynamic
-let string_seed: chan string = make_chan(1)
-let string_targets: (chan string)[] = [string_seed]
-pop(string_targets)
-let int_seed: chan int = make_chan(1)
-let int_targets: (chan int)[] = [int_seed]
-pop(int_targets)
-invoke(ref string_targets, dynamic)
-invoke(ref int_targets, dynamic)
-test_report(length(string_targets) * 10 + length(int_targets))`)
-		testExpectedObject(t, 10, got)
+integer = dynamic`)
+		if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {
+			t.Fatalf("error=%v", err)
+		}
 	})
 
 	t.Run("array declaration propagates channel metadata", func(t *testing.T) {
@@ -1301,6 +1294,398 @@ func TestRuntimeCallableValidationIsInvariantAndFailClosed(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDynamicAppendUsesDeclaredCollectionSchemas(t *testing.T) {
+	t.Run("fixed array positive", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let item: int[4] = [1, 2, 3, 4]
+let target: int[4][] = [item]
+pop(target)
+invoke(ref target, item)
+test_report(length(target))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	for _, tt := range []struct {
+		name     string
+		itemType string
+		literal  string
+	}{
+		{name: "dynamic array with matching length", itemType: "int[]", literal: "[1, 2, 3, 4]"},
+		{name: "different fixed array size", itemType: "int[5]", literal: "[1, 2, 3, 4, 5]"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			source := fmt.Sprintf(`
+let invoke: any = append
+let seed: int[4] = [1, 2, 3, 4]
+let target: int[4][] = [seed]
+pop(target)
+let item: %s = %s
+invoke(ref target, item)
+test_report(length(target))`, tt.itemType, tt.literal)
+			testExpectedObject(t, 0, runTypedFunctionProgram(t, source))
+		})
+	}
+
+	t.Run("empty nested callable array mismatch", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func integer(value: int) -> int return value end
+func text(value: string) -> int return 1 end
+let expected_item: (func(int) -> int)[] = [integer]
+pop(expected_item)
+let target: ((func(int) -> int)[])[] = [expected_item]
+pop(target)
+let wrong: (func(string) -> int)[] = [text]
+pop(wrong)
+let invoke: any = append
+invoke(ref target, wrong)
+test_report(length(target))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("empty nested callable array positive", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func integer(value: int) -> int return value end
+let item: (func(int) -> int)[] = [integer]
+pop(item)
+let target: ((func(int) -> int)[])[] = [item]
+pop(target)
+let invoke: any = append
+invoke(ref target, item)
+test_report(length(target))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("empty map mismatch", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let seed: map[string, int] = {"value": 1}
+let target: map[string, int][] = [seed]
+pop(target)
+let wrong: map[int, string] = {}
+let invoke: any = append
+invoke(ref target, wrong)
+test_report(length(target))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("empty map positive", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let seed: map[string, int] = {"value": 1}
+let target: map[string, int][] = [seed]
+pop(target)
+let item: map[string, int] = {}
+let invoke: any = append
+invoke(ref target, item)
+test_report(length(target))`)
+		testExpectedObject(t, 1, got)
+	})
+}
+
+func TestCollectionSchemaSurvivesShallowCopyAndMutation(t *testing.T) {
+	t.Run("array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func forward(item: int[4], target: ref int[4][]) -> void
+    pop(item)
+    let invoke: any = append
+    invoke(ref target, item)
+end
+let item: int[4] = [1, 2, 3, 4]
+let target: int[4][] = [item]
+pop(target)
+forward(item, target)
+test_report(length(target) * 10 + length(item))`)
+		testExpectedObject(t, 14, got)
+	})
+
+	t.Run("map", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func forward(item: map[string, int], target: ref map[string, int][]) -> void
+    delete(item, "value")
+    let invoke: any = append
+    invoke(ref target, item)
+end
+let item: map[string, int] = {"value": 1}
+let target: map[string, int][] = [item]
+pop(target)
+forward(item, target)
+test_report(length(target) * 10 + length(keys(item)))`)
+		testExpectedObject(t, 11, got)
+	})
+}
+
+func TestConflictingCollectionAndChannelMetadataFailsWithoutOverwrite(t *testing.T) {
+	tests := []string{
+		`let dynamic: int[] = [1, 2, 3, 4]
+let fixed: int[4] = [1, 2, 3, 4]
+let erased: any = dynamic
+fixed = erased`,
+		`let text: map[string, int] = {"value": 1}
+let integer: map[int, string] = {1: "value"}
+let erased: any = integer
+text = erased`,
+		`let text: chan string = make_chan(1)
+let integer: chan int = make_chan(1)
+let erased: any = text
+integer = erased`,
+	}
+	for _, source := range tests {
+		err := runTypedFunctionProgramError(t, source)
+		if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {
+			t.Fatalf("error=%v", err)
+		}
+	}
+}
+
+func TestCollectionRuntimeMetadataPreservesShallowCopyAndIdentity(t *testing.T) {
+	machine := New()
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	arraySchema := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer, Size: 4}
+	mapSchema := &value.RuntimeTypeInfo{Kind: value.TYPE_MAP, Key: &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}, Value: integer}
+	shared := value.NewChannel(1)
+
+	array := value.NewArray([]value.Value{shared})
+	arrayObject := array.Obj.(*value.ObjArray)
+	arrayObject.RuntimeType = arraySchema
+	arrayCopy := machine.copyValue(array)
+	arrayCopyObject := arrayCopy.Obj.(*value.ObjArray)
+	if arrayCopyObject == arrayObject || arrayCopyObject.RuntimeType != arraySchema || arrayCopyObject.Elements[0].Obj != shared.Obj {
+		t.Fatal("array shallow copy lost collection schema or nested identity")
+	}
+
+	mapping := value.NewMap()
+	mapObject := mapping.Obj.(*value.ObjMap)
+	mapObject.Data["item"] = shared
+	mapObject.RuntimeType = mapSchema
+	mapCopy := machine.copyValue(mapping)
+	mapCopyObject := mapCopy.Obj.(*value.ObjMap)
+	if mapCopyObject == mapObject || mapCopyObject.RuntimeType != mapSchema || mapCopyObject.Data["item"].Obj != shared.Obj {
+		t.Fatal("map shallow copy lost collection schema or nested identity")
+	}
+}
+
+func TestRuntimeValueMarkerRejectsConflictsWithoutOverwriteOrRefMutation(t *testing.T) {
+	machine := New()
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	text := &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}
+	dynamicArray := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer}
+	fixedArray := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer, Size: 4}
+	array := value.NewArray([]value.Value{value.NewInt(1)})
+	arrayObject := array.Obj.(*value.ObjArray)
+	arrayObject.RuntimeType = dynamicArray
+	if machine.markRuntimeValueType(array, fixedArray) || arrayObject.RuntimeType != dynamicArray {
+		t.Fatal("array conflict overwrote existing runtime schema")
+	}
+
+	stringMap := &value.RuntimeTypeInfo{Kind: value.TYPE_MAP, Key: text, Value: integer}
+	intMap := &value.RuntimeTypeInfo{Kind: value.TYPE_MAP, Key: integer, Value: text}
+	mapping := value.NewMap()
+	mapObject := mapping.Obj.(*value.ObjMap)
+	mapObject.RuntimeType = stringMap
+	if machine.markRuntimeValueType(mapping, intMap) || mapObject.RuntimeType != stringMap {
+		t.Fatal("map conflict overwrote existing runtime schema")
+	}
+
+	stringChannel := &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}
+	channel := value.NewChannel(1)
+	channelObject := channel.Obj.(*value.ObjChannel)
+	channelObject.ElementType = stringChannel
+	if machine.markRuntimeValueType(channel, &value.RuntimeTypeInfo{Kind: value.TYPE_CHANNEL, Element: integer}) || channelObject.ElementType != stringChannel {
+		t.Fatal("channel conflict overwrote existing runtime schema")
+	}
+
+	ref := &value.ObjRef{RefType: value.REF_PTR, Ptr: &array}
+	refValue := value.Value{Type: value.VAL_REF, Obj: ref}
+	if !machine.markRuntimeValueType(refValue, &value.RuntimeTypeInfo{Kind: value.TYPE_REF, Element: dynamicArray}) {
+		t.Fatal("compatible reference value marker was rejected")
+	}
+	if ref.TargetType != nil || refValue.Obj != ref {
+		t.Fatal("runtime value marker mutated or rebound ObjRef")
+	}
+}
+
+func TestTypedJSONLoadsBuildsCollectionRuntimeSchemas(t *testing.T) {
+	t.Run("empty nested array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let decoded: int[][] = [[1]]
+let ok: bool = json_loads("[[]]", decoded)
+let seed: int[] = [1]
+let target: int[][] = [seed]
+pop(target)
+let invoke: any = append
+invoke(ref target, decoded[0])
+if ok then test_report(length(target)) else test_report(999) end`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("empty nested map", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let decoded: map[string, int][] = [{"seed": 1}]
+let ok: bool = json_loads("[{}]", decoded)
+let seed: map[string, int] = {"seed": 1}
+let target: map[string, int][] = [seed]
+pop(target)
+let invoke: any = append
+invoke(ref target, decoded[0])
+if ok then test_report(length(target)) else test_report(999) end`)
+		testExpectedObject(t, 1, got)
+	})
+}
+
+func TestRuntimeValueMarkerPropagatesThroughReferenceWithoutMutatingIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "typed declaration",
+			source: `
+let typed: ref int[] = unknown_ref()
+let seed: int[] = [1]
+let target: int[][] = [seed]
+pop(target)
+let invoke: any = append
+invoke(ref target, typed)
+test_report(length(target))`,
+		},
+		{
+			name: "reference rebind",
+			source: `
+let initial: int[] = [1]
+let typed: ref int[] = ref initial
+typed = unknown_ref()
+let seed: int[] = [1]
+let target: int[][] = [seed]
+pop(target)
+let invoke: any = append
+invoke(ref target, typed)
+test_report(length(target))`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := lexer.New(tt.source)
+			p := parser.New(l)
+			program := p.ParseProgram()
+			if len(p.Errors()) != 0 {
+				t.Fatalf("parser errors: %v", p.Errors())
+			}
+			code, _, err := compiler.New().Compile(program)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			machine := New()
+			backing := value.NewArray(nil)
+			originalRef := &value.ObjRef{RefType: value.REF_PTR, Ptr: &backing}
+			captured := value.NewNull()
+			machine.DefineNative("unknown_ref", func(args []value.Value) value.Value {
+				return value.Value{Type: value.VAL_REF, Obj: originalRef}
+			})
+			machine.DefineNative("test_report", func(args []value.Value) value.Value {
+				captured = args[0]
+				return value.NewNull()
+			})
+			if err := machine.Interpret(code); err != nil {
+				t.Fatal(err)
+			}
+			testExpectedObject(t, 1, captured)
+			backingSchema := backing.Obj.(*value.ObjArray).RuntimeType
+			if backingSchema == nil || backingSchema.Kind != value.TYPE_ARRAY || backingSchema.Element == nil || backingSchema.Element.Kind != value.TYPE_INT {
+				t.Fatalf("backing schema=%#v", backingSchema)
+			}
+			if originalRef.Ptr != &backing || originalRef.TargetType != nil {
+				t.Fatal("runtime value marker mutated or rebound the ObjRef")
+			}
+		})
+	}
+
+	t.Run("map referent", func(t *testing.T) {
+		source := `
+let typed: ref map[string, int] = unknown_ref()
+let seed: map[string, int] = {"seed": 1}
+let target: map[string, int][] = [seed]
+pop(target)
+let invoke: any = append
+invoke(ref target, typed)
+test_report(length(target))`
+		l := lexer.New(source)
+		p := parser.New(l)
+		program := p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			t.Fatalf("parser errors: %v", p.Errors())
+		}
+		code, _, err := compiler.New().Compile(program)
+		if err != nil {
+			t.Fatal(err)
+		}
+		machine := New()
+		backing := value.NewMap()
+		originalRef := &value.ObjRef{RefType: value.REF_PTR, Ptr: &backing}
+		captured := value.NewNull()
+		machine.DefineNative("unknown_ref", func(args []value.Value) value.Value {
+			return value.Value{Type: value.VAL_REF, Obj: originalRef}
+		})
+		machine.DefineNative("test_report", func(args []value.Value) value.Value {
+			captured = args[0]
+			return value.NewNull()
+		})
+		if err := machine.Interpret(code); err != nil {
+			t.Fatal(err)
+		}
+		testExpectedObject(t, 1, captured)
+		backingSchema := backing.Obj.(*value.ObjMap).RuntimeType
+		if backingSchema == nil || backingSchema.Kind != value.TYPE_MAP || backingSchema.Key.Kind != value.TYPE_STRING || backingSchema.Value.Kind != value.TYPE_INT {
+			t.Fatalf("backing schema=%#v", backingSchema)
+		}
+		if originalRef.Ptr != &backing || originalRef.TargetType != nil {
+			t.Fatal("runtime value marker mutated or rebound the map ObjRef")
+		}
+	})
+
+	t.Run("channel referent", func(t *testing.T) {
+		source := `
+let typed: ref chan int = unknown_ref()
+let seed: chan int = make_chan(1)
+let target: (chan int)[] = [seed]
+pop(target)
+let invoke: any = append
+invoke(ref target, typed)
+test_report(length(target))`
+		l := lexer.New(source)
+		p := parser.New(l)
+		program := p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			t.Fatalf("parser errors: %v", p.Errors())
+		}
+		code, _, err := compiler.New().Compile(program)
+		if err != nil {
+			t.Fatal(err)
+		}
+		machine := New()
+		backing := value.NewChannel(1)
+		originalRef := &value.ObjRef{RefType: value.REF_PTR, Ptr: &backing}
+		captured := value.NewNull()
+		machine.DefineNative("unknown_ref", func(args []value.Value) value.Value {
+			return value.Value{Type: value.VAL_REF, Obj: originalRef}
+		})
+		machine.DefineNative("test_report", func(args []value.Value) value.Value {
+			captured = args[0]
+			return value.NewNull()
+		})
+		if err := machine.Interpret(code); err != nil {
+			t.Fatal(err)
+		}
+		testExpectedObject(t, 1, captured)
+		channel := backing.Obj.(*value.ObjChannel)
+		if channel.ElementType == nil || channel.ElementType.Kind != value.TYPE_INT {
+			t.Fatalf("channel element schema=%#v", channel.ElementType)
+		}
+		if originalRef.Ptr != &backing || originalRef.TargetType != nil {
+			t.Fatal("runtime value marker mutated or rebound the channel ObjRef")
+		}
+	})
 }
 
 func TestTypedJSONLoadsRejectsCallableAndChannelConstruction(t *testing.T) {

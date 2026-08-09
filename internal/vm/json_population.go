@@ -301,14 +301,18 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			}
 			elements[i] = created
 		}
-		return value.NewArray(elements), true
+		array := value.NewArray(elements)
+		array.Obj.(*value.ObjArray).RuntimeType = schema
+		return array, true
 	case value.TYPE_MAP:
 		items, ok := data.(map[string]interface{})
 		if !ok || !jsonMapKeyCompatible(schema.Key) {
 			break
 		}
 		mapping := value.NewMap()
-		mapData := mapping.Obj.(*value.ObjMap).Data
+		mapObject := mapping.Obj.(*value.ObjMap)
+		mapObject.RuntimeType = schema
+		mapData := mapObject.Data
 		for key, item := range items {
 			created, ok := buildTypedJSONValue(schema.Value, item)
 			if !ok {

@@ -68,6 +68,13 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		if actual.Type != value.VAL_OBJ || !ok {
 			return false
 		}
+		if array.RuntimeType != nil {
+			if !runtimeTypeComplete(array.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, array.RuntimeType, make(map[runtimeTypePair]bool)) {
+				return false
+			}
+		} else if expected.Size > 0 || len(array.Elements) == 0 {
+			return false
+		}
 		for _, element := range array.Elements {
 			if !vm.runtimeValueMatchesType(element, expected.Element) {
 				return false
@@ -77,6 +84,13 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 	case value.TYPE_MAP:
 		mapping, ok := actual.Obj.(*value.ObjMap)
 		if actual.Type != value.VAL_OBJ || !ok {
+			return false
+		}
+		if mapping.RuntimeType != nil {
+			if !runtimeTypeComplete(mapping.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, mapping.RuntimeType, make(map[runtimeTypePair]bool)) {
+				return false
+			}
+		} else if len(mapping.Data) == 0 {
 			return false
 		}
 		for key, element := range mapping.Data {
@@ -204,6 +218,9 @@ type runtimeValueTypePair struct {
 // complete value graph compatible. It never replaces a conflicting marker or
 // changes the identity of the marked value.
 func (vm *VM) markRuntimeValueType(actual value.Value, schema *value.RuntimeTypeInfo) bool {
+	if !runtimeTypeComplete(schema, make(map[*value.RuntimeTypeInfo]bool)) {
+		return false
+	}
 	if !vm.walkRuntimeValueType(actual, schema, false, make(map[runtimeValueTypePair]bool)) {
 		return false
 	}
@@ -229,8 +246,17 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		if runtimeValueTypeSeen(array, schema, seen) {
 			return true
 		}
+		effectiveSchema := schema
+		if array.RuntimeType != nil {
+			if !runtimeTypeComplete(array.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, array.RuntimeType, make(map[runtimeTypePair]bool)) {
+				return false
+			}
+			effectiveSchema = array.RuntimeType
+		} else if apply {
+			array.RuntimeType = schema
+		}
 		for _, element := range array.Elements {
-			if !vm.walkRuntimeValueType(element, schema.Element, apply, seen) {
+			if !vm.walkRuntimeValueType(element, effectiveSchema.Element, apply, seen) {
 				return false
 			}
 		}
@@ -243,8 +269,17 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		if runtimeValueTypeSeen(mapping, schema, seen) {
 			return true
 		}
+		effectiveSchema := schema
+		if mapping.RuntimeType != nil {
+			if !runtimeTypeComplete(mapping.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, mapping.RuntimeType, make(map[runtimeTypePair]bool)) {
+				return false
+			}
+			effectiveSchema = mapping.RuntimeType
+		} else if apply {
+			mapping.RuntimeType = schema
+		}
 		for key, element := range mapping.Data {
-			if !runtimeMapKeyMatchesType(key, schema.Key) || !vm.walkRuntimeValueType(element, schema.Value, apply, seen) {
+			if !runtimeMapKeyMatchesType(key, effectiveSchema.Key) || !vm.walkRuntimeValueType(element, effectiveSchema.Value, apply, seen) {
 				return false
 			}
 		}
@@ -258,7 +293,13 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 			return true
 		}
 		resolved, err := vm.resolveReferenceValue(actual)
-		return err == nil && vm.walkRuntimeValueType(resolved, schema.Element, apply, seen)
+		if err != nil {
+			return false
+		}
+		if resolved.Type == value.VAL_NULL {
+			return true
+		}
+		return vm.walkRuntimeValueType(resolved, schema.Element, apply, seen)
 	case value.TYPE_STRUCT:
 		instance, ok := actual.Obj.(*value.ObjInstance)
 		if actual.Type != value.VAL_OBJ || !ok || instance == nil || instance.Struct == nil || instance.Struct.Name != schema.Name {

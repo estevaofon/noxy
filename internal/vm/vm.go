@@ -3877,7 +3877,9 @@ func (vm *VM) run(minFrameCount int) error {
 			if typeValue.Type != value.VAL_OBJ || !ok || runtimeType == nil {
 				return vm.runtimeError(c, ip, "runtime value marker requires type metadata")
 			}
-			vm.markRuntimeValueType(vm.peek(0), runtimeType)
+			if !vm.markRuntimeValueType(vm.peek(0), runtimeType) {
+				return vm.runtimeError(c, ip, "runtime value metadata conflicts with static context")
+			}
 
 		case chunk.OP_DEREF:
 			refVal := vm.pop()
@@ -4844,13 +4846,13 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 	case *value.ObjArray:
 		newElems := make([]value.Value, len(obj.Elements))
 		copy(newElems, obj.Elements)
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjArray{Elements: newElems}}
+		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjArray{Elements: newElems, RuntimeType: obj.RuntimeType}}
 	case *value.ObjMap:
 		newData := make(map[interface{}]value.Value)
 		for k, val := range obj.Data {
 			newData[k] = val
 		}
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{Data: newData}}
+		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{Data: newData, RuntimeType: obj.RuntimeType}}
 	case *value.ObjInstance:
 		newFields := make(map[string]value.Value)
 		for k, val := range obj.Fields {
