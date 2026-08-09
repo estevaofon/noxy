@@ -69,9 +69,12 @@ const (
 	OP_CLOSURE       // [const_index] [upvalue_count] [is_local, index]...
 	OP_CLOSE_UPVALUE // Explicit instruction to close upvalues
 	OP_REF_LOCAL
+	OP_REF_UPVALUE
 	OP_REF_GLOBAL
 	OP_REF_PROPERTY
 	OP_REF_INDEX
+	OP_CONTEXT_REF_PROPERTY
+	OP_CONTEXT_REF_INDEX
 	OP_DEREF
 	OP_STORE_VIA_REF
 	OP_STORE_REF
@@ -79,6 +82,9 @@ const (
 	OP_SWAP
 	OP_COPY
 	OP_ADDR
+	OP_MARK_REF_JSON_DYNAMIC
+	OP_MARK_REF_TARGET_TYPE
+	OP_MARK_RUNTIME_VALUE_TYPE
 )
 
 func (op OpCode) String() string {
@@ -177,14 +183,26 @@ func (op OpCode) String() string {
 		return "OP_CLOSE_UPVALUE"
 	case OP_REF_LOCAL:
 		return "OP_REF_LOCAL"
+	case OP_REF_UPVALUE:
+		return "OP_REF_UPVALUE"
 	case OP_REF_GLOBAL:
 		return "OP_REF_GLOBAL"
 	case OP_REF_PROPERTY:
 		return "OP_REF_PROPERTY"
 	case OP_REF_INDEX:
 		return "OP_REF_INDEX"
+	case OP_CONTEXT_REF_PROPERTY:
+		return "OP_CONTEXT_REF_PROPERTY"
+	case OP_CONTEXT_REF_INDEX:
+		return "OP_CONTEXT_REF_INDEX"
 	case OP_DEREF:
 		return "OP_DEREF"
+	case OP_MARK_REF_JSON_DYNAMIC:
+		return "OP_MARK_REF_JSON_DYNAMIC"
+	case OP_MARK_REF_TARGET_TYPE:
+		return "OP_MARK_REF_TARGET_TYPE"
+	case OP_MARK_RUNTIME_VALUE_TYPE:
+		return "OP_MARK_RUNTIME_VALUE_TYPE"
 	case OP_STORE_VIA_REF:
 		return "OP_STORE_VIA_REF"
 	case OP_DUP:
@@ -358,6 +376,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_SET_INDEX", offset)
 	case OP_GET_PROPERTY:
 		return c.constantInstruction("OP_GET_PROPERTY", offset)
+	case OP_MARK_REF_TARGET_TYPE:
+		return c.constantLongInstruction("OP_MARK_REF_TARGET_TYPE", offset)
+	case OP_MARK_RUNTIME_VALUE_TYPE:
+		return c.constantLongInstruction("OP_MARK_RUNTIME_VALUE_TYPE", offset)
 	case OP_SET_PROPERTY:
 		return c.constantInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:
@@ -398,12 +420,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_CLOSE_UPVALUE", offset)
 	case OP_REF_LOCAL:
 		return c.byteInstruction("OP_REF_LOCAL", offset)
+	case OP_REF_UPVALUE:
+		return c.byteInstruction("OP_REF_UPVALUE", offset)
 	case OP_REF_GLOBAL:
 		return c.constantInstruction("OP_REF_GLOBAL", offset)
 	case OP_REF_PROPERTY:
 		return c.constantInstruction("OP_REF_PROPERTY", offset)
 	case OP_REF_INDEX:
 		return c.simpleInstruction("OP_REF_INDEX", offset)
+	case OP_CONTEXT_REF_PROPERTY:
+		return c.constantInstruction("OP_CONTEXT_REF_PROPERTY", offset)
+	case OP_CONTEXT_REF_INDEX:
+		return c.simpleInstruction("OP_CONTEXT_REF_INDEX", offset)
 	case OP_DEREF:
 		return c.simpleInstruction("OP_DEREF", offset)
 	case OP_STORE_VIA_REF:
@@ -418,6 +446,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_COPY", offset)
 	case OP_ADDR:
 		return c.simpleInstruction("OP_ADDR", offset)
+	case OP_MARK_REF_JSON_DYNAMIC:
+		return c.simpleInstruction("OP_MARK_REF_JSON_DYNAMIC", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

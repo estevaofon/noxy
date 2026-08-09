@@ -163,7 +163,7 @@ add(x)`, "expected int, got any"},
 		{"ref", `func set(v: ref int) -> void
     return
 end
-set(1)`, "reference argument must be a variable, property, index, or null"},
+set(1)`, "reference argument '1' is not addressable"},
 		{"ref type", `func set(v: ref int) -> void
     return
 end
@@ -202,6 +202,92 @@ set(value)
 set(values[0])`)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReferenceValueAssignmentSuggestsDereference(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func increment(value: ref int) -> void
+    value = value + 1
+end`)
+	if err == nil {
+		t.Fatal("expected reference assignment error")
+	}
+	want := "cannot assign int to ref int"
+	if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "use '*value = ...'") {
+		t.Fatalf("error=%q, want %q and dereference hint", err, want)
+	}
+}
+
+func TestReferenceSlotValueAssignmentsSuggestDereference(t *testing.T) {
+	tests := []struct {
+		name, input, hint string
+	}{
+		{
+			name: "local reference parameter",
+			input: `
+func increment(value: ref int) -> void
+    value = value + 1
+end`,
+			hint: "use '*value = ...'",
+		},
+		{
+			name: "global",
+			input: `
+let number: int = 0
+let value: ref int = ref number
+value = 1`,
+			hint: "use '*value = ...'",
+		},
+		{
+			name: "captured reference parameter",
+			input: `
+func outer(value: ref int) -> void
+    func inner() -> void
+        value = value + 1
+    end
+end`,
+			hint: "use '*value = ...'",
+		},
+		{
+			name: "field",
+			input: `
+struct Holder
+    field: ref int
+end
+let number: int = 0
+let holder: Holder = Holder(ref number)
+holder.field = 1`,
+			hint: "use '*holder.field = ...'",
+		},
+		{
+			name: "array element",
+			input: `
+let number: int = 0
+let items: (ref int)[] = [ref number]
+items[0] = 1`,
+			hint: "use '*items[0] = ...'",
+		},
+		{
+			name: "map value",
+			input: `
+let number: int = 0
+let items: map[string, ref int] = {"item": ref number}
+items["item"] = 1`,
+			hint: "use '*items[\"item\"] = ...'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := compileFunctionSource(t, tt.input)
+			if err == nil {
+				t.Fatal("expected reference assignment error")
+			}
+			if !strings.Contains(err.Error(), "cannot assign int to ref int") || !strings.Contains(err.Error(), tt.hint) {
+				t.Fatalf("error=%q, want reference assignment diagnostic with %q", err, tt.hint)
+			}
+		})
 	}
 }
 
@@ -398,6 +484,27 @@ accept(null)`)
 	}
 }
 
+func TestExactReferenceCallAcceptsNullForCallableElement(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func accept(value: ref func() -> int) -> void
+end
+accept(null)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExactReferenceCallDoesNotTreatAnyAsNull(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func accept(value: ref func() -> int) -> void
+end
+let dynamic: any = null
+accept(dynamic)`)
+	if err == nil || !strings.Contains(err.Error(), "expected ref func() -> int, got ref any") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestCapturedFunctionReassignmentIsTypeChecked(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func integer(value: int) -> int
@@ -453,6 +560,40 @@ func missing() -> Node
 end
 struct Node
     value: int
+end`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLocalStructTypeDoesNotLeakIntoSiblingFunction(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func define_local() -> int
+    struct Hidden
+        value: int
+    end
+    return Hidden(1).value
+end
+func sibling() -> int
+    let makers: (func(int) -> Hidden)[] = [Hidden]
+    return length(makers)
+end`)
+	if err == nil {
+		t.Fatal("local struct type leaked into sibling function")
+	}
+}
+
+func TestExactReferenceCallAcceptsCapturedVariable(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+func make_incrementer() -> func() -> int
+    let value: int = 0
+    return func() -> int
+        increment(value)
+        return value
+    end
 end`)
 	if err != nil {
 		t.Fatal(err)

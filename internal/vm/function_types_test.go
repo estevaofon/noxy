@@ -5,6 +5,7 @@ import (
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
+	"strings"
 	"testing"
 )
 
@@ -32,6 +33,82 @@ func runTypedFunctionProgram(t *testing.T, input string) value.Value {
 		t.Fatalf("vm error: %v", err)
 	}
 	return captured
+}
+
+func runTypedFunctionProgramError(t *testing.T, input string) error {
+	t.Helper()
+	l := lexer.New(input)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	bytecode, _, err := compiler.New().Compile(program)
+	if err != nil {
+		t.Fatalf("compiler error: %v", err)
+	}
+	return New().Interpret(bytecode)
+}
+
+func TestDynamicCallRejectsPlainValueForReferenceParameter(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func increment(value: ref int) -> void
+    return
+end
+let dynamic: func = increment
+let answer: int = 41
+dynamic(answer)`)
+	if err == nil || !strings.Contains(err.Error(), "argument 1: expected ref int, got int") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestDynamicCallRejectsReferenceForValueParameter(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func consume(value: int) -> void
+    return
+end
+let dynamic: func = consume
+let answer: int = 41
+dynamic(ref answer)`)
+	if err == nil || !strings.Contains(err.Error(), "argument 1: expected int, got ref") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestDynamicReferenceParameterAcceptsNull(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func consume(value: ref int) -> void
+    return
+end
+let dynamic: func = consume
+dynamic(null)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExactCallableReferenceParameterReceivesNullValue(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func accept(value: ref func() -> int) -> void
+    test_report(ref value)
+end
+accept(null)`)
+	if got.Type != value.VAL_NULL {
+		t.Fatalf("argument=%v (%v), want VAL_NULL", got, got.Type)
+	}
+	if got.Obj != nil {
+		t.Fatalf("null argument object=%T, want nil (no ObjRef)", got.Obj)
+	}
+}
+
+func TestUpdatingNullReferenceFailsClearly(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+let pointer: ref int = null
+*pointer = 1`)
+	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
+		t.Fatalf("error=%v", err)
+	}
 }
 
 func TestExecutesExactHigherOrderFunction(t *testing.T) {
@@ -94,6 +171,53 @@ end
 let dynamic: func = increment
 let answer: int = 41
 dynamic(ref answer)
+test_report(answer)`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestContextualReferenceUpdatesClosedUpvalue(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+func make_incrementer() -> func() -> int
+    let value: int = 40
+    return func() -> int
+        increment(value)
+        return value
+    end
+end
+let incrementer: func() -> int = make_incrementer()
+incrementer()
+test_report(incrementer())`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestExplicitReferenceToClosedUpvalueCanEscape(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func make_reference_factory() -> func() -> ref int
+    let value: int = 41
+    return func() -> ref int
+        return ref value
+    end
+end
+let get_reference: func() -> ref int = make_reference_factory()
+let pointer: ref int = get_reference()
+*pointer = 42
+test_report(pointer)`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestContextualReferenceAcceptsReferenceReturningCall(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let answer: int = 41
+func get_reference() -> ref int
+    return ref answer
+end
+func increment(value: ref int) -> void
+    *value = value + 1
+end
+increment(get_reference())
 test_report(answer)`)
 	testExpectedObject(t, 42, got)
 }

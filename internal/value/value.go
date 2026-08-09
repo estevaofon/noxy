@@ -2,7 +2,9 @@ package value
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type ValueType int
@@ -30,7 +32,103 @@ type Value struct {
 }
 
 type ParamInfo struct {
-	IsRef bool
+	IsRef    bool
+	TypeName string
+}
+
+type NativeSignature struct {
+	Arity      int
+	Variadic   bool
+	Params     []ParamInfo
+	ReturnType string
+}
+
+type RuntimeTypeKind uint8
+
+const (
+	TYPE_ANY RuntimeTypeKind = iota
+	TYPE_NULL
+	TYPE_BOOL
+	TYPE_INT
+	TYPE_FLOAT
+	TYPE_STRING
+	TYPE_BYTES
+	TYPE_ARRAY
+	TYPE_MAP
+	TYPE_REF
+	TYPE_STRUCT
+	TYPE_VOID
+	TYPE_CALLABLE
+	TYPE_CHANNEL
+)
+
+// RuntimeTypeInfo is narrow metadata used at typed native boundaries and on
+// callable/channel objects whose runtime shape alone cannot prove their static
+// type. It is not a new parameter mode and does not affect Value identity.
+type RuntimeTypeInfo struct {
+	Kind         RuntimeTypeKind
+	Name         string
+	Element      *RuntimeTypeInfo
+	Key          *RuntimeTypeInfo
+	Value        *RuntimeTypeInfo
+	Fields       map[string]*RuntimeTypeInfo
+	Size         int
+	Params       []*RuntimeTypeInfo
+	ParamIsRef   []bool
+	Return       *RuntimeTypeInfo
+	CallableBare bool
+}
+
+func (t *RuntimeTypeInfo) String() string {
+	if t == nil {
+		return "unknown"
+	}
+	switch t.Kind {
+	case TYPE_ANY:
+		return "any"
+	case TYPE_NULL:
+		return "null"
+	case TYPE_BOOL:
+		return "bool"
+	case TYPE_INT:
+		return "int"
+	case TYPE_FLOAT:
+		return "float"
+	case TYPE_STRING:
+		return "string"
+	case TYPE_BYTES:
+		return "bytes"
+	case TYPE_ARRAY:
+		element := t.Element.String()
+		if t.Element != nil && t.Element.Kind == TYPE_CALLABLE && !t.Element.CallableBare {
+			element = "(" + element + ")"
+		}
+		if t.Size > 0 {
+			return fmt.Sprintf("%s[%d]", element, t.Size)
+		}
+		return element + "[]"
+	case TYPE_MAP:
+		return "map[" + t.Key.String() + ", " + t.Value.String() + "]"
+	case TYPE_REF:
+		return "ref " + t.Element.String()
+	case TYPE_STRUCT:
+		return t.Name
+	case TYPE_VOID:
+		return "void"
+	case TYPE_CALLABLE:
+		if t.CallableBare {
+			return "func"
+		}
+		params := make([]string, len(t.Params))
+		for i, param := range t.Params {
+			params[i] = param.String()
+		}
+		return "func(" + strings.Join(params, ", ") + ") -> " + t.Return.String()
+	case TYPE_CHANNEL:
+		return "chan " + t.Element.String()
+	default:
+		return "unknown"
+	}
 }
 
 type ObjFunction struct {
@@ -40,6 +138,7 @@ type ObjFunction struct {
 	Params       []ParamInfo
 	Chunk        interface{}
 	Globals      map[string]Value // Module/Context globals
+	RuntimeType  *RuntimeTypeInfo
 }
 
 type ObjUpvalue struct {
@@ -65,12 +164,14 @@ func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 type NativeFunc func(args []Value) Value
 
 type ObjNative struct {
-	Name string
-	Fn   NativeFunc
+	Name      string
+	Fn        NativeFunc
+	Signature *NativeSignature
 }
 
 type ObjArray struct {
-	Elements []Value
+	Elements    []Value
+	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 }
 
 func (oa *ObjArray) String() string {
@@ -107,7 +208,8 @@ func (oa *ObjArray) Format(f fmt.State, verb rune) {
 }
 
 type ObjMap struct {
-	Data map[interface{}]Value
+	Data        map[interface{}]Value
+	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 }
 
 func (om *ObjMap) String() string {
@@ -136,8 +238,10 @@ func (om *ObjMap) Format(f fmt.State, verb rune) {
 }
 
 type ObjStruct struct {
-	Name   string
-	Fields []string
+	Name              string
+	Fields            []string
+	JSONDynamicFields map[string]bool
+	ConstructorType   *RuntimeTypeInfo
 }
 
 func (os *ObjStruct) String() string {
@@ -176,9 +280,10 @@ func (oi *ObjInstance) Format(f fmt.State, verb rune) {
 }
 
 type ObjChannel struct {
-	Chan   chan Value
-	Closed bool
-	Lock   sync.Mutex
+	Chan        chan Value
+	Closed      bool
+	Lock        sync.Mutex
+	ElementType *RuntimeTypeInfo
 }
 
 func (oc *ObjChannel) String() string {
@@ -226,15 +331,21 @@ const (
 )
 
 type ObjRef struct {
-	RefType   RefType
-	Name      string      // For Global or Property Name
-	Ptr       *Value      // For Local (unsafe if escapes)
-	Upvalue   *ObjUpvalue // For Local (safe, captured)
-	Container Value       // For Property/Index (Object, Array, Map)
-	Index     Value       // For Index
+	RefType     RefType
+	JSONDynamic atomic.Bool // Declared any target: JSON may replace its concrete runtime type.
+	TargetType  atomic.Pointer[RuntimeTypeInfo]
+	Name        string // For Global or Property Name
+	GlobalOwner *map[string]Value
+	Ptr         *Value      // For Local (unsafe if escapes)
+	Upvalue     *ObjUpvalue // For Local (safe, captured)
+	Container   Value       // For Property/Index (Object, Array, Map)
+	Index       Value       // For Index
 }
 
 func (or *ObjRef) String() string {
+	if or == nil {
+		return "<invalid reference>"
+	}
 	switch or.RefType {
 	case REF_GLOBAL:
 		return fmt.Sprintf("<ref global %s>", or.Name)
@@ -243,7 +354,15 @@ func (or *ObjRef) String() string {
 	case REF_PROPERTY:
 		return fmt.Sprintf("<ref prop %s>", or.Name)
 	case REF_INDEX:
-		return fmt.Sprintf("<ref index %s>", or.Index.String())
+		switch or.Index.Type {
+		case VAL_INT:
+			return fmt.Sprintf("<ref index %d>", or.Index.AsInt)
+		case VAL_OBJ:
+			if key, ok := or.Index.Obj.(string); ok {
+				return fmt.Sprintf("<ref index %s>", key)
+			}
+		}
+		return "<invalid reference>"
 	default:
 		return fmt.Sprintf("<ref %p>", or.Ptr)
 	}
@@ -303,7 +422,11 @@ func (v Value) String() string {
 	case VAL_WAITGROUP:
 		return v.Obj.(*ObjWaitGroup).String()
 	case VAL_REF:
-		return v.Obj.(*ObjRef).String()
+		ref, ok := v.Obj.(*ObjRef)
+		if !ok || ref == nil {
+			return "<invalid reference>"
+		}
+		return ref.String()
 	default:
 		return "unknown"
 	}
@@ -327,6 +450,10 @@ func NewNull() Value {
 }
 
 func NewString(v string) Value {
+	return Value{Type: VAL_OBJ, Obj: v}
+}
+
+func NewRuntimeTypeInfo(v *RuntimeTypeInfo) Value {
 	return Value{Type: VAL_OBJ, Obj: v}
 }
 
@@ -371,7 +498,14 @@ func NewClosure(fn *ObjFunction) Value {
 func NewNative(name string, fn NativeFunc) Value {
 	return Value{
 		Type: VAL_NATIVE,
-		Obj:  &ObjNative{Name: name, Fn: fn},
+		Obj:  &ObjNative{Name: name, Fn: fn, Signature: nil},
+	}
+}
+
+func NewNativeWithSignature(name string, signature NativeSignature, fn NativeFunc) Value {
+	return Value{
+		Type: VAL_NATIVE,
+		Obj:  &ObjNative{Name: name, Fn: fn, Signature: &signature},
 	}
 }
 

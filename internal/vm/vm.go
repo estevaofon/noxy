@@ -1792,11 +1792,22 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewArray(nil)
 	})
 
-	vm.DefineNative("delete", func(args []value.Value) value.Value {
+	deleteSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref map"},
+			{IsRef: false, TypeName: "any"},
+		},
+		ReturnType: "void",
+	}
+	vm.DefineNativeWithSignature("delete", deleteSignature, func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
-		mapVal := args[0]
+		mapVal, err := vm.resolveReferenceValue(args[0])
+		if err != nil {
+			return value.NewNull()
+		}
 		keyVal := args[1]
 		if mapVal.Type == value.VAL_OBJ {
 			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
@@ -1815,12 +1826,26 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.DefineNative("append", func(args []value.Value) value.Value {
+	appendSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+		},
+		ReturnType: "void",
+	}
+	vm.DefineNativeWithSignature("append", appendSignature, func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
-		arrVal := args[0]
+		targetRef, _ := args[0].Obj.(*value.ObjRef)
+		arrVal, err := vm.resolveReferenceValue(args[0])
+		if err != nil {
+			return value.NewNull()
+		}
 		item := args[1]
+		if !vm.appendItemCompatible(targetRef, item) {
+			return value.NewNull()
+		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				arr.Elements = append(arr.Elements, item)
@@ -1828,11 +1853,21 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.DefineNative("pop", func(args []value.Value) value.Value {
+	popSignature := value.NativeSignature{
+		Arity: 1,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+		},
+		ReturnType: "any",
+	}
+	vm.DefineNativeWithSignature("pop", popSignature, func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
-		arrVal := args[0]
+		arrVal, err := vm.resolveReferenceValue(args[0])
+		if err != nil {
+			return value.NewNull()
+		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				if len(arr.Elements) == 0 {
@@ -3189,7 +3224,15 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	})
 
 	// json_loads(str, target) -> Bool
-	vm.DefineNative("json_loads", func(args []value.Value) value.Value {
+	jsonLoadsSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: false, TypeName: "string"},
+			{IsRef: true, TypeName: "ref any"},
+		},
+		ReturnType: "bool",
+	}
+	vm.DefineNativeWithSignature("json_loads", jsonLoadsSignature, func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
@@ -3197,8 +3240,13 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		target := args[1]
 
 		var result interface{}
-		err := json.Unmarshal([]byte(jsonStr), &result)
-		if err != nil {
+		decoder := json.NewDecoder(strings.NewReader(jsonStr))
+		decoder.UseNumber()
+		if err := decoder.Decode(&result); err != nil {
+			return value.NewBool(false)
+		}
+		var trailing interface{}
+		if err := decoder.Decode(&trailing); err != io.EOF {
 			return value.NewBool(false)
 		}
 
@@ -3271,6 +3319,14 @@ func goValToNoxy(i interface{}) value.Value {
 			return value.NewInt(int64(v))
 		}
 		return value.NewFloat(v)
+	case json.Number:
+		if parsed, ok := exactJSONInt(v); ok {
+			return value.NewInt(parsed)
+		}
+		if parsed, err := v.Float64(); err == nil {
+			return value.NewFloat(parsed)
+		}
+		return value.NewNull()
 	case string:
 		return value.NewString(v)
 	case []interface{}:
@@ -3292,111 +3348,75 @@ func goValToNoxy(i interface{}) value.Value {
 // Helper: Populate Target
 func populateTarget(vm *VM, target value.Value, data interface{}) bool {
 	if target.Type == value.VAL_REF {
-		ref := target.Obj.(*value.ObjRef)
-		populateRef(vm, ref, data)
-		return true
+		ref, ok := target.Obj.(*value.ObjRef)
+		if !ok || ref == nil {
+			return false
+		}
+		return populateRef(vm, ref, data)
 	} else if target.Type == value.VAL_OBJ {
 		// Populate Object In-Place
-		populateObj(vm, target, data)
-		return true
+		return populateObj(vm, target, data)
 	}
 	// Cannot populate primitive value passed by value
 	return false
 }
 
-func populateObj(vm *VM, currentVal value.Value, data interface{}) {
-	if inst, ok := currentVal.Obj.(*value.ObjInstance); ok {
-		if dataMap, ok := data.(map[string]interface{}); ok {
-			for _, fieldName := range inst.Struct.Fields {
-				if val, exists := dataMap[fieldName]; exists {
-					// Check if field is instance -> recurse
-					fieldType := inst.Fields[fieldName]
-					if fieldType.Type == value.VAL_OBJ {
-						if _, isInst := fieldType.Obj.(*value.ObjInstance); isInst {
-							populateObj(vm, fieldType, val)
-							continue
-						}
-					}
-					inst.Fields[fieldName] = goValToNoxy(val)
-				}
-			}
-		}
-	} else if m, ok := currentVal.Obj.(*value.ObjMap); ok {
-		if dataMap, ok := data.(map[string]interface{}); ok {
-			// Clear logic? Or merge? Go unmarshal merges.
-			for k, v := range dataMap {
-				m.Data[k] = goValToNoxy(v)
-			}
-		}
-	} else if arr, ok := currentVal.Obj.(*value.ObjArray); ok {
-		if dataArr, ok := data.([]interface{}); ok {
-			// Replace array content (slice behavior)
-			// Or should we merge? slice unmarshal replaces.
-			// But we can't resize easily in place?
-			// Actually we can just replace Elements slice.
-			newElems := make([]value.Value, len(dataArr))
-			for i, el := range dataArr {
-				newElems[i] = goValToNoxy(el)
-			}
-			arr.Elements = newElems
-		}
+func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
+	commit, ok := prepareJSONMutation(vm, currentVal, nil, data, nil)
+	if !ok {
+		return false
 	}
+	commit()
+	return true
 }
 
 // Helper: Populate a Reference with Go Data (Deeply)
-func populateRef(vm *VM, ref *value.ObjRef, data interface{}) {
-	var currentVal value.Value
-
-	// Dereference
-	switch ref.RefType {
-	case value.REF_GLOBAL:
-		v, ok := vm.GetGlobal(ref.Name)
-		if ok {
-			currentVal = v
-		}
-	case value.REF_UPVALUE:
-		currentVal = *ref.Upvalue.Location
-	case value.REF_PTR:
-		currentVal = *ref.Ptr
-	case value.REF_PROPERTY:
-		if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-			currentVal = inst.Fields[ref.Name]
-		}
-	case value.REF_INDEX:
-		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-			idx := int(ref.Index.AsInt)
-			if idx >= 0 && idx < len(arr.Elements) {
-				currentVal = arr.Elements[idx]
-			}
-		}
+func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
+	currentVal, exists, store, err := vm.referenceStorage(ref)
+	if err != nil || !exists || store == nil {
+		return false
 	}
-
-	// Logic to update: if object, update in place
-	if currentVal.Type == value.VAL_OBJ {
-		populateObj(vm, currentVal, data)
-		return
+	if ref.JSONDynamic.Load() {
+		replacement, ok := dynamicJSONValue(data)
+		if !ok {
+			return false
+		}
+		store(replacement)
+		return true
 	}
+	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType.Load(), data, jsonSetter(store))
+	if !ok {
+		return false
+	}
+	commit()
+	return true
+}
 
-	// Replace reference
-	newValue := goValToNoxy(data)
-	switch ref.RefType {
-	case value.REF_GLOBAL:
-		vm.SetGlobal(ref.Name, newValue)
-	case value.REF_UPVALUE:
-		*ref.Upvalue.Location = newValue
-	case value.REF_PTR:
-		*ref.Ptr = newValue
-	case value.REF_PROPERTY:
-		if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-			inst.Fields[ref.Name] = newValue
-		}
-	case value.REF_INDEX:
-		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-			idx := int(ref.Index.AsInt)
-			if idx >= 0 && idx < len(arr.Elements) {
-				arr.Elements[idx] = newValue
-			}
-		}
+func jsonReplacementCompatible(current, replacement value.Value) bool {
+	if current.Type == value.VAL_NULL {
+		return true
+	}
+	if current.Type != replacement.Type {
+		return false
+	}
+	if current.Type != value.VAL_OBJ {
+		return true
+	}
+	switch current.Obj.(type) {
+	case string:
+		_, ok := replacement.Obj.(string)
+		return ok
+	case *value.ObjArray:
+		_, ok := replacement.Obj.(*value.ObjArray)
+		return ok
+	case *value.ObjMap:
+		_, ok := replacement.Obj.(*value.ObjMap)
+		return ok
+	case *value.ObjInstance:
+		_, ok := replacement.Obj.(*value.ObjInstance)
+		return ok
+	default:
+		return false
 	}
 }
 
@@ -3406,6 +3426,13 @@ func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
 		return
 	}
 	vm.SetGlobal(name, value.NewNative(name, fn))
+}
+
+func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSignature, fn value.NativeFunc) {
+	if _, ok := vm.GetGlobal(name); ok {
+		return
+	}
+	vm.SetGlobal(name, value.NewNativeWithSignature(name, signature, fn))
 }
 
 func (vm *VM) SetGlobal(name string, val value.Value) {
@@ -3498,11 +3525,13 @@ func (vm *VM) run(minFrameCount int) error {
 				fn := constant.Obj.(*value.ObjFunction)
 				// Clone to bind globals
 				boundFn := &value.ObjFunction{
-					Name:    fn.Name,
-					Arity:   fn.Arity,
-					Params:  fn.Params,
-					Chunk:   fn.Chunk,
-					Globals: frame.Globals,
+					Name:         fn.Name,
+					Arity:        fn.Arity,
+					UpvalueCount: fn.UpvalueCount,
+					Params:       fn.Params,
+					Chunk:        fn.Chunk,
+					Globals:      frame.Globals,
+					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -3517,11 +3546,13 @@ func (vm *VM) run(minFrameCount int) error {
 			if constant.Type == value.VAL_FUNCTION {
 				fn := constant.Obj.(*value.ObjFunction)
 				boundFn := &value.ObjFunction{
-					Name:    fn.Name,
-					Arity:   fn.Arity,
-					Params:  fn.Params,
-					Chunk:   fn.Chunk,
-					Globals: frame.Globals,
+					Name:         fn.Name,
+					Arity:        fn.Arity,
+					UpvalueCount: fn.UpvalueCount,
+					Params:       fn.Params,
+					Chunk:        fn.Chunk,
+					Globals:      frame.Globals,
+					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -3567,7 +3598,13 @@ func (vm *VM) run(minFrameCount int) error {
 		case chunk.OP_ADDR:
 			val := vm.pop()
 			if val.Type == value.VAL_REF {
-				ref := val.Obj.(*value.ObjRef)
+				ref, err := extractReferenceValue(val)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				if _, _, _, err := vm.referenceStorage(ref); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
 				addrStr := ""
 				switch ref.RefType {
 				case value.REF_PTR:
@@ -3642,17 +3679,44 @@ func (vm *VM) run(minFrameCount int) error {
 				},
 			})
 
+		case chunk.OP_REF_UPVALUE:
+			slot := int(c.Code[ip])
+			ip++
+			if slot < 0 || slot >= len(frame.Closure.Upvalues) {
+				return vm.runtimeError(c, ip, "upvalue reference index out of bounds: %d", slot)
+			}
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType: value.REF_UPVALUE,
+					Upvalue: frame.Closure.Upvalues[slot],
+				},
+			})
+
 		case chunk.OP_REF_GLOBAL:
 			index := c.Code[ip]
 			ip++
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
+			var owner *map[string]value.Value
+			if frame.Globals != nil {
+				if _, ok := frame.Globals[name]; ok {
+					owner = &frame.Globals
+				}
+			}
+			if owner == nil {
+				if _, ok := vm.GetGlobal(name); !ok {
+					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
+				}
+				owner = &vm.shared.Globals
+			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
-					RefType: value.REF_GLOBAL,
-					Name:    name,
+					RefType:     value.REF_GLOBAL,
+					Name:        name,
+					GlobalOwner: owner,
 				},
 			})
 
@@ -3667,37 +3731,11 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Auto-dereference if container is a ref
 			if container.Type == value.VAL_REF {
-				ref := container.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					val, ok := frame.Globals[ref.Name]
-					if !ok {
-						val, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
-					}
-					container = val
-				case value.REF_UPVALUE:
-					container = *ref.Upvalue.Location
-				case value.REF_PTR:
-					container = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if val, ok := inst.Fields[ref.Name]; ok {
-							container = val
-						} else {
-							container = value.NewNull()
-						}
-					}
-				case value.REF_INDEX:
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx >= 0 && idx < len(arr.Elements) {
-							container = arr.Elements[idx]
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(container)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				container = resolved
 			}
 
 			// Now check container type
@@ -3737,6 +3775,114 @@ func (vm *VM) run(minFrameCount int) error {
 				},
 			})
 
+		case chunk.OP_CONTEXT_REF_PROPERTY:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+			container := vm.pop()
+
+			instance, ok := container.Obj.(*value.ObjInstance)
+			if container.Type != value.VAL_OBJ || !ok || instance == nil {
+				return vm.runtimeError(c, ip, "contextual property reference base must be an instance")
+			}
+			stored, ok := instance.Fields[name]
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined property '%s'", name)
+			}
+			if stored.Type == value.VAL_REF {
+				vm.push(stored)
+				continue
+			}
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType:   value.REF_PROPERTY,
+					Container: container,
+					Name:      name,
+				},
+			})
+
+		case chunk.OP_CONTEXT_REF_INDEX:
+			idx := vm.pop()
+			container := vm.pop()
+			if container.Type != value.VAL_OBJ {
+				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
+			}
+
+			var stored value.Value
+			if array, ok := container.Obj.(*value.ObjArray); ok && array != nil {
+				if idx.Type != value.VAL_INT {
+					return vm.runtimeError(c, ip, "array index must be integer")
+				}
+				arrayIndex := int(idx.AsInt)
+				if arrayIndex < 0 || arrayIndex >= len(array.Elements) {
+					return vm.runtimeError(c, ip, "array index out of bounds")
+				}
+				stored = array.Elements[arrayIndex]
+			} else if mapObj, ok := container.Obj.(*value.ObjMap); ok && mapObj != nil {
+				key, err := referenceMapKey(idx)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				stored = mapObj.Data[key]
+			} else {
+				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
+			}
+
+			if stored.Type == value.VAL_REF {
+				vm.push(stored)
+				continue
+			}
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType:   value.REF_INDEX,
+					Container: container,
+					Index:     idx,
+				},
+			})
+
+		case chunk.OP_MARK_REF_JSON_DYNAMIC:
+			refValue := vm.peek(0)
+			ref, ok := refValue.Obj.(*value.ObjRef)
+			if refValue.Type != value.VAL_REF || !ok || ref == nil {
+				return vm.runtimeError(c, ip, "dynamic target marker requires a reference")
+			}
+			ref.JSONDynamic.Store(true)
+
+		case chunk.OP_MARK_REF_TARGET_TYPE:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			typeValue := c.Constants[index]
+			targetType, ok := typeValue.Obj.(*value.RuntimeTypeInfo)
+			if typeValue.Type != value.VAL_OBJ || !ok || targetType == nil {
+				return vm.runtimeError(c, ip, "reference target marker requires runtime type metadata")
+			}
+			refValue := vm.peek(0)
+			if refValue.Type == value.VAL_NULL {
+				continue
+			}
+			ref, ok := refValue.Obj.(*value.ObjRef)
+			if refValue.Type != value.VAL_REF || !ok || ref == nil {
+				return vm.runtimeError(c, ip, "reference target marker requires a reference")
+			}
+			if !markReferenceTargetType(ref, targetType) {
+				return vm.runtimeError(c, ip, "reference target metadata conflicts with static context")
+			}
+
+		case chunk.OP_MARK_RUNTIME_VALUE_TYPE:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			typeValue := c.Constants[index]
+			runtimeType, ok := typeValue.Obj.(*value.RuntimeTypeInfo)
+			if typeValue.Type != value.VAL_OBJ || !ok || runtimeType == nil {
+				return vm.runtimeError(c, ip, "runtime value marker requires type metadata")
+			}
+			if !vm.markRuntimeValueType(vm.peek(0), runtimeType) {
+				return vm.runtimeError(c, ip, "runtime value metadata conflicts with static context")
+			}
+
 		case chunk.OP_DEREF:
 			refVal := vm.pop()
 			if refVal.Type == value.VAL_NULL {
@@ -3745,81 +3891,11 @@ func (vm *VM) run(minFrameCount int) error {
 				// Not a ref - pass through as-is (already dereferenced)
 				vm.push(refVal)
 			} else {
-				// VAL_REF - dereference it
-				ref := refVal.Obj.(*value.ObjRef)
-
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					// Global lookup (Read)
-					val, ok := frame.Globals[ref.Name]
-					if !ok {
-						val, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
-					}
-					vm.push(val)
-				case value.REF_UPVALUE:
-					// Read from Upvalue
-					vm.push(*ref.Upvalue.Location)
-				case value.REF_PTR:
-					// Local pointer read
-					vm.push(*ref.Ptr)
-				case value.REF_PROPERTY:
-					// Read property from container
-					// Assume ObjInstance for now. Could be Map (if string key?) or Module?
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if val, ok := inst.Fields[ref.Name]; ok {
-							vm.push(val)
-						} else {
-							// Default value or null? Or error?
-							// Struct fields should exist if type checked.
-							// If dynamic, maybe null.
-							vm.push(value.NewNull())
-						}
-					} else {
-						return vm.runtimeError(c, ip, "Target is not an instance")
-					}
-				case value.REF_INDEX:
-					// Read index from container (Array or Map)
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx < 0 || idx >= len(arr.Elements) {
-							return vm.runtimeError(c, ip, "Index out of bounds")
-						}
-						vm.push(arr.Elements[idx])
-					} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
-						// Map key
-						// Need to hash key? ObjMap uses interface{} key or Value key?
-						// ObjMap keys are interface{}. We need Value->Interface conversion or map stores Values?
-						// value.go: Data map[interface{}]Value
-						var key interface{}
-						// Minimal key conversion logic (duplicated from elsewhere? or simple)
-						if ref.Index.Type == value.VAL_OBJ {
-							if s, ok := ref.Index.Obj.(string); ok {
-								key = s
-							} else {
-								key = ref.Index.Obj // Pointer/etc
-							}
-						} else {
-							// Primitive
-							if ref.Index.Type == value.VAL_INT {
-								key = ref.Index.AsInt
-							} else {
-								key = ref.Index.AsInt
-								return vm.runtimeError(c, ip, "Map key type not fully supported in ref yet")
-							}
-						}
-
-						if val, ok := m.Data[key]; ok {
-							vm.push(val)
-						} else {
-							vm.push(value.NewNull())
-						}
-					} else {
-						return vm.runtimeError(c, ip, "Target is not indexable")
-					}
+				resolved, err := vm.resolveReferenceValue(refVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				vm.push(resolved)
 			}
 		case chunk.OP_STORE_VIA_REF:
 			slot := int(c.Code[ip])
@@ -3829,102 +3905,15 @@ func (vm *VM) run(minFrameCount int) error {
 			// The reference itself is in a local variable (e.g., parameter 'x')
 			refVal := vm.stack[frame.Slots+slot]
 
-			if refVal.Type != value.VAL_REF {
-				return vm.runtimeError(c, ip, "Cannot store via non-ref variable")
-			}
-
-			ref := refVal.Obj.(*value.ObjRef)
-
-			switch ref.RefType {
-			case value.REF_GLOBAL:
-				// Global assignment
-				if _, ok := frame.Globals[ref.Name]; ok {
-					frame.Globals[ref.Name] = val
-				} else {
-					vm.SetGlobal(ref.Name, val)
-				}
-			case value.REF_UPVALUE:
-				// Write to Upvalue
-				*ref.Upvalue.Location = val
-			case value.REF_PTR:
-				// Local assignment: Write to Ptr
-				*ref.Ptr = val
-			case value.REF_PROPERTY:
-				if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-					inst.Fields[ref.Name] = val
-				} else {
-					return vm.runtimeError(c, ip, "Target is not an instance")
-				}
-			case value.REF_INDEX:
-				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-					idx := int(ref.Index.AsInt)
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "Index out of bounds")
-					}
-					arr.Elements[idx] = val
-				} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
-					// Map Write
-					var key interface{}
-					if ref.Index.Type == value.VAL_OBJ {
-						if s, ok := ref.Index.Obj.(string); ok {
-							key = s
-						} else {
-							return vm.runtimeError(c, ip, "Map key must be string (simple ref support)")
-						}
-					} else if ref.Index.Type == value.VAL_INT {
-						key = ref.Index.AsInt
-					}
-					m.Data[key] = val
-				}
+			if err := vm.storeReferenceValue(refVal, val); err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
 		case chunk.OP_STORE_REF:
 			val := vm.pop()    // Value to assign
 			refVal := vm.pop() // The reference itself (popped from stack)
 
-			if refVal.Type != value.VAL_REF {
-				return vm.runtimeError(c, ip, "Cannot store via non-ref value")
-			}
-
-			ref := refVal.Obj.(*value.ObjRef)
-
-			switch ref.RefType {
-			case value.REF_GLOBAL:
-				// Global assignment
-				if _, ok := frame.Globals[ref.Name]; ok {
-					frame.Globals[ref.Name] = val
-				} else {
-					vm.SetGlobal(ref.Name, val)
-				}
-			case value.REF_UPVALUE:
-				*ref.Upvalue.Location = val
-			case value.REF_PTR:
-				*ref.Ptr = val
-			case value.REF_PROPERTY:
-				if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-					inst.Fields[ref.Name] = val
-				} else {
-					return vm.runtimeError(c, ip, "Target is not an instance")
-				}
-			case value.REF_INDEX:
-				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-					idx := int(ref.Index.AsInt)
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "Index out of bounds")
-					}
-					arr.Elements[idx] = val
-				} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
-					var key interface{}
-					if ref.Index.Type == value.VAL_OBJ {
-						if s, ok := ref.Index.Obj.(string); ok {
-							key = s
-						} else {
-							return vm.runtimeError(c, ip, "Map key must be string")
-						}
-					} else if ref.Index.Type == value.VAL_INT {
-						key = ref.Index.AsInt
-					}
-					m.Data[key] = val
-				}
+			if err := vm.storeReferenceValue(refVal, val); err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
 
 		case chunk.OP_ADD:
@@ -4317,6 +4306,15 @@ func (vm *VM) run(minFrameCount int) error {
 			vm.push(value.NewBool(a.AsInt == b.AsInt))
 		case chunk.OP_PRINT:
 			v := vm.pop()
+			if v.Type == value.VAL_REF {
+				ref, err := extractReferenceValue(v)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				if _, _, _, err := vm.referenceStorage(ref); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+			}
 			fmt.Println(v)
 
 		case chunk.OP_CALL:
@@ -4486,7 +4484,11 @@ func (vm *VM) run(minFrameCount int) error {
 				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
 					for k, v := range modMap.Data {
 						if keyStr, ok := k.(string); ok {
-							vm.SetGlobal(keyStr, v)
+							if frame.Globals != nil {
+								frame.Globals[keyStr] = v
+							} else {
+								vm.SetGlobal(keyStr, v)
+							}
 						}
 					}
 				} else {
@@ -4608,37 +4610,11 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Auto-dereference if instance is a ref
 			if instanceVal.Type == value.VAL_REF {
-				ref := instanceVal.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					v, ok := frame.Globals[ref.Name]
-					if !ok {
-						v, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
-					}
-					instanceVal = v
-				case value.REF_UPVALUE:
-					instanceVal = *ref.Upvalue.Location
-				case value.REF_PTR:
-					instanceVal = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if v, ok := inst.Fields[ref.Name]; ok {
-							instanceVal = v
-						} else {
-							instanceVal = value.NewNull()
-						}
-					}
-				case value.REF_INDEX:
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx >= 0 && idx < len(arr.Elements) {
-							instanceVal = arr.Elements[idx]
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				instanceVal = resolved
 			}
 
 			if instanceVal.Type != value.VAL_OBJ {
@@ -4674,37 +4650,11 @@ func (vm *VM) run(minFrameCount int) error {
 			// Auto-dereference if instance is a ref
 
 			if instanceVal.Type == value.VAL_REF {
-				ref := instanceVal.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					v, ok := frame.Globals[ref.Name]
-					if !ok {
-						v, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
-					}
-					instanceVal = v
-				case value.REF_UPVALUE:
-					instanceVal = *ref.Upvalue.Location
-				case value.REF_PTR:
-					instanceVal = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if v, ok := inst.Fields[ref.Name]; ok {
-							instanceVal = v
-						} else {
-							instanceVal = value.NewNull()
-						}
-					}
-				case value.REF_INDEX:
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx >= 0 && idx < len(arr.Elements) {
-							instanceVal = arr.Elements[idx]
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				instanceVal = resolved
 			}
 
 			if instanceVal.Type != value.VAL_OBJ {
@@ -4729,29 +4679,11 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Expect Instance (Can be Ref to Instance)
 			if instanceVal.Type == value.VAL_REF {
-				// Deref container first
-				ref := instanceVal.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					v, ok := frame.Globals[ref.Name]
-					if !ok {
-						v, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
-					}
-					instanceVal = v
-				case value.REF_UPVALUE:
-					instanceVal = *ref.Upvalue.Location
-				case value.REF_PTR:
-					instanceVal = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if v, ok := inst.Fields[ref.Name]; ok {
-							instanceVal = v
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				instanceVal = resolved
 			}
 
 			if instanceVal.Type != value.VAL_OBJ {
@@ -4771,35 +4703,8 @@ func (vm *VM) run(minFrameCount int) error {
 			if fieldVal.Type != value.VAL_REF {
 				return vm.runtimeError(c, ip, "property '%s' is not a reference", name)
 			}
-
-			// Write Value to Reference -> Duplicate OP_STORE_REF logic
-			ref := fieldVal.Obj.(*value.ObjRef)
-			switch ref.RefType {
-			case value.REF_GLOBAL:
-				if _, ok := frame.Globals[ref.Name]; ok {
-					frame.Globals[ref.Name] = val
-				} else {
-					vm.SetGlobal(ref.Name, val)
-				}
-			case value.REF_UPVALUE:
-				*ref.Upvalue.Location = val
-			case value.REF_PTR:
-				*ref.Ptr = val
-			case value.REF_PROPERTY:
-				if targetInst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-					targetInst.Fields[ref.Name] = val
-				} else {
-					return vm.runtimeError(c, ip, "Target is not an instance")
-				}
-			case value.REF_INDEX:
-				// ... (Dup logic) ...
-				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-					idx := int(ref.Index.AsInt)
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "Index out of bounds")
-					}
-					arr.Elements[idx] = val
-				}
+			if err := vm.storeReferenceValue(fieldVal, val); err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
 			vm.push(val)
 
@@ -4819,10 +4724,14 @@ func (vm *VM) run(minFrameCount int) error {
 
 func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	if callee.Type == value.VAL_OBJ {
-		if structDef, ok := callee.Obj.(*value.ObjStruct); ok {
+		if structDef, ok := callee.Obj.(*value.ObjStruct); ok && structDef != nil {
 			// Instantiate
 			if argCount != len(structDef.Fields) {
 				return false, vm.runtimeError(c, ip, "expected %d arguments for struct %s but got %d", len(structDef.Fields), structDef.Name, argCount)
+			}
+			args := vm.stack[vm.stackTop-argCount : vm.stackTop]
+			if err := vm.validateStructConstructorArguments(structDef, args); err != nil {
+				return false, vm.runtimeError(c, ip, "%s", err)
 			}
 
 			instance := value.NewInstance(structDef)
@@ -4848,6 +4757,40 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 	if callee.Type == value.VAL_NATIVE {
 		native := callee.Obj.(*value.ObjNative)
 		args := vm.stack[vm.stackTop-argCount : vm.stackTop]
+		if native.Signature != nil {
+			sig := native.Signature
+			if !sig.Variadic && argCount != sig.Arity {
+				return false, vm.runtimeError(c, ip, "native '%s' expects %d arguments, got %d", native.Name, sig.Arity, argCount)
+			}
+			if sig.Variadic && argCount < sig.Arity {
+				return false, vm.runtimeError(c, ip, "native '%s' expects at least %d arguments, got %d", native.Name, sig.Arity, argCount)
+			}
+
+			params := sig.Params
+			if sig.Variadic && len(params) > 0 && argCount > len(params) {
+				expanded := make([]value.ParamInfo, argCount)
+				copy(expanded, params)
+				for i := len(params); i < argCount; i++ {
+					expanded[i] = params[len(params)-1]
+				}
+				params = expanded
+			}
+			if err := validateParameterModes(native.Name, params, args); err != nil {
+				return false, vm.runtimeError(c, ip, "%s", err)
+			}
+
+			callArgs := make([]value.Value, len(args))
+			copy(callArgs, args)
+			for i, param := range params {
+				if i >= len(callArgs) {
+					break
+				}
+				if !param.IsRef {
+					callArgs[i] = vm.copyValue(callArgs[i])
+				}
+			}
+			args = callArgs
+		}
 		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
 		result := native.Fn(args)
 		vm.stackTop -= argCount + 1 // args + function
@@ -4873,6 +4816,10 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 	// Handle Pass-by-Value (Copy) for non-ref parameters
 	// Args are at vm.stackTop - argCount
 	baseArgs := vm.stackTop - argCount
+	args := vm.stack[baseArgs:vm.stackTop]
+	if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
+		return false, vm.runtimeError(c, ip, "%s", err)
+	}
 	for i := 0; i < argCount; i++ {
 		if i < len(fn.Params) {
 			param := fn.Params[i]
@@ -4905,13 +4852,19 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 	case *value.ObjArray:
 		newElems := make([]value.Value, len(obj.Elements))
 		copy(newElems, obj.Elements)
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjArray{Elements: newElems}}
+		copied := value.NewArray(newElems)
+		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
+		return copied
 	case *value.ObjMap:
 		newData := make(map[interface{}]value.Value)
 		for k, val := range obj.Data {
 			newData[k] = val
 		}
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{Data: newData}}
+		copied := value.NewMap()
+		copiedMap := copied.Obj.(*value.ObjMap)
+		copiedMap.Data = newData
+		copiedMap.RuntimeType.Store(obj.RuntimeType.Load())
+		return copied
 	case *value.ObjInstance:
 		newFields := make(map[string]value.Value)
 		for k, val := range obj.Fields {
@@ -5070,7 +5023,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 			if len(p.Errors()) > 0 {
 				return value.NewNull(), fmt.Errorf("parse error in embedded module %s: %v", name, p.Errors())
 			}
-			c := compiler.NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), name)
+			c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), name, vm.Config.RootPath)
 			chunk, _, err := c.Compile(prog)
 			if err != nil {
 				return value.NewNull(), err
@@ -5164,7 +5117,7 @@ FileImport:
 		return value.NewNull(), fmt.Errorf("parse error in module %s: %v", name, p.Errors())
 	}
 
-	c := compiler.NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), path)
+	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), path, vm.Config.RootPath)
 	chunk, _, err := c.Compile(prog)
 	if err != nil {
 		return value.NewNull(), err

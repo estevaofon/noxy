@@ -41,7 +41,7 @@ print("")
 
 // Teste 5: Argumentos
 print("Teste 5: Argumentos da linha de comando")
-let args: string[100] = argv()
+let args: string[] = argv()
 print(f"Programa: {args[0]}")
 if strlen(args[1]) > 0 then
     print(f"Arg 1: {args[1]}")

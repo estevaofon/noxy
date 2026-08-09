@@ -5,6 +5,7 @@ import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
+	"path/filepath"
 	"strings"
 )
 
@@ -27,6 +28,13 @@ type Upvalue struct {
 	Type    ast.NoxyType
 }
 
+type scopedStructBinding struct {
+	Depth   int
+	Name    string
+	Prior   *ast.StructStatement
+	Existed bool
+}
+
 type Compiler struct {
 	enclosing           *Compiler
 	currentChunk        *chunk.Chunk
@@ -37,9 +45,13 @@ type Compiler struct {
 	loops               []*Loop
 	currentLine         int
 	FileName            string
+	moduleRoot          string
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
+	scopedStructs       []scopedStructBinding
+	programBindings     map[string]ast.NoxyType
+	moduleDiscovery     *moduleDiscoveryState
 }
 
 func New() *Compiler {
@@ -47,6 +59,17 @@ func New() *Compiler {
 }
 
 func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.StructStatement, fileName string) *Compiler {
+	moduleRoot := "."
+	if fileName != "" && fileName != "REPL" {
+		moduleRoot = filepath.Dir(fileName)
+	}
+	return NewWithStateAndRoot(globals, structs, fileName, moduleRoot)
+}
+
+func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*ast.StructStatement, fileName, moduleRoot string) *Compiler {
+	if moduleRoot == "" {
+		moduleRoot = "."
+	}
 	c := &Compiler{
 		enclosing:    nil,
 		currentChunk: chunk.New(),
@@ -58,23 +81,35 @@ func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.Struc
 		loops:        []*Loop{},
 		currentLine:  1,
 		FileName:     fileName,
+		moduleRoot:   moduleRoot,
 	}
 	c.currentChunk.FileName = fileName
 	return c
 }
 
 func NewChild(parent *Compiler) *Compiler {
+	childGlobals := make(map[string]ast.NoxyType, len(parent.globals))
+	for name, bindingType := range parent.globals {
+		childGlobals[name] = bindingType
+	}
+	childStructs := make(map[string]*ast.StructStatement, len(parent.structs))
+	for name, definition := range parent.structs {
+		childStructs[name] = definition
+	}
 	c := &Compiler{
-		enclosing:    parent,
-		currentChunk: chunk.New(),
-		locals:       []Local{},
-		globals:      parent.globals,
-		structs:      parent.structs,
-		upvalues:     []Upvalue{},
-		scopeDepth:   0,
-		loops:        []*Loop{},
-		currentLine:  parent.currentLine,
-		FileName:     parent.FileName,
+		enclosing:       parent,
+		currentChunk:    chunk.New(),
+		locals:          []Local{},
+		globals:         childGlobals,
+		structs:         childStructs,
+		upvalues:        []Upvalue{},
+		scopeDepth:      0,
+		loops:           []*Loop{},
+		currentLine:     parent.currentLine,
+		FileName:        parent.FileName,
+		moduleRoot:      parent.moduleRoot,
+		programBindings: parent.programBindings,
+		moduleDiscovery: parent.moduleDiscovery,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -87,9 +122,23 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		sequentialBindings := make(map[string]ast.NoxyType, len(c.globals))
+		for name, bindingType := range c.globals {
+			sequentialBindings[name] = bindingType
+		}
 		c.predeclareStructs(n.Statements)
-		if err := c.predeclareFunctions(n.Statements); err != nil {
+		if err := c.predeclareGlobalBindings(n.Statements); err != nil {
 			return nil, nil, err
+		}
+		c.programBindings = make(map[string]ast.NoxyType, len(c.globals))
+		for name, bindingType := range c.globals {
+			c.programBindings[name] = bindingType
+		}
+		for name := range c.globals {
+			delete(c.globals, name)
+		}
+		for name, bindingType := range sequentialBindings {
+			c.globals[name] = bindingType
 		}
 		for _, stmt := range n.Statements {
 			if _, _, err := c.Compile(stmt); err != nil {
@@ -132,6 +181,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			if !c.areTypesCompatible(n.Type, valType) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType))
+			}
+			if err := c.emitRuntimeValueType(n.Type); err != nil {
+				return nil, nil, err
 			}
 		}
 
@@ -227,6 +279,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !c.areTypesCompatible(refT.ElementType, valType) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s", c.currentLine, refT.ElementType.String(), valType.String())
 			}
+			if err := c.emitRuntimeValueType(refT.ElementType); err != nil {
+				return nil, nil, err
+			}
 
 			// 4. Emit Store
 			// Stack: [Ref, Val]
@@ -271,11 +326,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
 							fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
 						}
+						if err := c.emitRuntimeValueType(localType); err != nil {
+							return nil, nil, err
+						}
 						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 						c.emitByte(byte(chunk.OP_POP))
 						return c.currentChunk, nil, nil
 					}
 
+					if c.areTypesCompatible(refType.ElementType, valType) {
+						return nil, nil, referenceAssignmentTypeError(c.currentLine, ident.Value, localType, valType)
+					}
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 
 				} else {
@@ -283,16 +344,27 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if !c.areTypesCompatible(localType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 					}
+					if err := c.emitRuntimeValueType(localType); err != nil {
+						return nil, nil, err
+					}
 					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 					c.emitByte(byte(chunk.OP_POP))
 				}
 			} else if arg, upvalueType := c.resolveUpvalue(ident.Value); arg != -1 {
 				// Upvalue Logic
+				if refType, isRef := upvalueType.(*ast.RefType); isRef &&
+					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
+					c.areTypesCompatible(refType.ElementType, valType) {
+					return nil, nil, referenceAssignmentTypeError(c.currentLine, ident.Value, upvalueType, valType)
+				}
 				if !c.areTypesCompatible(upvalueType, valType) {
 					return nil, nil, fmt.Errorf(
 						"[line %d] type mismatch in assignment to '%s': expected %s, got %s",
 						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType),
 					)
+				}
+				if err := c.emitRuntimeValueType(upvalueType); err != nil {
+					return nil, nil, err
 				}
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
@@ -311,12 +383,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							}
 
 							nameConstant := c.makeConstant(value.NewString(ident.Value))
+							if err := c.emitRuntimeValueType(globalType); err != nil {
+								return nil, nil, err
+							}
 							c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
 							c.emitByte(byte(chunk.OP_POP))
 						} else {
 							// User tried `ref = val`. Explicitly FORBID update via name.
 							if c.areTypesCompatible(refType.ElementType, valType) {
-								return nil, nil, fmt.Errorf("[line %d] cannot assign value to global reference '%s'.\n  hint: Did you mean to update the value? Use '*%s = ...'", c.currentLine, ident.Value, ident.Value)
+								return nil, nil, referenceAssignmentTypeError(c.currentLine, ident.Value, globalType, valType)
 							}
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
 						}
@@ -326,6 +401,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					// Standard Global Assignment
 					if !c.areTypesCompatible(globalType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
+					}
+					if err := c.emitRuntimeValueType(globalType); err != nil {
+						return nil, nil, err
 					}
 				}
 				nameConstant := c.makeConstant(value.NewString(ident.Value))
@@ -374,7 +452,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			// Type Check
+			var assignedType ast.NoxyType
 			if arrType, ok := leftType.(*ast.ArrayType); ok {
+				assignedType = arrType.ElementType
 				if idxType != nil && idxType.String() != "int" {
 					return nil, nil, fmt.Errorf("[line %d] array index must be int, got %s", c.currentLine, idxType.String())
 				}
@@ -384,12 +464,23 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				// Implict deref/update via assignment is NOT allowed if types don't match.
 				// User must use `*arr[i] = val` for updates.
 
+				if refType, isRef := arrType.ElementType.(*ast.RefType); isRef &&
+					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
+					c.areTypesCompatible(refType.ElementType, valType) {
+					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), arrType.ElementType, valType)
+				}
 				if !c.areTypesCompatible(arrType.ElementType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
 				}
 			} else if mapType, ok := leftType.(*ast.MapType); ok {
+				assignedType = mapType.ValueType
 				if !c.areTypesCompatible(mapType.KeyType, idxType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map key: expected %s, got %s", c.currentLine, mapType.KeyType.String(), idxType.String())
+				}
+				if refType, isRef := mapType.ValueType.(*ast.RefType); isRef &&
+					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
+					c.areTypesCompatible(refType.ElementType, valType) {
+					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), mapType.ValueType, valType)
 				}
 				if !c.areTypesCompatible(mapType.ValueType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s", c.currentLine, mapType.ValueType.String(), valType.String())
@@ -398,6 +489,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if leftType != nil && leftType.String() != "any" {
 					return nil, nil, fmt.Errorf("[line %d] index assignment on non-array/map type: %s", c.currentLine, leftType.String())
 				}
+			}
+			if err := c.emitRuntimeValueType(assignedType); err != nil {
+				return nil, nil, err
 			}
 
 			c.emitByte(byte(chunk.OP_SET_INDEX))
@@ -441,7 +535,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// TYPE-BASED ASSIGNMENT LOGIC:
 			if fieldType != nil {
 				// If Field is Ref, Value MUST be compatible Ref (Rebind).
-				if _, isRefField := fieldType.(*ast.RefType); isRefField {
+				if refType, isRefField := fieldType.(*ast.RefType); isRefField {
 					// Check Compatibility
 					isRefVal := false
 					if valType != nil {
@@ -453,15 +547,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if valType != nil && !c.areTypesCompatible(fieldType, valType) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 						}
+					} else if c.areTypesCompatible(refType.ElementType, valType) {
+						return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(memberExp), fieldType, valType)
 					} else {
-						// Error: Trying to assign Value to Ref Field
-						return nil, nil, fmt.Errorf("[line %d] cannot assign value to reference field '%s'.\n  hint: Did you mean to update the value? Use '*%s.%s = ...'", c.currentLine, memberExp.Member, "...", memberExp.Member)
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 					}
 				} else {
 					// Standard Field
 					if !c.areTypesCompatible(fieldType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in field assignment: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 					}
+				}
+				if err := c.emitRuntimeValueType(fieldType); err != nil {
+					return nil, nil, err
 				}
 			}
 
@@ -477,12 +575,29 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.StructStatement:
 		c.setLine(n.Token.Line)
+		if c.scopeDepth > 0 {
+			prior, existed := c.structs[n.Name]
+			c.scopedStructs = append(c.scopedStructs, scopedStructBinding{
+				Depth:   c.scopeDepth,
+				Name:    n.Name,
+				Prior:   prior,
+				Existed: existed,
+			})
+			c.structs[n.Name] = n
+		}
 
 		fields := []string{}
 		for _, f := range n.FieldsList {
 			fields = append(fields, f.Name)
 		}
 		structObj := value.NewStruct(n.Name, fields)
+		structDefinition := structObj.Obj.(*value.ObjStruct)
+		structDefinition.JSONDynamicFields = make(map[string]bool)
+		for _, field := range n.FieldsList {
+			if primitive, ok := field.Type.(*ast.PrimitiveType); ok && primitive.Name == "any" {
+				structDefinition.JSONDynamicFields[field.Name] = true
+			}
+		}
 		c.emitConstant(structObj)
 
 		// Create Constructor Signature
@@ -490,10 +605,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		for _, f := range n.FieldsList {
 			paramTypes = append(paramTypes, f.Type)
 		}
-		structType := &ast.FunctionType{
-			Params: paramTypes,
-			Return: &ast.PrimitiveType{Name: n.Name},
-		}
+		structType := newStructFunctionType(n.Name, paramTypes)
+		structDefinition.ConstructorType = c.runtimeTypeInfo(structType)
 
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
@@ -1288,10 +1401,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 3. Handle Result
 		if n.SelectAll {
 			// use pkg select *
+			exports, loadable := c.discoverModuleExports(n.Module)
+			if !loadable && c.enclosing == nil {
+				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'", n.Token.Line, n.Module)
+			}
+			for name := range exports {
+				c.globals[name] = nil
+			}
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b
 			for _, sel := range n.Selectors {
+				c.globals[sel] = nil
 				// DUP the module
 				c.emitByte(byte(chunk.OP_DUP))
 
@@ -1321,6 +1442,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			nameConst := c.makeConstant(value.NewString(bindName))
+			c.globals[bindName] = nil
 			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
@@ -1368,6 +1490,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				"[line %d] return type mismatch in '%s': expected %s, got %s",
 				n.Token.Line, functionName, expected.String(), noxyTypeName(actual),
 			)
+		}
+		if err := c.emitRuntimeValueType(expected); err != nil {
+			return nil, nil, err
 		}
 		c.emitByte(byte(chunk.OP_RETURN))
 		return c.currentChunk, nil, nil
@@ -1443,6 +1568,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.CallExpression:
+		if handled, resultType, err := c.compileBuiltinCall(n); handled {
+			return c.currentChunk, resultType, err
+		}
+
 		// Check for special functions: chan_send, chan_recv
 		if ident, ok := n.Function.(*ast.Identifier); ok {
 			if ident.Value == "chan_send" {
@@ -1570,12 +1699,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if err != nil {
 						return nil, nil, err
 					}
+					if _, isNull := arg.(*ast.NullLiteral); isNull {
+						continue
+					}
 					if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
 						actual := &ast.RefType{ElementType: actualElement}
 						return nil, nil, fmt.Errorf(
 							"[line %d] argument %d to '%s': expected %s, got %s",
 							c.currentLine, i+1, callableName(n.Function), expectedRef.String(), actual.String(),
 						)
+					}
+					if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+						return nil, nil, err
 					}
 					continue
 				}
@@ -1599,6 +1734,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					c.currentLine, i+1, callableName(n.Function),
 					funcType.Params[i].String(), noxyTypeName(argType),
 				)
+			}
+			if isExact {
+				if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 
@@ -1638,6 +1778,23 @@ func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
 }
 
 func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.NoxyType, error) {
+	targetType, err := c.compileReferenceArgumentValue(expression)
+	if err != nil || targetType == nil {
+		return targetType, err
+	}
+	if runtimeType := c.runtimeTypeInfo(targetType); runtimeType != nil {
+		typeConstant := c.makeConstant(value.NewRuntimeTypeInfo(runtimeType))
+		if typeConstant > 65535 {
+			return nil, fmt.Errorf("[line %d] too many constants for reference target metadata", c.currentLine)
+		}
+		c.emitByte(byte(chunk.OP_MARK_REF_TARGET_TYPE))
+		c.emitByte(byte((typeConstant >> 8) & 0xff))
+		c.emitByte(byte(typeConstant & 0xff))
+	}
+	return targetType, nil
+}
+
+func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast.NoxyType, error) {
 	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
 		expression = prefix.Right
 	}
@@ -1653,8 +1810,13 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 			c.locals[slot].IsCaptured = true
 			return declared, nil
 		}
-		if upvalue, _ := c.resolveUpvalue(target.Value); upvalue != -1 {
-			return nil, fmt.Errorf("[line %d] captured variables cannot be passed by reference", c.currentLine)
+		if upvalue, declared := c.resolveUpvalue(target.Value); upvalue != -1 {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(upvalue))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_UPVALUE), byte(upvalue))
+			return declared, nil
 		}
 		name := c.makeConstant(value.NewString(target.Value))
 		if declared, ok := c.resolveGlobalType(target.Value); ok {
@@ -1677,10 +1839,11 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 			c.emitByte(byte(chunk.OP_DEREF))
 		}
 		name := c.makeConstant(value.NewString(target.Member))
-		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
 		if ref, ok := element.(*ast.RefType); ok {
+			c.emitBytes(byte(chunk.OP_CONTEXT_REF_PROPERTY), byte(name))
 			return ref.ElementType, nil
 		}
+		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
 		return element, nil
 	case *ast.IndexExpression:
 		_, container, err := c.Compile(target.Left)
@@ -1698,18 +1861,49 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 		if _, ok := indexType.(*ast.RefType); ok {
 			c.emitByte(byte(chunk.OP_DEREF))
 		}
-		c.emitByte(byte(chunk.OP_REF_INDEX))
+		indexType = unwrapRefType(indexType)
+		switch collection := unwrapRefType(container).(type) {
+		case *ast.ArrayType:
+			expected := &ast.PrimitiveType{Name: "int"}
+			if !c.areStrictTypesCompatible(expected, indexType) {
+				return nil, fmt.Errorf(
+					"[line %d] array reference index must be int, got %s",
+					c.currentLine, noxyTypeName(indexType),
+				)
+			}
+		case *ast.MapType:
+			if !c.areStrictTypesCompatible(collection.KeyType, indexType) {
+				return nil, fmt.Errorf(
+					"[line %d] map reference key must be %s, got %s",
+					c.currentLine, noxyTypeName(collection.KeyType), noxyTypeName(indexType),
+				)
+			}
+		}
 		if ref, ok := element.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_CONTEXT_REF_INDEX))
 			return ref.ElementType, nil
 		}
+		c.emitByte(byte(chunk.OP_REF_INDEX))
 		return element, nil
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))
 		return nil, nil
+	case *ast.CallExpression:
+		_, result, err := c.Compile(target)
+		if err != nil {
+			return nil, err
+		}
+		if ref, ok := result.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
+		return nil, fmt.Errorf(
+			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
+			c.currentLine, expression.String(),
+		)
 	default:
 		return nil, fmt.Errorf(
-			"[line %d] reference argument must be a variable, property, index, or null",
-			c.currentLine,
+			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
+			c.currentLine, expression.String(),
 		)
 	}
 }
@@ -1778,6 +1972,16 @@ func (c *Compiler) beginScope() {
 }
 
 func (c *Compiler) endScope() {
+	exitingDepth := c.scopeDepth
+	for len(c.scopedStructs) > 0 && c.scopedStructs[len(c.scopedStructs)-1].Depth == exitingDepth {
+		binding := c.scopedStructs[len(c.scopedStructs)-1]
+		c.scopedStructs = c.scopedStructs[:len(c.scopedStructs)-1]
+		if binding.Existed {
+			c.structs[binding.Name] = binding.Prior
+		} else {
+			delete(c.structs, binding.Name)
+		}
+	}
 	c.scopeDepth--
 	// Pop locals from stack
 	for len(c.locals) > 0 && c.locals[len(c.locals)-1].Depth > c.scopeDepth {
@@ -1850,6 +2054,33 @@ func (c *Compiler) resolveLocal(name string) (int, ast.NoxyType) {
 func (c *Compiler) resolveGlobalType(name string) (ast.NoxyType, bool) {
 	t, ok := c.globals[name]
 	return t, ok
+}
+
+func referenceAssignmentTypeError(line int, name string, expected, actual ast.NoxyType) error {
+	return fmt.Errorf(
+		"[line %d] cannot assign %s to %s\n  hint: use '*%s = ...' to update the referenced value",
+		line, noxyTypeName(actual), noxyTypeName(expected), name,
+	)
+}
+
+func isReferenceType(t ast.NoxyType) bool {
+	_, ok := t.(*ast.RefType)
+	return ok
+}
+
+func assignmentTargetName(expression ast.Expression) string {
+	switch target := expression.(type) {
+	case *ast.Identifier:
+		return target.Value
+	case *ast.StringLiteral:
+		return fmt.Sprintf("%q", target.Value)
+	case *ast.MemberAccessExpression:
+		return assignmentTargetName(target.Left) + "." + target.Member
+	case *ast.IndexExpression:
+		return assignmentTargetName(target.Left) + "[" + assignmentTargetName(target.Index) + "]"
+	default:
+		return expression.String()
+	}
 }
 
 func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
@@ -1933,6 +2164,9 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool, upvalueType ast.NoxyTyp
 }
 
 func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {
+	restoreBindings := c.applyProgramBindings()
+	defer restoreBindings()
+
 	fnCompiler := NewChild(c)
 	fnCompiler.scopeDepth = 1    // Inside function body
 	fnCompiler.addLocal("", nil) // Reserve slot 0 for function instance
@@ -1948,7 +2182,10 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 		if _, ok := param.Type.(*ast.RefType); ok {
 			isRef = true
 		}
-		paramsInfo = append(paramsInfo, value.ParamInfo{IsRef: isRef})
+		paramsInfo = append(paramsInfo, value.ParamInfo{
+			IsRef:    isRef,
+			TypeName: param.Type.String(),
+		})
 	}
 	if declaredReturn.String() != "void" && !blockGuaranteesReturn(body) {
 		return value.Value{}, nil, fmt.Errorf(
@@ -1968,6 +2205,32 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 
 	upvalueCount := len(fnCompiler.upvalues)
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
+	fnObj.Obj.(*value.ObjFunction).RuntimeType = c.runtimeTypeInfo(newFunctionType(params, declaredReturn))
 
 	return fnObj, fnCompiler, nil
+}
+
+func (c *Compiler) applyProgramBindings() func() {
+	if len(c.programBindings) == 0 {
+		return func() {}
+	}
+	type priorBinding struct {
+		typeInfo ast.NoxyType
+		exists   bool
+	}
+	prior := make(map[string]priorBinding, len(c.programBindings))
+	for name, bindingType := range c.programBindings {
+		current, exists := c.globals[name]
+		prior[name] = priorBinding{typeInfo: current, exists: exists}
+		c.globals[name] = bindingType
+	}
+	return func() {
+		for name, binding := range prior {
+			if binding.exists {
+				c.globals[name] = binding.typeInfo
+			} else {
+				delete(c.globals, name)
+			}
+		}
+	}
 }

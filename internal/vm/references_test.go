@@ -1,0 +1,100 @@
+package vm
+
+import (
+	"noxy-vm/internal/value"
+	"testing"
+)
+
+func TestResolveReferenceValueRejectsMalformedReferences(t *testing.T) {
+	malformedArrayIndex := value.Value{
+		Type: value.VAL_REF,
+		Obj: &value.ObjRef{
+			RefType:   value.REF_INDEX,
+			Container: value.NewArray([]value.Value{value.NewInt(1)}),
+			Index:     value.NewBool(false),
+		},
+	}
+	malformedMapKey := value.Value{
+		Type: value.VAL_REF,
+		Obj: &value.ObjRef{
+			RefType:   value.REF_INDEX,
+			Container: value.NewMap(),
+			Index:     value.Value{Type: value.VAL_OBJ, Obj: []int{1}},
+		},
+	}
+	tests := []struct {
+		name  string
+		input value.Value
+	}{
+		{name: "wrong object", input: value.Value{Type: value.VAL_REF, Obj: "not a reference"}},
+		{name: "nil reference", input: value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)(nil)}},
+		{name: "nil upvalue", input: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_UPVALUE}}},
+		{name: "nil upvalue location", input: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_UPVALUE, Upvalue: &value.ObjUpvalue{}}}},
+		{name: "nil pointer", input: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR}}},
+		{name: "array index type", input: malformedArrayIndex},
+		{name: "unhashable map key", input: malformedMapKey},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := New().resolveReferenceValue(tt.input); err == nil {
+				t.Fatal("malformed reference resolved without error")
+			}
+		})
+	}
+}
+
+func TestLookupReferenceValueRejectsNilReference(t *testing.T) {
+	if _, err := New().lookupReferenceValue(nil); err == nil {
+		t.Fatal("nil reference resolved without error")
+	}
+}
+
+func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
+	machine := New()
+	malformed := []struct {
+		name  string
+		value value.Value
+	}{
+		{name: "wrong object", value: value.Value{Type: value.VAL_REF, Obj: "not a reference"}},
+		{
+			name: "array index type",
+			value: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{
+				RefType:   value.REF_INDEX,
+				Container: value.NewArray([]value.Value{value.NewInt(1)}),
+				Index:     value.NewBool(false),
+			}},
+		},
+		{
+			name: "unhashable map key",
+			value: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{
+				RefType:   value.REF_INDEX,
+				Container: value.NewMap(),
+				Index:     value.Value{Type: value.VAL_OBJ, Obj: []int{1}},
+			}},
+		},
+	}
+	natives := []struct {
+		name string
+		args func(value.Value) []value.Value
+	}{
+		{name: "append", args: func(target value.Value) []value.Value { return []value.Value{target, value.NewInt(1)} }},
+		{name: "pop", args: func(target value.Value) []value.Value { return []value.Value{target} }},
+		{name: "delete", args: func(target value.Value) []value.Value { return []value.Value{target, value.NewString("key")} }},
+	}
+
+	for _, target := range malformed {
+		for _, native := range natives {
+			t.Run(target.name+"/"+native.name, func(t *testing.T) {
+				nativeValue, ok := machine.GetGlobal(native.name)
+				if !ok {
+					t.Fatalf("missing native %s", native.name)
+				}
+				result := nativeValue.Obj.(*value.ObjNative).Fn(native.args(target.value))
+				if result.Type != value.VAL_NULL {
+					t.Fatalf("result=%v, want null", result)
+				}
+			})
+		}
+	}
+}

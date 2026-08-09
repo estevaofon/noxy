@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Typed public native contracts and runtime reference-mode validation.
+- Safe references to captured upvalues.
+
+### Fixed
+
+- Reference documentation now distinguishes contextual passing, update, and rebind.
+- Dynamic calls reject incompatible reference modes before entering the callee.
+
 ## [1.4.0] - 2026-08-08
 
 ## Added

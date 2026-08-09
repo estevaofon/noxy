@@ -213,20 +213,36 @@ func commonInferredType(left, right ast.NoxyType) ast.NoxyType {
 	return &ast.PrimitiveType{Name: "any"}
 }
 
-func (c *Compiler) predeclareFunctions(statements []ast.Statement) error {
+func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 	seen := make(map[string]struct{})
 	for _, statement := range statements {
-		fn, ok := statement.(*ast.FunctionStatement)
-		if !ok {
-			continue
+		switch declaration := statement.(type) {
+		case *ast.UseStmt:
+			c.predeclareImport(declaration)
+		case *ast.FunctionStatement:
+			if _, duplicate := seen[declaration.Name]; duplicate {
+				return fmt.Errorf("[line %d] duplicate function '%s'", declaration.Token.Line, declaration.Name)
+			}
+			seen[declaration.Name] = struct{}{}
+			c.globals[declaration.Name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
+		case *ast.LetStmt:
+			c.globals[declaration.Name.Value] = declaration.Type
+		case *ast.StructStatement:
+			params := make([]ast.NoxyType, 0, len(declaration.FieldsList))
+			for _, field := range declaration.FieldsList {
+				params = append(params, field.Type)
+			}
+			c.globals[declaration.Name] = newStructFunctionType(declaration.Name, params)
 		}
-		if _, duplicate := seen[fn.Name]; duplicate {
-			return fmt.Errorf("[line %d] duplicate function '%s'", fn.Token.Line, fn.Name)
-		}
-		seen[fn.Name] = struct{}{}
-		c.globals[fn.Name] = newFunctionType(fn.Parameters, fn.ReturnType)
 	}
 	return nil
+}
+
+func newStructFunctionType(name string, params []ast.NoxyType) *ast.FunctionType {
+	return &ast.FunctionType{
+		Params: params,
+		Return: &ast.PrimitiveType{Name: name},
+	}
 }
 
 func (c *Compiler) predeclareStructs(statements []ast.Statement) {
