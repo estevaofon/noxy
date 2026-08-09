@@ -170,6 +170,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !c.areTypesCompatible(n.Type, valType) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType))
 			}
+			if err := c.emitRuntimeValueType(n.Type); err != nil {
+				return nil, nil, err
+			}
 		}
 
 		if c.scopeDepth > 0 {
@@ -264,6 +267,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !c.areTypesCompatible(refT.ElementType, valType) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s", c.currentLine, refT.ElementType.String(), valType.String())
 			}
+			if err := c.emitRuntimeValueType(refT.ElementType); err != nil {
+				return nil, nil, err
+			}
 
 			// 4. Emit Store
 			// Stack: [Ref, Val]
@@ -308,6 +314,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
 							fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
 						}
+						if err := c.emitRuntimeValueType(localType); err != nil {
+							return nil, nil, err
+						}
 						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 						c.emitByte(byte(chunk.OP_POP))
 						return c.currentChunk, nil, nil
@@ -322,6 +331,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					// Standard Value Assignment (int = int)
 					if !c.areTypesCompatible(localType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
+					}
+					if err := c.emitRuntimeValueType(localType); err != nil {
+						return nil, nil, err
 					}
 					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 					c.emitByte(byte(chunk.OP_POP))
@@ -338,6 +350,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						"[line %d] type mismatch in assignment to '%s': expected %s, got %s",
 						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType),
 					)
+				}
+				if err := c.emitRuntimeValueType(upvalueType); err != nil {
+					return nil, nil, err
 				}
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
@@ -356,6 +371,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							}
 
 							nameConstant := c.makeConstant(value.NewString(ident.Value))
+							if err := c.emitRuntimeValueType(globalType); err != nil {
+								return nil, nil, err
+							}
 							c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
 							c.emitByte(byte(chunk.OP_POP))
 						} else {
@@ -371,6 +389,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					// Standard Global Assignment
 					if !c.areTypesCompatible(globalType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
+					}
+					if err := c.emitRuntimeValueType(globalType); err != nil {
+						return nil, nil, err
 					}
 				}
 				nameConstant := c.makeConstant(value.NewString(ident.Value))
@@ -419,7 +440,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			// Type Check
+			var assignedType ast.NoxyType
 			if arrType, ok := leftType.(*ast.ArrayType); ok {
+				assignedType = arrType.ElementType
 				if idxType != nil && idxType.String() != "int" {
 					return nil, nil, fmt.Errorf("[line %d] array index must be int, got %s", c.currentLine, idxType.String())
 				}
@@ -438,6 +461,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
 				}
 			} else if mapType, ok := leftType.(*ast.MapType); ok {
+				assignedType = mapType.ValueType
 				if !c.areTypesCompatible(mapType.KeyType, idxType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map key: expected %s, got %s", c.currentLine, mapType.KeyType.String(), idxType.String())
 				}
@@ -453,6 +477,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if leftType != nil && leftType.String() != "any" {
 					return nil, nil, fmt.Errorf("[line %d] index assignment on non-array/map type: %s", c.currentLine, leftType.String())
 				}
+			}
+			if err := c.emitRuntimeValueType(assignedType); err != nil {
+				return nil, nil, err
 			}
 
 			c.emitByte(byte(chunk.OP_SET_INDEX))
@@ -518,6 +545,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if !c.areTypesCompatible(fieldType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in field assignment: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 					}
+				}
+				if err := c.emitRuntimeValueType(fieldType); err != nil {
+					return nil, nil, err
 				}
 			}
 
@@ -1438,6 +1468,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				n.Token.Line, functionName, expected.String(), noxyTypeName(actual),
 			)
 		}
+		if err := c.emitRuntimeValueType(expected); err != nil {
+			return nil, nil, err
+		}
 		c.emitByte(byte(chunk.OP_RETURN))
 		return c.currentChunk, nil, nil
 
@@ -1653,6 +1686,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							c.currentLine, i+1, callableName(n.Function), expectedRef.String(), actual.String(),
 						)
 					}
+					if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+						return nil, nil, err
+					}
 					continue
 				}
 			}
@@ -1675,6 +1711,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					c.currentLine, i+1, callableName(n.Function),
 					funcType.Params[i].String(), noxyTypeName(argType),
 				)
+			}
+			if isExact {
+				if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 
@@ -2131,6 +2172,7 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 
 	upvalueCount := len(fnCompiler.upvalues)
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
+	fnObj.Obj.(*value.ObjFunction).RuntimeType = c.runtimeTypeInfo(newFunctionType(params, declaredReturn))
 
 	return fnObj, fnCompiler, nil
 }

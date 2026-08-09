@@ -84,6 +84,7 @@ const (
 	OP_ADDR
 	OP_MARK_REF_JSON_DYNAMIC
 	OP_MARK_REF_TARGET_TYPE
+	OP_MARK_RUNTIME_VALUE_TYPE
 )
 
 func (op OpCode) String() string {
@@ -200,6 +201,8 @@ func (op OpCode) String() string {
 		return "OP_MARK_REF_JSON_DYNAMIC"
 	case OP_MARK_REF_TARGET_TYPE:
 		return "OP_MARK_REF_TARGET_TYPE"
+	case OP_MARK_RUNTIME_VALUE_TYPE:
+		return "OP_MARK_RUNTIME_VALUE_TYPE"
 	case OP_STORE_VIA_REF:
 		return "OP_STORE_VIA_REF"
 	case OP_DUP:
@@ -375,6 +378,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.constantInstruction("OP_GET_PROPERTY", offset)
 	case OP_MARK_REF_TARGET_TYPE:
 		return c.constantLongInstruction("OP_MARK_REF_TARGET_TYPE", offset)
+	case OP_MARK_RUNTIME_VALUE_TYPE:
+		return c.constantLongInstruction("OP_MARK_RUNTIME_VALUE_TYPE", offset)
 	case OP_SET_PROPERTY:
 		return c.constantInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:

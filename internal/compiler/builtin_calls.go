@@ -95,6 +95,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression) (bool, ast.NoxyT
 					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
 				)
 			}
+			if err := c.emitRuntimeValueType(array.ElementType); err != nil {
+				return true, nil, err
+			}
 		}
 		c.emitBytes(byte(chunk.OP_CALL), 2)
 		return true, builtinType("void"), nil

@@ -3525,11 +3525,13 @@ func (vm *VM) run(minFrameCount int) error {
 				fn := constant.Obj.(*value.ObjFunction)
 				// Clone to bind globals
 				boundFn := &value.ObjFunction{
-					Name:    fn.Name,
-					Arity:   fn.Arity,
-					Params:  fn.Params,
-					Chunk:   fn.Chunk,
-					Globals: frame.Globals,
+					Name:         fn.Name,
+					Arity:        fn.Arity,
+					UpvalueCount: fn.UpvalueCount,
+					Params:       fn.Params,
+					Chunk:        fn.Chunk,
+					Globals:      frame.Globals,
+					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -3544,11 +3546,13 @@ func (vm *VM) run(minFrameCount int) error {
 			if constant.Type == value.VAL_FUNCTION {
 				fn := constant.Obj.(*value.ObjFunction)
 				boundFn := &value.ObjFunction{
-					Name:    fn.Name,
-					Arity:   fn.Arity,
-					Params:  fn.Params,
-					Chunk:   fn.Chunk,
-					Globals: frame.Globals,
+					Name:         fn.Name,
+					Arity:        fn.Arity,
+					UpvalueCount: fn.UpvalueCount,
+					Params:       fn.Params,
+					Chunk:        fn.Chunk,
+					Globals:      frame.Globals,
+					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -3864,6 +3868,16 @@ func (vm *VM) run(minFrameCount int) error {
 				return vm.runtimeError(c, ip, "reference target marker requires a reference")
 			}
 			ref.TargetType = targetType
+
+		case chunk.OP_MARK_RUNTIME_VALUE_TYPE:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			typeValue := c.Constants[index]
+			runtimeType, ok := typeValue.Obj.(*value.RuntimeTypeInfo)
+			if typeValue.Type != value.VAL_OBJ || !ok || runtimeType == nil {
+				return vm.runtimeError(c, ip, "runtime value marker requires type metadata")
+			}
+			vm.markRuntimeValueType(vm.peek(0), runtimeType)
 
 		case chunk.OP_DEREF:
 			refVal := vm.pop()

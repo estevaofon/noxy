@@ -2,6 +2,7 @@ package value
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -55,17 +56,25 @@ const (
 	TYPE_MAP
 	TYPE_REF
 	TYPE_STRUCT
+	TYPE_VOID
+	TYPE_CALLABLE
+	TYPE_CHANNEL
 )
 
-// RuntimeTypeInfo is narrow metadata carried by references at typed native
-// boundaries. It is not a new parameter mode and does not affect Value identity.
+// RuntimeTypeInfo is narrow metadata used at typed native boundaries and on
+// callable/channel objects whose runtime shape alone cannot prove their static
+// type. It is not a new parameter mode and does not affect Value identity.
 type RuntimeTypeInfo struct {
-	Kind    RuntimeTypeKind
-	Name    string
-	Element *RuntimeTypeInfo
-	Key     *RuntimeTypeInfo
-	Value   *RuntimeTypeInfo
-	Fields  map[string]*RuntimeTypeInfo
+	Kind         RuntimeTypeKind
+	Name         string
+	Element      *RuntimeTypeInfo
+	Key          *RuntimeTypeInfo
+	Value        *RuntimeTypeInfo
+	Fields       map[string]*RuntimeTypeInfo
+	Params       []*RuntimeTypeInfo
+	ParamIsRef   []bool
+	Return       *RuntimeTypeInfo
+	CallableBare bool
 }
 
 func (t *RuntimeTypeInfo) String() string {
@@ -95,6 +104,19 @@ func (t *RuntimeTypeInfo) String() string {
 		return "ref " + t.Element.String()
 	case TYPE_STRUCT:
 		return t.Name
+	case TYPE_VOID:
+		return "void"
+	case TYPE_CALLABLE:
+		if t.CallableBare {
+			return "func"
+		}
+		params := make([]string, len(t.Params))
+		for i, param := range t.Params {
+			params[i] = param.String()
+		}
+		return "func(" + strings.Join(params, ", ") + ") -> " + t.Return.String()
+	case TYPE_CHANNEL:
+		return "chan " + t.Element.String()
 	default:
 		return "unknown"
 	}
@@ -107,6 +129,7 @@ type ObjFunction struct {
 	Params       []ParamInfo
 	Chunk        interface{}
 	Globals      map[string]Value // Module/Context globals
+	RuntimeType  *RuntimeTypeInfo
 }
 
 type ObjUpvalue struct {
@@ -245,9 +268,10 @@ func (oi *ObjInstance) Format(f fmt.State, verb rune) {
 }
 
 type ObjChannel struct {
-	Chan   chan Value
-	Closed bool
-	Lock   sync.Mutex
+	Chan        chan Value
+	Closed      bool
+	Lock        sync.Mutex
+	ElementType *RuntimeTypeInfo
 }
 
 func (oc *ObjChannel) String() string {

@@ -895,6 +895,281 @@ test_report(length(values))`)
 	})
 }
 
+func TestTypedAppendAcceptsExactFunctionElement(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+let values: (func(int) -> int)[] = [identity]
+append(values, identity)
+test_report(length(values))`)
+	testExpectedObject(t, 2, got)
+}
+
+func TestDynamicAppendValidatesCallableElementTypes(t *testing.T) {
+	t.Run("reject nested non-callable array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+let invoke: any = append
+let seed: (func(int) -> int)[] = [identity]
+let targets: ((func(int) -> int)[])[] = [seed]
+pop(targets)
+let wrong: int[] = [1]
+invoke(ref targets, wrong)
+test_report(length(targets))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("reject incompatible exact signature", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func text(value: string) -> int
+    return 1
+end
+func identity(value: int) -> int
+    return value
+end
+let invoke: any = append
+let targets: (func(int) -> int)[] = [identity]
+pop(targets)
+invoke(ref targets, text)
+test_report(length(targets))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("reject incompatible return and reference mode", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+func wrong_return(value: int) -> string
+    return "bad"
+end
+func wrong_mode(value: ref int) -> int
+    return value
+end
+let invoke: any = append
+let targets: (func(int) -> int)[] = [identity]
+pop(targets)
+invoke(ref targets, wrong_return)
+invoke(ref targets, wrong_mode)
+test_report(length(targets))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("accept callable in bare function array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+let invoke: any = append
+let targets: func[] = [identity]
+pop(targets)
+invoke(ref targets, identity)
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+}
+
+func TestTypedAndDynamicAppendValidateChannelElementTypes(t *testing.T) {
+	t.Run("exact typed channel", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let channel: chan int = make_chan(1)
+let targets: (chan int)[] = [channel]
+pop(targets)
+append(targets, channel)
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("dynamic incompatible typed channel", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let wrong: chan string = make_chan(1)
+let seed: chan int = make_chan(1)
+let targets: (chan int)[] = [seed]
+pop(targets)
+invoke(ref targets, wrong)
+test_report(length(targets))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("assignment annotates previously untyped channel", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let raw: any = make_chan(1)
+let typed: chan int = make_chan(1)
+typed = raw
+let seed: chan int = make_chan(1)
+let targets: (chan int)[] = [seed]
+pop(targets)
+invoke(ref targets, typed)
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("conflicting assignment preserves original metadata", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let text: chan string = make_chan(1)
+let dynamic: any = text
+let integer: chan int = make_chan(1)
+integer = dynamic
+let string_seed: chan string = make_chan(1)
+let string_targets: (chan string)[] = [string_seed]
+pop(string_targets)
+let int_seed: chan int = make_chan(1)
+let int_targets: (chan int)[] = [int_seed]
+pop(int_targets)
+invoke(ref string_targets, dynamic)
+invoke(ref int_targets, dynamic)
+test_report(length(string_targets) * 10 + length(int_targets))`)
+		testExpectedObject(t, 10, got)
+	})
+
+	t.Run("array declaration propagates channel metadata", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let raw: any = make_chan(1)
+let channels: (chan int)[] = [raw]
+let seed: (chan int)[] = [make_chan(1)]
+let targets: ((chan int)[])[] = [seed]
+pop(targets)
+invoke(ref targets, channels)
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("exact append annotates channel expression", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let seed: chan int = make_chan(1)
+let targets: (chan int)[] = [seed]
+pop(targets)
+append(targets, make_chan(1))
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("exact parameter propagates channel metadata", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func store(channel: chan int, targets: ref (chan int)[]) -> void
+    let invoke: any = append
+    invoke(ref targets, channel)
+end
+let seed: chan int = make_chan(1)
+let targets: (chan int)[] = [seed]
+pop(targets)
+store(make_chan(1), targets)
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("return propagates channel metadata", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func create() -> chan int
+    return make_chan(1)
+end
+let invoke: any = append
+let seed: chan int = make_chan(1)
+let targets: (chan int)[] = [seed]
+pop(targets)
+invoke(ref targets, create())
+test_report(length(targets))`)
+		testExpectedObject(t, 1, got)
+	})
+}
+
+func TestRuntimeCallableValidationProjectsOnlyCompleteNativeSignatures(t *testing.T) {
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	expected := &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     []*value.RuntimeTypeInfo{integer},
+		ParamIsRef: []bool{false},
+		Return:     integer,
+	}
+	typed := value.NewNativeWithSignature("identity", value.NativeSignature{
+		Arity:      1,
+		Params:     []value.ParamInfo{{TypeName: "int"}},
+		ReturnType: "int",
+	}, func(args []value.Value) value.Value { return args[0] })
+	if !runtimeCallableMatchesType(typed, expected) {
+		t.Fatal("complete typed native did not satisfy exact callable schema")
+	}
+	untyped := value.NewNative("identity", func(args []value.Value) value.Value { return args[0] })
+	if runtimeCallableMatchesType(untyped, expected) {
+		t.Fatal("untyped native satisfied exact callable schema")
+	}
+	wrongMode := value.NewNativeWithSignature("identity", value.NativeSignature{
+		Arity:      1,
+		Params:     []value.ParamInfo{{IsRef: true, TypeName: "ref int"}},
+		ReturnType: "int",
+	}, func(args []value.Value) value.Value { return args[0] })
+	if runtimeCallableMatchesType(wrongMode, expected) {
+		t.Fatal("native with incompatible reference mode satisfied exact callable schema")
+	}
+}
+
+func TestTypedJSONLoadsRejectsCallableAndChannelConstruction(t *testing.T) {
+	t.Run("empty bare function array after pop", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+let target: func[] = [identity]
+pop(target)
+let ok: bool = json_loads("[42]", target)
+if ok then test_report(999) else test_report(length(target)) end`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("callable map value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+let target: map[string, func] = {"seed": identity}
+delete(target, "seed")
+let ok: bool = json_loads("{\"item\":42}", target)
+if ok then test_report(999) else test_report(length(keys(target))) end`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("reference callable element", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let target: (ref func)[] = [null]
+pop(target)
+let ok: bool = json_loads("[42]", target)
+if ok then test_report(999) else test_report(length(target)) end`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("typed channel element", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let channel: chan int = make_chan(1)
+let target: (chan int)[] = [channel]
+pop(target)
+let ok: bool = json_loads("[42]", target)
+if ok then test_report(999) else test_report(length(target)) end`)
+		testExpectedObject(t, 0, got)
+	})
+}
+
+func TestTypedJSONLoadsPreservesOmittedCallableStructField(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func identity(value: int) -> int
+    return value
+end
+struct Holder
+    version: int
+    callback: func(int) -> int
+end
+let target: Holder = Holder(1, identity)
+let ok: bool = json_loads("{\"version\":2}", target)
+if ok then test_report(target.callback(7)) else test_report(999) end`)
+	testExpectedObject(t, 7, got)
+}
+
 func TestDynamicAppendRejectsMalformedReferenceItemWithoutMutation(t *testing.T) {
 	source := `
 let invoke: any = append
