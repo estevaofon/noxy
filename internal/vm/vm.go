@@ -3372,72 +3372,8 @@ func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
 
 // Helper: Populate a Reference with Go Data (Deeply)
 func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
-	var currentVal value.Value
-	var store func(value.Value)
-
-	// Dereference
-	switch ref.RefType {
-	case value.REF_GLOBAL:
-		var err error
-		currentVal, err = vm.lookupGlobalReferenceValue(ref)
-		if err != nil {
-			return false
-		}
-		store = func(updated value.Value) { _ = vm.storeGlobalReferenceValue(ref, updated) }
-	case value.REF_UPVALUE:
-		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
-			return false
-		}
-		currentVal = *ref.Upvalue.Location
-		store = func(updated value.Value) { *ref.Upvalue.Location = updated }
-	case value.REF_PTR:
-		if ref.Ptr == nil {
-			return false
-		}
-		currentVal = *ref.Ptr
-		store = func(updated value.Value) { *ref.Ptr = updated }
-	case value.REF_PROPERTY:
-		inst, ok := ref.Container.Obj.(*value.ObjInstance)
-		if !ok {
-			return false
-		}
-		currentVal, ok = inst.Fields[ref.Name]
-		if !ok {
-			return false
-		}
-		store = func(updated value.Value) { inst.Fields[ref.Name] = updated }
-	case value.REF_INDEX:
-		if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-			if ref.Index.Type != value.VAL_INT {
-				return false
-			}
-			idx := int(ref.Index.AsInt)
-			if idx < 0 || idx >= len(arr.Elements) {
-				return false
-			}
-			currentVal = arr.Elements[idx]
-			store = func(updated value.Value) { arr.Elements[idx] = updated }
-			break
-		}
-		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ok {
-			key, err := referenceMapKey(ref.Index)
-			if err != nil {
-				return false
-			}
-			var exists bool
-			currentVal, exists = mapping.Data[key]
-			if !exists {
-				return false
-			}
-			store = func(updated value.Value) { mapping.Data[key] = updated }
-			break
-		}
-		return false
-	default:
-		return false
-	}
-
-	if store == nil {
+	currentVal, exists, store, err := vm.referenceStorage(ref)
+	if err != nil || !exists || store == nil {
 		return false
 	}
 	if ref.JSONDynamic {
@@ -3448,7 +3384,7 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 		store(replacement)
 		return true
 	}
-	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType, data, store)
+	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType, data, jsonSetter(store))
 	if !ok {
 		return false
 	}
@@ -3658,7 +3594,13 @@ func (vm *VM) run(minFrameCount int) error {
 		case chunk.OP_ADDR:
 			val := vm.pop()
 			if val.Type == value.VAL_REF {
-				ref := val.Obj.(*value.ObjRef)
+				ref, err := extractReferenceValue(val)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				if _, _, _, err := vm.referenceStorage(ref); err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
 				addrStr := ""
 				switch ref.RefType {
 				case value.REF_PTR:
@@ -3785,34 +3727,11 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Auto-dereference if container is a ref
 			if container.Type == value.VAL_REF {
-				ref := container.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					val, err := vm.lookupGlobalReferenceValue(ref)
-					if err != nil {
-						return vm.runtimeError(c, ip, "%s", err)
-					}
-					container = val
-				case value.REF_UPVALUE:
-					container = *ref.Upvalue.Location
-				case value.REF_PTR:
-					container = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if val, ok := inst.Fields[ref.Name]; ok {
-							container = val
-						} else {
-							container = value.NewNull()
-						}
-					}
-				case value.REF_INDEX:
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx >= 0 && idx < len(arr.Elements) {
-							container = arr.Elements[idx]
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(container)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				container = resolved
 			}
 
 			// Now check container type
@@ -3954,7 +3873,7 @@ func (vm *VM) run(minFrameCount int) error {
 				// Not a ref - pass through as-is (already dereferenced)
 				vm.push(refVal)
 			} else {
-				resolved, err := vm.lookupReferenceValue(refVal.Obj.(*value.ObjRef))
+				resolved, err := vm.resolveReferenceValue(refVal)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
@@ -3968,99 +3887,15 @@ func (vm *VM) run(minFrameCount int) error {
 			// The reference itself is in a local variable (e.g., parameter 'x')
 			refVal := vm.stack[frame.Slots+slot]
 
-			if refVal.Type != value.VAL_REF {
-				return vm.runtimeError(c, ip, "Cannot store via non-ref variable")
-			}
-
-			ref := refVal.Obj.(*value.ObjRef)
-
-			switch ref.RefType {
-			case value.REF_GLOBAL:
-				if err := vm.storeGlobalReferenceValue(ref, val); err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-			case value.REF_UPVALUE:
-				// Write to Upvalue
-				*ref.Upvalue.Location = val
-			case value.REF_PTR:
-				// Local assignment: Write to Ptr
-				*ref.Ptr = val
-			case value.REF_PROPERTY:
-				if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-					inst.Fields[ref.Name] = val
-				} else {
-					return vm.runtimeError(c, ip, "Target is not an instance")
-				}
-			case value.REF_INDEX:
-				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-					idx := int(ref.Index.AsInt)
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "Index out of bounds")
-					}
-					arr.Elements[idx] = val
-				} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
-					// Map Write
-					var key interface{}
-					if ref.Index.Type == value.VAL_OBJ {
-						if s, ok := ref.Index.Obj.(string); ok {
-							key = s
-						} else {
-							return vm.runtimeError(c, ip, "Map key must be string (simple ref support)")
-						}
-					} else if ref.Index.Type == value.VAL_INT {
-						key = ref.Index.AsInt
-					}
-					m.Data[key] = val
-				}
+			if err := vm.storeReferenceValue(refVal, val); err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
 		case chunk.OP_STORE_REF:
 			val := vm.pop()    // Value to assign
 			refVal := vm.pop() // The reference itself (popped from stack)
 
-			if refVal.Type == value.VAL_NULL {
-				return vm.runtimeError(c, ip, "cannot update null reference")
-			}
-			if refVal.Type != value.VAL_REF {
-				return vm.runtimeError(c, ip, "cannot store via non-reference value")
-			}
-
-			ref := refVal.Obj.(*value.ObjRef)
-
-			switch ref.RefType {
-			case value.REF_GLOBAL:
-				if err := vm.storeGlobalReferenceValue(ref, val); err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-			case value.REF_UPVALUE:
-				*ref.Upvalue.Location = val
-			case value.REF_PTR:
-				*ref.Ptr = val
-			case value.REF_PROPERTY:
-				if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-					inst.Fields[ref.Name] = val
-				} else {
-					return vm.runtimeError(c, ip, "Target is not an instance")
-				}
-			case value.REF_INDEX:
-				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-					idx := int(ref.Index.AsInt)
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "Index out of bounds")
-					}
-					arr.Elements[idx] = val
-				} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
-					var key interface{}
-					if ref.Index.Type == value.VAL_OBJ {
-						if s, ok := ref.Index.Obj.(string); ok {
-							key = s
-						} else {
-							return vm.runtimeError(c, ip, "Map key must be string")
-						}
-					} else if ref.Index.Type == value.VAL_INT {
-						key = ref.Index.AsInt
-					}
-					m.Data[key] = val
-				}
+			if err := vm.storeReferenceValue(refVal, val); err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
 
 		case chunk.OP_ADD:
@@ -4748,34 +4583,11 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Auto-dereference if instance is a ref
 			if instanceVal.Type == value.VAL_REF {
-				ref := instanceVal.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					v, err := vm.lookupGlobalReferenceValue(ref)
-					if err != nil {
-						return vm.runtimeError(c, ip, "%s", err)
-					}
-					instanceVal = v
-				case value.REF_UPVALUE:
-					instanceVal = *ref.Upvalue.Location
-				case value.REF_PTR:
-					instanceVal = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if v, ok := inst.Fields[ref.Name]; ok {
-							instanceVal = v
-						} else {
-							instanceVal = value.NewNull()
-						}
-					}
-				case value.REF_INDEX:
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx >= 0 && idx < len(arr.Elements) {
-							instanceVal = arr.Elements[idx]
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				instanceVal = resolved
 			}
 
 			if instanceVal.Type != value.VAL_OBJ {
@@ -4811,34 +4623,11 @@ func (vm *VM) run(minFrameCount int) error {
 			// Auto-dereference if instance is a ref
 
 			if instanceVal.Type == value.VAL_REF {
-				ref := instanceVal.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					v, err := vm.lookupGlobalReferenceValue(ref)
-					if err != nil {
-						return vm.runtimeError(c, ip, "%s", err)
-					}
-					instanceVal = v
-				case value.REF_UPVALUE:
-					instanceVal = *ref.Upvalue.Location
-				case value.REF_PTR:
-					instanceVal = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if v, ok := inst.Fields[ref.Name]; ok {
-							instanceVal = v
-						} else {
-							instanceVal = value.NewNull()
-						}
-					}
-				case value.REF_INDEX:
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx >= 0 && idx < len(arr.Elements) {
-							instanceVal = arr.Elements[idx]
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				instanceVal = resolved
 			}
 
 			if instanceVal.Type != value.VAL_OBJ {
@@ -4863,26 +4652,11 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Expect Instance (Can be Ref to Instance)
 			if instanceVal.Type == value.VAL_REF {
-				// Deref container first
-				ref := instanceVal.Obj.(*value.ObjRef)
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					v, err := vm.lookupGlobalReferenceValue(ref)
-					if err != nil {
-						return vm.runtimeError(c, ip, "%s", err)
-					}
-					instanceVal = v
-				case value.REF_UPVALUE:
-					instanceVal = *ref.Upvalue.Location
-				case value.REF_PTR:
-					instanceVal = *ref.Ptr
-				case value.REF_PROPERTY:
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if v, ok := inst.Fields[ref.Name]; ok {
-							instanceVal = v
-						}
-					}
+				resolved, err := vm.resolveReferenceValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				instanceVal = resolved
 			}
 
 			if instanceVal.Type != value.VAL_OBJ {
@@ -4902,33 +4676,8 @@ func (vm *VM) run(minFrameCount int) error {
 			if fieldVal.Type != value.VAL_REF {
 				return vm.runtimeError(c, ip, "property '%s' is not a reference", name)
 			}
-
-			// Write Value to Reference -> Duplicate OP_STORE_REF logic
-			ref := fieldVal.Obj.(*value.ObjRef)
-			switch ref.RefType {
-			case value.REF_GLOBAL:
-				if err := vm.storeGlobalReferenceValue(ref, val); err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-			case value.REF_UPVALUE:
-				*ref.Upvalue.Location = val
-			case value.REF_PTR:
-				*ref.Ptr = val
-			case value.REF_PROPERTY:
-				if targetInst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-					targetInst.Fields[ref.Name] = val
-				} else {
-					return vm.runtimeError(c, ip, "Target is not an instance")
-				}
-			case value.REF_INDEX:
-				// ... (Dup logic) ...
-				if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-					idx := int(ref.Index.AsInt)
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "Index out of bounds")
-					}
-					arr.Elements[idx] = val
-				}
+			if err := vm.storeReferenceValue(fieldVal, val); err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
 			vm.push(val)
 

@@ -435,58 +435,9 @@ func jsonMapKeyCompatible(keyType *value.RuntimeTypeInfo) bool {
 }
 
 func jsonReferenceStorage(vm *VM, ref *value.ObjRef) (value.Value, jsonSetter, bool) {
-	if ref == nil {
+	stored, exists, store, err := vm.referenceStorage(ref)
+	if err != nil || !exists || store == nil {
 		return value.Value{}, nil, false
 	}
-	switch ref.RefType {
-	case value.REF_GLOBAL:
-		stored, err := vm.lookupGlobalReferenceValue(ref)
-		if err != nil {
-			return value.Value{}, nil, false
-		}
-		return stored, func(updated value.Value) { _ = vm.storeGlobalReferenceValue(ref, updated) }, true
-	case value.REF_UPVALUE:
-		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
-			return value.Value{}, nil, false
-		}
-		return *ref.Upvalue.Location, func(updated value.Value) { *ref.Upvalue.Location = updated }, true
-	case value.REF_PTR:
-		if ref.Ptr == nil {
-			return value.Value{}, nil, false
-		}
-		return *ref.Ptr, func(updated value.Value) { *ref.Ptr = updated }, true
-	case value.REF_PROPERTY:
-		instance, ok := ref.Container.Obj.(*value.ObjInstance)
-		if ref.Container.Type != value.VAL_OBJ || !ok {
-			return value.Value{}, nil, false
-		}
-		stored, ok := instance.Fields[ref.Name]
-		if !ok {
-			return value.Value{}, nil, false
-		}
-		return stored, func(updated value.Value) { instance.Fields[ref.Name] = updated }, true
-	case value.REF_INDEX:
-		if array, ok := ref.Container.Obj.(*value.ObjArray); ref.Container.Type == value.VAL_OBJ && ok {
-			if ref.Index.Type != value.VAL_INT {
-				return value.Value{}, nil, false
-			}
-			index := int(ref.Index.AsInt)
-			if index < 0 || index >= len(array.Elements) {
-				return value.Value{}, nil, false
-			}
-			return array.Elements[index], func(updated value.Value) { array.Elements[index] = updated }, true
-		}
-		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ref.Container.Type == value.VAL_OBJ && ok {
-			key, err := referenceMapKey(ref.Index)
-			if err != nil {
-				return value.Value{}, nil, false
-			}
-			stored, ok := mapping.Data[key]
-			if !ok {
-				return value.Value{}, nil, false
-			}
-			return stored, func(updated value.Value) { mapping.Data[key] = updated }, true
-		}
-	}
-	return value.Value{}, nil, false
+	return stored, jsonSetter(store), true
 }

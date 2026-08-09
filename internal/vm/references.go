@@ -19,96 +19,131 @@ func referenceMapKey(index value.Value) (interface{}, error) {
 	}
 }
 
-func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
-	if ref.GlobalOwner == nil || *ref.GlobalOwner == nil {
-		return value.Value{}, fmt.Errorf("invalid global reference owner")
+type referenceSetter func(value.Value)
+
+func extractReferenceValue(input value.Value) (*value.ObjRef, error) {
+	if input.Type != value.VAL_REF {
+		return nil, fmt.Errorf("expected reference value, got %s", runtimeValueMode(input))
 	}
-	if ref.GlobalOwner == &vm.shared.Globals {
-		if result, ok := vm.GetGlobal(ref.Name); ok {
-			return result, nil
+	ref, ok := input.Obj.(*value.ObjRef)
+	if !ok || ref == nil {
+		return nil, fmt.Errorf("invalid reference value")
+	}
+	return ref, nil
+}
+
+func (vm *VM) referenceStorage(ref *value.ObjRef) (value.Value, bool, referenceSetter, error) {
+	if ref == nil {
+		return value.Value{}, false, nil, fmt.Errorf("invalid reference value")
+	}
+	switch ref.RefType {
+	case value.REF_GLOBAL:
+		if ref.GlobalOwner == nil || *ref.GlobalOwner == nil {
+			return value.Value{}, false, nil, fmt.Errorf("invalid global reference owner")
 		}
-	} else if result, ok := (*ref.GlobalOwner)[ref.Name]; ok {
-		return result, nil
+		if ref.GlobalOwner == &vm.shared.Globals {
+			stored, ok := vm.GetGlobal(ref.Name)
+			if !ok {
+				return value.Value{}, false, nil, fmt.Errorf("undefined global variable '%s'", ref.Name)
+			}
+			return stored, true, func(updated value.Value) { vm.SetGlobal(ref.Name, updated) }, nil
+		}
+		owner := *ref.GlobalOwner
+		stored, ok := owner[ref.Name]
+		if !ok {
+			return value.Value{}, false, nil, fmt.Errorf("undefined global variable '%s'", ref.Name)
+		}
+		return stored, true, func(updated value.Value) { owner[ref.Name] = updated }, nil
+	case value.REF_UPVALUE:
+		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
+			return value.Value{}, false, nil, fmt.Errorf("invalid upvalue reference")
+		}
+		return *ref.Upvalue.Location, true, func(updated value.Value) { *ref.Upvalue.Location = updated }, nil
+	case value.REF_PTR:
+		if ref.Ptr == nil {
+			return value.Value{}, false, nil, fmt.Errorf("invalid pointer reference")
+		}
+		return *ref.Ptr, true, func(updated value.Value) { *ref.Ptr = updated }, nil
+	case value.REF_PROPERTY:
+		instance, ok := ref.Container.Obj.(*value.ObjInstance)
+		if ref.Container.Type != value.VAL_OBJ || !ok || instance == nil {
+			return value.Value{}, false, nil, fmt.Errorf("Target is not an instance")
+		}
+		stored, ok := instance.Fields[ref.Name]
+		if !ok {
+			return value.Value{}, false, nil, fmt.Errorf("undefined property '%s'", ref.Name)
+		}
+		return stored, true, func(updated value.Value) { instance.Fields[ref.Name] = updated }, nil
+	case value.REF_INDEX:
+		if array, ok := ref.Container.Obj.(*value.ObjArray); ref.Container.Type == value.VAL_OBJ && ok && array != nil {
+			if ref.Index.Type != value.VAL_INT {
+				return value.Value{}, false, nil, fmt.Errorf("array reference index must be integer")
+			}
+			index := int(ref.Index.AsInt)
+			if index < 0 || index >= len(array.Elements) {
+				return value.Value{}, false, nil, fmt.Errorf("Index out of bounds")
+			}
+			return array.Elements[index], true, func(updated value.Value) { array.Elements[index] = updated }, nil
+		}
+		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ref.Container.Type == value.VAL_OBJ && ok && mapping != nil {
+			key, err := referenceMapKey(ref.Index)
+			if err != nil {
+				return value.Value{}, false, nil, err
+			}
+			stored, exists := mapping.Data[key]
+			if !exists {
+				stored = value.NewNull()
+			}
+			return stored, exists, func(updated value.Value) { mapping.Data[key] = updated }, nil
+		}
+		return value.Value{}, false, nil, fmt.Errorf("Target is not indexable")
+	default:
+		return value.Value{}, false, nil, fmt.Errorf("invalid reference target")
 	}
-	return value.Value{}, fmt.Errorf("undefined global variable '%s'", ref.Name)
+}
+
+func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
+	stored, _, _, err := vm.referenceStorage(ref)
+	return stored, err
 }
 
 func (vm *VM) storeGlobalReferenceValue(ref *value.ObjRef, updated value.Value) error {
-	if ref.GlobalOwner == nil || *ref.GlobalOwner == nil {
-		return fmt.Errorf("invalid global reference owner")
+	_, _, store, err := vm.referenceStorage(ref)
+	if err != nil {
+		return err
 	}
-	if ref.GlobalOwner == &vm.shared.Globals {
-		vm.SetGlobal(ref.Name, updated)
-		return nil
-	}
-	(*ref.GlobalOwner)[ref.Name] = updated
+	store(updated)
 	return nil
 }
 
 func (vm *VM) lookupReferenceValue(ref *value.ObjRef) (value.Value, error) {
-	if ref == nil {
-		return value.Value{}, fmt.Errorf("invalid reference value")
+	stored, _, _, err := vm.referenceStorage(ref)
+	return stored, err
+}
+
+func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error {
+	if input.Type == value.VAL_NULL {
+		return fmt.Errorf("cannot update null reference")
 	}
-	switch ref.RefType {
-	case value.REF_GLOBAL:
-		return vm.lookupGlobalReferenceValue(ref)
-	case value.REF_UPVALUE:
-		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
-			return value.Value{}, fmt.Errorf("invalid upvalue reference")
-		}
-		return *ref.Upvalue.Location, nil
-	case value.REF_PTR:
-		if ref.Ptr == nil {
-			return value.Value{}, fmt.Errorf("invalid pointer reference")
-		}
-		return *ref.Ptr, nil
-	case value.REF_PROPERTY:
-		instance, ok := ref.Container.Obj.(*value.ObjInstance)
-		if !ok {
-			return value.Value{}, fmt.Errorf("Target is not an instance")
-		}
-		if result, ok := instance.Fields[ref.Name]; ok {
-			return result, nil
-		}
-		return value.NewNull(), nil
-	case value.REF_INDEX:
-		if array, ok := ref.Container.Obj.(*value.ObjArray); ok {
-			if ref.Index.Type != value.VAL_INT {
-				return value.Value{}, fmt.Errorf("array reference index must be integer")
-			}
-			index := int(ref.Index.AsInt)
-			if index < 0 || index >= len(array.Elements) {
-				return value.Value{}, fmt.Errorf("Index out of bounds")
-			}
-			return array.Elements[index], nil
-		}
-		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ok {
-			key, err := referenceMapKey(ref.Index)
-			if err != nil {
-				return value.Value{}, err
-			}
-			if result, ok := mapping.Data[key]; ok {
-				return result, nil
-			}
-			return value.NewNull(), nil
-		}
-		return value.Value{}, fmt.Errorf("Target is not indexable")
-	default:
-		return value.Value{}, fmt.Errorf("invalid reference target")
+	ref, err := extractReferenceValue(input)
+	if err != nil {
+		return err
 	}
+	_, _, store, err := vm.referenceStorage(ref)
+	if err != nil {
+		return err
+	}
+	store(updated)
+	return nil
 }
 
 func (vm *VM) resolveReferenceValue(input value.Value) (value.Value, error) {
 	if input.Type == value.VAL_NULL {
 		return value.Value{}, fmt.Errorf("cannot dereference null reference")
 	}
-	if input.Type != value.VAL_REF {
-		return value.Value{}, fmt.Errorf("expected reference value, got %s", runtimeValueMode(input))
-	}
-
-	ref, ok := input.Obj.(*value.ObjRef)
-	if !ok || ref == nil {
-		return value.Value{}, fmt.Errorf("invalid reference value")
+	ref, err := extractReferenceValue(input)
+	if err != nil {
+		return value.Value{}, err
 	}
 	return vm.lookupReferenceValue(ref)
 }
