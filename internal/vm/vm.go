@@ -1837,11 +1837,15 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
+		targetRef, _ := args[0].Obj.(*value.ObjRef)
 		arrVal, err := vm.resolveReferenceValue(args[0])
 		if err != nil {
 			return value.NewNull()
 		}
 		item := args[1]
+		if !vm.appendItemCompatible(targetRef, item) {
+			return value.NewNull()
+		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				arr.Elements = append(arr.Elements, item)

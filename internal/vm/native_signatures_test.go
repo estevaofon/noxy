@@ -635,6 +635,129 @@ test_report(values[0][0])`)
 	testExpectedObject(t, 42, got)
 }
 
+func TestDynamicAppendSpecializesItemModeFromTargetType(t *testing.T) {
+	t.Run("reject reference for plain element", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let values: int[] = [1]
+let item: int = 2
+invoke(ref values, ref item)
+test_report(length(values))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("reject incompatible plain value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let values: int[] = [1]
+invoke(ref values, "bad")
+test_report(length(values))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("reject plain value for reference element", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Vertex
+    value: int
+end
+let invoke: any = append
+let values: (ref Vertex)[] = []
+let item: Vertex = Vertex(2)
+invoke(ref values, item)
+test_report(length(values))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("reject reference to incompatible value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Vertex
+    value: int
+end
+let invoke: any = append
+let values: (ref Vertex)[] = []
+let item: int = 2
+invoke(ref values, ref item)
+test_report(length(values))`)
+		testExpectedObject(t, 0, got)
+	})
+
+	t.Run("accept plain value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let values: int[] = [1]
+invoke(ref values, 2)
+test_report(values[1])`)
+		testExpectedObject(t, 2, got)
+	})
+
+	t.Run("accept and retain reference value", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Vertex
+    value: int
+end
+let invoke: any = append
+let values: (ref Vertex)[] = []
+let item: Vertex = Vertex(2)
+invoke(ref values, ref item)
+values[0].value = 42
+test_report(item.value)`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("accept null reference element", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let values: (ref int)[] = []
+invoke(ref values, null)
+test_report(length(values))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("forward existing target reference", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let invoke: any = append
+let values: int[] = [1]
+let forwarded: ref int[] = ref values
+invoke(ref forwarded, 2)
+test_report(length(values))`)
+		testExpectedObject(t, 2, got)
+	})
+}
+
+func TestDynamicAppendRejectsMalformedReferenceItemWithoutMutation(t *testing.T) {
+	source := `
+let invoke: any = append
+let values: (ref int)[] = []
+invoke(ref values, malformed_ref())
+test_report(length(values))`
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.New().Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("malformed_ref", func(args []value.Value) value.Value {
+		return value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"}
+	})
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) > 0 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	if err := machine.Interpret(code); err != nil {
+		t.Fatalf("malformed append item must fail as a legacy no-op, got %v", err)
+	}
+	testExpectedObject(t, 0, captured)
+}
+
 func TestUnrelatedWildcardImportKeepsBuiltinRuntimeContract(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 use sys select *
