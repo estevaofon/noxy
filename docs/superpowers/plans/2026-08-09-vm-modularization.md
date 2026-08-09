@@ -13,7 +13,7 @@
 - Work only in branch `refactor/modularize-vm` and its isolated worktree.
 - No production extraction starts before `internal/vm` coverage reaches 60.0%.
 - Do not change public APIs, AST, compiler contracts, opcodes, bytecode, error strings, line reporting, or language semantics.
-- Preserve native names, signatures, final implementations, registration behavior, and the duplicate `strings_contains` and `strings_replace` registrations.
+- Preserve native names, signatures, final implementations, the effective final registry, and the duplicate `strings_contains` and `strings_replace` overwrite order. Unique cross-domain registrations may be grouped.
 - Keep all new production files in `internal/vm` with `package vm`; create no subpackages.
 - Keep `run` as one switch-based loop and move it only after every other extraction.
 - Use hermetic test resources: `t.TempDir()`, loopback ports assigned by the OS, bounded waits, and no internet access.

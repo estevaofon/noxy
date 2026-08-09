@@ -20,7 +20,8 @@ statement coverage for `internal/vm`.
 
 The refactoring must preserve observable behavior exactly: public APIs,
 bytecode, opcodes, language semantics, native contracts, error text, line
-reporting, resource behavior, and initialization order remain unchanged.
+reporting, resource behavior, and the effective final builtin registry remain
+unchanged.
 
 ## Non-Goals
 
@@ -81,8 +82,9 @@ Construction remains:
 2. `NewWithConfig` creates shared state and delegates to `NewWithShared`.
 3. `NewWithShared` initializes VM-local state and invokes
    `vm.defineBuiltins()`.
-4. `defineBuiltins` invokes domain registration functions in the same
-   effective order as the current constructor body.
+4. `defineBuiltins` invokes domain registration functions. Unique names may be
+   grouped by domain; duplicate names retain their relative overwrite order so
+   the effective final registry remains identical.
 
 Execution remains:
 
@@ -105,9 +107,12 @@ keep their current runtime ownership.
 - Preserve legacy no-op or sentinel behavior in mutating natives.
 - Preserve panic behavior for existing internal-limit assertions.
 - Preserve global/module locking and resource locking.
-- Preserve native names, signatures, variadic rules, and registration order.
+- Preserve native names, signatures, variadic rules, and the effective final
+  registry. Literal cross-domain order for unique names is not observable and
+  may change when registrations are grouped by domain.
 - Preserve duplicate `strings_contains` and `strings_replace` registrations;
-  cleanup belongs to a separate behavioral change.
+  preserve their relative overwrite order. Cleanup belongs to a separate
+  behavioral change.
 
 ## Test Safety Net
 
@@ -195,6 +200,7 @@ limitation is reported explicitly rather than treated as a passing result.
 - `vm.go` contains fewer than 400 lines and only its approved responsibilities.
 - All target files exist and contain only their approved responsibilities.
 - No public VM API, opcode, bytecode, or language behavior changes.
-- Native registration order and effective duplicate behavior remain unchanged.
+- The effective final native registry and duplicate overwrite behavior remain
+  unchanged; unique cross-domain registrations may be grouped.
 - All supported final verification commands pass with zero failures.
 - The worktree contains no unrelated changes or generated tracked artifacts.
