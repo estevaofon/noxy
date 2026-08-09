@@ -58,11 +58,11 @@ func markReferenceTargetType(ref *value.ObjRef, targetType *value.RuntimeTypeInf
 }
 
 func (vm *VM) validateStructConstructorArguments(definition *value.ObjStruct, args []value.Value) error {
-	if definition == nil || !runtimeTypeComplete(definition.ConstructorType, make(map[*value.RuntimeTypeInfo]bool)) {
+	schema, valid := validStructConstructorType(definition)
+	if !valid {
 		return fmt.Errorf("struct constructor has incomplete runtime type metadata")
 	}
-	schema := definition.ConstructorType
-	if schema.Kind != value.TYPE_CALLABLE || schema.CallableBare || len(schema.Params) != len(args) || len(schema.ParamIsRef) != len(schema.Params) {
+	if len(schema.Params) != len(args) {
 		return fmt.Errorf("struct '%s' constructor has invalid runtime type metadata", definition.Name)
 	}
 	params := make([]value.ParamInfo, len(schema.Params))
@@ -78,6 +78,19 @@ func (vm *VM) validateStructConstructorArguments(definition *value.ObjStruct, ar
 		}
 	}
 	return nil
+}
+
+func validStructConstructorType(definition *value.ObjStruct) (*value.RuntimeTypeInfo, bool) {
+	if definition == nil {
+		return nil, false
+	}
+	schema := definition.ConstructorType
+	if !runtimeTypeComplete(schema, make(map[*value.RuntimeTypeInfo]bool)) || schema.Kind != value.TYPE_CALLABLE || schema.CallableBare ||
+		len(schema.Params) != len(definition.Fields) || len(schema.ParamIsRef) != len(schema.Params) || schema.Return == nil ||
+		schema.Return.Kind != value.TYPE_STRUCT || schema.Return.Name != definition.Name {
+		return nil, false
+	}
+	return schema, true
 }
 
 func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo) bool {
@@ -201,7 +214,8 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 		switch actual.Type {
 		case value.VAL_OBJ:
 			constructor, ok := actual.Obj.(*value.ObjStruct)
-			return ok && constructor != nil && runtimeTypeComplete(constructor.ConstructorType, make(map[*value.RuntimeTypeInfo]bool))
+			_, valid := validStructConstructorType(constructor)
+			return ok && valid
 		case value.VAL_FUNCTION:
 			switch callable := actual.Obj.(type) {
 			case *value.ObjClosure:
@@ -219,8 +233,8 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 	switch actual.Type {
 	case value.VAL_OBJ:
 		constructor, ok := actual.Obj.(*value.ObjStruct)
-		return ok && constructor != nil && runtimeTypeComplete(constructor.ConstructorType, make(map[*value.RuntimeTypeInfo]bool)) &&
-			runtimeTypeAccepts(expected, constructor.ConstructorType, make(map[runtimeTypePair]bool))
+		constructorType, valid := validStructConstructorType(constructor)
+		return ok && valid && runtimeTypeAccepts(expected, constructorType, make(map[runtimeTypePair]bool))
 	case value.VAL_FUNCTION:
 		var actualType *value.RuntimeTypeInfo
 		switch callable := actual.Obj.(type) {

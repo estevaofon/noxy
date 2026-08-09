@@ -1425,13 +1425,17 @@ test_report(made.value)`)
 
 func TestRuntimeCallableValidationRejectsMalformedStructConstructors(t *testing.T) {
 	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	boxReturn := &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Box", Fields: map[string]*value.RuntimeTypeInfo{"value": integer}}
 	expected := &value.RuntimeTypeInfo{
 		Kind:       value.TYPE_CALLABLE,
 		Params:     []*value.RuntimeTypeInfo{integer},
 		ParamIsRef: []bool{false},
-		Return:     &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Box", Fields: map[string]*value.RuntimeTypeInfo{"value": integer}},
+		Return:     boxReturn,
 	}
 	bare := &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, CallableBare: true}
+	constructor := func(schema *value.RuntimeTypeInfo) value.Value {
+		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjStruct{Name: "Box", Fields: []string{"value"}, ConstructorType: schema}}
+	}
 	malformed := []struct {
 		name   string
 		actual value.Value
@@ -1439,6 +1443,12 @@ func TestRuntimeCallableValidationRejectsMalformedStructConstructors(t *testing.
 		{name: "wrong object", actual: value.Value{Type: value.VAL_OBJ, Obj: "not a struct"}},
 		{name: "typed nil", actual: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjStruct)(nil)}},
 		{name: "missing schema", actual: value.NewStruct("Box", []string{"value"})},
+		{name: "wrong schema kind", actual: constructor(integer)},
+		{name: "bare constructor schema", actual: constructor(&value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, CallableBare: true})},
+		{name: "nil return", actual: constructor(&value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, ParamIsRef: []bool{false}})},
+		{name: "wrong nominal return", actual: constructor(&value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, ParamIsRef: []bool{false}, Return: &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Other"}})},
+		{name: "wrong arity", actual: constructor(&value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Return: boxReturn})},
+		{name: "wrong mode length", actual: constructor(&value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, Params: []*value.RuntimeTypeInfo{integer}, Return: boxReturn})},
 	}
 	for _, tt := range malformed {
 		t.Run(tt.name, func(t *testing.T) {
