@@ -55,3 +55,7 @@ func TestStackAndCallSourceLayout(t *testing.T) {
 		requireSourceFunctions(t, filename, names...)
 	}
 }
+
+func TestModuleSourceLayout(t *testing.T) {
+	requireSourceFunctions(t, "modules.go", "loadModule")
+}
