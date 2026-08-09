@@ -177,6 +177,11 @@ func TestMalformedReferenceStringificationIsPanicSafe(t *testing.T) {
 	}{
 		{name: "wrong object", input: value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"}},
 		{name: "typed nil", input: value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)(nil)}},
+		{name: "typed nil index metadata", input: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{
+			RefType:   value.REF_INDEX,
+			Container: value.NewArray(nil),
+			Index:     value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjArray)(nil)},
+		}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

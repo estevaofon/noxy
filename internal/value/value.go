@@ -318,7 +318,15 @@ func (or *ObjRef) String() string {
 	case REF_PROPERTY:
 		return fmt.Sprintf("<ref prop %s>", or.Name)
 	case REF_INDEX:
-		return fmt.Sprintf("<ref index %s>", or.Index.String())
+		switch or.Index.Type {
+		case VAL_INT:
+			return fmt.Sprintf("<ref index %d>", or.Index.AsInt)
+		case VAL_OBJ:
+			if key, ok := or.Index.Obj.(string); ok {
+				return fmt.Sprintf("<ref index %s>", key)
+			}
+		}
+		return "<invalid reference>"
 	default:
 		return fmt.Sprintf("<ref %p>", or.Ptr)
 	}
