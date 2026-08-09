@@ -1,9 +1,11 @@
 package vm
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"testing"
 )
 
@@ -58,4 +60,55 @@ func TestStackAndCallSourceLayout(t *testing.T) {
 
 func TestModuleSourceLayout(t *testing.T) {
 	requireSourceFunctions(t, "modules.go", "loadModule")
+}
+
+func TestExecutorSourceLayout(t *testing.T) {
+	t.Run("executor declarations", func(t *testing.T) {
+		requireSourceFunctions(t, "executor.go", "Interpret", "InterpretWithGlobals", "run")
+	})
+
+	t.Run("vm.go boundary", func(t *testing.T) {
+		source, err := os.ReadFile("vm.go")
+		if err != nil {
+			t.Fatalf("read vm.go: %v", err)
+		}
+		lineCount := bytes.Count(source, []byte{'\n'})
+		if len(source) > 0 && source[len(source)-1] != '\n' {
+			lineCount++
+		}
+		if lineCount >= 400 {
+			t.Errorf("vm.go has %d physical lines; want fewer than 400", lineCount)
+		}
+
+		file, err := parser.ParseFile(token.NewFileSet(), "vm.go", source, 0)
+		if err != nil {
+			t.Fatalf("parse vm.go: %v", err)
+		}
+		allowed := map[string]bool{
+			"runtimeError":              true,
+			"New":                       true,
+			"NewWithConfig":             true,
+			"NewWithShared":             true,
+			"DefineNative":              true,
+			"DefineNativeWithSignature": true,
+			"SetGlobal":                 true,
+			"GetGlobal":                 true,
+			"SetModule":                 true,
+			"GetModule":                 true,
+		}
+		found := make(map[string]bool)
+		for _, declaration := range file.Decls {
+			if function, ok := declaration.(*ast.FuncDecl); ok {
+				found[function.Name.Name] = true
+				if !allowed[function.Name.Name] {
+					t.Errorf("vm.go unexpectedly declares %s", function.Name.Name)
+				}
+			}
+		}
+		for name := range allowed {
+			if !found[name] {
+				t.Errorf("vm.go does not declare %s", name)
+			}
+		}
+	})
 }
