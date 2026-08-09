@@ -2,8 +2,9 @@ package vm
 
 import (
 	"fmt"
-	"noxy-vm/internal/value"
 	"reflect"
+
+	"noxy-vm/internal/value"
 )
 
 func referenceMapKey(index value.Value) (interface{}, error) {
@@ -23,11 +24,15 @@ func referenceMapKey(index value.Value) (interface{}, error) {
 type referenceSetter func(value.Value)
 
 func validateReferencedValue(stored value.Value) error {
-	if stored.Type != value.VAL_OBJ || stored.Obj == nil {
-		if stored.Type == value.VAL_OBJ {
-			return fmt.Errorf("invalid referenced object")
-		}
+	switch stored.Type {
+	case value.VAL_OBJ, value.VAL_FUNCTION, value.VAL_NATIVE, value.VAL_BYTES,
+		value.VAL_CHANNEL, value.VAL_WAITGROUP, value.VAL_REF:
+		// These tags require a concrete payload in Obj.
+	default:
 		return nil
+	}
+	if stored.Obj == nil {
+		return fmt.Errorf("invalid referenced object")
 	}
 	object := reflect.ValueOf(stored.Obj)
 	switch object.Kind() {
@@ -112,6 +117,9 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 			return array.Elements[index], true, func(updated value.Value) { array.Elements[index] = updated }, nil
 		}
 		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ref.Container.Type == value.VAL_OBJ && ok && mapping != nil {
+			if mapping.Data == nil {
+				return value.Value{}, false, nil, fmt.Errorf("invalid map reference container")
+			}
 			key, err := referenceMapKey(ref.Index)
 			if err != nil {
 				return value.Value{}, false, nil, err

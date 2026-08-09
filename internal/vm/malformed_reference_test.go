@@ -61,6 +61,7 @@ dynamic(malformed_ref())`, value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)
 
 func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
 	moduleGlobals := map[string]value.Value{"present": value.NewInt(1)}
+	nilDataMap := value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{}}
 	tests := []struct {
 		name      string
 		malformed value.Value
@@ -75,6 +76,7 @@ func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
 		{name: "array index type", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewArray([]value.Value{value.NewInt(1)}), Index: value.NewBool(false)}}},
 		{name: "array bounds", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewArray([]value.Value{value.NewInt(1)}), Index: value.NewInt(2)}}},
 		{name: "map key", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewMap(), Index: value.Value{Type: value.VAL_OBJ, Obj: []int{1}}}}},
+		{name: "nil map data", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: nilDataMap, Index: value.NewString("key")}}},
 		{name: "index container", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewInt(1), Index: value.NewInt(0)}}},
 	}
 
@@ -216,7 +218,15 @@ func TestReferencesToTypedNilObjectsAreRuntimeErrors(t *testing.T) {
 	}{
 		{name: "array", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjArray)(nil)}},
 		{name: "map", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjMap)(nil)}},
+		{name: "struct", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjStruct)(nil)}},
 		{name: "instance", stored: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjInstance)(nil)}},
+		{name: "function", stored: value.Value{Type: value.VAL_FUNCTION, Obj: (*value.ObjFunction)(nil)}},
+		{name: "closure", stored: value.Value{Type: value.VAL_FUNCTION, Obj: (*value.ObjClosure)(nil)}},
+		{name: "native", stored: value.Value{Type: value.VAL_NATIVE, Obj: (*value.ObjNative)(nil)}},
+		{name: "bytes", stored: value.Value{Type: value.VAL_BYTES, Obj: (*string)(nil)}},
+		{name: "channel", stored: value.Value{Type: value.VAL_CHANNEL, Obj: (*value.ObjChannel)(nil)}},
+		{name: "waitgroup", stored: value.Value{Type: value.VAL_WAITGROUP, Obj: (*value.ObjWaitGroup)(nil)}},
+		{name: "reference", stored: value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)(nil)}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,6 +234,43 @@ func TestReferencesToTypedNilObjectsAreRuntimeErrors(t *testing.T) {
 			input := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
 			if _, err := New().resolveReferenceValue(input); err == nil {
 				t.Fatal("typed-nil referenced object resolved without runtime error")
+			}
+		})
+	}
+}
+
+func TestReferencesPreserveValidObjectBackedAndScalarValues(t *testing.T) {
+	storedInt := value.NewInt(7)
+	validRef := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &storedInt}}
+	tests := []struct {
+		name   string
+		stored value.Value
+	}{
+		{name: "string object", stored: value.NewString("value")},
+		{name: "array", stored: value.NewArray(nil)},
+		{name: "map", stored: value.NewMap()},
+		{name: "instance", stored: value.NewInstance(&value.ObjStruct{Name: "Holder"})},
+		{name: "function", stored: value.NewFunction("f", 0, 0, nil, nil, nil)},
+		{name: "native", stored: value.NewNative("n", func(args []value.Value) value.Value { return value.NewNull() })},
+		{name: "bytes", stored: value.NewBytes("ok")},
+		{name: "channel", stored: value.NewChannel(1)},
+		{name: "waitgroup", stored: value.NewWaitGroup()},
+		{name: "reference", stored: validRef},
+		{name: "null", stored: value.NewNull()},
+		{name: "bool", stored: value.NewBool(true)},
+		{name: "int", stored: value.NewInt(42)},
+		{name: "float", stored: value.NewFloat(3.5)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stored := tt.stored
+			input := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+			got, err := New().resolveReferenceValue(input)
+			if err != nil {
+				t.Fatalf("valid referenced value rejected: %v", err)
+			}
+			if got.Type != tt.stored.Type {
+				t.Fatalf("type=%v, want %v", got.Type, tt.stored.Type)
 			}
 		})
 	}
