@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type ValueType int
@@ -170,7 +171,7 @@ type ObjNative struct {
 
 type ObjArray struct {
 	Elements    []Value
-	RuntimeType *RuntimeTypeInfo
+	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 }
 
 func (oa *ObjArray) String() string {
@@ -208,7 +209,7 @@ func (oa *ObjArray) Format(f fmt.State, verb rune) {
 
 type ObjMap struct {
 	Data        map[interface{}]Value
-	RuntimeType *RuntimeTypeInfo
+	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 }
 
 func (om *ObjMap) String() string {
@@ -330,8 +331,8 @@ const (
 
 type ObjRef struct {
 	RefType     RefType
-	JSONDynamic bool // Declared any target: JSON may replace its concrete runtime type.
-	TargetType  *RuntimeTypeInfo
+	JSONDynamic atomic.Bool // Declared any target: JSON may replace its concrete runtime type.
+	TargetType  atomic.Pointer[RuntimeTypeInfo]
 	Name        string // For Global or Property Name
 	GlobalOwner *map[string]Value
 	Ptr         *Value      // For Local (unsafe if escapes)

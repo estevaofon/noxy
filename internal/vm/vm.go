@@ -3376,7 +3376,7 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 	if err != nil || !exists || store == nil {
 		return false
 	}
-	if ref.JSONDynamic {
+	if ref.JSONDynamic.Load() {
 		replacement, ok := dynamicJSONValue(data)
 		if !ok {
 			return false
@@ -3384,7 +3384,7 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 		store(replacement)
 		return true
 	}
-	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType, data, jsonSetter(store))
+	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType.Load(), data, jsonSetter(store))
 	if !ok {
 		return false
 	}
@@ -3849,7 +3849,7 @@ func (vm *VM) run(minFrameCount int) error {
 			if refValue.Type != value.VAL_REF || !ok || ref == nil {
 				return vm.runtimeError(c, ip, "dynamic target marker requires a reference")
 			}
-			ref.JSONDynamic = true
+			ref.JSONDynamic.Store(true)
 
 		case chunk.OP_MARK_REF_TARGET_TYPE:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
@@ -3867,7 +3867,9 @@ func (vm *VM) run(minFrameCount int) error {
 			if refValue.Type != value.VAL_REF || !ok || ref == nil {
 				return vm.runtimeError(c, ip, "reference target marker requires a reference")
 			}
-			ref.TargetType = targetType
+			if !markReferenceTargetType(ref, targetType) {
+				return vm.runtimeError(c, ip, "reference target metadata conflicts with static context")
+			}
 
 		case chunk.OP_MARK_RUNTIME_VALUE_TYPE:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
@@ -4846,13 +4848,19 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 	case *value.ObjArray:
 		newElems := make([]value.Value, len(obj.Elements))
 		copy(newElems, obj.Elements)
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjArray{Elements: newElems, RuntimeType: obj.RuntimeType}}
+		copied := value.NewArray(newElems)
+		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
+		return copied
 	case *value.ObjMap:
 		newData := make(map[interface{}]value.Value)
 		for k, val := range obj.Data {
 			newData[k] = val
 		}
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{Data: newData, RuntimeType: obj.RuntimeType}}
+		copied := value.NewMap()
+		copiedMap := copied.Obj.(*value.ObjMap)
+		copiedMap.Data = newData
+		copiedMap.RuntimeType.Store(obj.RuntimeType.Load())
+		return copied
 	case *value.ObjInstance:
 		newFields := make(map[string]value.Value)
 		for k, val := range obj.Fields {

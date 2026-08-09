@@ -9,10 +9,13 @@ func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool 
 			return false
 		}
 	}
-	if target == nil || target.TargetType == nil {
+	if target == nil {
 		return true
 	}
-	arrayType := target.TargetType
+	arrayType := target.TargetType.Load()
+	if arrayType == nil {
+		return true
+	}
 	if arrayType.Kind != value.TYPE_ARRAY || arrayType.Element == nil {
 		return false
 	}
@@ -34,6 +37,21 @@ func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool 
 		return false
 	}
 	return vm.runtimeValueMatchesType(resolved, elementType.Element)
+}
+
+func markReferenceTargetType(ref *value.ObjRef, targetType *value.RuntimeTypeInfo) bool {
+	if ref == nil || targetType == nil {
+		return false
+	}
+	for {
+		existing := ref.TargetType.Load()
+		if existing != nil {
+			return runtimeTypeAccepts(targetType, existing, make(map[runtimeTypePair]bool))
+		}
+		if ref.TargetType.CompareAndSwap(nil, targetType) {
+			return true
+		}
+	}
 }
 
 func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo) bool {
@@ -68,8 +86,9 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		if actual.Type != value.VAL_OBJ || !ok {
 			return false
 		}
-		if array.RuntimeType != nil {
-			if !runtimeTypeComplete(array.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, array.RuntimeType, make(map[runtimeTypePair]bool)) {
+		actualType := array.RuntimeType.Load()
+		if actualType != nil {
+			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool)) {
 				return false
 			}
 		} else if expected.Size > 0 || len(array.Elements) == 0 {
@@ -86,8 +105,9 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		if actual.Type != value.VAL_OBJ || !ok {
 			return false
 		}
-		if mapping.RuntimeType != nil {
-			if !runtimeTypeComplete(mapping.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, mapping.RuntimeType, make(map[runtimeTypePair]bool)) {
+		actualType := mapping.RuntimeType.Load()
+		if actualType != nil {
+			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool)) {
 				return false
 			}
 		} else if len(mapping.Data) == 0 {
@@ -247,13 +267,18 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 			return true
 		}
 		effectiveSchema := schema
-		if array.RuntimeType != nil {
-			if !runtimeTypeComplete(array.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, array.RuntimeType, make(map[runtimeTypePair]bool)) {
+		actualType := array.RuntimeType.Load()
+		if actualType != nil {
+			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
 				return false
 			}
-			effectiveSchema = array.RuntimeType
-		} else if apply {
-			array.RuntimeType = schema
+			effectiveSchema = actualType
+		} else if apply && !array.RuntimeType.CompareAndSwap(nil, schema) {
+			actualType = array.RuntimeType.Load()
+			if actualType == nil || !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
+				return false
+			}
+			effectiveSchema = actualType
 		}
 		for _, element := range array.Elements {
 			if !vm.walkRuntimeValueType(element, effectiveSchema.Element, apply, seen) {
@@ -270,13 +295,18 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 			return true
 		}
 		effectiveSchema := schema
-		if mapping.RuntimeType != nil {
-			if !runtimeTypeComplete(mapping.RuntimeType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, mapping.RuntimeType, make(map[runtimeTypePair]bool)) {
+		actualType := mapping.RuntimeType.Load()
+		if actualType != nil {
+			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
 				return false
 			}
-			effectiveSchema = mapping.RuntimeType
-		} else if apply {
-			mapping.RuntimeType = schema
+			effectiveSchema = actualType
+		} else if apply && !mapping.RuntimeType.CompareAndSwap(nil, schema) {
+			actualType = mapping.RuntimeType.Load()
+			if actualType == nil || !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
+				return false
+			}
+			effectiveSchema = actualType
 		}
 		for key, element := range mapping.Data {
 			if !runtimeMapKeyMatchesType(key, effectiveSchema.Key) || !vm.walkRuntimeValueType(element, effectiveSchema.Value, apply, seen) {

@@ -302,7 +302,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			elements[i] = created
 		}
 		array := value.NewArray(elements)
-		array.Obj.(*value.ObjArray).RuntimeType = schema
+		array.Obj.(*value.ObjArray).RuntimeType.Store(schema)
 		return array, true
 	case value.TYPE_MAP:
 		items, ok := data.(map[string]interface{})
@@ -311,7 +311,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 		}
 		mapping := value.NewMap()
 		mapObject := mapping.Obj.(*value.ObjMap)
-		mapObject.RuntimeType = schema
+		mapObject.RuntimeType.Store(schema)
 		mapData := mapObject.Data
 		for key, item := range items {
 			created, ok := buildTypedJSONValue(schema.Value, item)

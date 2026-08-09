@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"noxy-vm/internal/compiler"
@@ -96,8 +97,9 @@ typed_test(ref forwarded)`
 	if received != stored {
 		t.Fatal("target metadata marker copied or rebound the forwarded reference")
 	}
-	if stored.TargetType == nil || stored.TargetType.Kind != value.TYPE_INT {
-		t.Fatalf("target metadata=%v, want int", stored.TargetType)
+	targetType := stored.TargetType.Load()
+	if targetType == nil || targetType.Kind != value.TYPE_INT {
+		t.Fatalf("target metadata=%v, want int", targetType)
 	}
 }
 
@@ -370,7 +372,9 @@ func TestPopulateTargetSupportsCompatibleAndNullScalarReplacement(t *testing.T) 
 
 	t.Run("marked dynamic null", func(t *testing.T) {
 		stored := value.NewNull()
-		target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored, JSONDynamic: true}}
+		ref := &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}
+		ref.JSONDynamic.Store(true)
+		target := value.Value{Type: value.VAL_REF, Obj: ref}
 		if !populateTarget(New(), target, float64(42)) {
 			t.Fatal("null target rejected dynamic scalar replacement")
 		}
@@ -1447,20 +1451,20 @@ func TestCollectionRuntimeMetadataPreservesShallowCopyAndIdentity(t *testing.T) 
 
 	array := value.NewArray([]value.Value{shared})
 	arrayObject := array.Obj.(*value.ObjArray)
-	arrayObject.RuntimeType = arraySchema
+	arrayObject.RuntimeType.Store(arraySchema)
 	arrayCopy := machine.copyValue(array)
 	arrayCopyObject := arrayCopy.Obj.(*value.ObjArray)
-	if arrayCopyObject == arrayObject || arrayCopyObject.RuntimeType != arraySchema || arrayCopyObject.Elements[0].Obj != shared.Obj {
+	if arrayCopyObject == arrayObject || arrayCopyObject.RuntimeType.Load() != arraySchema || arrayCopyObject.Elements[0].Obj != shared.Obj {
 		t.Fatal("array shallow copy lost collection schema or nested identity")
 	}
 
 	mapping := value.NewMap()
 	mapObject := mapping.Obj.(*value.ObjMap)
 	mapObject.Data["item"] = shared
-	mapObject.RuntimeType = mapSchema
+	mapObject.RuntimeType.Store(mapSchema)
 	mapCopy := machine.copyValue(mapping)
 	mapCopyObject := mapCopy.Obj.(*value.ObjMap)
-	if mapCopyObject == mapObject || mapCopyObject.RuntimeType != mapSchema || mapCopyObject.Data["item"].Obj != shared.Obj {
+	if mapCopyObject == mapObject || mapCopyObject.RuntimeType.Load() != mapSchema || mapCopyObject.Data["item"].Obj != shared.Obj {
 		t.Fatal("map shallow copy lost collection schema or nested identity")
 	}
 }
@@ -1473,8 +1477,8 @@ func TestRuntimeValueMarkerRejectsConflictsWithoutOverwriteOrRefMutation(t *test
 	fixedArray := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer, Size: 4}
 	array := value.NewArray([]value.Value{value.NewInt(1)})
 	arrayObject := array.Obj.(*value.ObjArray)
-	arrayObject.RuntimeType = dynamicArray
-	if machine.markRuntimeValueType(array, fixedArray) || arrayObject.RuntimeType != dynamicArray {
+	arrayObject.RuntimeType.Store(dynamicArray)
+	if machine.markRuntimeValueType(array, fixedArray) || arrayObject.RuntimeType.Load() != dynamicArray {
 		t.Fatal("array conflict overwrote existing runtime schema")
 	}
 
@@ -1482,8 +1486,8 @@ func TestRuntimeValueMarkerRejectsConflictsWithoutOverwriteOrRefMutation(t *test
 	intMap := &value.RuntimeTypeInfo{Kind: value.TYPE_MAP, Key: integer, Value: text}
 	mapping := value.NewMap()
 	mapObject := mapping.Obj.(*value.ObjMap)
-	mapObject.RuntimeType = stringMap
-	if machine.markRuntimeValueType(mapping, intMap) || mapObject.RuntimeType != stringMap {
+	mapObject.RuntimeType.Store(stringMap)
+	if machine.markRuntimeValueType(mapping, intMap) || mapObject.RuntimeType.Load() != stringMap {
 		t.Fatal("map conflict overwrote existing runtime schema")
 	}
 
@@ -1500,7 +1504,7 @@ func TestRuntimeValueMarkerRejectsConflictsWithoutOverwriteOrRefMutation(t *test
 	if !machine.markRuntimeValueType(refValue, &value.RuntimeTypeInfo{Kind: value.TYPE_REF, Element: dynamicArray}) {
 		t.Fatal("compatible reference value marker was rejected")
 	}
-	if ref.TargetType != nil || refValue.Obj != ref {
+	if ref.TargetType.Load() != nil || refValue.Obj != ref {
 		t.Fatal("runtime value marker mutated or rebound ObjRef")
 	}
 }
@@ -1591,11 +1595,11 @@ test_report(length(target))`,
 				t.Fatal(err)
 			}
 			testExpectedObject(t, 1, captured)
-			backingSchema := backing.Obj.(*value.ObjArray).RuntimeType
+			backingSchema := backing.Obj.(*value.ObjArray).RuntimeType.Load()
 			if backingSchema == nil || backingSchema.Kind != value.TYPE_ARRAY || backingSchema.Element == nil || backingSchema.Element.Kind != value.TYPE_INT {
 				t.Fatalf("backing schema=%#v", backingSchema)
 			}
-			if originalRef.Ptr != &backing || originalRef.TargetType != nil {
+			if originalRef.Ptr != &backing || originalRef.TargetType.Load() != nil {
 				t.Fatal("runtime value marker mutated or rebound the ObjRef")
 			}
 		})
@@ -1635,11 +1639,11 @@ test_report(length(target))`
 			t.Fatal(err)
 		}
 		testExpectedObject(t, 1, captured)
-		backingSchema := backing.Obj.(*value.ObjMap).RuntimeType
+		backingSchema := backing.Obj.(*value.ObjMap).RuntimeType.Load()
 		if backingSchema == nil || backingSchema.Kind != value.TYPE_MAP || backingSchema.Key.Kind != value.TYPE_STRING || backingSchema.Value.Kind != value.TYPE_INT {
 			t.Fatalf("backing schema=%#v", backingSchema)
 		}
-		if originalRef.Ptr != &backing || originalRef.TargetType != nil {
+		if originalRef.Ptr != &backing || originalRef.TargetType.Load() != nil {
 			t.Fatal("runtime value marker mutated or rebound the map ObjRef")
 		}
 	})
@@ -1682,10 +1686,142 @@ test_report(length(target))`
 		if channel.ElementType == nil || channel.ElementType.Kind != value.TYPE_INT {
 			t.Fatalf("channel element schema=%#v", channel.ElementType)
 		}
-		if originalRef.Ptr != &backing || originalRef.TargetType != nil {
+		if originalRef.Ptr != &backing || originalRef.TargetType.Load() != nil {
 			t.Fatal("runtime value marker mutated or rebound the channel ObjRef")
 		}
 	})
+}
+
+func TestConcurrentCollectionRuntimeMetadataPublication(t *testing.T) {
+	machine := New()
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	arraySchema := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer}
+	mapSchema := &value.RuntimeTypeInfo{Kind: value.TYPE_MAP, Key: &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}, Value: integer}
+
+	tests := []struct {
+		name        string
+		actual      value.Value
+		schema      *value.RuntimeTypeInfo
+		conflicting *value.RuntimeTypeInfo
+	}{
+		{
+			name:        "array",
+			actual:      value.NewArray(nil),
+			schema:      arraySchema,
+			conflicting: &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}},
+		},
+		{
+			name:        "map",
+			actual:      value.NewMap(),
+			schema:      mapSchema,
+			conflicting: &value.RuntimeTypeInfo{Kind: value.TYPE_MAP, Key: integer, Value: integer},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := make(chan struct{})
+			var workers sync.WaitGroup
+			for i := 0; i < 16; i++ {
+				workers.Add(2)
+				go func() {
+					defer workers.Done()
+					<-start
+					for j := 0; j < 100; j++ {
+						machine.markRuntimeValueType(tt.actual, tt.schema)
+					}
+				}()
+				go func() {
+					defer workers.Done()
+					<-start
+					for j := 0; j < 100; j++ {
+						machine.runtimeValueMatchesType(tt.actual, tt.schema)
+					}
+				}()
+			}
+			close(start)
+			workers.Wait()
+			if !machine.markRuntimeValueType(tt.actual, tt.schema) {
+				t.Fatal("compatible concurrent marker was not published")
+			}
+
+			failures := make(chan string, 2400)
+			workers = sync.WaitGroup{}
+			for i := 0; i < 8; i++ {
+				workers.Add(3)
+				go func() {
+					defer workers.Done()
+					for j := 0; j < 100; j++ {
+						if !machine.markRuntimeValueType(tt.actual, tt.schema) {
+							failures <- "compatible marker was rejected"
+						}
+					}
+				}()
+				go func() {
+					defer workers.Done()
+					for j := 0; j < 100; j++ {
+						if machine.markRuntimeValueType(tt.actual, tt.conflicting) {
+							failures <- "conflicting marker was accepted"
+						}
+					}
+				}()
+				go func() {
+					defer workers.Done()
+					for j := 0; j < 100; j++ {
+						if !machine.runtimeValueMatchesType(tt.actual, tt.schema) {
+							failures <- "dynamic validation lost the published schema"
+						}
+					}
+				}()
+			}
+			workers.Wait()
+			close(failures)
+			for failure := range failures {
+				t.Error(failure)
+			}
+		})
+	}
+}
+
+func TestConcurrentReferenceTargetMetadataPublication(t *testing.T) {
+	machine := New()
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	arraySchema := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: integer}
+	conflicting := &value.RuntimeTypeInfo{Kind: value.TYPE_ARRAY, Element: &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}}
+	stored := value.NewArray(nil)
+	ref := &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}
+
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		workers.Add(2)
+		go func() {
+			defer workers.Done()
+			<-start
+			for j := 0; j < 100; j++ {
+				if !markReferenceTargetType(ref, arraySchema) {
+					t.Errorf("compatible reference schema was rejected")
+					return
+				}
+			}
+		}()
+		go func() {
+			defer workers.Done()
+			<-start
+			for j := 0; j < 100; j++ {
+				machine.appendItemCompatible(ref, value.NewInt(1))
+				ref.JSONDynamic.Store(true)
+				_ = ref.JSONDynamic.Load()
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	if ref.TargetType.Load() != arraySchema {
+		t.Fatal("compatible concurrent marker did not preserve the published schema")
+	}
+	if markReferenceTargetType(ref, conflicting) || ref.TargetType.Load() != arraySchema {
+		t.Fatal("conflicting reference marker succeeded or overwrote the published schema")
+	}
 }
 
 func TestTypedJSONLoadsRejectsCallableAndChannelConstruction(t *testing.T) {
