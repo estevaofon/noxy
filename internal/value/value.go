@@ -241,6 +241,7 @@ type ObjStruct struct {
 	Name              string
 	Fields            []string
 	JSONDynamicFields map[string]bool
+	ConstructorType   *RuntimeTypeInfo
 }
 
 func (os *ObjStruct) String() string {

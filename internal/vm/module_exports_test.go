@@ -1,6 +1,10 @@
 package vm
 
 import (
+	"noxy-vm/internal/ast"
+	"noxy-vm/internal/compiler"
+	"noxy-vm/internal/lexer"
+	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
 	"os"
 	"path/filepath"
@@ -30,6 +34,50 @@ func TestRuntimeEmbeddedWildcardExportsAreDurable(t *testing.T) {
 	data := module.Obj.(*value.ObjMap).Data
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime http module omitted wildcard-imported delete")
+	}
+}
+
+func TestRuntimeModuleCachePreservesStructConstructorCallableSchema(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "constructors.nx"), []byte("struct Box\n    value: int\nend\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	expected := &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     []*value.RuntimeTypeInfo{integer},
+		ParamIsRef: []bool{false},
+		Return:     &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Box", Fields: map[string]*value.RuntimeTypeInfo{"value": integer}},
+	}
+	l := lexer.New("use constructors as first\nuse constructors as second\n")
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"), root).Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := machine.Interpret(code); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := machine.GetGlobal("first")
+	if !ok {
+		t.Fatal("missing first module alias")
+	}
+	second, ok := machine.GetGlobal("second")
+	if !ok {
+		t.Fatal("missing cached module alias")
+	}
+	firstConstructor := first.Obj.(*value.ObjMap).Data["Box"]
+	secondConstructor := second.Obj.(*value.ObjMap).Data["Box"]
+	if firstConstructor.Obj != secondConstructor.Obj {
+		t.Fatal("cached import replaced the constructor definition")
+	}
+	if !runtimeCallableMatchesType(firstConstructor, expected) {
+		t.Fatal("cached constructor did not satisfy exact schema")
 	}
 }
 

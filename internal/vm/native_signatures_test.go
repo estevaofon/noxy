@@ -1300,6 +1300,155 @@ func TestRuntimeCallableValidationIsInvariantAndFailClosed(t *testing.T) {
 	}
 }
 
+func TestStructConstructorExactAssignmentAndCallRemainSupported(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+let make_box: func(int) -> Box = Box
+let made: Box = make_box(42)
+test_report(made.value)`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestStructConstructorsSatisfyCallableCollectionSchemas(t *testing.T) {
+	t.Run("exact array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+let makers: (func(int) -> Box)[] = [Box]
+let made: Box = makers[0](42)
+test_report(made.value)`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("exact map", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+let makers: map[string, func(int) -> Box] = {"box": Box}
+let made: Box = makers["box"](42)
+test_report(made.value)`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("bare array", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+let makers: func[] = [Box]
+let made: any = makers[0](42)
+test_report(made.value)`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("bare map", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+let makers: map[string, func] = {"box": Box}
+let made: any = makers["box"](42)
+test_report(made.value)`)
+		testExpectedObject(t, 42, got)
+	})
+}
+
+func TestStructConstructorsSatisfyExactAndDynamicAppendSchemas(t *testing.T) {
+	t.Run("exact append", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+func make_box(value: int) -> Box
+    return Box(value)
+end
+let makers: (func(int) -> Box)[] = [make_box]
+pop(makers)
+append(makers, Box)
+test_report(length(makers))`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("dynamic matching and nominal return mismatch", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Box
+    value: int
+end
+struct Other
+    value: int
+end
+func make_box(value: int) -> Box
+    return Box(value)
+end
+let makers: (func(int) -> Box)[] = [make_box]
+pop(makers)
+let invoke: any = append
+invoke(ref makers, Box)
+invoke(ref makers, Other)
+test_report(length(makers))`)
+		testExpectedObject(t, 1, got)
+	})
+}
+
+func TestStructConstructorCallableSchemaPreservesReferenceFields(t *testing.T) {
+	t.Run("nested struct reference", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Node
+    value: int
+end
+struct Holder
+    node: ref Node
+end
+let makers: (func(ref Node) -> Holder)[] = [Holder]
+let node: Node = Node(42)
+let made: Holder = makers[0](ref node)
+test_report(made.node.value)`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("recursive struct reference", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Node
+    value: int
+    next: ref Node
+end
+let makers: (func(int, ref Node) -> Node)[] = [Node]
+let made: Node = makers[0](42, null)
+test_report(made.value)`)
+		testExpectedObject(t, 42, got)
+	})
+}
+
+func TestRuntimeCallableValidationRejectsMalformedStructConstructors(t *testing.T) {
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	expected := &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     []*value.RuntimeTypeInfo{integer},
+		ParamIsRef: []bool{false},
+		Return:     &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Box", Fields: map[string]*value.RuntimeTypeInfo{"value": integer}},
+	}
+	bare := &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, CallableBare: true}
+	malformed := []struct {
+		name   string
+		actual value.Value
+	}{
+		{name: "wrong object", actual: value.Value{Type: value.VAL_OBJ, Obj: "not a struct"}},
+		{name: "typed nil", actual: value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjStruct)(nil)}},
+		{name: "missing schema", actual: value.NewStruct("Box", []string{"value"})},
+	}
+	for _, tt := range malformed {
+		t.Run(tt.name, func(t *testing.T) {
+			if runtimeCallableMatchesType(tt.actual, bare) || runtimeCallableMatchesType(tt.actual, expected) {
+				t.Fatalf("malformed constructor %v satisfied callable schema", tt.actual)
+			}
+		})
+	}
+}
+
 func TestDynamicAppendUsesDeclaredCollectionSchemas(t *testing.T) {
 	t.Run("fixed array positive", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `

@@ -173,6 +173,9 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 	}
 	if expected.CallableBare {
 		switch actual.Type {
+		case value.VAL_OBJ:
+			constructor, ok := actual.Obj.(*value.ObjStruct)
+			return ok && constructor != nil && runtimeTypeComplete(constructor.ConstructorType, make(map[*value.RuntimeTypeInfo]bool))
 		case value.VAL_FUNCTION:
 			switch callable := actual.Obj.(type) {
 			case *value.ObjClosure:
@@ -188,6 +191,10 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 	}
 
 	switch actual.Type {
+	case value.VAL_OBJ:
+		constructor, ok := actual.Obj.(*value.ObjStruct)
+		return ok && constructor != nil && runtimeTypeComplete(constructor.ConstructorType, make(map[*value.RuntimeTypeInfo]bool)) &&
+			runtimeTypeAccepts(expected, constructor.ConstructorType, make(map[runtimeTypePair]bool))
 	case value.VAL_FUNCTION:
 		var actualType *value.RuntimeTypeInfo
 		switch callable := actual.Obj.(type) {

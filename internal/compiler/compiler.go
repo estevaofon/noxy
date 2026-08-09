@@ -584,6 +584,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			paramTypes = append(paramTypes, f.Type)
 		}
 		structType := newStructFunctionType(n.Name, paramTypes)
+		structDefinition.ConstructorType = c.runtimeTypeInfo(structType)
 
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
