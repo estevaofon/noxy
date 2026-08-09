@@ -587,6 +587,61 @@ end`)
 	})
 }
 
+func TestTypedJSONLoadsAcceptsNullForStructSchema(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "target",
+			source: `
+struct Vertex
+    value: int
+end
+let target: Vertex = Vertex(1)
+let ok: bool = json_loads("null", target)
+if ok then
+    if target == null then test_report(1) else test_report(998) end
+else
+    test_report(999)
+end`,
+		},
+		{
+			name: "array element",
+			source: `
+struct Vertex
+    value: int
+end
+let target: Vertex[] = [Vertex(1)]
+let ok: bool = json_loads("[null]", target)
+if ok then
+    if target[0] == null then test_report(length(target)) else test_report(998) end
+else
+    test_report(999)
+end`,
+		},
+		{
+			name: "map value",
+			source: `
+struct Vertex
+    value: int
+end
+let target: map[string, Vertex] = {"item": Vertex(1)}
+let ok: bool = json_loads("{\"item\":null}", target)
+if ok then
+    if target["item"] == null then test_report(1) else test_report(998) end
+else
+    test_report(999)
+end`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testExpectedObject(t, 1, runTypedFunctionProgram(t, tt.source))
+		})
+	}
+}
+
 func TestTypedJSONLoadsReplacesNonNullAnyComposite(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: any = [1]

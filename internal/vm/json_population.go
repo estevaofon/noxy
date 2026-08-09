@@ -44,6 +44,12 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 		// Null and legacy-filled ref slots retain their declared referent type.
 		return prepareJSONMutation(vm, current, schema.Element, data, set)
 	}
+	if schema != nil && schema.Kind == value.TYPE_STRUCT && data == nil {
+		if set == nil {
+			return nil, false
+		}
+		return func() { set(value.NewNull()) }, true
+	}
 
 	if current.Type == value.VAL_NULL {
 		if schema == nil || set == nil {
@@ -312,6 +318,9 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 		}
 		return mapping, true
 	case value.TYPE_STRUCT:
+		if data == nil {
+			return value.NewNull(), true
+		}
 		items, ok := data.(map[string]interface{})
 		if !ok {
 			break
