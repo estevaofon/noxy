@@ -189,6 +189,44 @@ class UpdateVersionTests(unittest.TestCase):
         }
         self.assertEqual(files_after, files_before)
 
+    def test_rollback_failure_preserves_original_for_manual_recovery(self) -> None:
+        before = snapshot(self.root)
+        real_replace = os.replace
+        failed_commit_path = (self.root / TARGET_FILES[2]).resolve()
+        failed_restore_path = (self.root / TARGET_FILES[1]).resolve()
+
+        def fail_commit_and_restore(source, destination) -> None:
+            source_path = Path(source)
+            destination_path = Path(destination).resolve()
+            if source_path.name == "2.new" and destination_path == failed_commit_path:
+                raise OSError("injected mid-commit failure")
+            if (
+                source_path.name == "1.original"
+                and destination_path == failed_restore_path
+            ):
+                raise OSError("injected rollback failure")
+            real_replace(source, destination)
+
+        with mock.patch("os.replace", side_effect=fail_commit_and_restore):
+            with self.assertRaises(UpdateError) as raised:
+                execute_update(self.root, "1.6.0", "2026-08-09", False)
+
+        message = str(raised.exception)
+        self.assertIn(str(failed_commit_path), message)
+        self.assertIn(str(failed_restore_path), message)
+        recovery_match = re.search(
+            r"recovery files preserved at (?P<path>.+)$", message
+        )
+        self.assertIsNotNone(recovery_match)
+        recovery_dir = Path(recovery_match.group("path"))
+        self.assertTrue(recovery_dir.is_dir())
+        self.assertEqual(
+            (recovery_dir / "1.original").read_bytes(), before[TARGET_FILES[1]]
+        )
+        for relative in (TARGET_FILES[0], *TARGET_FILES[2:]):
+            with self.subTest(relative=relative):
+                self.assertEqual((self.root / relative).read_bytes(), before[relative])
+
 
 if __name__ == "__main__":
     unittest.main()

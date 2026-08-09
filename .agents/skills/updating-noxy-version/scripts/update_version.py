@@ -162,6 +162,7 @@ def _write_updates(
     staged: dict[str, Path] = {}
     backups: dict[str, Path] = {}
     operation_error: UpdateError | None = None
+    preserve_transaction = False
 
     try:
         for index, relative in enumerate(TARGET_FILES):
@@ -195,11 +196,16 @@ def _write_updates(
                         )
                 message = f"failed to replace {target_path}: {error}"
                 if rollback_errors:
+                    preserve_transaction = True
                     message += "; " + "; ".join(rollback_errors)
+                    message += f"; recovery files preserved at {transaction_dir}"
                 raise UpdateError(message) from error
             replaced.append(relative)
     except UpdateError as error:
         operation_error = error
+
+    if preserve_transaction:
+        raise operation_error
 
     try:
         shutil.rmtree(transaction_dir)
