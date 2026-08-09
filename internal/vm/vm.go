@@ -1792,11 +1792,22 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		return value.NewArray(nil)
 	})
 
-	vm.DefineNative("delete", func(args []value.Value) value.Value {
+	deleteSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref map"},
+			{IsRef: false, TypeName: "any"},
+		},
+		ReturnType: "void",
+	}
+	vm.DefineNativeWithSignature("delete", deleteSignature, func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
-		mapVal := args[0]
+		mapVal, err := vm.resolveReferenceValue(args[0])
+		if err != nil {
+			return value.NewNull()
+		}
 		keyVal := args[1]
 		if mapVal.Type == value.VAL_OBJ {
 			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
@@ -1815,11 +1826,22 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.DefineNative("append", func(args []value.Value) value.Value {
+	appendSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+			{IsRef: false, TypeName: "any"},
+		},
+		ReturnType: "void",
+	}
+	vm.DefineNativeWithSignature("append", appendSignature, func(args []value.Value) value.Value {
 		if len(args) != 2 {
 			return value.NewNull()
 		}
-		arrVal := args[0]
+		arrVal, err := vm.resolveReferenceValue(args[0])
+		if err != nil {
+			return value.NewNull()
+		}
 		item := args[1]
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
@@ -1828,11 +1850,21 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		}
 		return value.NewNull()
 	})
-	vm.DefineNative("pop", func(args []value.Value) value.Value {
+	popSignature := value.NativeSignature{
+		Arity: 1,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+		},
+		ReturnType: "any",
+	}
+	vm.DefineNativeWithSignature("pop", popSignature, func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
-		arrVal := args[0]
+		arrVal, err := vm.resolveReferenceValue(args[0])
+		if err != nil {
+			return value.NewNull()
+		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				if len(arr.Elements) == 0 {
@@ -3189,7 +3221,15 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	})
 
 	// json_loads(str, target) -> Bool
-	vm.DefineNative("json_loads", func(args []value.Value) value.Value {
+	jsonLoadsSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: false, TypeName: "string"},
+			{IsRef: true, TypeName: "ref any"},
+		},
+		ReturnType: "bool",
+	}
+	vm.DefineNativeWithSignature("json_loads", jsonLoadsSignature, func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
@@ -3766,81 +3806,11 @@ func (vm *VM) run(minFrameCount int) error {
 				// Not a ref - pass through as-is (already dereferenced)
 				vm.push(refVal)
 			} else {
-				// VAL_REF - dereference it
-				ref := refVal.Obj.(*value.ObjRef)
-
-				switch ref.RefType {
-				case value.REF_GLOBAL:
-					// Global lookup (Read)
-					val, ok := frame.Globals[ref.Name]
-					if !ok {
-						val, ok = vm.GetGlobal(ref.Name)
-						if !ok {
-							return vm.runtimeError(c, ip, "undefined global variable '%s'", ref.Name)
-						}
-					}
-					vm.push(val)
-				case value.REF_UPVALUE:
-					// Read from Upvalue
-					vm.push(*ref.Upvalue.Location)
-				case value.REF_PTR:
-					// Local pointer read
-					vm.push(*ref.Ptr)
-				case value.REF_PROPERTY:
-					// Read property from container
-					// Assume ObjInstance for now. Could be Map (if string key?) or Module?
-					if inst, ok := ref.Container.Obj.(*value.ObjInstance); ok {
-						if val, ok := inst.Fields[ref.Name]; ok {
-							vm.push(val)
-						} else {
-							// Default value or null? Or error?
-							// Struct fields should exist if type checked.
-							// If dynamic, maybe null.
-							vm.push(value.NewNull())
-						}
-					} else {
-						return vm.runtimeError(c, ip, "Target is not an instance")
-					}
-				case value.REF_INDEX:
-					// Read index from container (Array or Map)
-					if arr, ok := ref.Container.Obj.(*value.ObjArray); ok {
-						idx := int(ref.Index.AsInt)
-						if idx < 0 || idx >= len(arr.Elements) {
-							return vm.runtimeError(c, ip, "Index out of bounds")
-						}
-						vm.push(arr.Elements[idx])
-					} else if m, ok := ref.Container.Obj.(*value.ObjMap); ok {
-						// Map key
-						// Need to hash key? ObjMap uses interface{} key or Value key?
-						// ObjMap keys are interface{}. We need Value->Interface conversion or map stores Values?
-						// value.go: Data map[interface{}]Value
-						var key interface{}
-						// Minimal key conversion logic (duplicated from elsewhere? or simple)
-						if ref.Index.Type == value.VAL_OBJ {
-							if s, ok := ref.Index.Obj.(string); ok {
-								key = s
-							} else {
-								key = ref.Index.Obj // Pointer/etc
-							}
-						} else {
-							// Primitive
-							if ref.Index.Type == value.VAL_INT {
-								key = ref.Index.AsInt
-							} else {
-								key = ref.Index.AsInt
-								return vm.runtimeError(c, ip, "Map key type not fully supported in ref yet")
-							}
-						}
-
-						if val, ok := m.Data[key]; ok {
-							vm.push(val)
-						} else {
-							vm.push(value.NewNull())
-						}
-					} else {
-						return vm.runtimeError(c, ip, "Target is not indexable")
-					}
+				resolved, err := vm.lookupReferenceValue(refVal.Obj.(*value.ObjRef), frame.Globals)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
 				}
+				vm.push(resolved)
 			}
 		case chunk.OP_STORE_VIA_REF:
 			slot := int(c.Code[ip])

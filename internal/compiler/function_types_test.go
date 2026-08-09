@@ -163,7 +163,7 @@ add(x)`, "expected int, got any"},
 		{"ref", `func set(v: ref int) -> void
     return
 end
-set(1)`, "reference argument must be a variable, property, index, or null"},
+set(1)`, "reference argument '1' is not addressable"},
 		{"ref type", `func set(v: ref int) -> void
     return
 end

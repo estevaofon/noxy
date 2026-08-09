@@ -1462,6 +1462,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.CallExpression:
+		if handled, resultType, err := c.compileBuiltinCall(n); handled {
+			return c.currentChunk, resultType, err
+		}
+
 		// Check for special functions: chan_send, chan_recv
 		if ident, ok := n.Function.(*ast.Identifier); ok {
 			if ident.Value == "chan_send" {
@@ -1732,8 +1736,8 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 		return nil, nil
 	default:
 		return nil, fmt.Errorf(
-			"[line %d] reference argument must be a variable, property, index, or null",
-			c.currentLine,
+			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
+			c.currentLine, expression.String(),
 		)
 	}
 }

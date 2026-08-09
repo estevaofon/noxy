@@ -146,3 +146,74 @@ func TestTypedNativeShallowCopiesOrdinaryComposite(t *testing.T) {
 		t.Fatalf("caller value=%d, want 1", got)
 	}
 }
+
+func TestTypedMutatingBuiltinsPreserveSourceSyntax(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let values: int[] = [1]
+append(values, 2)
+let removed: int = pop(values)
+test_report(length(values) * 10 + removed)`)
+	testExpectedObject(t, 12, got)
+}
+
+func TestTypedDeleteMutatesCallerMap(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let mapping: map[string, int] = {"a": 1}
+delete(mapping, "a")
+test_report(length(keys(mapping)))`)
+	testExpectedObject(t, 0, got)
+}
+
+func TestTypedJSONLoadsPopulatesCallerTarget(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let target: map[string, int] = {"old": 0}
+let ok: bool = json_loads("{\"answer\":42}", target)
+test_report(target["answer"])`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestTypedMutatingBuiltinResolvesCapturedTarget(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func make_mutator() -> func() -> int
+    let values: int[] = [1]
+    return func() -> int
+        append(values, 2)
+        let removed: int = pop(values)
+        return length(values) * 10 + removed
+    end
+end
+let mutate: func() -> int = make_mutator()
+test_report(mutate())`)
+	testExpectedObject(t, 12, got)
+}
+
+func TestTypedMutatingBuiltinsResolvePropertyTargets(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Collections
+    values: int[]
+    mapping: map[string, int]
+end
+let collections: Collections = Collections([1], {"a": 1})
+append(collections.values, 2)
+delete(collections.mapping, "a")
+test_report(length(collections.values) * 10 + length(keys(collections.mapping)))`)
+	testExpectedObject(t, 20, got)
+}
+
+func TestTypedMutatingBuiltinResolvesArrayIndexTarget(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let nested: int[][] = [[1]]
+append(nested[0], 2)
+let removed: int = pop(nested[0])
+test_report(length(nested[0]) * 10 + removed)`)
+	testExpectedObject(t, 12, got)
+}
+
+func TestTypedMutatingBuiltinResolvesMapIndexTarget(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let nested: map[string, int[]] = {"values": [1]}
+append(nested["values"], 2)
+let removed: int = pop(nested["values"])
+test_report(length(nested["values"]) * 10 + removed)`)
+	testExpectedObject(t, 12, got)
+}
