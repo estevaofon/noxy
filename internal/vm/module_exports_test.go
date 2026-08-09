@@ -8,8 +8,69 @@ import (
 	"noxy-vm/internal/value"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestRuntimeModuleCacheSharesIdentityAcrossImportsAndChildVM(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "answer.nx"), []byte("let answer: int = 42\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	source := "use answer as first\nuse answer as second\n"
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"), root).Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := machine.Interpret(code); err != nil {
+		t.Fatal(err)
+	}
+	first, ok := machine.GetGlobal("first")
+	if !ok {
+		t.Fatal("missing first module alias")
+	}
+	second, ok := machine.GetGlobal("second")
+	if !ok {
+		t.Fatal("missing second module alias")
+	}
+	if first.Obj != second.Obj {
+		t.Fatal("second module import did not reuse the cached module object")
+	}
+	cached, ok := machine.GetModule("answer")
+	if !ok || cached.Obj != first.Obj {
+		t.Fatalf("cached module=%v, want first module object", cached)
+	}
+
+	child := NewWithShared(machine.shared, machine.Config)
+	childLexer := lexer.New("use answer as child_answer\n")
+	childParser := parser.New(childLexer)
+	childProgram := childParser.ParseProgram()
+	if len(childParser.Errors()) != 0 {
+		t.Fatalf("child parser errors: %v", childParser.Errors())
+	}
+	childCode, _, err := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "child.nx"), root).Compile(childProgram)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Interpret(childCode); err != nil {
+		t.Fatal(err)
+	}
+	childAnswer, ok := child.GetGlobal("child_answer")
+	if !ok || childAnswer.Obj != cached.Obj {
+		t.Fatalf("child module=%v, want shared cached module", childAnswer)
+	}
+
+	if _, err := machine.loadModule("missing_answer_module"); err == nil || !strings.Contains(err.Error(), "missing_answer_module") {
+		t.Fatalf("missing module error=%v", err)
+	}
+}
 
 func TestRuntimeFileModuleGlobalsContainDirectExports(t *testing.T) {
 	root := t.TempDir()

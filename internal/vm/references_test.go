@@ -98,3 +98,49 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
+	globals := map[string]value.Value{"answer": value.NewInt(41)}
+	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer", GlobalOwner: &globals}
+	machine := New()
+
+	got, err := machine.lookupGlobalReferenceValue(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != value.VAL_INT || got.AsInt != 41 {
+		t.Fatalf("lookup=%v, want 41", got)
+	}
+	if err := machine.storeGlobalReferenceValue(ref, value.NewInt(42)); err != nil {
+		t.Fatal(err)
+	}
+	if got := globals["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+		t.Fatalf("stored value=%v, want 42", got)
+	}
+
+	for _, tt := range []struct {
+		name string
+		ref  *value.ObjRef
+		want string
+	}{
+		{
+			name: "nil owner",
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer"},
+			want: "invalid global reference owner",
+		},
+		{
+			name: "missing global",
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &globals},
+			want: "undefined global variable 'missing'",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := machine.lookupGlobalReferenceValue(tt.ref); err == nil || err.Error() != tt.want {
+				t.Fatalf("lookup error=%v, want %q", err, tt.want)
+			}
+			if err := machine.storeGlobalReferenceValue(tt.ref, value.NewInt(42)); err == nil || err.Error() != tt.want {
+				t.Fatalf("store error=%v, want %q", err, tt.want)
+			}
+		})
+	}
+}

@@ -1,10 +1,6 @@
 package vm
 
 import (
-	"fmt"
-	"noxy-vm/internal/compiler"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
 	"testing"
 )
@@ -58,41 +54,7 @@ func TestBooleanLogic(t *testing.T) {
 
 func runVmTests(t *testing.T, tests []vmTestCase) {
 	for _, tt := range tests {
-		// Wrap input in test_report call
-		input := fmt.Sprintf("test_report(%s)", tt.input)
-
-		l := lexer.New(input)
-		p := parser.New(l)
-		program := p.ParseProgram()
-		if len(p.Errors()) > 0 {
-			t.Fatalf("parser errors: %v", p.Errors())
-		}
-
-		c := compiler.New()
-		bytecode, _, err := c.Compile(program)
-		if err != nil {
-			t.Fatalf("compiler error: %s", err)
-		}
-
-		vm := New()
-
-		// Capture result
-		var captured value.Value = value.NewNull()
-
-		// Define native before running
-		vm.DefineNative("test_report", func(args []value.Value) value.Value {
-			if len(args) > 0 {
-				captured = args[0]
-			}
-			return value.NewNull()
-		})
-
-		err = vm.Interpret(bytecode)
-		if err != nil {
-			t.Fatalf("vm error: %s", err)
-		}
-
-		testExpectedObject(t, tt.expected, captured)
+		testExpectedObject(t, tt.expected, captureVMSource(t, "test_report("+tt.input+")"))
 	}
 }
 

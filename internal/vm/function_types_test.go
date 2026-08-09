@@ -1,9 +1,6 @@
 package vm
 
 import (
-	"noxy-vm/internal/compiler"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
 	"strings"
 	"testing"
@@ -11,43 +8,12 @@ import (
 
 func runTypedFunctionProgram(t *testing.T, input string) value.Value {
 	t.Helper()
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	if len(p.Errors()) != 0 {
-		t.Fatalf("parser errors: %v", p.Errors())
-	}
-	bytecode, _, err := compiler.New().Compile(program)
-	if err != nil {
-		t.Fatalf("compiler error: %v", err)
-	}
-	machine := New()
-	captured := value.NewNull()
-	machine.DefineNative("test_report", func(args []value.Value) value.Value {
-		if len(args) != 0 {
-			captured = args[0]
-		}
-		return value.NewNull()
-	})
-	if err := machine.Interpret(bytecode); err != nil {
-		t.Fatalf("vm error: %v", err)
-	}
-	return captured
+	return captureVMSource(t, input)
 }
 
 func runTypedFunctionProgramError(t *testing.T, input string) error {
 	t.Helper()
-	l := lexer.New(input)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	if len(p.Errors()) != 0 {
-		t.Fatalf("parser errors: %v", p.Errors())
-	}
-	bytecode, _, err := compiler.New().Compile(program)
-	if err != nil {
-		t.Fatalf("compiler error: %v", err)
-	}
-	return New().Interpret(bytecode)
+	return interpretVMSource(t, New(), input)
 }
 
 func TestDynamicCallRejectsPlainValueForReferenceParameter(t *testing.T) {
