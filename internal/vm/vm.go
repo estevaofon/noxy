@@ -3753,8 +3753,16 @@ func (vm *VM) run(minFrameCount int) error {
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
-			owner := &frame.Globals
-			if frame.Globals == nil {
+			var owner *map[string]value.Value
+			if frame.Globals != nil {
+				if _, ok := frame.Globals[name]; ok {
+					owner = &frame.Globals
+				}
+			}
+			if owner == nil {
+				if _, ok := vm.GetGlobal(name); !ok {
+					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
+				}
 				owner = &vm.shared.Globals
 			}
 			vm.push(value.Value{
