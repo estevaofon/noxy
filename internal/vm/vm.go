@@ -3885,6 +3885,74 @@ func (vm *VM) run(minFrameCount int) error {
 				},
 			})
 
+		case chunk.OP_CONTEXT_REF_PROPERTY:
+			index := c.Code[ip]
+			ip++
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+			container := vm.pop()
+
+			instance, ok := container.Obj.(*value.ObjInstance)
+			if container.Type != value.VAL_OBJ || !ok {
+				return vm.runtimeError(c, ip, "contextual property reference base must be an instance")
+			}
+			stored, ok := instance.Fields[name]
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined property '%s'", name)
+			}
+			if stored.Type == value.VAL_REF {
+				vm.push(stored)
+				continue
+			}
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType:   value.REF_PROPERTY,
+					Container: container,
+					Name:      name,
+				},
+			})
+
+		case chunk.OP_CONTEXT_REF_INDEX:
+			idx := vm.pop()
+			container := vm.pop()
+			if container.Type != value.VAL_OBJ {
+				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
+			}
+
+			var stored value.Value
+			if array, ok := container.Obj.(*value.ObjArray); ok {
+				if idx.Type != value.VAL_INT {
+					return vm.runtimeError(c, ip, "array index must be integer")
+				}
+				arrayIndex := int(idx.AsInt)
+				if arrayIndex < 0 || arrayIndex >= len(array.Elements) {
+					return vm.runtimeError(c, ip, "array index out of bounds")
+				}
+				stored = array.Elements[arrayIndex]
+			} else if mapObj, ok := container.Obj.(*value.ObjMap); ok {
+				key, err := referenceMapKey(idx)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				stored = mapObj.Data[key]
+			} else {
+				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
+			}
+
+			if stored.Type == value.VAL_REF {
+				vm.push(stored)
+				continue
+			}
+			vm.push(value.Value{
+				Type: value.VAL_REF,
+				Obj: &value.ObjRef{
+					RefType:   value.REF_INDEX,
+					Container: container,
+					Index:     idx,
+				},
+			})
+
 		case chunk.OP_MARK_REF_JSON_DYNAMIC:
 			refValue := vm.peek(0)
 			ref, ok := refValue.Obj.(*value.ObjRef)

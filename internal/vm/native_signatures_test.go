@@ -489,3 +489,127 @@ use http_client select *`)
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestUncalledFunctionImportDoesNotChangeOuterBuiltinCompilation(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func unused() -> void
+    use http_client select delete
+end
+let mapping: map[string, int] = {"a": 1}
+delete(mapping, "a")
+test_report(length(keys(mapping)))`)
+	testExpectedObject(t, 0, got)
+}
+
+func TestCachedWildcardWrapperKeepsLaterUserBindingAtRuntime(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+use http
+func delete(left: int, right: int) -> int
+    return left + right
+end
+use http select *
+test_report(delete(20, 22))`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestContextualReferenceCallsForwardStoredReferences(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "property",
+			source: `
+struct Holder
+    values: ref int[]
+end
+let values: int[] = [1]
+let holder: Holder = Holder(ref values)
+func push(target: ref int[]) -> void
+    append(target, 2)
+end
+push(holder.values)
+test_report(length(values))`,
+		},
+		{
+			name: "array index",
+			source: `
+let values: int[] = [1]
+let stored: (ref int[])[] = [ref values]
+func push(target: ref int[]) -> void
+    append(target, 2)
+end
+push(stored[0])
+test_report(length(values))`,
+		},
+		{
+			name: "map index",
+			source: `
+let values: int[] = [1]
+let stored: map[string, ref int[]] = {"values": ref values}
+func push(target: ref int[]) -> void
+    append(target, 2)
+end
+push(stored["values"])
+test_report(length(values))`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testExpectedObject(t, 2, runTypedFunctionProgram(t, tt.source))
+		})
+	}
+}
+
+func TestContextualReferenceCallPreservesStoredNullReference(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Holder
+    values: ref int[]
+end
+let holder: Holder = Holder(null)
+func push(target: ref int[]) -> void
+    append(target, 2)
+end
+push(holder.values)
+test_report(42)`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestContextualReferenceCallsCanFillNullIndexSlots(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "array index",
+			source: `
+func fill(target: ref int) -> void
+    if target == null then
+        *target = 42
+    end
+end
+let stored: (ref int)[] = [null]
+fill(stored[0])
+test_report(stored[0])`,
+		},
+		{
+			name: "map index",
+			source: `
+func fill(target: ref int) -> void
+    if target == null then
+        *target = 42
+    end
+end
+let stored: map[string, ref int] = {"answer": null}
+fill(stored["answer"])
+test_report(stored["answer"])`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testExpectedObject(t, 42, runTypedFunctionProgram(t, tt.source))
+		})
+	}
+}

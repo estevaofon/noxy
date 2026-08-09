@@ -73,6 +73,8 @@ const (
 	OP_REF_GLOBAL
 	OP_REF_PROPERTY
 	OP_REF_INDEX
+	OP_CONTEXT_REF_PROPERTY
+	OP_CONTEXT_REF_INDEX
 	OP_DEREF
 	OP_STORE_VIA_REF
 	OP_STORE_REF
@@ -187,6 +189,10 @@ func (op OpCode) String() string {
 		return "OP_REF_PROPERTY"
 	case OP_REF_INDEX:
 		return "OP_REF_INDEX"
+	case OP_CONTEXT_REF_PROPERTY:
+		return "OP_CONTEXT_REF_PROPERTY"
+	case OP_CONTEXT_REF_INDEX:
+		return "OP_CONTEXT_REF_INDEX"
 	case OP_DEREF:
 		return "OP_DEREF"
 	case OP_MARK_REF_JSON_DYNAMIC:
@@ -412,6 +418,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.constantInstruction("OP_REF_PROPERTY", offset)
 	case OP_REF_INDEX:
 		return c.simpleInstruction("OP_REF_INDEX", offset)
+	case OP_CONTEXT_REF_PROPERTY:
+		return c.constantInstruction("OP_CONTEXT_REF_PROPERTY", offset)
+	case OP_CONTEXT_REF_INDEX:
+		return c.simpleInstruction("OP_CONTEXT_REF_INDEX", offset)
 	case OP_DEREF:
 		return c.simpleInstruction("OP_DEREF", offset)
 	case OP_STORE_VIA_REF:

@@ -41,6 +41,7 @@ type Compiler struct {
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
 	programBindings     map[string]ast.NoxyType
+	moduleDiscovery     *moduleDiscoveryState
 }
 
 func New() *Compiler {
@@ -65,11 +66,15 @@ func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.Struc
 }
 
 func NewChild(parent *Compiler) *Compiler {
+	childGlobals := make(map[string]ast.NoxyType, len(parent.globals))
+	for name, bindingType := range parent.globals {
+		childGlobals[name] = bindingType
+	}
 	c := &Compiler{
 		enclosing:       parent,
 		currentChunk:    chunk.New(),
 		locals:          []Local{},
-		globals:         parent.globals,
+		globals:         childGlobals,
 		structs:         parent.structs,
 		upvalues:        []Upvalue{},
 		scopeDepth:      0,
@@ -77,6 +82,7 @@ func NewChild(parent *Compiler) *Compiler {
 		currentLine:     parent.currentLine,
 		FileName:        parent.FileName,
 		programBindings: parent.programBindings,
+		moduleDiscovery: parent.moduleDiscovery,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -1730,10 +1736,11 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 			c.emitByte(byte(chunk.OP_DEREF))
 		}
 		name := c.makeConstant(value.NewString(target.Member))
-		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
 		if ref, ok := element.(*ast.RefType); ok {
+			c.emitBytes(byte(chunk.OP_CONTEXT_REF_PROPERTY), byte(name))
 			return ref.ElementType, nil
 		}
+		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
 		return element, nil
 	case *ast.IndexExpression:
 		_, container, err := c.Compile(target.Left)
@@ -1769,10 +1776,11 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 				)
 			}
 		}
-		c.emitByte(byte(chunk.OP_REF_INDEX))
 		if ref, ok := element.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_CONTEXT_REF_INDEX))
 			return ref.ElementType, nil
 		}
+		c.emitByte(byte(chunk.OP_REF_INDEX))
 		return element, nil
 	case *ast.NullLiteral:
 		c.emitByte(byte(chunk.OP_NULL))

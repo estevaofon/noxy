@@ -217,6 +217,40 @@ use http_client select *`)
 	}
 }
 
+func TestCachedWildcardWrapperDoesNotShadowLaterUserBinding(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+use http
+func delete(left: int, right: int) -> int
+    return left + right
+end
+use http select *
+delete(20)`)
+	if err == nil || !strings.Contains(err.Error(), "function 'delete' expects 2 arguments, got 1") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestUncalledFunctionImportsDoNotShadowOuterBuiltins(t *testing.T) {
+	tests := []struct {
+		name      string
+		importUse string
+	}{
+		{name: "selected", importUse: "use http_client select delete"},
+		{name: "alias", importUse: "use http_client as delete"},
+		{name: "wildcard", importUse: "use http_client select *"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := "func unused() -> void\n    " + tt.importUse + "\nend\ndelete({\"a\": 1}, \"a\")"
+			_, err := compileFunctionSource(t, source)
+			if err == nil || !strings.Contains(err.Error(), "not addressable") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
 func TestMutatingBuiltinArityContracts(t *testing.T) {
 	tests := []struct {
 		name   string
