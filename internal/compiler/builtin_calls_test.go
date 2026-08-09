@@ -147,12 +147,84 @@ func TestUnrelatedWildcardImportKeepsBuiltinLowering(t *testing.T) {
 	}
 }
 
+func TestWildcardImportCollisionUsesDynamicCallPath(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+use http_client select *
+let url: string = "http://example.invalid"
+delete(url)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWildcardImportCollisionIsKnownInsideEarlierFunction(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func remove(url: string) -> void
+    delete(url)
+end
+use http_client select *
+remove("http://example.invalid")`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWildcardImportAndFunctionPredeclarationsPreserveRuntimePrecedence(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "later wildcard wins",
+			source: `
+func delete(left: int, right: int) -> int
+    return left + right
+end
+func remove(url: string) -> void
+    delete(url)
+end
+use http_client select *
+remove("http://example.invalid")`,
+		},
+		{
+			name: "later function wins",
+			source: `
+use http_client select *
+func delete(left: int, right: int) -> int
+    return left + right
+end
+func answer() -> int
+    return delete(20, 22)
+end`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := compileFunctionSource(t, tt.source); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestBuiltinCallBeforeLaterWildcardImportUsesSequentialBinding(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+delete({"a": 1}, "a")
+use http_client select *`)
+	if err == nil || !strings.Contains(err.Error(), "not addressable") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestMutatingBuiltinArityContracts(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
 		want   string
 	}{
+		{name: "append too few", source: "append([])", want: "append expects 2 arguments, got 1"},
+		{name: "append too many", source: "append([], 1, 2)", want: "append expects 2 arguments, got 3"},
 		{name: "pop", source: "pop()", want: "pop expects 1 arguments, got 0"},
 		{name: "delete", source: "delete({})", want: "delete expects 2 arguments, got 1"},
 		{name: "json_loads", source: `json_loads("{}")`, want: "json_loads expects 2 arguments, got 1"},
@@ -231,5 +303,26 @@ json_loads(42, target)`,
 				t.Fatalf("error=%v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestDeleteRejectsExplicitReferenceForOrdinaryAnyKey(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let key: string = "a"
+let mapping: map[any, int] = {"a": 1}
+delete(mapping, ref key)`)
+	if err == nil || !strings.Contains(err.Error(), "expected any, got ref string") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestDeleteAcceptsImplicitReadFromExistingReferenceKey(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let key_value: string = "a"
+let key: ref string = ref key_value
+let mapping: map[any, int] = {"a": 1}
+delete(mapping, key)`)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

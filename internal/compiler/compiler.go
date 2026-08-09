@@ -40,6 +40,7 @@ type Compiler struct {
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
+	programBindings     map[string]ast.NoxyType
 }
 
 func New() *Compiler {
@@ -65,16 +66,17 @@ func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.Struc
 
 func NewChild(parent *Compiler) *Compiler {
 	c := &Compiler{
-		enclosing:    parent,
-		currentChunk: chunk.New(),
-		locals:       []Local{},
-		globals:      parent.globals,
-		structs:      parent.structs,
-		upvalues:     []Upvalue{},
-		scopeDepth:   0,
-		loops:        []*Loop{},
-		currentLine:  parent.currentLine,
-		FileName:     parent.FileName,
+		enclosing:       parent,
+		currentChunk:    chunk.New(),
+		locals:          []Local{},
+		globals:         parent.globals,
+		structs:         parent.structs,
+		upvalues:        []Upvalue{},
+		scopeDepth:      0,
+		loops:           []*Loop{},
+		currentLine:     parent.currentLine,
+		FileName:        parent.FileName,
+		programBindings: parent.programBindings,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -87,9 +89,23 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		sequentialBindings := make(map[string]ast.NoxyType, len(c.globals))
+		for name, bindingType := range c.globals {
+			sequentialBindings[name] = bindingType
+		}
 		c.predeclareStructs(n.Statements)
-		if err := c.predeclareFunctions(n.Statements); err != nil {
+		if err := c.predeclareGlobalBindings(n.Statements); err != nil {
 			return nil, nil, err
+		}
+		c.programBindings = make(map[string]ast.NoxyType, len(c.globals))
+		for name, bindingType := range c.globals {
+			c.programBindings[name] = bindingType
+		}
+		for name := range c.globals {
+			delete(c.globals, name)
+		}
+		for name, bindingType := range sequentialBindings {
+			c.globals[name] = bindingType
 		}
 		for _, stmt := range n.Statements {
 			if _, _, err := c.Compile(stmt); err != nil {
@@ -502,6 +518,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			fields = append(fields, f.Name)
 		}
 		structObj := value.NewStruct(n.Name, fields)
+		structDefinition := structObj.Obj.(*value.ObjStruct)
+		structDefinition.JSONDynamicFields = make(map[string]bool)
+		for _, field := range n.FieldsList {
+			if primitive, ok := field.Type.(*ast.PrimitiveType); ok && primitive.Name == "any" {
+				structDefinition.JSONDynamicFields[field.Name] = true
+			}
+		}
 		c.emitConstant(structObj)
 
 		// Create Constructor Signature
@@ -509,10 +532,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		for _, f := range n.FieldsList {
 			paramTypes = append(paramTypes, f.Type)
 		}
-		structType := &ast.FunctionType{
-			Params: paramTypes,
-			Return: &ast.PrimitiveType{Name: n.Name},
-		}
+		structType := newStructFunctionType(n.Name, paramTypes)
 
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
@@ -1307,6 +1327,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 3. Handle Result
 		if n.SelectAll {
 			// use pkg select *
+			for name := range c.discoverModuleExports(n.Module) {
+				c.globals[name] = nil
+			}
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b
@@ -2020,6 +2043,9 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool, upvalueType ast.NoxyTyp
 }
 
 func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {
+	restoreBindings := c.applyProgramBindings()
+	defer restoreBindings()
+
 	fnCompiler := NewChild(c)
 	fnCompiler.scopeDepth = 1    // Inside function body
 	fnCompiler.addLocal("", nil) // Reserve slot 0 for function instance
@@ -2060,4 +2086,29 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
 
 	return fnObj, fnCompiler, nil
+}
+
+func (c *Compiler) applyProgramBindings() func() {
+	if len(c.programBindings) == 0 {
+		return func() {}
+	}
+	type priorBinding struct {
+		typeInfo ast.NoxyType
+		exists   bool
+	}
+	prior := make(map[string]priorBinding, len(c.programBindings))
+	for name, bindingType := range c.programBindings {
+		current, exists := c.globals[name]
+		prior[name] = priorBinding{typeInfo: current, exists: exists}
+		c.globals[name] = bindingType
+	}
+	return func() {
+		for name, binding := range prior {
+			if binding.exists {
+				c.globals[name] = binding.typeInfo
+			} else {
+				delete(c.globals, name)
+			}
+		}
+	}
 }

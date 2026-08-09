@@ -145,8 +145,9 @@ func (om *ObjMap) Format(f fmt.State, verb rune) {
 }
 
 type ObjStruct struct {
-	Name   string
-	Fields []string
+	Name              string
+	Fields            []string
+	JSONDynamicFields map[string]bool
 }
 
 func (os *ObjStruct) String() string {
@@ -235,12 +236,13 @@ const (
 )
 
 type ObjRef struct {
-	RefType   RefType
-	Name      string      // For Global or Property Name
-	Ptr       *Value      // For Local (unsafe if escapes)
-	Upvalue   *ObjUpvalue // For Local (safe, captured)
-	Container Value       // For Property/Index (Object, Array, Map)
-	Index     Value       // For Index
+	RefType     RefType
+	JSONDynamic bool        // Declared any target: JSON may replace its concrete runtime type.
+	Name        string      // For Global or Property Name
+	Ptr         *Value      // For Local (unsafe if escapes)
+	Upvalue     *ObjUpvalue // For Local (safe, captured)
+	Container   Value       // For Property/Index (Object, Array, Map)
+	Index       Value       // For Index
 }
 
 func (or *ObjRef) String() string {

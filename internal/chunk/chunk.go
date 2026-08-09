@@ -80,6 +80,7 @@ const (
 	OP_SWAP
 	OP_COPY
 	OP_ADDR
+	OP_MARK_REF_JSON_DYNAMIC
 )
 
 func (op OpCode) String() string {
@@ -188,6 +189,8 @@ func (op OpCode) String() string {
 		return "OP_REF_INDEX"
 	case OP_DEREF:
 		return "OP_DEREF"
+	case OP_MARK_REF_JSON_DYNAMIC:
+		return "OP_MARK_REF_JSON_DYNAMIC"
 	case OP_STORE_VIA_REF:
 		return "OP_STORE_VIA_REF"
 	case OP_DUP:
@@ -423,6 +426,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_COPY", offset)
 	case OP_ADDR:
 		return c.simpleInstruction("OP_ADDR", offset)
+	case OP_MARK_REF_JSON_DYNAMIC:
+		return c.simpleInstruction("OP_MARK_REF_JSON_DYNAMIC", offset)
 	default:
 		fmt.Printf("Unknown opcode %d\n", instruction)
 		return offset + 1

@@ -3354,13 +3354,23 @@ func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
 			if val, exists := dataMap[fieldName]; exists {
 				// Check if field is instance -> recurse
 				fieldType := inst.Fields[fieldName]
+				if inst.Struct.JSONDynamicFields[fieldName] {
+					inst.Fields[fieldName] = goValToNoxy(val)
+					continue
+				}
 				if fieldType.Type == value.VAL_OBJ {
 					if _, isInst := fieldType.Obj.(*value.ObjInstance); isInst {
-						populateObj(vm, fieldType, val)
+						if !populateObj(vm, fieldType, val) {
+							return false
+						}
 						continue
 					}
 				}
-				inst.Fields[fieldName] = goValToNoxy(val)
+				replacement := goValToNoxy(val)
+				if !jsonReplacementCompatible(fieldType, replacement) {
+					return false
+				}
+				inst.Fields[fieldName] = replacement
 			}
 		}
 		return true
@@ -3456,7 +3466,11 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 			if err != nil {
 				return false
 			}
-			currentVal = mapping.Data[key]
+			var exists bool
+			currentVal, exists = mapping.Data[key]
+			if !exists {
+				return false
+			}
 			store = func(updated value.Value) { mapping.Data[key] = updated }
 			break
 		}
@@ -3477,8 +3491,40 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 	if store == nil {
 		return false
 	}
-	store(goValToNoxy(data))
+	replacement := goValToNoxy(data)
+	if !ref.JSONDynamic && !jsonReplacementCompatible(currentVal, replacement) {
+		return false
+	}
+	store(replacement)
 	return true
+}
+
+func jsonReplacementCompatible(current, replacement value.Value) bool {
+	if current.Type == value.VAL_NULL {
+		return true
+	}
+	if current.Type != replacement.Type {
+		return false
+	}
+	if current.Type != value.VAL_OBJ {
+		return true
+	}
+	switch current.Obj.(type) {
+	case string:
+		_, ok := replacement.Obj.(string)
+		return ok
+	case *value.ObjArray:
+		_, ok := replacement.Obj.(*value.ObjArray)
+		return ok
+	case *value.ObjMap:
+		_, ok := replacement.Obj.(*value.ObjMap)
+		return ok
+	case *value.ObjInstance:
+		_, ok := replacement.Obj.(*value.ObjInstance)
+		return ok
+	default:
+		return false
+	}
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
@@ -3838,6 +3884,14 @@ func (vm *VM) run(minFrameCount int) error {
 					Index:     idx,
 				},
 			})
+
+		case chunk.OP_MARK_REF_JSON_DYNAMIC:
+			refValue := vm.peek(0)
+			ref, ok := refValue.Obj.(*value.ObjRef)
+			if refValue.Type != value.VAL_REF || !ok || ref == nil {
+				return vm.runtimeError(c, ip, "dynamic target marker requires a reference")
+			}
+			ref.JSONDynamic = true
 
 		case chunk.OP_DEREF:
 			refVal := vm.pop()

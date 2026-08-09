@@ -122,6 +122,12 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression) (bool, ast.NoxyT
 		if err != nil {
 			return true, nil, err
 		}
+		if _, explicitRef := key.(*ast.RefType); explicitRef {
+			return true, nil, fmt.Errorf(
+				"[line %d] argument 2 to 'delete': expected %s, got %s",
+				c.currentLine, noxyTypeName(mapping.KeyType), noxyTypeName(key),
+			)
+		}
 		if !c.areStrictTypesCompatible(mapping.KeyType, key) {
 			return true, nil, fmt.Errorf(
 				"[line %d] argument 2 to 'delete': expected %s, got %s",
@@ -141,8 +147,12 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression) (bool, ast.NoxyT
 				c.currentLine, noxyTypeName(jsonText),
 			)
 		}
-		if _, err := c.compileReferenceArgument(call.Arguments[1]); err != nil {
+		targetType, err := c.compileReferenceArgument(call.Arguments[1])
+		if err != nil {
 			return true, nil, err
+		}
+		if primitive, ok := targetType.(*ast.PrimitiveType); ok && primitive.Name == "any" {
+			c.emitByte(byte(chunk.OP_MARK_REF_JSON_DYNAMIC))
 		}
 		c.emitBytes(byte(chunk.OP_CALL), 2)
 		return true, builtinType("bool"), nil

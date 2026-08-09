@@ -252,6 +252,14 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 				Index:     value.NewBool(true),
 			},
 		},
+		{
+			name: "missing map key",
+			ref: &value.ObjRef{
+				RefType:   value.REF_INDEX,
+				Container: value.NewMap(),
+				Index:     value.NewString("missing"),
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -261,6 +269,99 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 				t.Fatal("invalid reference target reported successful population")
 			}
 		})
+	}
+}
+
+func TestPopulateTargetPropagatesNestedObjectFailure(t *testing.T) {
+	inner := value.NewInstance(&value.ObjStruct{Name: "Inner", Fields: []string{"name"}})
+	inner.Obj.(*value.ObjInstance).Fields["name"] = value.NewString("keep")
+	outer := value.NewInstance(&value.ObjStruct{Name: "Outer", Fields: []string{"inner"}})
+	outer.Obj.(*value.ObjInstance).Fields["inner"] = inner
+
+	if populateTarget(New(), outer, map[string]interface{}{"inner": []interface{}{}}) {
+		t.Fatal("nested object population failure reported success")
+	}
+	got := inner.Obj.(*value.ObjInstance).Fields["name"]
+	if got.Type != value.VAL_OBJ || got.Obj != "keep" {
+		t.Fatalf("nested field=%v, want unchanged string", got)
+	}
+}
+
+func TestPopulateTargetRejectsIncompatibleScalarReplacementWithoutMutation(t *testing.T) {
+	stored := value.NewString("keep")
+	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+
+	if populateTarget(New(), target, float64(42)) {
+		t.Fatal("incompatible scalar replacement reported success")
+	}
+	if stored.Type != value.VAL_OBJ || stored.Obj != "keep" {
+		t.Fatalf("stored=%v, want unchanged string", stored)
+	}
+}
+
+func TestPopulateTargetSupportsCompatibleAndNullScalarReplacement(t *testing.T) {
+	t.Run("compatible string", func(t *testing.T) {
+		stored := value.NewString("before")
+		target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+		if !populateTarget(New(), target, "after") {
+			t.Fatal("compatible scalar replacement failed")
+		}
+		if stored.Type != value.VAL_OBJ || stored.Obj != "after" {
+			t.Fatalf("stored=%v, want after", stored)
+		}
+	})
+
+	t.Run("null remains dynamic", func(t *testing.T) {
+		stored := value.NewNull()
+		target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
+		if !populateTarget(New(), target, float64(42)) {
+			t.Fatal("null target rejected dynamic scalar replacement")
+		}
+		if stored.Type != value.VAL_INT || stored.AsInt != 42 {
+			t.Fatalf("stored=%v, want int 42", stored)
+		}
+	})
+}
+
+func TestTypedJSONLoadsAllowsNonNullAnyTargetToChangeType(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let target: any = "before"
+json_loads("42", target)
+test_report(target)`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestTypedJSONLoadsAllowsNonNullAnyStructFieldToChangeType(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Holder
+    data: any
+end
+let target: Holder = Holder("before")
+json_loads("{\"data\":42}", target)
+test_report(target.data)`)
+	testExpectedObject(t, 42, got)
+}
+
+func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {
+	outer := value.NewInstance(&value.ObjStruct{Name: "Outer", Fields: []string{"items", "metadata"}})
+	fields := outer.Obj.(*value.ObjInstance).Fields
+	fields["items"] = value.NewArray(nil)
+	fields["metadata"] = value.NewMap()
+
+	data := map[string]interface{}{
+		"items":    []interface{}{float64(42)},
+		"metadata": map[string]interface{}{"answer": float64(42)},
+	}
+	if !populateTarget(New(), outer, data) {
+		t.Fatal("compatible composite fields were rejected")
+	}
+	items := fields["items"].Obj.(*value.ObjArray)
+	if len(items.Elements) != 1 || items.Elements[0].Type != value.VAL_INT || items.Elements[0].AsInt != 42 {
+		t.Fatalf("items=%v, want [42]", fields["items"])
+	}
+	metadata := fields["metadata"].Obj.(*value.ObjMap)
+	if got := metadata.Data["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+		t.Fatalf("metadata=%v, want answer=42", fields["metadata"])
 	}
 }
 
@@ -356,4 +457,35 @@ let values: int[] = [1]
 append(values, 2)
 test_report(length(values))`)
 	testExpectedObject(t, 2, got)
+}
+
+func TestWildcardImportInstallsCollidingBuiltinNameAtRuntime(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+use http_client select *
+test_report(delete)`)
+	closure, ok := got.Obj.(*value.ObjClosure)
+	if got.Type != value.VAL_FUNCTION || !ok || closure.Function.Name != "delete" {
+		t.Fatalf("delete binding=%v, want imported function", got)
+	}
+}
+
+func TestBuiltinCallBeforeLaterWildcardImportUsesRuntimeBuiltin(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let mapping: map[string, int] = {"a": 1}
+delete(mapping, "a")
+use http_client select *
+test_report(length(keys(mapping)))`)
+	testExpectedObject(t, 0, got)
+}
+
+func TestFunctionUsingLaterWildcardCollisionFailsWhenCalledBeforeImport(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func remove(url: string) -> void
+    delete(url)
+end
+remove("http://example.invalid")
+use http_client select *`)
+	if err == nil || !strings.Contains(err.Error(), "expects 2 arguments, got 1") {
+		t.Fatalf("error=%v", err)
+	}
 }
