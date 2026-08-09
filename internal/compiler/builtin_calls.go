@@ -45,10 +45,6 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression) (bool, ast.NoxyT
 	if _, declared := c.resolveGlobalType(name); declared {
 		return false, nil, nil
 	}
-	if c.hasWildcardImport {
-		return false, nil, nil
-	}
-
 	wantArity := map[string]int{"append": 2, "pop": 1, "delete": 2, "json_loads": 2}[name]
 	if len(call.Arguments) != wantArity {
 		return true, nil, fmt.Errorf(

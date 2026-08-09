@@ -348,3 +348,12 @@ item[0] = 42
 test_report(values[0][0])`)
 	testExpectedObject(t, 42, got)
 }
+
+func TestUnrelatedWildcardImportKeepsBuiltinRuntimeContract(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+use sys select *
+let values: int[] = [1]
+append(values, 2)
+test_report(length(values))`)
+	testExpectedObject(t, 2, got)
+}

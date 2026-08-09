@@ -40,7 +40,6 @@ type Compiler struct {
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
-	hasWildcardImport   bool
 }
 
 func New() *Compiler {
@@ -66,17 +65,16 @@ func NewWithState(globals map[string]ast.NoxyType, structs map[string]*ast.Struc
 
 func NewChild(parent *Compiler) *Compiler {
 	c := &Compiler{
-		enclosing:         parent,
-		currentChunk:      chunk.New(),
-		locals:            []Local{},
-		globals:           parent.globals,
-		structs:           parent.structs,
-		upvalues:          []Upvalue{},
-		scopeDepth:        0,
-		loops:             []*Loop{},
-		currentLine:       parent.currentLine,
-		FileName:          parent.FileName,
-		hasWildcardImport: parent.hasWildcardImport,
+		enclosing:    parent,
+		currentChunk: chunk.New(),
+		locals:       []Local{},
+		globals:      parent.globals,
+		structs:      parent.structs,
+		upvalues:     []Upvalue{},
+		scopeDepth:   0,
+		loops:        []*Loop{},
+		currentLine:  parent.currentLine,
+		FileName:     parent.FileName,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -1309,7 +1307,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 3. Handle Result
 		if n.SelectAll {
 			// use pkg select *
-			c.hasWildcardImport = true
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b

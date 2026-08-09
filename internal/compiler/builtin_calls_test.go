@@ -129,7 +129,6 @@ func TestImportedMutatingBuiltinNamesUseDynamicCallPath(t *testing.T) {
 		{name: "aliased delete", source: "use fake_module as delete\ndelete(1, 2)"},
 		{name: "selected json_loads", source: "use fake_module select json_loads\njson_loads(1, 2)"},
 		{name: "aliased json_loads", source: "use fake_module as json_loads\njson_loads(1, 2)"},
-		{name: "wildcard import", source: "use fake_module select *\nappend(1, 2)"},
 	}
 
 	for _, tt := range tests {
@@ -138,6 +137,13 @@ func TestImportedMutatingBuiltinNamesUseDynamicCallPath(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestUnrelatedWildcardImportKeepsBuiltinLowering(t *testing.T) {
+	_, err := compileFunctionSource(t, "use sys select *\nappend([1], 2)")
+	if err == nil || !strings.Contains(err.Error(), "not addressable") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
