@@ -2,7 +2,6 @@ package vm
 
 import (
 	"noxy-vm/internal/value"
-	"strings"
 	"testing"
 )
 
@@ -119,10 +118,29 @@ func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
 		t.Fatalf("stored value=%v, want 42", got)
 	}
 
-	if _, err := machine.lookupGlobalReferenceValue(&value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer"}); err == nil || !strings.Contains(err.Error(), "invalid global reference owner") {
-		t.Fatalf("nil owner error=%v", err)
-	}
-	if err := machine.storeGlobalReferenceValue(&value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &globals}, value.NewInt(42)); err == nil || !strings.Contains(err.Error(), "undefined global variable 'missing'") {
-		t.Fatalf("missing global error=%v", err)
+	for _, tt := range []struct {
+		name string
+		ref  *value.ObjRef
+		want string
+	}{
+		{
+			name: "nil owner",
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer"},
+			want: "invalid global reference owner",
+		},
+		{
+			name: "missing global",
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &globals},
+			want: "undefined global variable 'missing'",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := machine.lookupGlobalReferenceValue(tt.ref); err == nil || err.Error() != tt.want {
+				t.Fatalf("lookup error=%v, want %q", err, tt.want)
+			}
+			if err := machine.storeGlobalReferenceValue(tt.ref, value.NewInt(42)); err == nil || err.Error() != tt.want {
+				t.Fatalf("store error=%v, want %q", err, tt.want)
+			}
+		})
 	}
 }
