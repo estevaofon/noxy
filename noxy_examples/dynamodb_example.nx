@@ -54,7 +54,7 @@ let key: map[string, any] = {
 }
 
 print(f"Reading user {USER_ID}...")
-let user: map[string, any] = dynamodb.get_item(client, TABLE_NAME, key)
+let user: any = dynamodb.get_item(client, TABLE_NAME, key)
 
 if user != null then
     print(f"Found user: {user['name']} (Email: {user['email']}, Age: {user['age']})")
@@ -79,7 +79,7 @@ let updated: bool = dynamodb.update_item(client, TABLE_NAME, key, updateExpr, ex
 if updated then
     print("User updated successfully.")
     // Verify update
-    let updatedUser: map[string, any] = dynamodb.get_item(client, TABLE_NAME, key)
+    let updatedUser: any = dynamodb.get_item(client, TABLE_NAME, key)
     if updatedUser != null then
         print(f"Updated Data -> Age: {updatedUser['age']}, Active: {updatedUser['active']}")
     end

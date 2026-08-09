@@ -9,7 +9,7 @@ print("Test 1: Declaration with empty list")
 
 print("Test 2: Declaration with typed element")
 let v: Vertex = Vertex(1)
-let l2: ref Vertex[] = [ref v]
+let l2: (ref Vertex)[] = [ref v]
 print("L2 created. Len: " + to_str(length(l2)))
 
 print("Test 5: Typed array assignment")
