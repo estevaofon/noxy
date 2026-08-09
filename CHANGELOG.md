@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-09
+
 ### Added
 
 - Typed public native contracts and runtime reference-mode validation.
