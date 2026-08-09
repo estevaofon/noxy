@@ -137,8 +137,9 @@ Tests that require resources must be hermetic:
 Coverage is measured with:
 
 ```powershell
-go test -coverprofile="$env:TEMP\noxy-vm.cover" ./internal/vm
-go tool cover -func="$env:TEMP\noxy-vm.cover"
+$coverage = Join-Path $env:TEMP 'noxy-vm.cover'
+go test -coverprofile $coverage ./internal/vm
+go tool cover -func $coverage
 ```
 
 The extraction phase cannot begin until the total reported statement coverage
@@ -173,8 +174,9 @@ The final verification commands are:
 
 ```powershell
 gofmt -w internal/vm
-go test -coverprofile="$env:TEMP\noxy-vm.cover" ./internal/vm
-go tool cover -func="$env:TEMP\noxy-vm.cover"
+$coverage = Join-Path $env:TEMP 'noxy-vm.cover'
+go test -coverprofile $coverage ./internal/vm
+go tool cover -func $coverage
 go test ./internal/...
 go test ./...
 go test -race ./internal/vm
