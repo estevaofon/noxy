@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 import argparse
 import difflib
+import os
 import re
+import shutil
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
 
-SEMVER = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 TARGET_VERSION = re.compile(rf"^v?(?P<version>{SEMVER})$")
 RELEASE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RELEASE_HEADING = re.compile(
     rf"(?m)^## \[(?P<version>{SEMVER})\] - \d{{4}}-\d{{2}}-\d{{2}}\r?$"
+)
+RELEASE_VERSION_HEADING = re.compile(
+    rf"(?m)^## \[(?P<version>{SEMVER})\][^\r\n]*\r?$"
 )
 SURFACES = (
     (
@@ -108,7 +114,10 @@ def build_updates(
         updated[relative] = value
 
     changelog = contents[CHANGELOG]
-    if any(match.group("version") == target for match in RELEASE_HEADING.finditer(changelog)):
+    if any(
+        match.group("version") == target
+        for match in RELEASE_VERSION_HEADING.finditer(changelog)
+    ):
         raise UpdateError(f"{CHANGELOG}: release {target} already exists")
     newline = "\r\n" if "\r\n" in changelog else "\n"
     marker = "## [Unreleased]"
@@ -138,6 +147,74 @@ def render_diff(original: dict[str, str], updated: dict[str, str]) -> str:
     return "".join(chunks)
 
 
+def _write_updates(
+    root: Path, original: dict[str, str], updated: dict[str, str]
+) -> None:
+    try:
+        transaction_dir = Path(
+            tempfile.mkdtemp(prefix=".noxy-version-update-", dir=root)
+        )
+    except OSError as error:
+        raise UpdateError(
+            f"failed to create staging directory in {root}: {error}"
+        ) from error
+
+    staged: dict[str, Path] = {}
+    backups: dict[str, Path] = {}
+    operation_error: UpdateError | None = None
+
+    try:
+        for index, relative in enumerate(TARGET_FILES):
+            target_path = root / relative
+            staged_path = transaction_dir / f"{index}.new"
+            backup_path = transaction_dir / f"{index}.original"
+            try:
+                staged_path.write_bytes(updated[relative].encode("utf-8"))
+                backup_path.write_bytes(original[relative].encode("utf-8"))
+            except OSError as error:
+                raise UpdateError(
+                    f"failed to stage update for {target_path}: {error}"
+                ) from error
+            staged[relative] = staged_path
+            backups[relative] = backup_path
+
+        replaced: list[str] = []
+        for relative in TARGET_FILES:
+            target_path = root / relative
+            try:
+                os.replace(staged[relative], target_path)
+            except OSError as error:
+                rollback_errors = []
+                for replaced_relative in reversed(replaced):
+                    replaced_path = root / replaced_relative
+                    try:
+                        os.replace(backups[replaced_relative], replaced_path)
+                    except OSError as rollback_error:
+                        rollback_errors.append(
+                            f"failed to restore {replaced_path}: {rollback_error}"
+                        )
+                message = f"failed to replace {target_path}: {error}"
+                if rollback_errors:
+                    message += "; " + "; ".join(rollback_errors)
+                raise UpdateError(message) from error
+            replaced.append(relative)
+    except UpdateError as error:
+        operation_error = error
+
+    try:
+        shutil.rmtree(transaction_dir)
+    except OSError as error:
+        cleanup_error = UpdateError(
+            f"failed to remove transaction artifacts at {transaction_dir}: {error}"
+        )
+        if operation_error is not None:
+            raise UpdateError(f"{operation_error}; {cleanup_error}") from operation_error
+        raise cleanup_error from error
+
+    if operation_error is not None:
+        raise operation_error
+
+
 def execute_update(
     root: Path, target: str, release_date: str | None = None, dry_run: bool = False
 ) -> str:
@@ -155,8 +232,7 @@ def execute_update(
     updated = build_updates(original, normalized, normalized_date)
     diff = render_diff(original, updated)
     if not dry_run:
-        for relative in TARGET_FILES:
-            (root / relative).write_bytes(updated[relative].encode("utf-8"))
+        _write_updates(root, original, updated)
     return diff
 
 

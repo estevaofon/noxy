@@ -1,7 +1,10 @@
+import os
+import re
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -58,6 +61,10 @@ class UpdateVersionTests(unittest.TestCase):
     def test_normalizes_prefixed_and_plain_semver(self) -> None:
         self.assertEqual(normalize_version("1.6.0"), ("1.6.0", (1, 6, 0)))
         self.assertEqual(normalize_version("v1.6.0"), ("1.6.0", (1, 6, 0)))
+
+    def test_rejects_semver_with_unicode_decimal_digits(self) -> None:
+        with self.assertRaisesRegex(UpdateError, "semantic version"):
+            normalize_version("1.6.1١")
 
     def test_updates_all_surfaces_and_preserves_history_and_dependencies(self) -> None:
         diff = execute_update(self.root, "v1.6.0", "2026-08-09", False)
@@ -134,6 +141,53 @@ class UpdateVersionTests(unittest.TestCase):
             execute_update(self.root, "1.6.0", "2026-08-09", False)
 
         self.assertEqual(snapshot(self.root), before)
+
+    def test_rejects_any_target_release_heading_without_writing(self) -> None:
+        changelog = self.root / "CHANGELOG.md"
+        original_changelog = changelog.read_bytes()
+
+        for heading in ("## [1.6.0]", "## [1.6.0] - TBD"):
+            with self.subTest(heading=heading):
+                create_fixture(self.root)
+                changelog.write_bytes(
+                    original_changelog + f"\n{heading}\n".encode("utf-8")
+                )
+                before = snapshot(self.root)
+
+                with self.assertRaisesRegex(UpdateError, "already exists"):
+                    execute_update(self.root, "1.6.0", "2026-08-09", False)
+
+                self.assertEqual(snapshot(self.root), before)
+
+    def test_mid_commit_failure_restores_every_file_and_removes_artifacts(self) -> None:
+        readme = self.root / "README.md"
+        readme.write_bytes(readme.read_bytes().replace(b"\n", b"\r\n"))
+        before = snapshot(self.root)
+        files_before = {
+            path.relative_to(self.root) for path in self.root.rglob("*") if path.is_file()
+        }
+        real_replace = os.replace
+        target_paths = {(self.root / relative).resolve() for relative in TARGET_FILES}
+        replacements = 0
+
+        def fail_third_target_replace(source, destination) -> None:
+            nonlocal replacements
+            if Path(destination).resolve() in target_paths:
+                replacements += 1
+                if replacements == 3:
+                    raise OSError("injected mid-commit failure")
+            real_replace(source, destination)
+
+        failed_path = self.root / TARGET_FILES[2]
+        with mock.patch("os.replace", side_effect=fail_third_target_replace):
+            with self.assertRaisesRegex(UpdateError, re.escape(str(failed_path))):
+                execute_update(self.root, "1.6.0", "2026-08-09", False)
+
+        self.assertEqual(snapshot(self.root), before)
+        files_after = {
+            path.relative_to(self.root) for path in self.root.rglob("*") if path.is_file()
+        }
+        self.assertEqual(files_after, files_before)
 
 
 if __name__ == "__main__":
