@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"encoding/json"
 	"math"
+	"math/big"
 	"noxy-vm/internal/value"
 	"sort"
 )
@@ -14,7 +16,10 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 		if set == nil {
 			return nil, false
 		}
-		replacement := goValToNoxy(data)
+		replacement, ok := dynamicJSONValue(data)
+		if !ok {
+			return nil, false
+		}
 		return func() { set(replacement) }, true
 	}
 
@@ -96,7 +101,10 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 	if set == nil {
 		return nil, false
 	}
-	replacement := goValToNoxy(data)
+	replacement, ok := dynamicJSONValue(data)
+	if !ok {
+		return nil, false
+	}
 	if !jsonReplacementCompatible(current, replacement) {
 		return nil, false
 	}
@@ -124,7 +132,11 @@ func prepareJSONArrayMutation(vm *VM, array *value.ObjArray, elementSchema *valu
 			continue
 		}
 		if elementSchema == nil {
-			newElements[i] = goValToNoxy(item)
+			created, ok := dynamicJSONValue(item)
+			if !ok {
+				return nil, false
+			}
+			newElements[i] = created
 			continue
 		}
 		created, ok := buildTypedJSONValue(elementSchema, item)
@@ -164,7 +176,11 @@ func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.Ru
 			continue
 		}
 		if valueSchema == nil {
-			newData[mapKey] = goValToNoxy(item)
+			created, ok := dynamicJSONValue(item)
+			if !ok {
+				return nil, false
+			}
+			newData[mapKey] = created
 			continue
 		}
 		created, ok := buildTypedJSONValue(valueSchema, item)
@@ -229,7 +245,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 	}
 	switch schema.Kind {
 	case value.TYPE_ANY:
-		return goValToNoxy(data), true
+		return dynamicJSONValue(data)
 	case value.TYPE_NULL:
 		if data == nil {
 			return value.NewNull(), true
@@ -239,12 +255,19 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			return value.NewBool(actual), true
 		}
 	case value.TYPE_INT:
-		if actual, ok := data.(float64); ok && actual >= math.MinInt64 && actual <= math.MaxInt64 && actual == math.Trunc(actual) {
-			return value.NewInt(int64(actual)), true
+		if actual, ok := exactJSONInt(data); ok {
+			return value.NewInt(actual), true
 		}
 	case value.TYPE_FLOAT:
-		if actual, ok := data.(float64); ok {
-			return value.NewFloat(actual), true
+		switch actual := data.(type) {
+		case float64:
+			if !math.IsInf(actual, 0) && !math.IsNaN(actual) {
+				return value.NewFloat(actual), true
+			}
+		case json.Number:
+			if parsed, err := actual.Float64(); err == nil && !math.IsInf(parsed, 0) && !math.IsNaN(parsed) {
+				return value.NewFloat(parsed), true
+			}
 		}
 	case value.TYPE_STRING:
 		if actual, ok := data.(string); ok {
@@ -255,6 +278,9 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			return value.NewBytes(actual), true
 		}
 	case value.TYPE_REF:
+		if data == nil {
+			return value.NewNull(), true
+		}
 		return buildTypedJSONValue(schema.Element, data)
 	case value.TYPE_ARRAY:
 		items, ok := data.([]interface{})
@@ -319,6 +345,80 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 		return instance, true
 	}
 	return value.Value{}, false
+}
+
+func exactJSONInt(data interface{}) (int64, bool) {
+	var rational *big.Rat
+	switch actual := data.(type) {
+	case json.Number:
+		var ok bool
+		rational, ok = new(big.Rat).SetString(actual.String())
+		if !ok {
+			return 0, false
+		}
+	case float64:
+		if math.IsInf(actual, 0) || math.IsNaN(actual) {
+			return 0, false
+		}
+		rational = new(big.Rat).SetFloat64(actual)
+	default:
+		return 0, false
+	}
+	if rational == nil || !rational.IsInt() || !rational.Num().IsInt64() {
+		return 0, false
+	}
+	return rational.Num().Int64(), true
+}
+
+func dynamicJSONValue(data interface{}) (value.Value, bool) {
+	switch actual := data.(type) {
+	case nil:
+		return value.NewNull(), true
+	case bool:
+		return value.NewBool(actual), true
+	case string:
+		return value.NewString(actual), true
+	case float64:
+		if parsed, ok := exactJSONInt(actual); ok {
+			return value.NewInt(parsed), true
+		}
+		if math.IsInf(actual, 0) || math.IsNaN(actual) {
+			return value.Value{}, false
+		}
+		return value.NewFloat(actual), true
+	case json.Number:
+		if parsed, ok := exactJSONInt(actual); ok {
+			return value.NewInt(parsed), true
+		}
+		parsed, err := actual.Float64()
+		if err != nil || math.IsInf(parsed, 0) || math.IsNaN(parsed) {
+			return value.Value{}, false
+		}
+		return value.NewFloat(parsed), true
+	case []interface{}:
+		elements := make([]value.Value, len(actual))
+		for i, item := range actual {
+			converted, ok := dynamicJSONValue(item)
+			if !ok {
+				return value.Value{}, false
+			}
+			elements[i] = converted
+		}
+		return value.NewArray(elements), true
+	case map[string]interface{}:
+		mapping := value.NewMap()
+		dataMap := mapping.Obj.(*value.ObjMap).Data
+		for key, item := range actual {
+			converted, ok := dynamicJSONValue(item)
+			if !ok {
+				return value.Value{}, false
+			}
+			dataMap[key] = converted
+		}
+		return mapping, true
+	default:
+		return value.Value{}, false
+	}
 }
 
 func jsonMapKeyCompatible(keyType *value.RuntimeTypeInfo) bool {

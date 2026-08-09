@@ -410,6 +410,34 @@ end`)
 	testExpectedObject(t, 12, got)
 }
 
+func TestTypedJSONLoadsParsesIntegersExactlyAndRejectsOverflow(t *testing.T) {
+	t.Run("maximum int", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let target: int[] = [1]
+let ok: bool = json_loads("[9223372036854775807]", target)
+if ok then
+    test_report(target[0])
+else
+    test_report(0)
+end`)
+		if got.Type != value.VAL_INT || got.AsInt != int64(9223372036854775807) {
+			t.Fatalf("got=%v, want MaxInt64", got)
+		}
+	})
+
+	t.Run("overflow leaves target unchanged", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let target: int[] = [7]
+let ok: bool = json_loads("[9223372036854775808]", target)
+if ok then
+    test_report(999)
+else
+    test_report(target[0])
+end`)
+		testExpectedObject(t, 7, got)
+	})
+}
+
 func TestTypedJSONLoadsRejectsInvalidMapValueAtomically(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: map[string, int] = {"a": 1, "b": 2}
@@ -464,6 +492,22 @@ else
     test_report(999)
 end`)
 		testExpectedObject(t, 7, got)
+	})
+
+	t.Run("json null creates reference slot", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let target: (ref int)[] = []
+let ok: bool = json_loads("[null]", target)
+if ok then
+    if target[0] == null then
+        test_report(length(target))
+    else
+        test_report(998)
+    end
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 1, got)
 	})
 }
 

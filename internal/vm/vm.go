@@ -3240,8 +3240,13 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		target := args[1]
 
 		var result interface{}
-		err := json.Unmarshal([]byte(jsonStr), &result)
-		if err != nil {
+		decoder := json.NewDecoder(strings.NewReader(jsonStr))
+		decoder.UseNumber()
+		if err := decoder.Decode(&result); err != nil {
+			return value.NewBool(false)
+		}
+		var trailing interface{}
+		if err := decoder.Decode(&trailing); err != io.EOF {
 			return value.NewBool(false)
 		}
 
@@ -3314,6 +3319,14 @@ func goValToNoxy(i interface{}) value.Value {
 			return value.NewInt(int64(v))
 		}
 		return value.NewFloat(v)
+	case json.Number:
+		if parsed, ok := exactJSONInt(v); ok {
+			return value.NewInt(parsed)
+		}
+		if parsed, err := v.Float64(); err == nil {
+			return value.NewFloat(parsed)
+		}
+		return value.NewNull()
 	case string:
 		return value.NewString(v)
 	case []interface{}:
@@ -3437,7 +3450,11 @@ func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
 		return false
 	}
 	if ref.JSONDynamic {
-		store(goValToNoxy(data))
+		replacement, ok := dynamicJSONValue(data)
+		if !ok {
+			return false
+		}
+		store(replacement)
 		return true
 	}
 	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType, data, store)
