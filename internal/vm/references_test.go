@@ -2,6 +2,7 @@ package vm
 
 import (
 	"noxy-vm/internal/value"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +97,32 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
+	globals := map[string]value.Value{"answer": value.NewInt(41)}
+	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer", GlobalOwner: &globals}
+	machine := New()
+
+	got, err := machine.lookupGlobalReferenceValue(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != value.VAL_INT || got.AsInt != 41 {
+		t.Fatalf("lookup=%v, want 41", got)
+	}
+	if err := machine.storeGlobalReferenceValue(ref, value.NewInt(42)); err != nil {
+		t.Fatal(err)
+	}
+	if got := globals["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+		t.Fatalf("stored value=%v, want 42", got)
+	}
+
+	if _, err := machine.lookupGlobalReferenceValue(&value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer"}); err == nil || !strings.Contains(err.Error(), "invalid global reference owner") {
+		t.Fatalf("nil owner error=%v", err)
+	}
+	if err := machine.storeGlobalReferenceValue(&value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &globals}, value.NewInt(42)); err == nil || !strings.Contains(err.Error(), "undefined global variable 'missing'") {
+		t.Fatalf("missing global error=%v", err)
 	}
 }
