@@ -28,6 +28,13 @@ type Upvalue struct {
 	Type    ast.NoxyType
 }
 
+type scopedStructBinding struct {
+	Depth   int
+	Name    string
+	Prior   *ast.StructStatement
+	Existed bool
+}
+
 type Compiler struct {
 	enclosing           *Compiler
 	currentChunk        *chunk.Chunk
@@ -42,6 +49,7 @@ type Compiler struct {
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
+	scopedStructs       []scopedStructBinding
 	programBindings     map[string]ast.NoxyType
 	moduleDiscovery     *moduleDiscoveryState
 }
@@ -84,12 +92,16 @@ func NewChild(parent *Compiler) *Compiler {
 	for name, bindingType := range parent.globals {
 		childGlobals[name] = bindingType
 	}
+	childStructs := make(map[string]*ast.StructStatement, len(parent.structs))
+	for name, definition := range parent.structs {
+		childStructs[name] = definition
+	}
 	c := &Compiler{
 		enclosing:       parent,
 		currentChunk:    chunk.New(),
 		locals:          []Local{},
 		globals:         childGlobals,
-		structs:         parent.structs,
+		structs:         childStructs,
 		upvalues:        []Upvalue{},
 		scopeDepth:      0,
 		loops:           []*Loop{},
@@ -563,6 +575,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.StructStatement:
 		c.setLine(n.Token.Line)
+		if c.scopeDepth > 0 {
+			prior, existed := c.structs[n.Name]
+			c.scopedStructs = append(c.scopedStructs, scopedStructBinding{
+				Depth:   c.scopeDepth,
+				Name:    n.Name,
+				Prior:   prior,
+				Existed: existed,
+			})
+			c.structs[n.Name] = n
+		}
 
 		fields := []string{}
 		for _, f := range n.FieldsList {
@@ -1950,6 +1972,16 @@ func (c *Compiler) beginScope() {
 }
 
 func (c *Compiler) endScope() {
+	exitingDepth := c.scopeDepth
+	for len(c.scopedStructs) > 0 && c.scopedStructs[len(c.scopedStructs)-1].Depth == exitingDepth {
+		binding := c.scopedStructs[len(c.scopedStructs)-1]
+		c.scopedStructs = c.scopedStructs[:len(c.scopedStructs)-1]
+		if binding.Existed {
+			c.structs[binding.Name] = binding.Prior
+		} else {
+			delete(c.structs, binding.Name)
+		}
+	}
 	c.scopeDepth--
 	// Pop locals from stack
 	for len(c.locals) > 0 && c.locals[len(c.locals)-1].Depth > c.scopeDepth {

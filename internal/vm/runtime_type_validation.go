@@ -1,6 +1,9 @@
 package vm
 
-import "noxy-vm/internal/value"
+import (
+	"fmt"
+	"noxy-vm/internal/value"
+)
 
 func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool {
 	if item.Type == value.VAL_REF {
@@ -52,6 +55,29 @@ func markReferenceTargetType(ref *value.ObjRef, targetType *value.RuntimeTypeInf
 			return true
 		}
 	}
+}
+
+func (vm *VM) validateStructConstructorArguments(definition *value.ObjStruct, args []value.Value) error {
+	if definition == nil || !runtimeTypeComplete(definition.ConstructorType, make(map[*value.RuntimeTypeInfo]bool)) {
+		return fmt.Errorf("struct constructor has incomplete runtime type metadata")
+	}
+	schema := definition.ConstructorType
+	if schema.Kind != value.TYPE_CALLABLE || schema.CallableBare || len(schema.Params) != len(args) || len(schema.ParamIsRef) != len(schema.Params) {
+		return fmt.Errorf("struct '%s' constructor has invalid runtime type metadata", definition.Name)
+	}
+	params := make([]value.ParamInfo, len(schema.Params))
+	for i, expected := range schema.Params {
+		params[i] = value.ParamInfo{IsRef: schema.ParamIsRef[i], TypeName: expected.String()}
+	}
+	if err := validateParameterModes(definition.Name, params, args); err != nil {
+		return err
+	}
+	for i, expected := range schema.Params {
+		if !vm.runtimeValueMatchesType(args[i], expected) {
+			return fmt.Errorf("function '%s' argument %d: expected %s, got %s", definition.Name, i+1, expected.String(), runtimeValueMode(args[i]))
+		}
+	}
+	return nil
 }
 
 func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo) bool {

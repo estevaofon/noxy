@@ -1449,6 +1449,241 @@ func TestRuntimeCallableValidationRejectsMalformedStructConstructors(t *testing.
 	}
 }
 
+func TestLocalStructConstructorsPublishScopedCallableSchemas(t *testing.T) {
+	t.Run("matching and nominal mismatch", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func run() -> int
+    struct Local
+        value: int
+    end
+    struct Other
+        value: int
+    end
+    let makers: (func(int) -> Local)[] = [Local]
+    pop(makers)
+    let invoke: any = append
+    invoke(ref makers, Local)
+    invoke(ref makers, Other)
+    return length(makers)
+end
+test_report(run())`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("bare callable", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func run() -> int
+    struct Local
+        value: int
+    end
+    let makers: func[] = [Local]
+    return makers[0](42).value
+end
+test_report(run())`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("nested function captures registry snapshot", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func run() -> int
+    struct Local
+        value: int
+    end
+    struct Other
+        value: int
+    end
+    func make_local(value: int) -> Local
+        return Local(value)
+    end
+    let makers: (func(int) -> Local)[] = [make_local]
+    pop(makers)
+    let invoke: any = append
+    invoke(ref makers, Local)
+    invoke(ref makers, Other)
+    return length(makers)
+end
+test_report(run())`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("shadow restores outer definition", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func run() -> int
+    struct Item
+        value: int
+    end
+    let makers: (func(int) -> Item)[] = [Item]
+    pop(makers)
+    if true then
+        struct Item
+            value: string
+        end
+        let inner: (func(string) -> Item)[] = [Item]
+        let made: Item = inner[0]("ok")
+    end
+    let invoke: any = append
+    invoke(ref makers, Item)
+    return length(makers)
+end
+test_report(run())`)
+		testExpectedObject(t, 1, got)
+	})
+
+	t.Run("sibling functions isolate registries", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+func first() -> int
+    struct Local
+        value: int
+    end
+    let makers: (func(int) -> Local)[] = [Local]
+    return makers[0](4).value
+end
+func second() -> int
+    struct Local
+        value: string
+    end
+    let makers: (func(string) -> Local)[] = [Local]
+    return length(makers[0]("ok").value)
+end
+test_report(first() * 10 + second())`)
+		testExpectedObject(t, 42, got)
+	})
+}
+
+func TestLocalStructSchemaPreservesReferenceAndJSONFields(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+func run() -> int
+    struct Node
+        value: int
+    end
+    struct Local
+        node: ref Node
+        count: int
+    end
+    let makers: (func(ref Node, int) -> Local)[] = [Local]
+    let node: Node = Node(42)
+    let target: Local = makers[0](ref node, 1)
+    let ok: bool = json_loads("{\"count\":2}", target)
+    if ok then return target.node.value + target.count else return 0 end
+end
+test_report(run())`)
+	testExpectedObject(t, 44, got)
+}
+
+func TestDynamicStructConstructorValidatesModesAndTypesBeforeConstruction(t *testing.T) {
+	t.Run("plain passed to ref field", func(t *testing.T) {
+		err := runTypedFunctionProgramError(t, `
+struct Node
+    value: int
+end
+struct Holder
+    node: ref Node
+end
+let dynamic: func = Holder
+let node: Node = Node(1)
+dynamic(node)`)
+		if err == nil || !strings.Contains(err.Error(), "expected ref Node") {
+			t.Fatalf("error=%v, want ref mode rejection", err)
+		}
+	})
+
+	t.Run("ref passed to ordinary field", func(t *testing.T) {
+		err := runTypedFunctionProgramError(t, `
+struct Node
+    value: int
+end
+struct Holder
+    node: Node
+end
+let dynamic: func = Holder
+let node: Node = Node(1)
+dynamic(ref node)`)
+		if err == nil || !strings.Contains(err.Error(), "expected Node, got ref") {
+			t.Fatalf("error=%v, want ordinary mode rejection", err)
+		}
+	})
+
+	t.Run("wrong ordinary type", func(t *testing.T) {
+		err := runTypedFunctionProgramError(t, `
+struct Box
+    value: int
+end
+let dynamic: func = Box
+dynamic("wrong")`)
+		if err == nil || !strings.Contains(err.Error(), "expected int") {
+			t.Fatalf("error=%v, want runtime type rejection", err)
+		}
+	})
+
+	t.Run("valid explicit ref", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Node
+    value: int
+end
+struct Holder
+    node: ref Node
+end
+let dynamic: func = Holder
+let node: Node = Node(42)
+let made: any = dynamic(ref node)
+test_report(made.node.value)`)
+		testExpectedObject(t, 42, got)
+	})
+
+	t.Run("valid null ref", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Node
+    value: int
+end
+struct Holder
+    node: ref Node
+end
+let dynamic: func = Holder
+let made: any = dynamic(null)
+if made.node == null then test_report(42) else test_report(0) end`)
+		testExpectedObject(t, 42, got)
+	})
+}
+
+func TestStructConstructorValidationFailureLeavesStackUntouched(t *testing.T) {
+	integer := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	constructorType := &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     []*value.RuntimeTypeInfo{integer},
+		ParamIsRef: []bool{false},
+		Return:     &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Box", Fields: map[string]*value.RuntimeTypeInfo{"value": integer}},
+	}
+	definition := &value.ObjStruct{Name: "Box", Fields: []string{"value"}, ConstructorType: constructorType}
+	constructor := value.Value{Type: value.VAL_OBJ, Obj: definition}
+	argument := value.NewString("wrong")
+	machine := New()
+	machine.push(constructor)
+	machine.push(argument)
+	before := machine.stackTop
+	ok, err := machine.callValue(constructor, 1, nil, 0)
+	if ok || err == nil || !strings.Contains(err.Error(), "expected int") {
+		t.Fatalf("ok=%v error=%v, want type rejection", ok, err)
+	}
+	if machine.stackTop != before || machine.stack[0].Obj != definition || machine.stack[1].Obj != argument.Obj {
+		t.Fatal("constructor validation failure mutated stack or constructed an instance")
+	}
+}
+
+func TestDynamicStructConstructorRejectsMalformedReference(t *testing.T) {
+	err := runMalformedReferenceProgram(t, `
+struct Node
+    value: int
+end
+struct Holder
+    node: ref Node
+end
+let dynamic: func = Holder
+dynamic(malformed_ref())`, value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR}})
+	if err == nil {
+		t.Fatal("dynamic constructor accepted malformed reference")
+	}
+}
+
 func TestDynamicAppendUsesDeclaredCollectionSchemas(t *testing.T) {
 	t.Run("fixed array positive", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `

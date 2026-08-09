@@ -566,6 +566,23 @@ end`)
 	}
 }
 
+func TestLocalStructTypeDoesNotLeakIntoSiblingFunction(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+func define_local() -> int
+    struct Hidden
+        value: int
+    end
+    return Hidden(1).value
+end
+func sibling() -> int
+    let makers: (func(int) -> Hidden)[] = [Hidden]
+    return length(makers)
+end`)
+	if err == nil {
+		t.Fatal("local struct type leaked into sibling function")
+	}
+}
+
 func TestExactReferenceCallAcceptsCapturedVariable(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func increment(value: ref int) -> void

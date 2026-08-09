@@ -4724,10 +4724,14 @@ func (vm *VM) run(minFrameCount int) error {
 
 func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	if callee.Type == value.VAL_OBJ {
-		if structDef, ok := callee.Obj.(*value.ObjStruct); ok {
+		if structDef, ok := callee.Obj.(*value.ObjStruct); ok && structDef != nil {
 			// Instantiate
 			if argCount != len(structDef.Fields) {
 				return false, vm.runtimeError(c, ip, "expected %d arguments for struct %s but got %d", len(structDef.Fields), structDef.Name, argCount)
+			}
+			args := vm.stack[vm.stackTop-argCount : vm.stackTop]
+			if err := vm.validateStructConstructorArguments(structDef, args); err != nil {
+				return false, vm.runtimeError(c, ip, "%s", err)
 			}
 
 			instance := value.NewInstance(structDef)
