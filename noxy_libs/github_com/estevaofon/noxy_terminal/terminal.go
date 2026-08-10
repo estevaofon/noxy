@@ -189,14 +189,9 @@ func (r *terminalRuntime) close() bool {
 
 func (r *terminalRuntime) shutdown() {
 	r.stateMu.Lock()
-	r.stopping = true
-	r.stateMu.Unlock()
-
-	r.readMu.Lock()
-	defer r.readMu.Unlock()
-
-	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
+
+	r.stopping = true
 
 	if r.device == nil {
 		r.lastErr = ""

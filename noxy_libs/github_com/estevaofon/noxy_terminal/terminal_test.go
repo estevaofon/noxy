@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -12,6 +13,47 @@ type fakeTerminalDevice struct {
 	fd         uintptr
 	closeErr   error
 	closeCalls int
+}
+
+type blockingTerminalDevice struct {
+	fd          uintptr
+	readStarted chan struct{}
+	closed      chan struct{}
+	startOnce   sync.Once
+	closeOnce   sync.Once
+	mu          sync.Mutex
+	closeCalls  int
+}
+
+func newBlockingTerminalDevice() *blockingTerminalDevice {
+	return &blockingTerminalDevice{
+		readStarted: make(chan struct{}),
+		closed:      make(chan struct{}),
+	}
+}
+
+func (d *blockingTerminalDevice) Read([]byte) (int, error) {
+	d.startOnce.Do(func() { close(d.readStarted) })
+	<-d.closed
+	return 0, io.EOF
+}
+
+func (d *blockingTerminalDevice) Close() error {
+	d.mu.Lock()
+	d.closeCalls++
+	d.mu.Unlock()
+	d.closeOnce.Do(func() { close(d.closed) })
+	return nil
+}
+
+func (d *blockingTerminalDevice) Fd() uintptr {
+	return d.fd
+}
+
+func (d *blockingTerminalDevice) closeCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.closeCalls
 }
 
 func (d *fakeTerminalDevice) Read(p []byte) (int, error) {
