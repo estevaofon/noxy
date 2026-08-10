@@ -361,7 +361,7 @@ The local compileVMSourceWithRoot helper uses compiler.NewWithStateAndRoot so im
 - [ ] **Step 2: Run the test and verify the file is absent**
 
 ~~~powershell
-go test ./internal/vm -run TestSpaceInvadersScriptedInteractiveInput -v
+go test ./internal/vm -run TestSpaceInvadersSmokeMode -v
 ~~~
 
 Expected: FAIL opening noxy_examples/space_invaders.nx.
@@ -454,7 +454,7 @@ Add TestSpaceInvadersScriptedInteractiveInput. Compile the example without --smo
 - [ ] **Step 2: Run the contract test and verify failure**
 
 ~~~powershell
-go test ./internal/vm -run TestSpaceInvadersSmokeMode -v
+go test ./internal/vm -run TestSpaceInvadersScriptedInteractiveInput -v
 ~~~
 
 Expected: FAIL because the current non-smoke path does not open or consume the fake raw terminal.
