@@ -151,10 +151,13 @@ def build_updates(
     if marker_match is None:
         raise UpdateError(f"{CHANGELOG}: {marker} heading must end with a newline")
     newline = marker_match.group("newline")
-    anchor = marker_match.group(0)
     heading = f"## [{target}] - {release_date}"
-    updated[CHANGELOG] = changelog.replace(
-        anchor, anchor + newline + heading + newline, 1
+    updated[CHANGELOG] = (
+        changelog[: marker_match.end()]
+        + newline
+        + heading
+        + newline
+        + changelog[marker_match.end() :]
     )
     return updated
 

@@ -124,20 +124,30 @@ class UpdateVersionTests(unittest.TestCase):
 
     def test_updates_changelog_when_unreleased_heading_uses_lf_in_mixed_eol_file(self) -> None:
         changelog = self.root / "CHANGELOG.md"
-        changelog.write_bytes(
-            b"# Changelog\r\n\r\n## [Unreleased]\n\n### Added\r\n\r\n"
-            b"- Pending feature.\r\n\r\n## [1.5.0] - 2026-08-08\r\n"
+        original = (
+            b"# Changelog\r\n\r\n"
+            b"Inline note: ## [Unreleased]\n"
+            b"must remain text.\r\n\r\n"
+            b"## [Unreleased]\n\n"
+            b"### Added\r\n\r\n"
+            b"- Pending feature.\r\n\r\n"
+            b"## [1.5.0] - 2026-08-08\r\n"
         )
+        changelog.write_bytes(original)
 
         execute_update(self.root, "minor", "2026-08-09", False)
 
-        updated = changelog.read_bytes()
-        self.assertIn(b"# Changelog\r\n", updated)
-        self.assertIn(
-            b"## [Unreleased]\n\n## [1.6.0] - 2026-08-09\n\n",
-            updated,
+        self.assertEqual(
+            changelog.read_bytes(),
+            b"# Changelog\r\n\r\n"
+            b"Inline note: ## [Unreleased]\n"
+            b"must remain text.\r\n\r\n"
+            b"## [Unreleased]\n\n"
+            b"## [1.6.0] - 2026-08-09\n\n"
+            b"### Added\r\n\r\n"
+            b"- Pending feature.\r\n\r\n"
+            b"## [1.5.0] - 2026-08-08\r\n",
         )
-        self.assertIn(b"### Added\r\n", updated)
 
     def test_dry_run_returns_diff_without_writing(self) -> None:
         before = snapshot(self.root)
