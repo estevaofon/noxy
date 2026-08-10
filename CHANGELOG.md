@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Repository-local skill for safe, transactional Noxy version updates by major, minor, patch, or explicit target, with default-minor behavior, dry-run validation, and rollback coverage. `#tooling` @estevaofon
+
 ## [1.5.0] - 2026-08-09
 
 ### Added
