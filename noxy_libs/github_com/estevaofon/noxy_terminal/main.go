@@ -63,6 +63,8 @@ func (server *pluginServer) write(response pluginResponse) error {
 }
 
 func (server *pluginServer) serve(input io.Reader) error {
+	prepareOutputSignals()
+
 	scanner := bufio.NewScanner(input)
 	workerErrors := make(chan error, 1)
 	inputCloser, _ := input.(io.Closer)
