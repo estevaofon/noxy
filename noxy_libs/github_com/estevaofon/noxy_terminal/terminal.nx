@@ -1,0 +1,66 @@
+let _terminal_loaded: bool = false
+let _terminal_attempted: bool = false
+let _terminal_load_error: string = ""
+
+struct TerminalResult
+    ok: bool
+    error: string
+end
+
+struct KeyEvent
+    ok: bool
+    key: string
+    error: string
+end
+
+func _ensure_terminal_plugin() -> bool
+    if _terminal_loaded then return true end
+    if _terminal_attempted then return false end
+
+    _terminal_attempted = true
+    _terminal_loaded = sys_load_plugin("terminal", "noxy-plugin-terminal")
+    if !_terminal_loaded then
+        _terminal_load_error = "noxy-plugin-terminal was not found or could not be started"
+    end
+    return _terminal_loaded
+end
+
+func _terminal_error() -> string
+    if !_terminal_loaded then return _terminal_load_error end
+    let result: any = terminal_request("last_error")
+    if result == null then return "terminal plugin request failed" end
+    return to_str(result)
+end
+
+func _terminal_bool(method: string) -> bool
+    let result: any = terminal_request(method)
+    return result != null && to_str(result) == "true"
+end
+
+func is_terminal() -> bool
+    if !_ensure_terminal_plugin() then return false end
+    return _terminal_bool("is_terminal")
+end
+
+func open_raw() -> TerminalResult
+    if !_ensure_terminal_plugin() then
+        return TerminalResult(false, _terminal_error())
+    end
+    let ok: bool = _terminal_bool("open_raw")
+    if !ok then return TerminalResult(false, _terminal_error()) end
+    return TerminalResult(true, "")
+end
+
+func read_key() -> KeyEvent
+    if !_ensure_terminal_plugin() then
+        return KeyEvent(false, "", _terminal_error())
+    end
+    let result: any = terminal_request("read_key")
+    if result == null then return KeyEvent(false, "", _terminal_error()) end
+    return KeyEvent(true, to_str(result), "")
+end
+
+func close() -> bool
+    if !_terminal_loaded then return true end
+    return _terminal_bool("close")
+end
