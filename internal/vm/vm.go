@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bufio"
 	"database/sql"
 	"fmt"
 	"net"
@@ -37,6 +38,7 @@ type SharedState struct {
 	Globals     map[string]value.Value // Global variables/functions
 	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
 	GlobalsLock sync.RWMutex
+	Terminal    *terminalRuntime
 
 	// Shared Network Resources
 	NetListeners map[int]net.Listener
@@ -101,6 +103,11 @@ func NewWithConfig(cfg VMConfig) *VM {
 		StmtParams:   make(map[int]map[int]interface{}),
 		NextDbID:     1,
 		NextStmtID:   1,
+		Terminal: &terminalRuntime{
+			driver: xTermDriver{},
+			input:  bufio.NewReader(os.Stdin),
+			fd:     int(os.Stdin.Fd()),
+		},
 	}
 	return NewWithShared(shared, cfg)
 }
