@@ -16,8 +16,10 @@ Use the bundled updater from the Noxy repository root. Preserve unrelated user c
    - Use an explicit `X.Y.Z` or `vX.Y.Z` when supplied.
    - Otherwise use the requested `major`, `minor`, or `patch` component.
    - Default to `minor` when the request does not name a target.
+   - For an intentional migration to a lower explicit version, add
+     `--allow-downgrade`; never use it for named component bumps.
 3. Preview changes:
-   `python .agents/skills/updating-noxy-version/scripts/update_version.py [target] --dry-run`
+   `python .agents/skills/updating-noxy-version/scripts/update_version.py [target] [--allow-downgrade] --dry-run`
    Omit `[target]` to use the default minor bump. Add `--date YYYY-MM-DD` only when the user specifies a release date.
 4. Review the preview. It must touch only the five expected release files.
 5. Apply by rerunning the same command without `--dry-run`.

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import difflib
-import os
 import re
 import shutil
 import sys
@@ -47,6 +46,10 @@ TARGET_FILES = tuple(item[0] for item in SURFACES) + (CHANGELOG,)
 
 class UpdateError(ValueError):
     pass
+
+
+def _copy_file_contents(source: Path, destination: Path) -> None:
+    destination.write_bytes(source.read_bytes())
 
 
 def normalize_version(value: str) -> tuple[str, tuple[int, int, int]]:
@@ -212,13 +215,15 @@ def _write_updates(
         for relative in TARGET_FILES:
             target_path = root / relative
             try:
-                os.replace(staged[relative], target_path)
+                _copy_file_contents(staged[relative], target_path)
             except OSError as error:
                 rollback_errors = []
-                for replaced_relative in reversed(replaced):
+                for replaced_relative in reversed([*replaced, relative]):
                     replaced_path = root / replaced_relative
                     try:
-                        os.replace(backups[replaced_relative], replaced_path)
+                        _copy_file_contents(
+                            backups[replaced_relative], replaced_path
+                        )
                     except OSError as rollback_error:
                         rollback_errors.append(
                             f"failed to restore {replaced_path}: {rollback_error}"
@@ -251,7 +256,11 @@ def _write_updates(
 
 
 def execute_update(
-    root: Path, target: str, release_date: str | None = None, dry_run: bool = False
+    root: Path,
+    target: str,
+    release_date: str | None = None,
+    dry_run: bool = False,
+    allow_downgrade: bool = False,
 ) -> str:
     root = root.resolve()
     normalized_date = normalize_date(release_date)
@@ -259,7 +268,9 @@ def execute_update(
     current = inspect_current_versions(original)
     _current_text, current_tuple = normalize_version(current)
     normalized, target_tuple = resolve_target(target, current_tuple)
-    if target_tuple <= current_tuple:
+    if target_tuple <= current_tuple and not (
+        allow_downgrade and target_tuple < current_tuple
+    ):
         raise UpdateError(
             f"target version {normalized} must be greater than current version {current}"
         )
@@ -287,6 +298,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--date", dest="release_date", help="release date as YYYY-MM-DD")
     parser.add_argument("--dry-run", action="store_true", help="print diff without writing")
+    parser.add_argument(
+        "--allow-downgrade",
+        action="store_true",
+        help="allow an explicit target lower than the current version",
+    )
     parser.add_argument("--root", type=Path, default=default_root(), help="Noxy repository root")
     return parser.parse_args(argv)
 
@@ -294,7 +310,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        diff = execute_update(args.root, args.version, args.release_date, args.dry_run)
+        diff = execute_update(
+            args.root,
+            args.version,
+            args.release_date,
+            args.dry_run,
+            args.allow_downgrade,
+        )
     except UpdateError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

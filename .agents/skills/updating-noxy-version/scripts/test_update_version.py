@@ -1,4 +1,3 @@
-import os
 import re
 import sys
 import tempfile
@@ -105,6 +104,11 @@ class UpdateVersionTests(unittest.TestCase):
 
         self.assertEqual(args.version, "minor")
 
+    def test_cli_accepts_explicit_downgrade_opt_in(self) -> None:
+        args = parse_args(["0.1.0", "--allow-downgrade"])
+
+        self.assertTrue(args.allow_downgrade)
+
     def test_rejects_semver_with_unicode_decimal_digits(self) -> None:
         with self.assertRaisesRegex(UpdateError, "semantic version"):
             normalize_version("1.6.1١")
@@ -158,6 +162,20 @@ class UpdateVersionTests(unittest.TestCase):
         for relative in TARGET_FILES:
             self.assertIn(relative.replace("\\", "/"), diff)
 
+    def test_updates_files_in_place_to_preserve_permissions(self) -> None:
+        identities_before = {
+            relative: (self.root / relative).stat().st_ino
+            for relative in TARGET_FILES
+        }
+
+        execute_update(self.root, "1.6.0", "2026-08-09", False)
+
+        identities_after = {
+            relative: (self.root / relative).stat().st_ino
+            for relative in TARGET_FILES
+        }
+        self.assertEqual(identities_after, identities_before)
+
     def test_rejects_invalid_semver_and_date(self) -> None:
         with self.assertRaisesRegex(UpdateError, "semantic version"):
             normalize_version("1.6")
@@ -179,6 +197,24 @@ class UpdateVersionTests(unittest.TestCase):
                 with self.assertRaisesRegex(UpdateError, "greater than current"):
                     execute_update(self.root, target, "2026-08-09", False)
                 self.assertEqual(snapshot(self.root), before)
+
+    def test_allows_explicit_downgrade_when_opted_in(self) -> None:
+        execute_update(
+            self.root,
+            "0.1.0",
+            "2026-08-10",
+            False,
+            allow_downgrade=True,
+        )
+
+        self.assertIn(
+            'const Version = "v0.1.0"',
+            (self.root / TARGET_FILES[0]).read_text(),
+        )
+        self.assertIn(
+            "## [0.1.0] - 2026-08-10",
+            (self.root / TARGET_FILES[4]).read_text(),
+        )
 
     def test_rejects_inconsistent_current_versions_without_writing(self) -> None:
         readme = self.root / "README.md"
@@ -236,20 +272,22 @@ class UpdateVersionTests(unittest.TestCase):
         files_before = {
             path.relative_to(self.root) for path in self.root.rglob("*") if path.is_file()
         }
-        real_replace = os.replace
         target_paths = {(self.root / relative).resolve() for relative in TARGET_FILES}
         replacements = 0
 
-        def fail_third_target_replace(source, destination) -> None:
+        def fail_third_target_write(source, destination) -> None:
             nonlocal replacements
-            if Path(destination).resolve() in target_paths:
+            if source.name.endswith(".new") and destination.resolve() in target_paths:
                 replacements += 1
                 if replacements == 3:
                     raise OSError("injected mid-commit failure")
-            real_replace(source, destination)
+            destination.write_bytes(source.read_bytes())
 
         failed_path = self.root / TARGET_FILES[2]
-        with mock.patch("os.replace", side_effect=fail_third_target_replace):
+        with mock.patch(
+            "update_version._copy_file_contents",
+            side_effect=fail_third_target_write,
+        ):
             with self.assertRaisesRegex(UpdateError, re.escape(str(failed_path))):
                 execute_update(self.root, "1.6.0", "2026-08-09", False)
 
@@ -261,13 +299,12 @@ class UpdateVersionTests(unittest.TestCase):
 
     def test_rollback_failure_preserves_original_for_manual_recovery(self) -> None:
         before = snapshot(self.root)
-        real_replace = os.replace
         failed_commit_path = (self.root / TARGET_FILES[2]).resolve()
         failed_restore_path = (self.root / TARGET_FILES[1]).resolve()
 
         def fail_commit_and_restore(source, destination) -> None:
-            source_path = Path(source)
-            destination_path = Path(destination).resolve()
+            source_path = source
+            destination_path = destination.resolve()
             if source_path.name == "2.new" and destination_path == failed_commit_path:
                 raise OSError("injected mid-commit failure")
             if (
@@ -275,9 +312,12 @@ class UpdateVersionTests(unittest.TestCase):
                 and destination_path == failed_restore_path
             ):
                 raise OSError("injected rollback failure")
-            real_replace(source, destination)
+            destination.write_bytes(source.read_bytes())
 
-        with mock.patch("os.replace", side_effect=fail_commit_and_restore):
+        with mock.patch(
+            "update_version._copy_file_contents",
+            side_effect=fail_commit_and_restore,
+        ):
             with self.assertRaises(UpdateError) as raised:
                 execute_update(self.root, "1.6.0", "2026-08-09", False)
 
