@@ -12,4 +12,5 @@ func (vm *VM) defineBuiltins() {
 	vm.defineNetworkBuiltins()
 	vm.defineSQLiteBuiltins()
 	vm.defineJSONBuiltins()
+	vm.defineTerminalBuiltins()
 }

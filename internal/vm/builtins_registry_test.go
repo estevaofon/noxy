@@ -36,6 +36,8 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"strings_to_upper", "strings_trim", "sys_argv", "sys_exec",
 		"sys_exec_output", "sys_exit", "sys_getcwd", "sys_getenv",
 		"sys_load_plugin", "sys_os", "sys_setenv", "sys_sleep",
+		"terminal_close", "terminal_is_terminal", "terminal_open_raw",
+		"terminal_read_key",
 		"time_add_days", "time_add_seconds", "time_after", "time_before",
 		"time_days_in_month", "time_diff", "time_diff_duration", "time_format",
 		"time_format_custom", "time_format_date", "time_format_time",
@@ -89,6 +91,10 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 			params:     []value.ParamInfo{{TypeName: "string"}, {IsRef: true, TypeName: "ref any"}},
 			returnType: "bool",
 		},
+		{name: "terminal_is_terminal", arity: 0, returnType: "bool"},
+		{name: "terminal_open_raw", arity: 1, params: []value.ParamInfo{{TypeName: "any"}}, returnType: "any"},
+		{name: "terminal_read_key", arity: 1, params: []value.ParamInfo{{TypeName: "any"}}, returnType: "any"},
+		{name: "terminal_close", arity: 0, returnType: "bool"},
 	}
 
 	for _, tt := range tests {

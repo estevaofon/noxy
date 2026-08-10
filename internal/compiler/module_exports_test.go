@@ -25,6 +25,30 @@ func TestEmbeddedWildcardExportsIncludeDurableWrapperBindings(t *testing.T) {
 	}
 }
 
+func TestEmbeddedModuleTerminalCompilesWithTypedExports(t *testing.T) {
+	compiler := New()
+	exports, loadable := compiler.discoverModuleExports("terminal")
+	if !loadable {
+		t.Fatal("terminal was not loadable")
+	}
+	for _, name := range []string{"TerminalResult", "KeyEvent", "is_terminal", "open_raw", "read_key", "close"} {
+		if _, ok := exports[name]; !ok {
+			t.Fatalf("terminal export %q was not discovered", name)
+		}
+	}
+
+	_, err := compileFunctionSource(t, `
+use terminal
+let available: bool = terminal.is_terminal()
+let opened: terminal.TerminalResult = terminal.open_raw()
+let event: terminal.KeyEvent = terminal.read_key()
+let closed: bool = terminal.close()
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFileModuleDirectExportsAreDiscovered(t *testing.T) {
 	root := t.TempDir()
 	modulePath := filepath.Join(root, "collision.nx")

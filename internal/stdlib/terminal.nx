@@ -1,0 +1,26 @@
+struct TerminalResult
+    ok: bool
+    error: string
+end
+
+struct KeyEvent
+    ok: bool
+    key: string
+    error: string
+end
+
+func is_terminal() -> bool
+    return terminal_is_terminal()
+end
+
+func open_raw() -> TerminalResult
+    return terminal_open_raw(TerminalResult)
+end
+
+func read_key() -> KeyEvent
+    return terminal_read_key(KeyEvent)
+end
+
+func close() -> bool
+    return terminal_close()
+end
