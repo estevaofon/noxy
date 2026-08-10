@@ -217,6 +217,10 @@ script argument. Smoke mode skips raw terminal setup, runs a bounded number of
 deterministic frames, and exits successfully after exercising state updates and
 render construction. Normal execution remains interactive.
 
+Because the concurrent example runner launches examples without arguments, add
+`space_invaders.nx` to its interactive-example exclusion list. The dedicated
+`--smoke` command remains the automated integration check for this game.
+
 Run the project-required validation commands:
 
 ```text

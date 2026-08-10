@@ -676,6 +676,80 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `crypto` | Cryptographic functions (hashing, UUID) |
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
+| `terminal` | Interactive raw-terminal input |
+
+### Terminal Module
+
+Import `terminal` when a program needs real-time keyboard input from an
+interactive standard input terminal:
+
+```noxy
+use terminal
+```
+
+The module exposes the following types and functions:
+
+```noxy
+struct TerminalResult
+    ok: bool
+    error: string
+end
+
+struct KeyEvent
+    ok: bool
+    key: string
+    error: string
+end
+
+func is_terminal() -> bool
+func open_raw() -> TerminalResult
+func read_key() -> KeyEvent
+func close() -> bool
+```
+
+- `is_terminal()` reports whether standard input is interactive.
+- `open_raw()` saves the current terminal state and enables raw mode. Its
+  `TerminalResult.ok` is `false` and `error` describes the failure when stdin
+  is not interactive or raw mode cannot be enabled. Opening an already-active
+  raw session succeeds without replacing the saved state.
+- `read_key()` is available only in raw mode. It blocks until one key is read,
+  without requiring Enter, and returns either `{ok: true, key: ..., error: ""}`
+  or `{ok: false, key: "", error: ...}` when input is unavailable or fails.
+- `close()` restores the saved terminal state. It returns `true` after a
+  successful restore or when raw mode is already inactive, and `false` if
+  restoration fails.
+
+`read_key()` normalizes ASCII letters to lowercase. It returns `"space"` for
+Space, `"enter"` for CR or LF, and `"ctrl+c"` for Ctrl+C. Other printable
+Unicode runes are returned as strings, while other control bytes use a stable
+`"unknown:0xNN"` representation. Multi-byte special-key sequences such as
+arrow keys are not part of this module version.
+
+Always close an opened raw session explicitly. The VM also attempts to restore
+an active terminal when the root interpretation ends, including after a runtime
+error, but explicit cleanup keeps the program's terminal lifecycle clear:
+
+```noxy
+use terminal
+let opened: terminal.TerminalResult = terminal.open_raw()
+if opened.ok then
+    let event: terminal.KeyEvent = terminal.read_key()
+    print(event.key)
+    terminal.close()
+end
+```
+
+### Space Invaders Example
+
+`noxy_examples/space_invaders.nx` is an interactive terminal example. Run it
+from an interactive terminal; use `A` and `D` to move, Space to fire, and `Q`
+or Ctrl+C to quit. The game accepts a deterministic, non-interactive smoke
+mode for automated validation:
+
+```powershell
+go run cmd/noxy/main.go noxy_examples/space_invaders.nx
+go run cmd/noxy/main.go noxy_examples/space_invaders.nx --smoke
+```
 
 ---
 
