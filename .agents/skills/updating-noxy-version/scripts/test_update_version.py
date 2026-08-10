@@ -122,6 +122,23 @@ class UpdateVersionTests(unittest.TestCase):
         self.assertIn("## [1.4.0] - 2026-08-01", changelog)
         self.assertIn("a/internal/version/version.go", diff)
 
+    def test_updates_changelog_when_unreleased_heading_uses_lf_in_mixed_eol_file(self) -> None:
+        changelog = self.root / "CHANGELOG.md"
+        changelog.write_bytes(
+            b"# Changelog\r\n\r\n## [Unreleased]\n\n### Added\r\n\r\n"
+            b"- Pending feature.\r\n\r\n## [1.5.0] - 2026-08-08\r\n"
+        )
+
+        execute_update(self.root, "minor", "2026-08-09", False)
+
+        updated = changelog.read_bytes()
+        self.assertIn(b"# Changelog\r\n", updated)
+        self.assertIn(
+            b"## [Unreleased]\n\n## [1.6.0] - 2026-08-09\n\n",
+            updated,
+        )
+        self.assertIn(b"### Added\r\n", updated)
+
     def test_dry_run_returns_diff_without_writing(self) -> None:
         before = snapshot(self.root)
 

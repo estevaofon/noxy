@@ -144,13 +144,14 @@ def build_updates(
         for match in RELEASE_VERSION_HEADING.finditer(changelog)
     ):
         raise UpdateError(f"{CHANGELOG}: release {target} already exists")
-    newline = "\r\n" if "\r\n" in changelog else "\n"
     marker = "## [Unreleased]"
     if changelog.splitlines().count(marker) != 1:
         raise UpdateError(f"{CHANGELOG}: expected exactly one {marker} heading")
-    anchor = marker + newline
-    if anchor not in changelog:
+    marker_match = re.search(r"(?m)^## \[Unreleased\](?P<newline>\r?\n)", changelog)
+    if marker_match is None:
         raise UpdateError(f"{CHANGELOG}: {marker} heading must end with a newline")
+    newline = marker_match.group("newline")
+    anchor = marker_match.group(0)
     heading = f"## [{target}] - {release_date}"
     updated[CHANGELOG] = changelog.replace(
         anchor, anchor + newline + heading + newline, 1
