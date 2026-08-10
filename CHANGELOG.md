@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Portable raw-terminal input module with typed Noxy wrappers, normalized key events, shared noxy-routine support, and automatic terminal restoration. `#runtime` @estevaofon
+- Real-time terminal Space Invaders example written in Noxy, with deterministic smoke coverage and channel-driven controls that do not require Enter. `#examples` @estevaofon
+
+### Fixed
+
+- Terminal cleanup now runs before `sys.exit`, and queued key readers revalidate raw mode after terminal closure. `#runtime` @estevaofon
+
 ## [0.1.0] - 2026-08-10
 
 ### Added
