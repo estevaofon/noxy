@@ -1,6 +1,6 @@
 ---
 name: updating-noxy-version
-description: Use when changing, bumping, releasing, or synchronizing the Noxy VM semantic version across runtime metadata, noxy.mod, README, language specification, and changelog.
+description: Use when changing, bumping, releasing, or synchronizing the Noxy VM semantic version by major, minor, patch, or explicit target across runtime metadata, noxy.mod, README, language specification, and changelog.
 ---
 
 # Updating Noxy Version
@@ -12,10 +12,13 @@ Use the bundled updater from the Noxy repository root. Preserve unrelated user c
 ## Workflow
 
 1. Inspect `git status --short`. Note pre-existing changes, especially in the five release files.
-2. Normalize the requested target to `vX.Y.Z` for reporting.
+2. Resolve the target:
+   - Use an explicit `X.Y.Z` or `vX.Y.Z` when supplied.
+   - Otherwise use the requested `major`, `minor`, or `patch` component.
+   - Default to `minor` when the request does not name a target.
 3. Preview changes:
-   `python .agents/skills/updating-noxy-version/scripts/update_version.py <version> --dry-run`
-   Add `--date YYYY-MM-DD` only when the user specifies a release date.
+   `python .agents/skills/updating-noxy-version/scripts/update_version.py [target] --dry-run`
+   Omit `[target]` to use the default minor bump. Add `--date YYYY-MM-DD` only when the user specifies a release date.
 4. Review the preview. It must touch only the five expected release files.
 5. Apply by rerunning the same command without `--dry-run`.
 6. Review `git diff` and confirm historical changelog and dependency versions remain unchanged.

@@ -1,4 +1,4 @@
 interface:
   display_name: "Update Noxy Version"
   short_description: "Update and validate Noxy release versions"
-  default_prompt: "Use $updating-noxy-version to update Noxy to v1.6.0 and run all required checks."
+  default_prompt: "Use $updating-noxy-version to update Noxy's minor version by default, or apply a major or patch bump when requested, and run all required checks."
