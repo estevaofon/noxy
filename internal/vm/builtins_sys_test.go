@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -53,4 +54,51 @@ func TestSystemExecutionAndPluginErrorsDoNotInvokeExternalPrograms(t *testing.T)
 	nonexistentPlugin := filepath.Join(t.TempDir(), "missing-plugin-binary")
 	assertBuiltinValue(t, callBuiltin(t, machine, "sys_load_plugin"), value.NewBool(false))
 	assertBuiltinValue(t, callBuiltin(t, machine, "sys_load_plugin", value.NewString("missing"), value.NewString(nonexistentPlugin)), value.NewBool(false))
+}
+
+func TestSystemExitFromChildVMRestoresSharedTerminalBeforeExiting(t *testing.T) {
+	parent, driver := newVMWithActiveTestTerminal(t, nil)
+	child := NewWithShared(parent.shared, parent.Config)
+
+	requestedCode := -1
+	parent.shared.exitProcess = func(code int) {
+		if driver.restored != 1 {
+			t.Errorf("restore calls when exit function ran = %d, want 1", driver.restored)
+		}
+		if parent.shared.Terminal.raw {
+			t.Error("terminal remained in raw mode when exit function ran")
+		}
+		requestedCode = code
+	}
+
+	assertBuiltinValue(t, callBuiltin(t, child, "sys_exit", value.NewInt(23)), value.NewNull())
+
+	if requestedCode != 23 {
+		t.Errorf("exit code = %d, want 23", requestedCode)
+	}
+	if driver.restored != 1 {
+		t.Errorf("restore calls = %d, want 1", driver.restored)
+	}
+}
+
+func TestSystemExitContinuesWhenTerminalRestoreFails(t *testing.T) {
+	restoreErr := errors.New("restore failed")
+	machine, driver := newVMWithActiveTestTerminal(t, restoreErr)
+
+	requestedCode := -1
+	machine.shared.exitProcess = func(code int) {
+		requestedCode = code
+	}
+
+	assertBuiltinValue(t, callBuiltin(t, machine, "sys_exit"), value.NewNull())
+
+	if requestedCode != 0 {
+		t.Errorf("exit code = %d, want default 0", requestedCode)
+	}
+	if driver.restored != 1 {
+		t.Errorf("restore calls = %d, want 1", driver.restored)
+	}
+	if !machine.shared.Terminal.raw {
+		t.Error("terminal raw state cleared after failed restoration")
+	}
 }

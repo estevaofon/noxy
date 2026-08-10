@@ -87,15 +87,15 @@ func (runtime *terminalRuntime) close() error {
 }
 
 func (runtime *terminalRuntime) readKey() (string, error) {
+	runtime.readMu.Lock()
+	defer runtime.readMu.Unlock()
+
 	runtime.stateMu.Lock()
 	if !runtime.raw {
 		runtime.stateMu.Unlock()
 		return "", fmt.Errorf("terminal is not in raw mode")
 	}
 	runtime.stateMu.Unlock()
-
-	runtime.readMu.Lock()
-	defer runtime.readMu.Unlock()
 
 	r, _, err := runtime.input.ReadRune()
 	if err != nil {

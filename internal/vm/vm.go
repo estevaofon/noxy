@@ -39,6 +39,7 @@ type SharedState struct {
 	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
 	GlobalsLock sync.RWMutex
 	Terminal    *terminalRuntime
+	exitProcess func(int)
 
 	// Shared Network Resources
 	NetListeners map[int]net.Listener
@@ -108,6 +109,7 @@ func NewWithConfig(cfg VMConfig) *VM {
 			input:  bufio.NewReader(os.Stdin),
 			fd:     int(os.Stdin.Fd()),
 		},
+		exitProcess: os.Exit,
 	}
 	return NewWithShared(shared, cfg)
 }

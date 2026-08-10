@@ -719,6 +719,12 @@ func close() -> bool
   successful restore or when raw mode is already inactive, and `false` if
   restoration fails.
 
+Closing restores raw state even when a `read_key()` call is already blocked.
+That active read is not cancelled and must be released by input or process
+termination. Reads queued behind it acquire the read lock, revalidate the raw
+state, and fail with an inactive-raw error after a successful close instead of
+reading more input.
+
 `read_key()` normalizes ASCII letters to lowercase. It returns `"space"` for
 Space, `"enter"` for CR or LF, and `"ctrl+c"` for Ctrl+C. Other printable
 Unicode runes are returned as strings, while other control bytes use a stable
@@ -727,7 +733,8 @@ arrow keys are not part of this module version.
 
 Always close an opened raw session explicitly. The VM also attempts to restore
 an active terminal when the root interpretation ends, including after a runtime
-error, but explicit cleanup keeps the program's terminal lifecycle clear:
+error, and before `sys.exit()` terminates the process, but explicit cleanup
+keeps the program's terminal lifecycle clear:
 
 ```noxy
 use terminal
@@ -750,6 +757,13 @@ mode for automated validation:
 go run cmd/noxy/main.go noxy_examples/space_invaders.nx
 go run cmd/noxy/main.go noxy_examples/space_invaders.nx --smoke
 ```
+
+On normal completion, the example explicitly closes raw mode and emits the ANSI
+cursor-show sequence. If an unexpected runtime error unwinds the root
+interpretation after the cursor has been hidden, automatic cleanup still
+attempts raw-mode restoration, but ANSI presentation state is separate: the
+terminal may require a cursor-show or reset sequence to make the cursor visible
+again.
 
 ---
 

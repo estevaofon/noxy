@@ -262,7 +262,8 @@ func (vm *VM) defineSystemBuiltins() {
 		if len(args) > 0 {
 			code = int(args[0].AsInt)
 		}
-		os.Exit(code)
+		_ = vm.shared.Terminal.close()
+		vm.shared.exitProcess(code)
 		return value.NewNull()
 	})
 }
