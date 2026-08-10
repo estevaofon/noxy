@@ -9,7 +9,7 @@
 
 ### Fixed
 
-- Terminal cleanup now runs before `sys.exit`, and queued key readers revalidate raw mode after terminal closure. `#runtime` @estevaofon
+- Terminal cleanup now runs before `sys.exit` and during panic unwinding. `#runtime` @estevaofon
 
 ## [0.1.0] - 2026-08-10
 

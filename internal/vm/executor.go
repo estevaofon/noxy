@@ -13,7 +13,7 @@ func (vm *VM) Interpret(c *chunk.Chunk) error {
 	return vm.InterpretWithGlobals(c, nil)
 }
 
-func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) error {
+func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) (err error) {
 	scriptFn := &value.ObjFunction{
 		Name:    "script",
 		Arity:   0,
@@ -43,15 +43,13 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 	vm.frameCount = 1
 	vm.currentFrame = frame
 
-	runErr := vm.run(1)
-	restoreErr := vm.shared.Terminal.close()
-	if runErr != nil {
-		return runErr
-	}
-	if restoreErr != nil {
-		return fmt.Errorf("restore terminal: %w", restoreErr)
-	}
-	return nil
+	defer func() {
+		if restoreErr := vm.shared.Terminal.close(); err == nil && restoreErr != nil {
+			err = fmt.Errorf("restore terminal: %w", restoreErr)
+		}
+	}()
+
+	return vm.run(1)
 }
 
 func (vm *VM) run(minFrameCount int) error {

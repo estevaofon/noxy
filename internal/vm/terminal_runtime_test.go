@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"errors"
+	"noxy-vm/internal/chunk"
 	"strings"
 	"testing"
 )
@@ -176,4 +177,19 @@ func TestInterpretRestoresTerminalAfterRuntimeError(t *testing.T) {
 	if driver.restored != 1 {
 		t.Errorf("restore calls = %d, want 1", driver.restored)
 	}
+}
+
+func TestInterpretRestoresTerminalAfterPanic(t *testing.T) {
+	machine, driver := newVMWithActiveTestTerminal(t, nil)
+
+	defer func() {
+		if recovered := recover(); recovered == nil {
+			t.Fatal("Interpret() did not panic for a truncated OP_CONSTANT")
+		}
+		if driver.restored != 1 {
+			t.Errorf("restore calls = %d, want 1", driver.restored)
+		}
+	}()
+
+	_ = machine.Interpret(&chunk.Chunk{Code: []byte{byte(chunk.OP_CONSTANT)}})
 }

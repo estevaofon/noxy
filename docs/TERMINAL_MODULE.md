@@ -107,9 +107,9 @@ end
 ```
 
 The VM also attempts to restore an active terminal when root interpretation
-ends, including after a runtime error, and before `sys.exit()` terminates the
-process. This automatic restoration is a safety mechanism, not a replacement
-for explicit cleanup.
+ends normally, after a runtime error, or while an unexpected VM panic unwinds,
+and before `sys.exit()` terminates the process. This automatic restoration is a
+safety mechanism, not a replacement for explicit cleanup.
 
 ANSI presentation state is separate from raw input state. Programs that hide
 the cursor, change colors, or otherwise alter terminal presentation must reset
@@ -117,11 +117,11 @@ those settings themselves.
 
 ## Concurrent Reads and Close
 
-Closing restores raw state even when a `read_key()` call is already blocked.
-That active read is not cancelled and must be released by input or process
-termination. Reads queued behind it acquire the read lock, revalidate the raw
-state, and fail with an inactive-raw error after a successful close instead of
-reading more input.
+Reads are serialized. Closing restores raw state even when a `read_key()` call
+is already blocked. That active read is not cancelled and must be released by
+input or process termination. The behavior of other concurrent reads during
+`close()` is experimental; callers should coordinate a single reader and stop
+its loop before closing the terminal.
 
 ## Space Invaders Example
 
