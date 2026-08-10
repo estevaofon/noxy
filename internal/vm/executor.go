@@ -43,7 +43,15 @@ func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Valu
 	vm.frameCount = 1
 	vm.currentFrame = frame
 
-	return vm.run(1)
+	runErr := vm.run(1)
+	restoreErr := vm.shared.Terminal.close()
+	if runErr != nil {
+		return runErr
+	}
+	if restoreErr != nil {
+		return fmt.Errorf("restore terminal: %w", restoreErr)
+	}
+	return nil
 }
 
 func (vm *VM) run(minFrameCount int) error {

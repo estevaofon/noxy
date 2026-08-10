@@ -143,3 +143,80 @@ func TestSpawnedVMsShareTerminalRuntime(t *testing.T) {
 		t.Fatal("spawned VM does not retain the parent terminal runtime")
 	}
 }
+
+func newVMWithActiveTestTerminal(t *testing.T, closeErr error) (*VM, *fakeTerminalDriver) {
+	t.Helper()
+	driver := &fakeTerminalDriver{terminal: true, closeErr: closeErr}
+	machine := New()
+	machine.shared.Terminal = newTestTerminalRuntime(driver, "")
+	if err := machine.shared.Terminal.openRaw(); err != nil {
+		t.Fatalf("openRaw() error = %v", err)
+	}
+	return machine, driver
+}
+
+func TestInterpretRestoresTerminalAfterSuccess(t *testing.T) {
+	machine, driver := newVMWithActiveTestTerminal(t, nil)
+
+	err := interpretVMSource(t, machine, "let value: int = 1")
+
+	if err != nil {
+		t.Fatalf("Interpret() error = %v", err)
+	}
+	if driver.restored != 1 {
+		t.Errorf("restore calls = %d, want 1", driver.restored)
+	}
+}
+
+func TestInterpretRestoresTerminalAfterRuntimeError(t *testing.T) {
+	machine, driver := newVMWithActiveTestTerminal(t, nil)
+
+	err := interpretVMSource(t, machine, "1 / 0")
+
+	if err == nil {
+		t.Fatal("Interpret() error = nil, want runtime error")
+	}
+	if !strings.Contains(err.Error(), "division by zero") {
+		t.Errorf("Interpret() error = %v, want division by zero", err)
+	}
+	if driver.restored != 1 {
+		t.Errorf("restore calls = %d, want 1", driver.restored)
+	}
+}
+
+func TestInterpretReportsRestoreErrorWhenExecutionSucceeds(t *testing.T) {
+	restoreErr := errors.New("restore failed")
+	machine, driver := newVMWithActiveTestTerminal(t, restoreErr)
+
+	err := interpretVMSource(t, machine, "let value: int = 1")
+
+	if !errors.Is(err, restoreErr) {
+		t.Fatalf("Interpret() error = %v, want wrapped %v", err, restoreErr)
+	}
+	if !strings.Contains(err.Error(), "restore terminal") {
+		t.Errorf("Interpret() error = %v, want restore terminal context", err)
+	}
+	if driver.restored != 1 {
+		t.Errorf("restore calls = %d, want 1", driver.restored)
+	}
+}
+
+func TestInterpretPreservesRuntimeErrorWhenRestoreAlsoFails(t *testing.T) {
+	restoreErr := errors.New("restore failed")
+	machine, driver := newVMWithActiveTestTerminal(t, restoreErr)
+
+	err := interpretVMSource(t, machine, "1 / 0")
+
+	if err == nil {
+		t.Fatal("Interpret() error = nil, want runtime error")
+	}
+	if !strings.Contains(err.Error(), "division by zero") {
+		t.Errorf("Interpret() error = %v, want division by zero", err)
+	}
+	if errors.Is(err, restoreErr) {
+		t.Errorf("Interpret() error = %v, unexpectedly wraps restore error", err)
+	}
+	if driver.restored != 1 {
+		t.Errorf("restore calls = %d, want 1", driver.restored)
+	}
+}
