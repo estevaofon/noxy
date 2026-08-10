@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -113,12 +114,88 @@ func TestPluginServerWritesJSONResponsesAndContinuesAfterDecodeError(t *testing.
 	assertPluginResult(t, result, true)
 }
 
+func TestPluginServerReturnsWorkerWriteErrorAndShutsDown(t *testing.T) {
+	writeErr := errors.New("RPC output failed")
+	output := &failAfterWriter{remainingWrites: 1, err: writeErr}
+	device := &fakeTerminalDevice{reader: strings.NewReader("A")}
+	driver := &fakeTerminalDriver{device: device, terminal: true}
+	runtime := newTerminalRuntime(driver)
+	server := newPluginServer(runtime, output)
+	inputReader, inputWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = inputWriter.Close()
+		_ = inputReader.Close()
+		runtime.shutdown()
+	})
+	serveDone := make(chan error, 1)
+
+	go func() {
+		serveDone <- server.serve(inputReader)
+	}()
+
+	if _, err := io.WriteString(inputWriter, "{\"method\":\"open_raw\",\"params\":[]}\n{\"method\":\"read_key\",\"params\":[]}\n"); err != nil {
+		t.Fatalf("write requests: %v", err)
+	}
+
+	select {
+	case err := <-serveDone:
+		if !errors.Is(err, writeErr) {
+			t.Fatalf("serve() error = %v, want %v", err, writeErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("serve() did not return after worker response write failed")
+	}
+
+	if driver.restoreCalls != 1 {
+		t.Fatalf("restore calls = %d, want 1", driver.restoreCalls)
+	}
+	if device.closeCalls != 1 {
+		t.Fatalf("Close calls = %d, want 1", device.closeCalls)
+	}
+}
+
+func TestPluginServerReturnsSynchronousWriteErrorAndShutsDown(t *testing.T) {
+	writeErr := errors.New("RPC output failed")
+	output := &failAfterWriter{err: writeErr}
+	device := &fakeTerminalDevice{reader: strings.NewReader("")}
+	driver := &fakeTerminalDriver{device: device, terminal: true}
+	runtime := newTerminalRuntime(driver)
+	server := newPluginServer(runtime, output)
+
+	err := server.serve(strings.NewReader("{\"method\":\"open_raw\",\"params\":[]}\n"))
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("serve() error = %v, want %v", err, writeErr)
+	}
+	if driver.restoreCalls != 1 {
+		t.Fatalf("restore calls = %d, want 1", driver.restoreCalls)
+	}
+	if device.closeCalls != 1 {
+		t.Fatalf("Close calls = %d, want 1", device.closeCalls)
+	}
+}
+
 type errorReader struct {
 	err error
 }
 
 func (r errorReader) Read([]byte) (int, error) {
 	return 0, r.err
+}
+
+type failAfterWriter struct {
+	mu              sync.Mutex
+	remainingWrites int
+	err             error
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.remainingWrites == 0 {
+		return 0, w.err
+	}
+	w.remainingWrites--
+	return len(p), nil
 }
 
 func assertPluginResult(t *testing.T, response pluginResponse, want interface{}) {

@@ -56,19 +56,37 @@ func (server *pluginServer) handle(request pluginRequest) pluginResponse {
 	}
 }
 
-func (server *pluginServer) write(response pluginResponse) {
+func (server *pluginServer) write(response pluginResponse) error {
 	server.writeMu.Lock()
 	defer server.writeMu.Unlock()
-	_ = server.encoder.Encode(response)
+	return server.encoder.Encode(response)
 }
 
 func (server *pluginServer) serve(input io.Reader) error {
 	scanner := bufio.NewScanner(input)
+	workerErrors := make(chan error, 1)
+	inputCloser, _ := input.(io.Closer)
+	var closeInput sync.Once
+	reportWorkerError := func(err error) {
+		server.runtime.shutdown()
+		select {
+		case workerErrors <- err:
+		default:
+		}
+		if inputCloser != nil {
+			closeInput.Do(func() { _ = inputCloser.Close() })
+		}
+	}
+
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
 		var request pluginRequest
 		if err := json.Unmarshal(line, &request); err != nil {
-			server.write(pluginResponse{Error: err.Error()})
+			if writeErr := server.write(pluginResponse{Error: err.Error()}); writeErr != nil {
+				server.runtime.shutdown()
+				server.workers.Wait()
+				return writeErr
+			}
 			continue
 		}
 
@@ -76,16 +94,27 @@ func (server *pluginServer) serve(input io.Reader) error {
 			server.workers.Add(1)
 			go func(request pluginRequest) {
 				defer server.workers.Done()
-				server.write(server.handle(request))
+				if err := server.write(server.handle(request)); err != nil {
+					reportWorkerError(err)
+				}
 			}(request)
 			continue
 		}
 
-		server.write(server.handle(request))
+		if err := server.write(server.handle(request)); err != nil {
+			server.runtime.shutdown()
+			server.workers.Wait()
+			return err
+		}
 	}
 
 	server.runtime.shutdown()
 	server.workers.Wait()
+	select {
+	case err := <-workerErrors:
+		return err
+	default:
+	}
 	return scanner.Err()
 }
 
