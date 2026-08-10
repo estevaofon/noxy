@@ -1,4 +1,5 @@
 use sys
+use terminal
 use time
 
 let WIDTH: int = 40
@@ -30,6 +31,20 @@ struct GameState
     enemy_column: int
     invulnerable_until: int
     status: string
+end
+
+func read_controls(commands: chan string)
+    while true do
+        let event: terminal.KeyEvent = terminal.read_key()
+        if !event.ok then
+            chan_send(commands, "q")
+            return
+        end
+        chan_send(commands, event.key)
+        if event.key == "q" || event.key == "ctrl+c" then
+            return
+        end
+    end
 end
 
 func new_invaders() -> Invader[]
@@ -374,6 +389,80 @@ func run_smoke()
     print("SPACE_INVADERS_SMOKE_OK")
 end
 
+func run_interactive()
+    if !terminal.is_terminal() then
+        print("Space Invaders requires an interactive terminal on standard input.")
+        return
+    end
+
+    let opened: terminal.TerminalResult = terminal.open_raw()
+    if !opened.ok then
+        print("Unable to open raw terminal mode: " + opened.error)
+        return
+    end
+
+    let started_at: int = time.now_ms()
+    let state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, started_at, started_at, 0, 0, "playing")
+    let invaders: Invader[] = new_invaders()
+    let shot: Projectile = Projectile(0, 0, false)
+    let enemy_shots: Projectile[] = new_enemy_shots()
+    let commands: chan string = make_chan(16)
+    let escape: string = fmt("%c", 27)
+    spawn(read_controls, commands)
+
+    iprint(escape + "[?25l" + escape + "[2J")
+    while state.status == "playing" do
+        let draining_commands: bool = true
+        while draining_commands do
+            when
+                case command = chan_recv(commands) then
+                    apply_command(state, shot, command)
+                default
+                    draining_commands = false
+            end
+        end
+
+        if state.status == "playing" then
+            let now: int = time.now_ms()
+            step_invaders(state, invaders, now)
+            step_player_shot(state, shot, invaders)
+            step_enemy_shots(state, enemy_shots, now)
+            spawn_enemy_shot(state, invaders, enemy_shots, now)
+            update_status(state, invaders)
+        end
+
+        let frame: string = build_frame(state, invaders, shot, enemy_shots)
+        iprint(escape + "[H" + frame)
+        if state.status == "playing" then
+            time.sleep(FRAME_MS)
+        end
+    end
+
+    if state.status == "victory" || state.status == "defeat" then
+        let waiting_to_exit: bool = true
+        while waiting_to_exit do
+            let command: string = chan_recv(commands)
+            if command == "q" || command == "ctrl+c" then
+                waiting_to_exit = false
+            end
+        end
+    end
+
+    let closed: bool = terminal.close()
+    iprint(escape + "[?25h")
+    print("")
+    if !closed then
+        print("Warning: terminal raw mode could not be restored cleanly.")
+    end
+    if state.status == "victory" then
+        print("Victory! Final score: " + to_str(state.score))
+    elif state.status == "defeat" then
+        print("Defeat. Final score: " + to_str(state.score))
+    else
+        print("Game quit. Final score: " + to_str(state.score))
+    end
+end
+
 func main()
     let args: string[] = sys.argv()
     let smoke: bool = false
@@ -389,7 +478,7 @@ func main()
         run_smoke()
         return
     end
-    print("Space Invaders interactive mode will be added in the next task.")
+    run_interactive()
 end
 
 main()
