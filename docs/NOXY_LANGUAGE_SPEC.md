@@ -676,94 +676,16 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `crypto` | Cryptographic functions (hashing, UUID) |
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
-| `terminal` | Interactive raw-terminal input |
+| `terminal` | Experimental interactive raw-terminal input; see [Terminal Module](TERMINAL_MODULE.md) |
 
-### Terminal Module
+### Experimental Terminal Module
 
-Import `terminal` when a program needs real-time keyboard input from an
-interactive standard input terminal:
+The `terminal` module provides raw-mode keyboard input for interactive terminal
+programs. It is experimental: its API and behavior may change between releases
+without the compatibility guarantees of stable standard library modules.
 
-```noxy
-use terminal
-```
-
-The module exposes the following types and functions:
-
-```noxy
-struct TerminalResult
-    ok: bool
-    error: string
-end
-
-struct KeyEvent
-    ok: bool
-    key: string
-    error: string
-end
-
-func is_terminal() -> bool
-func open_raw() -> TerminalResult
-func read_key() -> KeyEvent
-func close() -> bool
-```
-
-- `is_terminal()` reports whether standard input is interactive.
-- `open_raw()` saves the current terminal state and enables raw mode. Its
-  `TerminalResult.ok` is `false` and `error` describes the failure when stdin
-  is not interactive or raw mode cannot be enabled. Opening an already-active
-  raw session succeeds without replacing the saved state.
-- `read_key()` is available only in raw mode. It blocks until one key is read,
-  without requiring Enter, and returns either `{ok: true, key: ..., error: ""}`
-  or `{ok: false, key: "", error: ...}` when input is unavailable or fails.
-- `close()` restores the saved terminal state. It returns `true` after a
-  successful restore or when raw mode is already inactive, and `false` if
-  restoration fails.
-
-Closing restores raw state even when a `read_key()` call is already blocked.
-That active read is not cancelled and must be released by input or process
-termination. Reads queued behind it acquire the read lock, revalidate the raw
-state, and fail with an inactive-raw error after a successful close instead of
-reading more input.
-
-`read_key()` normalizes ASCII letters to lowercase. It returns `"space"` for
-Space, `"enter"` for CR or LF, and `"ctrl+c"` for Ctrl+C. Other printable
-Unicode runes are returned as strings, while other control bytes use a stable
-`"unknown:0xNN"` representation. Multi-byte special-key sequences such as
-arrow keys are not part of this module version.
-
-Always close an opened raw session explicitly. The VM also attempts to restore
-an active terminal when the root interpretation ends, including after a runtime
-error, and before `sys.exit()` terminates the process, but explicit cleanup
-keeps the program's terminal lifecycle clear:
-
-```noxy
-use terminal
-let opened: terminal.TerminalResult = terminal.open_raw()
-if opened.ok then
-    let event: terminal.KeyEvent = terminal.read_key()
-    print(event.key)
-    terminal.close()
-end
-```
-
-### Space Invaders Example
-
-`noxy_examples/space_invaders.nx` is an interactive terminal example. Run it
-from an interactive terminal; use `A` and `D` to move, Space to fire, and `Q`
-or Ctrl+C to quit. The game accepts a deterministic, non-interactive smoke
-mode for automated validation:
-
-```powershell
-go run cmd/noxy/main.go noxy_examples/space_invaders.nx
-go run cmd/noxy/main.go noxy_examples/space_invaders.nx --smoke
-```
-
-On normal completion, the example explicitly closes raw mode and emits the ANSI
-cursor-show sequence. If an unexpected runtime error unwinds the root
-interpretation after the cursor has been hidden, automatic cleanup still
-attempts raw-mode restoration, but ANSI presentation state is separate: the
-terminal may require a cursor-show or reset sequence to make the cursor visible
-again.
+See the dedicated [Experimental Terminal Module specification](TERMINAL_MODULE.md)
+for its API, lifecycle, key representation, limitations, and examples.
 
 ---
 
