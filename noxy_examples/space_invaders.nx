@@ -1,3 +1,8 @@
+// Este exemplo requer a biblioteca noxy_terminal.
+// Instale com: noxy --get github.com/estevaofon/noxy_terminal
+// Depois, siga as instruções do README da biblioteca: também é necessário
+// executar o script build_plugin.ps1 (Windows) ou build_plugin.sh (Unix).
+
 use sys
 use github_com.estevaofon.noxy_terminal.terminal as terminal
 use time
