@@ -8,7 +8,13 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from update_version import UpdateError, execute_update, normalize_version
+from update_version import (
+    UpdateError,
+    execute_update,
+    normalize_version,
+    parse_args,
+    resolve_target,
+)
 
 
 TARGET_FILES = (
@@ -61,6 +67,43 @@ class UpdateVersionTests(unittest.TestCase):
     def test_normalizes_prefixed_and_plain_semver(self) -> None:
         self.assertEqual(normalize_version("1.6.0"), ("1.6.0", (1, 6, 0)))
         self.assertEqual(normalize_version("v1.6.0"), ("1.6.0", (1, 6, 0)))
+
+    def test_resolves_named_and_explicit_targets(self) -> None:
+        current = (1, 5, 7)
+
+        self.assertEqual(resolve_target("major", current), ("2.0.0", (2, 0, 0)))
+        self.assertEqual(resolve_target("minor", current), ("1.6.0", (1, 6, 0)))
+        self.assertEqual(resolve_target("patch", current), ("1.5.8", (1, 5, 8)))
+        self.assertEqual(resolve_target(" MiNoR ", current), ("1.6.0", (1, 6, 0)))
+        self.assertEqual(resolve_target("v2.3.4", current), ("2.3.4", (2, 3, 4)))
+
+    def test_named_minor_bump_updates_every_surface(self) -> None:
+        diff = execute_update(self.root, "minor", "2026-08-09", False)
+
+        self.assertIn('const Version = "v1.6.0"', (self.root / TARGET_FILES[0]).read_text())
+        self.assertIn("noxy v1.6.0", (self.root / TARGET_FILES[1]).read_text())
+        self.assertIn("require example.org/library v1.4.0", (self.root / TARGET_FILES[1]).read_text())
+        self.assertIn("Noxy REPL v1.6.0", (self.root / TARGET_FILES[2]).read_text())
+        self.assertIn("*Version: 1.6.0*", (self.root / TARGET_FILES[3]).read_text())
+        changelog = (self.root / TARGET_FILES[4]).read_text()
+        self.assertIn("## [1.6.0] - 2026-08-09", changelog)
+        self.assertIn("## [1.4.0] - 2026-08-01", changelog)
+        self.assertIn("a/internal/version/version.go", diff)
+
+    def test_rejects_invalid_target_without_writing(self) -> None:
+        before = snapshot(self.root)
+
+        with self.assertRaisesRegex(
+            UpdateError, "major, minor, patch, X.Y.Z, or vX.Y.Z"
+        ):
+            execute_update(self.root, "feature", "2026-08-09", False)
+
+        self.assertEqual(snapshot(self.root), before)
+
+    def test_cli_defaults_omitted_target_to_minor(self) -> None:
+        args = parse_args([])
+
+        self.assertEqual(args.version, "minor")
 
     def test_rejects_semver_with_unicode_decimal_digits(self) -> None:
         with self.assertRaisesRegex(UpdateError, "semantic version"):

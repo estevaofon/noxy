@@ -57,6 +57,31 @@ def normalize_version(value: str) -> tuple[str, tuple[int, int, int]]:
     return normalized, tuple(int(part) for part in normalized.split("."))
 
 
+def resolve_target(
+    value: str, current: tuple[int, int, int]
+) -> tuple[str, tuple[int, int, int]]:
+    normalized = value.strip()
+    kind = normalized.lower()
+    major, minor, patch = current
+
+    if kind == "major":
+        target = (major + 1, 0, 0)
+    elif kind == "minor":
+        target = (major, minor + 1, 0)
+    elif kind == "patch":
+        target = (major, minor, patch + 1)
+    else:
+        try:
+            return normalize_version(normalized)
+        except UpdateError as error:
+            raise UpdateError(
+                f"invalid version target: {value!r}; expected "
+                "major, minor, patch, X.Y.Z, or vX.Y.Z"
+            ) from error
+
+    return ".".join(str(part) for part in target), target
+
+
 def normalize_date(value: str | None) -> str:
     normalized = date.today().isoformat() if value is None else value
     if not RELEASE_DATE.fullmatch(normalized):
@@ -225,11 +250,11 @@ def execute_update(
     root: Path, target: str, release_date: str | None = None, dry_run: bool = False
 ) -> str:
     root = root.resolve()
-    normalized, target_tuple = normalize_version(target)
     normalized_date = normalize_date(release_date)
     original = read_targets(root)
     current = inspect_current_versions(original)
     _current_text, current_tuple = normalize_version(current)
+    normalized, target_tuple = resolve_target(target, current_tuple)
     if target_tuple <= current_tuple:
         raise UpdateError(
             f"target version {normalized} must be greater than current version {current}"
@@ -250,7 +275,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Update all active Noxy release version surfaces."
     )
-    parser.add_argument("version", help="target semantic version, with optional v prefix")
+    parser.add_argument(
+        "version",
+        nargs="?",
+        default="minor",
+        help="target version: major, minor, patch, X.Y.Z, or vX.Y.Z (default: minor)",
+    )
     parser.add_argument("--date", dest="release_date", help="release date as YYYY-MM-DD")
     parser.add_argument("--dry-run", action="store_true", help="print diff without writing")
     parser.add_argument("--root", type=Path, default=default_root(), help="Noxy repository root")
