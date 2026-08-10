@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"errors"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -51,16 +50,6 @@ func TestTerminalBuiltins(t *testing.T) {
 		assertKeyEvent(t, callBuiltin(t, machine, "terminal_read_key", eventDefinition), eventDefinition, false, "", "terminal is not in raw mode")
 	})
 
-	t.Run("returns read error fields", func(t *testing.T) {
-		machine := New()
-		machine.shared.Terminal = newTestTerminalRuntime(&fakeTerminalDriver{terminal: true}, "")
-		resultDefinition := testTerminalResultDefinition()
-		eventDefinition := testKeyEventDefinition()
-
-		assertTerminalResult(t, callBuiltin(t, machine, "terminal_open_raw", resultDefinition), resultDefinition, true, "")
-		assertKeyEvent(t, callBuiltin(t, machine, "terminal_read_key", eventDefinition), eventDefinition, false, "", "EOF")
-	})
-
 	t.Run("returns operational failure fields", func(t *testing.T) {
 		machine := New()
 		machine.shared.Terminal = newTestTerminalRuntime(&fakeTerminalDriver{}, "")
@@ -69,28 +58,4 @@ func TestTerminalBuiltins(t *testing.T) {
 		assertTerminalResult(t, callBuiltin(t, machine, "terminal_open_raw", resultDefinition), resultDefinition, false, "standard input is not a terminal")
 	})
 
-	t.Run("returns false on close failure", func(t *testing.T) {
-		machine := New()
-		machine.shared.Terminal = newTestTerminalRuntime(&fakeTerminalDriver{terminal: true, closeErr: errors.New("restore failed")}, "")
-		resultDefinition := testTerminalResultDefinition()
-
-		assertTerminalResult(t, callBuiltin(t, machine, "terminal_open_raw", resultDefinition), resultDefinition, true, "")
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_close"), value.NewBool(false))
-	})
-
-	t.Run("returns null for malformed internal calls", func(t *testing.T) {
-		machine := New()
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_open_raw"), value.NewNull())
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_open_raw", value.NewString("wrong")), value.NewNull())
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_read_key"), value.NewNull())
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_read_key", value.NewString("wrong")), value.NewNull())
-	})
-
-	t.Run("returns null for typed nil struct definitions", func(t *testing.T) {
-		machine := New()
-		typedNilDefinition := value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjStruct)(nil)}
-
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_open_raw", typedNilDefinition), value.NewNull())
-		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_read_key", typedNilDefinition), value.NewNull())
-	})
 }

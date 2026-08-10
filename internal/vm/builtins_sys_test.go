@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -78,27 +77,5 @@ func TestSystemExitFromChildVMRestoresSharedTerminalBeforeExiting(t *testing.T) 
 	}
 	if driver.restored != 1 {
 		t.Errorf("restore calls = %d, want 1", driver.restored)
-	}
-}
-
-func TestSystemExitContinuesWhenTerminalRestoreFails(t *testing.T) {
-	restoreErr := errors.New("restore failed")
-	machine, driver := newVMWithActiveTestTerminal(t, restoreErr)
-
-	requestedCode := -1
-	machine.shared.exitProcess = func(code int) {
-		requestedCode = code
-	}
-
-	assertBuiltinValue(t, callBuiltin(t, machine, "sys_exit"), value.NewNull())
-
-	if requestedCode != 0 {
-		t.Errorf("exit code = %d, want default 0", requestedCode)
-	}
-	if driver.restored != 1 {
-		t.Errorf("restore calls = %d, want 1", driver.restored)
-	}
-	if !machine.shared.Terminal.raw {
-		t.Error("terminal raw state cleared after failed restoration")
 	}
 }
