@@ -1,0 +1,484 @@
+use sys
+use github_com.estevaofon.noxy_terminal.terminal as terminal
+use time
+
+let WIDTH: int = 40
+let HEIGHT: int = 20
+let INVADER_ROWS: int = 4
+let INVADER_COLS: int = 8
+let FRAME_MS: int = 50
+
+struct Invader
+    x: int
+    y: int
+    alive: bool
+end
+
+struct Projectile
+    x: int
+    y: int
+    active: bool
+end
+
+struct GameState
+    player_x: int
+    lives: int
+    score: int
+    invader_dx: int
+    invader_step_ms: int
+    last_invader_step: int
+    last_enemy_shot: int
+    enemy_column: int
+    invulnerable_until: int
+    status: string
+end
+
+func read_controls(commands: chan string)
+    while true do
+        let event: terminal.KeyEvent = terminal.read_key()
+        if !event.ok then
+            chan_send(commands, "q")
+            return
+        end
+        chan_send(commands, event.key)
+        if event.key == "q" || event.key == "ctrl+c" then
+            return
+        end
+    end
+end
+
+func new_invaders() -> Invader[]
+    let invaders: Invader[] = []
+    let row: int = 0
+    while row < INVADER_ROWS do
+        let column: int = 0
+        while column < INVADER_COLS do
+            append(invaders, Invader(4 + column * 4, 2 + row * 2, true))
+            column = column + 1
+        end
+        row = row + 1
+    end
+    return invaders
+end
+
+func new_enemy_shots() -> Projectile[]
+    let shots: Projectile[] = []
+    let i: int = 0
+    while i < 3 do
+        append(shots, Projectile(0, 0, false))
+        i = i + 1
+    end
+    return shots
+end
+
+func apply_command(state: ref GameState, shot: ref Projectile, command: string)
+    if state.status != "playing" then
+        return
+    end
+
+    if command == "a" then
+        if state.player_x > 1 then
+            state.player_x = state.player_x - 1
+        end
+    elif command == "d" then
+        if state.player_x < WIDTH - 2 then
+            state.player_x = state.player_x + 1
+        end
+    elif command == "space" then
+        if !shot.active then
+            shot.x = state.player_x
+            shot.y = HEIGHT - 3
+            shot.active = true
+        end
+    elif command == "q" || command == "ctrl+c" then
+        state.status = "quit"
+    end
+end
+
+func count_alive(invaders: Invader[]) -> int
+    let alive: int = 0
+    let i: int = 0
+    while i < length(invaders) do
+        if invaders[i].alive then
+            alive = alive + 1
+        end
+        i = i + 1
+    end
+    return alive
+end
+
+func step_invaders(state: ref GameState, invaders: ref Invader[], now: int)
+    if state.status != "playing" || now - state.last_invader_step < state.invader_step_ms then
+        return
+    end
+
+    let turn: bool = false
+    let i: int = 0
+    while i < length(invaders) do
+        if invaders[i].alive then
+            let next_x: int = invaders[i].x + state.invader_dx
+            if next_x <= 1 || next_x >= WIDTH - 2 then
+                turn = true
+            end
+        end
+        i = i + 1
+    end
+
+    i = 0
+    if turn then
+        state.invader_dx = 0 - state.invader_dx
+        while i < length(invaders) do
+            if invaders[i].alive then
+                invaders[i].y = invaders[i].y + 1
+            end
+            i = i + 1
+        end
+    else
+        while i < length(invaders) do
+            if invaders[i].alive then
+                invaders[i].x = invaders[i].x + state.invader_dx
+            end
+            i = i + 1
+        end
+    end
+
+    let destroyed: int = INVADER_ROWS * INVADER_COLS - count_alive(invaders)
+    state.invader_step_ms = 500 - destroyed * 25
+    if state.invader_step_ms < 100 then
+        state.invader_step_ms = 100
+    end
+    state.last_invader_step = now
+end
+
+func step_player_shot(state: ref GameState, shot: ref Projectile, invaders: ref Invader[])
+    if state.status != "playing" || !shot.active then
+        return
+    end
+
+    shot.y = shot.y - 1
+    if shot.y <= 0 then
+        shot.active = false
+        return
+    end
+
+    let i: int = 0
+    while i < length(invaders) do
+        if invaders[i].alive && invaders[i].x == shot.x && invaders[i].y == shot.y then
+            invaders[i].alive = false
+            state.score = state.score + 10
+            shot.active = false
+            return
+        end
+        i = i + 1
+    end
+end
+
+func step_enemy_shots(state: ref GameState, shots: ref Projectile[], now: int)
+    if state.status != "playing" then
+        return
+    end
+
+    let i: int = 0
+    while i < length(shots) do
+        if shots[i].active then
+            shots[i].y = shots[i].y + 1
+            if shots[i].y >= HEIGHT - 2 then
+                if shots[i].x == state.player_x && now >= state.invulnerable_until then
+                    state.lives = state.lives - 1
+                    state.invulnerable_until = now + 750
+                end
+                shots[i].active = false
+            end
+        end
+        i = i + 1
+    end
+end
+
+func spawn_enemy_shot(state: ref GameState, invaders: Invader[], shots: ref Projectile[], now: int)
+    if state.status != "playing" || now - state.last_enemy_shot < 800 then
+        return
+    end
+
+    let slot: int = -1
+    let i: int = 0
+    while i < length(shots) do
+        if !shots[i].active && slot == -1 then
+            slot = i
+        end
+        i = i + 1
+    end
+    if slot == -1 then
+        return
+    end
+
+    let attempt: int = 0
+    while attempt < INVADER_COLS do
+        let column: int = (state.enemy_column + attempt) % INVADER_COLS
+        let shooter: int = -1
+        i = 0
+        while i < length(invaders) do
+            if i % INVADER_COLS == column && invaders[i].alive then
+                if shooter == -1 || invaders[i].y > invaders[shooter].y then
+                    shooter = i
+                end
+            end
+            i = i + 1
+        end
+
+        if shooter != -1 then
+            shots[slot].x = invaders[shooter].x
+            shots[slot].y = invaders[shooter].y + 1
+            shots[slot].active = true
+            state.enemy_column = (column + 1) % INVADER_COLS
+            state.last_enemy_shot = now
+            return
+        end
+        attempt = attempt + 1
+    end
+
+    state.last_enemy_shot = now
+end
+
+func update_status(state: ref GameState, invaders: Invader[])
+    if state.status != "playing" then
+        return
+    end
+    if state.lives <= 0 then
+        state.status = "defeat"
+        return
+    end
+    if count_alive(invaders) == 0 then
+        state.status = "victory"
+        return
+    end
+
+    let i: int = 0
+    while i < length(invaders) do
+        if invaders[i].alive && invaders[i].y >= HEIGHT - 2 then
+            state.status = "defeat"
+            return
+        end
+        i = i + 1
+    end
+end
+
+func fixed_width_line(text: string) -> string
+    let line: string = text
+    while length(line) < WIDTH do
+        line = line + " "
+    end
+    return line
+end
+
+func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_shots: Projectile[]) -> string
+    let cells: string[] = []
+    let i: int = 0
+    while i < WIDTH * HEIGHT do
+        append(cells, " ")
+        i = i + 1
+    end
+
+    let y: int = 0
+    while y < HEIGHT do
+        let x: int = 0
+        while x < WIDTH do
+            if y == 0 || y == HEIGHT - 1 || x == 0 || x == WIDTH - 1 then
+                cells[y * WIDTH + x] = "#"
+            end
+            x = x + 1
+        end
+        y = y + 1
+    end
+
+    i = 0
+    while i < length(invaders) do
+        if invaders[i].alive then
+            cells[invaders[i].y * WIDTH + invaders[i].x] = "W"
+        end
+        i = i + 1
+    end
+    if shot.active then
+        cells[shot.y * WIDTH + shot.x] = "|"
+    end
+    i = 0
+    while i < length(enemy_shots) do
+        if enemy_shots[i].active then
+            cells[enemy_shots[i].y * WIDTH + enemy_shots[i].x] = "!"
+        end
+        i = i + 1
+    end
+    cells[(HEIGHT - 2) * WIDTH + state.player_x] = "A"
+
+    let frame: string = fixed_width_line("Score: " + to_str(state.score) + " Lives: " + to_str(state.lives) + " Status: " + state.status) + "\n"
+    y = 0
+    while y < HEIGHT do
+        let row: string = ""
+        let x: int = 0
+        while x < WIDTH do
+            row = row + cells[y * WIDTH + x]
+            x = x + 1
+        end
+        frame = frame + row + "\n"
+        y = y + 1
+    end
+    frame = frame + fixed_width_line("A/D move  SPACE fire  Q quit")
+    return frame
+end
+
+func smoke_fail(message: string)
+    print("SPACE_INVADERS_SMOKE_FAIL: " + message)
+    sys.exit(1)
+end
+
+func run_smoke()
+    let base: int = time.now_ms()
+    let state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, base, base - 800, 0, 0, "playing")
+    let invaders: Invader[] = new_invaders()
+    let shot: Projectile = Projectile(0, 0, false)
+    let enemy_shots: Projectile[] = new_enemy_shots()
+
+    apply_command(state, shot, "a")
+    apply_command(state, shot, "d")
+    apply_command(state, shot, "space")
+
+    let frame_number: int = 0
+    while frame_number < 12 do
+        let now: int = base + frame_number * FRAME_MS
+        step_invaders(state, invaders, now)
+        step_player_shot(state, shot, invaders)
+        step_enemy_shots(state, enemy_shots, now)
+        spawn_enemy_shot(state, invaders, enemy_shots, now)
+        update_status(state, invaders)
+        let frame: string = build_frame(state, invaders, shot, enemy_shots)
+
+        if state.player_x < 1 || state.player_x > WIDTH - 2 then
+            smoke_fail("player left playfield")
+        end
+        if state.lives < 0 || state.lives > 3 then
+            smoke_fail("invalid lives")
+        end
+        if shot.active && (shot.y <= 0 || shot.y >= HEIGHT - 1) then
+            smoke_fail("player projectile left playfield")
+        end
+        let active_enemy_shots: int = 0
+        let i: int = 0
+        while i < length(enemy_shots) do
+            if enemy_shots[i].active then
+                active_enemy_shots = active_enemy_shots + 1
+                if enemy_shots[i].y <= 0 || enemy_shots[i].y >= HEIGHT - 1 then
+                    smoke_fail("enemy projectile left playfield")
+                end
+            end
+            i = i + 1
+        end
+        if active_enemy_shots > 3 then
+            smoke_fail("too many enemy projectiles")
+        end
+        if length(frame) != (HEIGHT + 2) * (WIDTH + 1) - 1 then
+            smoke_fail("invalid frame dimensions")
+        end
+        frame_number = frame_number + 1
+    end
+
+    if state.score != 10 then
+        smoke_fail("player projectile did not hit an invader")
+    end
+    if count_alive(invaders) != INVADER_ROWS * INVADER_COLS - 1 then
+        smoke_fail("alive invader count is inconsistent")
+    end
+    print("SPACE_INVADERS_SMOKE_OK")
+end
+
+func run_interactive()
+    if !terminal.is_terminal() then
+        print("Space Invaders requires an interactive terminal on standard input.")
+        return
+    end
+
+    let opened: terminal.TerminalResult = terminal.open_raw()
+    if !opened.ok then
+        print("Unable to open raw terminal mode: " + opened.error)
+        return
+    end
+
+    let started_at: int = time.now_ms()
+    let state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, started_at, started_at, 0, 0, "playing")
+    let invaders: Invader[] = new_invaders()
+    let shot: Projectile = Projectile(0, 0, false)
+    let enemy_shots: Projectile[] = new_enemy_shots()
+    let commands: chan string = make_chan(16)
+    let escape: string = fmt("%c", 27)
+    spawn(read_controls, commands)
+
+    iprint(escape + "[?25l" + escape + "[2J")
+    while state.status == "playing" do
+        let draining_commands: bool = true
+        while draining_commands do
+            when
+                case command = chan_recv(commands) then
+                    apply_command(state, shot, command)
+                default
+                    draining_commands = false
+            end
+        end
+
+        if state.status == "playing" then
+            let now: int = time.now_ms()
+            step_invaders(state, invaders, now)
+            step_player_shot(state, shot, invaders)
+            step_enemy_shots(state, enemy_shots, now)
+            spawn_enemy_shot(state, invaders, enemy_shots, now)
+            update_status(state, invaders)
+        end
+
+        let frame: string = build_frame(state, invaders, shot, enemy_shots)
+        iprint(escape + "[H" + frame)
+        if state.status == "playing" then
+            time.sleep(FRAME_MS)
+        end
+    end
+
+    if state.status == "victory" || state.status == "defeat" then
+        let waiting_to_exit: bool = true
+        while waiting_to_exit do
+            let command: string = chan_recv(commands)
+            if command == "q" || command == "ctrl+c" then
+                waiting_to_exit = false
+            end
+        end
+    end
+
+    let closed: bool = terminal.close()
+    iprint(escape + "[?25h")
+    print("")
+    if !closed then
+        print("Warning: terminal raw mode could not be restored cleanly.")
+    end
+    if state.status == "victory" then
+        print("Victory! Final score: " + to_str(state.score))
+    elif state.status == "defeat" then
+        print("Defeat. Final score: " + to_str(state.score))
+    else
+        print("Game quit. Final score: " + to_str(state.score))
+    end
+end
+
+func main()
+    let args: string[] = sys.argv()
+    let smoke: bool = false
+    let i: int = 0
+    while i < length(args) do
+        if args[i] == "--smoke" then
+            smoke = true
+        end
+        i = i + 1
+    end
+
+    if smoke then
+        run_smoke()
+        return
+    end
+    run_interactive()
+end
+
+main()

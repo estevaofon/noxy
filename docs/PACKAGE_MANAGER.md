@@ -53,9 +53,13 @@ my_project/
 
 ## Using Packages
 
-Once installed, you can import packages in your Noxy code using their path relative to `noxy_libs` or the project root conform configured.
+Once installed, import packages using the module path. For example, the external terminal package is imported as:
 
-*(Note: Specific import syntax depends on the current Noxy language specification for imports, typically finding files in `noxy_libs` automatically or via relative paths).*
+```noxy
+use github_com.estevaofon.noxy_terminal.terminal as terminal
+```
+
+The current package copy is provisional inside `noxy_libs` and may move to its own repository later.
 
 ## Creating a Package
 

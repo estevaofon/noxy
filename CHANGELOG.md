@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Experimental external terminal package backed by a Go plugin.
+- Complete Space Invaders example using the external terminal package.
+
 ## [0.1.0] - 2026-08-10
 
 ### Added
