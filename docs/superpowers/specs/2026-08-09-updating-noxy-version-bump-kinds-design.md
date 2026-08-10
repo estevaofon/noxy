@@ -68,4 +68,3 @@ Add RED/GREEN regression coverage for:
 - CLI argument parsing defaults the omitted target to `minor`.
 
 Re-run the complete updater suite, skill validator, real repository dry run, Go tests/build/vet, and the Noxy integration suite before updating the open pull request.
-
