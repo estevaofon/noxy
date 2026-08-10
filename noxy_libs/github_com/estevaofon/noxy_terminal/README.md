@@ -17,8 +17,10 @@ the following commands:
 ```
 
 The build creates `noxy-plugin-terminal` (`noxy-plugin-terminal.exe` on
-Windows). Keep that binary next to the program that loads this module, or make
-it available on `PATH`.
+Windows). At load time, the generic loader searches `PATH`, the current working
+directory, and recursively below that directory's `noxy_libs` tree. Place the
+binary in one of those locations; it is not resolved relative to the Noxy
+executable.
 
 ## Use
 
@@ -59,9 +61,13 @@ named keys `space`, `enter`, and `ctrl+c`. Other printable characters are
 returned as themselves; unsupported control input is represented as
 `unknown:0xNN`.
 
-Only one reader may call `read_key()` at a time. Call `close()` explicitly
-after opening raw mode, including on every normal game exit, so the terminal
-settings are restored promptly. Calling `close()` before opening is safe.
+Only one reader may call `read_key()` at a time. `read_key()` and plugin RPC
+requests are blocking and serialized, so never call `close()` while a reader
+loop is active. First signal the reader loop to stop, let it return from
+`read_key()`, and wait for that loop to finish; only then call `close()`.
+Call `close()` explicitly after opening raw mode, including on every normal
+game exit, so the terminal settings are restored promptly. Calling `close()`
+before opening is safe.
 
 On Windows the plugin opens `CONIN$`; on Unix-like systems it opens `/dev/tty`.
 This lets interactive terminal input work even when the program's standard
