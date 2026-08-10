@@ -67,9 +67,9 @@ func (vm *VM) defineTerminalBuiltins() {
 }
 
 func terminalStructDefinition(args []value.Value) (*value.ObjStruct, bool) {
-	if len(args) != 1 {
+	if len(args) != 1 || args[0].Type != value.VAL_OBJ {
 		return nil, false
 	}
 	definition, ok := args[0].Obj.(*value.ObjStruct)
-	return definition, ok
+	return definition, ok && definition != nil
 }

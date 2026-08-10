@@ -85,4 +85,12 @@ func TestTerminalBuiltins(t *testing.T) {
 		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_read_key"), value.NewNull())
 		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_read_key", value.NewString("wrong")), value.NewNull())
 	})
+
+	t.Run("returns null for typed nil struct definitions", func(t *testing.T) {
+		machine := New()
+		typedNilDefinition := value.Value{Type: value.VAL_OBJ, Obj: (*value.ObjStruct)(nil)}
+
+		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_open_raw", typedNilDefinition), value.NewNull())
+		assertBuiltinValue(t, callBuiltin(t, machine, "terminal_read_key", typedNilDefinition), value.NewNull())
+	})
 }
