@@ -162,7 +162,7 @@ func step_player_shot(state: ref GameState, shot: ref Projectile, invaders: ref 
 
     let i: int = 0
     while i < length(invaders) do
-        if invaders[i].alive && invaders[i].x == shot.x && invaders[i].y == shot.y then
+        if invaders[i].alive && shot.x >= invaders[i].x - 1 && shot.x <= invaders[i].x + 1 && invaders[i].y == shot.y then
             invaders[i].alive = false
             state.score = state.score + 10
             shot.active = false
@@ -373,7 +373,15 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
         frame = frame + "═"
         i = i + 1
     end
-    return frame + "╝" + color("0", colored)
+    frame = frame + "╝" + color("0", colored) + "\n"
+    let guide_move: string = "A/D MOVE   "
+    let guide_fire: string = "SPACE FIRE   "
+    let guide_quit: string = "Q QUIT"
+    let guide_padding: string = ""
+    while length(guide_move) + length(guide_fire) + length(guide_quit) + length(guide_padding) < WIDTH + 2 do
+        guide_padding = guide_padding + " "
+    end
+    return frame + color("96", colored) + guide_move + color("93", colored) + guide_fire + color("95", colored) + guide_quit + guide_padding + color("0", colored)
 end
 
 func smoke_fail(message: string)
@@ -401,9 +409,12 @@ func smoke_assert_frame(state: GameState, invaders: Invader[], shot: Projectile,
     if !contains_text(colored_frame, color("92", true) + "LIVES 3") then
         smoke_fail("HUD lives segment is not green")
     end
+    if !contains_text(frame, "A/D MOVE") || !contains_text(frame, "SPACE FIRE") || !contains_text(frame, "Q QUIT") then
+        smoke_fail("command guide is missing")
+    end
 
     let frame_lines: strings.SplitResult = strings.split(frame, "\n")
-    if frame_lines.count != HEIGHT + 3 then smoke_fail("frame has invalid line count") end
+    if frame_lines.count != HEIGHT + 4 then smoke_fail("frame has invalid line count") end
     let line_index: int = 0
     while line_index < frame_lines.count do
         if length(frame_lines.parts[line_index]) != WIDTH + 2 then
@@ -446,6 +457,24 @@ func smoke_assert_boundaries(base: int)
     if spawn_shots[0].active then smoke_fail("enemy projectile spawned outside playfield") end
 end
 
+func smoke_assert_invader_hitbox()
+    let left_state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, 0, 0, 0, 0, "playing")
+    let left_invaders: Invader[] = [Invader(10, 5, true)]
+    let left_shot: Projectile = Projectile(9, 6, true)
+    step_player_shot(left_state, left_shot, left_invaders)
+    if left_invaders[0].alive || left_state.score != 10 then
+        smoke_fail("left edge of invader sprite has no collision")
+    end
+
+    let right_state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, 0, 0, 0, 0, "playing")
+    let right_invaders: Invader[] = [Invader(10, 5, true)]
+    let right_shot: Projectile = Projectile(11, 6, true)
+    step_player_shot(right_state, right_shot, right_invaders)
+    if right_invaders[0].alive || right_state.score != 10 then
+        smoke_fail("right edge of invader sprite has no collision")
+    end
+end
+
 func run_smoke()
     let base: int = time.now_ms()
     let state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, base, base - 800, 0, 0, "playing")
@@ -453,6 +482,7 @@ func run_smoke()
     let shot: Projectile = Projectile(0, 0, false)
     let enemy_shots: Projectile[] = new_enemy_shots()
 
+    smoke_assert_invader_hitbox()
     smoke_assert_frame(state, invaders, shot, enemy_shots)
     smoke_assert_boundaries(base)
 
