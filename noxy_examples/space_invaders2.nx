@@ -5,6 +5,7 @@
 
 use sys
 use github_com.estevaofon.noxy_terminal.terminal as terminal
+use strings
 use time
 
 let WIDTH: int = 56
@@ -224,6 +225,11 @@ func spawn_enemy_shot(state: ref GameState, invaders: Invader[], shots: ref Proj
         end
 
         if shooter != -1 then
+            if invaders[shooter].y + 1 >= HEIGHT - 1 then
+                state.enemy_column = (column + 1) % INVADER_COLS
+                state.last_enemy_shot = now
+                return
+            end
             shots[slot].x = invaders[shooter].x
             shots[slot].y = invaders[shooter].y + 1
             shots[slot].active = true
@@ -279,10 +285,9 @@ func contains_text(text: string, target: string) -> bool
 end
 
 func cell_color(cell: string) -> string
-    if cell == "╭" || cell == "╬" || cell == "╮" || cell == "╰" || cell == "╩" || cell == "╯" then
-        return "96"
-    end
-    if cell == "▟" || cell == "█" || cell == "▙" then return "92" end
+    if cell == "╭" || cell == "╬" || cell == "╮" then return "95" end
+    if cell == "╰" || cell == "╩" || cell == "╯" then return "93" end
+    if cell == "▟" || cell == "█" || cell == "▙" then return "96" end
     if cell == "│" then return "93" end
     if cell == "▼" then return "91" end
     if cell == "✦" || cell == "·" then return "90" end
@@ -327,7 +332,14 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
         cells[(HEIGHT - 2) * WIDTH + state.player_x + 1] = "▙"
     end
 
-    let frame: string = color("93", colored) + "SCORE " + to_str(state.score) + "   LIVES " + to_str(state.lives) + "   STATUS " + state.status + color("0", colored) + "\n"
+    let hud_score: string = "SCORE " + to_str(state.score) + "   "
+    let hud_lives: string = "LIVES " + to_str(state.lives) + "   "
+    let hud_status: string = "STATUS " + state.status
+    let hud_padding: string = ""
+    while length(hud_score) + length(hud_lives) + length(hud_status) + length(hud_padding) < WIDTH + 2 do
+        hud_padding = hud_padding + " "
+    end
+    let frame: string = color("93", colored) + hud_score + color("92", colored) + hud_lives + color("93", colored) + hud_status + hud_padding + color("0", colored) + "\n"
     let border: string = "╔"
     i = 0
     while i < WIDTH do
@@ -335,17 +347,17 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
         i = i + 1
     end
     border = border + "╗"
-    frame = frame + color("95", colored) + border + color("0", colored) + "\n"
+    frame = frame + color("96", colored) + border + color("0", colored) + "\n"
 
     let y: int = 0
     while y < HEIGHT do
-        let row: string = color("95", colored) + "║"
+        let row: string = color("96", colored) + "║"
         let x: int = 0
         while x < WIDTH do
             let cell: string = cells[y * WIDTH + x]
             let code: string = cell_color(cell)
             if code != "" then
-                row = row + color(code, colored) + cell + color("95", colored)
+                row = row + color(code, colored) + cell + color("96", colored)
             else
                 row = row + cell
             end
@@ -355,7 +367,7 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
         frame = frame + row + "\n"
         y = y + 1
     end
-    frame = frame + color("95", colored) + "╚"
+    frame = frame + color("96", colored) + "╚"
     i = 0
     while i < WIDTH do
         frame = frame + "═"
@@ -369,14 +381,9 @@ func smoke_fail(message: string)
     sys.exit(1)
 end
 
-func run_smoke()
-    let base: int = time.now_ms()
-    let state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, base, base - 800, 0, 0, "playing")
-    let invaders: Invader[] = new_invaders()
-    let shot: Projectile = Projectile(0, 0, false)
-    let enemy_shots: Projectile[] = new_enemy_shots()
-
+func smoke_assert_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_shots: Projectile[])
     let frame: string = build_frame(state, invaders, shot, enemy_shots, false)
+    let colored_frame: string = build_frame(state, invaders, shot, enemy_shots, true)
     if !contains_text(frame, "SCORE") then smoke_fail("HUD is missing score") end
     if !contains_text(frame, "LIVES") then smoke_fail("HUD is missing lives") end
     if !contains_text(frame, "╔") || !contains_text(frame, "╝") then
@@ -385,6 +392,69 @@ func run_smoke()
     if !contains_text(frame, "╭╬╮") && !contains_text(frame, "╰╩╯") then
         smoke_fail("invader sprite is missing")
     end
+    if cell_color("▟") != "96" then smoke_fail("player sprite is not cyan") end
+    if cell_color("╭") != "95" then smoke_fail("upper invader sprite is not magenta") end
+    if cell_color("╰") != "93" then smoke_fail("lower invader sprite is not yellow") end
+    if !contains_text(colored_frame, color("96", true) + "╔") then
+        smoke_fail("arcade border is not cyan")
+    end
+    if !contains_text(colored_frame, color("92", true) + "LIVES 3") then
+        smoke_fail("HUD lives segment is not green")
+    end
+
+    let frame_lines: strings.SplitResult = strings.split(frame, "\n")
+    if frame_lines.count != HEIGHT + 3 then smoke_fail("frame has invalid line count") end
+    let line_index: int = 0
+    while line_index < frame_lines.count do
+        if length(frame_lines.parts[line_index]) != WIDTH + 2 then
+            smoke_fail("frame line has invalid visual width")
+        end
+        line_index = line_index + 1
+    end
+    if contains_text(frame, fmt("%c", 27)) then
+        smoke_fail("plain frame contains ANSI escape codes")
+    end
+end
+
+func smoke_assert_boundaries(base: int)
+    let boundary_state: GameState = GameState(2, 3, 0, 1, 500, base, base, 0, 0, "playing")
+    let boundary_shot: Projectile = Projectile(0, 0, false)
+    let boundary_step: int = 0
+    while boundary_step < WIDTH * 2 do
+        apply_command(boundary_state, boundary_shot, "a")
+        boundary_step = boundary_step + 1
+    end
+    if boundary_state.player_x != 2 then smoke_fail("player crossed left boundary") end
+    boundary_step = 0
+    while boundary_step < WIDTH * 2 do
+        apply_command(boundary_state, boundary_shot, "d")
+        boundary_step = boundary_step + 1
+    end
+    if boundary_state.player_x != WIDTH - 3 then smoke_fail("player crossed right boundary") end
+
+    let low_invaders: Invader[] = new_invaders()
+    let low_index: int = 0
+    while low_index < length(low_invaders) do
+        low_invaders[low_index].alive = false
+        low_index = low_index + 1
+    end
+    low_invaders[0].alive = true
+    low_invaders[0].y = HEIGHT - 2
+    let spawn_state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, base, base - 800, 0, 0, "playing")
+    let spawn_shots: Projectile[] = new_enemy_shots()
+    spawn_enemy_shot(spawn_state, low_invaders, spawn_shots, base)
+    if spawn_shots[0].active then smoke_fail("enemy projectile spawned outside playfield") end
+end
+
+func run_smoke()
+    let base: int = time.now_ms()
+    let state: GameState = GameState(WIDTH / 2, 3, 0, 1, 500, base, base - 800, 0, 0, "playing")
+    let invaders: Invader[] = new_invaders()
+    let shot: Projectile = Projectile(0, 0, false)
+    let enemy_shots: Projectile[] = new_enemy_shots()
+
+    smoke_assert_frame(state, invaders, shot, enemy_shots)
+    smoke_assert_boundaries(base)
 
     apply_command(state, shot, "a")
     apply_command(state, shot, "d")
@@ -424,13 +494,13 @@ func run_smoke()
         end
         frame_number = frame_number + 1
     end
-
     if state.score != 10 then
         smoke_fail("player projectile did not hit an invader")
     end
     if count_alive(invaders) != INVADER_ROWS * INVADER_COLS - 1 then
         smoke_fail("alive invader count is inconsistent")
     end
+    if state.status != "playing" then smoke_fail("smoke simulation left playing status") end
     print("SPACE_INVADERS2_SMOKE_OK")
 end
 
