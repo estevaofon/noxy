@@ -6,6 +6,7 @@
 
 - Experimental external terminal package backed by a Go plugin.
 - Complete Space Invaders example using the external terminal package.
+- Neo Arcade Space Invaders 2 example with colored terminal sprites, deterministic starfield, smoke validation, and safe interactive terminal cleanup. `#examples` @estevaofon
 
 ## [0.1.0] - 2026-08-10
 
