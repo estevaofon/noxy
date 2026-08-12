@@ -72,6 +72,26 @@ func TestStrictJSONValToGoRejectsNonJSONValues(t *testing.T) {
 	}
 }
 
+func TestStrictJSONValToGoRejectsInvalidUTF8Strings(t *testing.T) {
+	invalidValue := value.NewString(string([]byte{0xff}))
+	invalidKey := value.NewMap()
+	invalidKey.Obj.(*value.ObjMap).Data[string([]byte{0xff})] = value.NewBool(true)
+	tests := []struct {
+		name  string
+		input value.Value
+	}{
+		{name: "value", input: invalidValue},
+		{name: "map key", input: invalidKey},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := strictJSONValToGo(tt.input); err == nil {
+				t.Fatal("strict conversion accepted invalid UTF-8")
+			}
+		})
+	}
+}
+
 func TestStrictJSONValToGoRejectsCyclesAndAcceptsSharedChildren(t *testing.T) {
 	arrayCycle := value.NewArray(nil)
 	arrayCycle.Obj.(*value.ObjArray).Elements = []value.Value{arrayCycle}
@@ -185,6 +205,56 @@ func TestJSONDumpsResultBuiltinReportsSuccessAndFailure(t *testing.T) {
 	assertBuiltinValue(t, failureFields["data"], value.NewString(""))
 	if failureFields["error"].String() == "" {
 		t.Fatal("strict encoder returned an empty error")
+	}
+}
+
+func TestJSONDumpsResultBuiltinRejectsInvalidStrictValues(t *testing.T) {
+	machine := New()
+	resultType := value.NewStruct("EncodeResult", []string{"success", "data", "error"})
+	invalidKey := value.NewMap()
+	invalidKey.Obj.(*value.ObjMap).Data[string([]byte{0xff})] = value.NewBool(true)
+	arrayCycle := value.NewArray(nil)
+	arrayCycle.Obj.(*value.ObjArray).Elements = []value.Value{arrayCycle}
+	mapCycle := value.NewMap()
+	mapCycle.Obj.(*value.ObjMap).Data["self"] = mapCycle
+	tests := []struct {
+		name  string
+		input value.Value
+	}{
+		{name: "invalid UTF-8 string", input: value.NewString(string([]byte{0xff}))},
+		{name: "invalid UTF-8 map key", input: invalidKey},
+		{name: "NaN", input: value.NewFloat(math.NaN())},
+		{name: "array cycle", input: arrayCycle},
+		{name: "map cycle", input: mapCycle},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			failure := callBuiltin(t, machine, "json_dumps_result", tt.input, resultType)
+			fields := failure.Obj.(*value.ObjInstance).Fields
+			assertBuiltinValue(t, fields["success"], value.NewBool(false))
+			assertBuiltinValue(t, fields["data"], value.NewString(""))
+			if fields["error"].String() == "" {
+				t.Fatal("strict encoder returned an empty error")
+			}
+		})
+	}
+}
+
+func TestJSONLoadsBuiltinRejectsInvalidUTF8WithoutMutation(t *testing.T) {
+	machine := New()
+	target := value.NewMap()
+	targetMap := target.Obj.(*value.ObjMap)
+	targetMap.Data["sentinel"] = value.NewString("keep")
+	invalidJSON := value.NewString(string([]byte{'{', '"', 'n', 'a', 'm', 'e', '"', ':', '"', 0xff, '"', '}'}))
+
+	result := callBuiltin(t, machine, "json_loads", invalidJSON, target)
+	assertBuiltinValue(t, result, value.NewBool(false))
+	if len(targetMap.Data) != 1 {
+		t.Fatalf("target mutated after invalid JSON: %#v", targetMap.Data)
+	}
+	assertBuiltinValue(t, targetMap.Data["sentinel"], value.NewString("keep"))
+	if _, exists := targetMap.Data["name"]; exists {
+		t.Fatal("target gained a field from invalid JSON")
 	}
 }
 

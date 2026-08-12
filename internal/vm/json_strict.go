@@ -3,6 +3,7 @@ package vm
 import (
 	"errors"
 	"math"
+	"unicode/utf8"
 
 	"noxy-vm/internal/value"
 )
@@ -11,6 +12,7 @@ var (
 	errJSONUnsupported = errors.New("value is not JSON-compatible")
 	errJSONNonFinite   = errors.New("non-finite float is not valid JSON")
 	errJSONCycle       = errors.New("cyclic value is not valid JSON")
+	errJSONInvalidUTF8 = errors.New("invalid UTF-8 is not valid JSON")
 )
 
 type strictJSONTraversal struct {
@@ -42,6 +44,9 @@ func (t *strictJSONTraversal) convert(input value.Value) (interface{}, error) {
 	case value.VAL_OBJ:
 		switch object := input.Obj.(type) {
 		case string:
+			if !utf8.ValidString(object) {
+				return nil, errJSONInvalidUTF8
+			}
 			return object, nil
 		case *value.ObjArray:
 			if object == nil {
@@ -89,6 +94,9 @@ func (t *strictJSONTraversal) convertMap(mapping *value.ObjMap) (map[string]inte
 		stringKey, ok := key.(string)
 		if !ok {
 			return nil, errJSONUnsupported
+		}
+		if !utf8.ValidString(stringKey) {
+			return nil, errJSONInvalidUTF8
 		}
 		convertedValue, err := t.convert(item)
 		if err != nil {

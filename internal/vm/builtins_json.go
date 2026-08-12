@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"noxy-vm/internal/value"
 )
@@ -80,6 +81,9 @@ func (vm *VM) defineJSONBuiltins() {
 			return value.NewBool(false)
 		}
 		jsonStr := args[0].String()
+		if !utf8.ValidString(jsonStr) {
+			return value.NewBool(false)
+		}
 		target := args[1]
 
 		var result interface{}
