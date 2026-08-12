@@ -44,8 +44,14 @@ func (t *strictJSONTraversal) convert(input value.Value) (interface{}, error) {
 		case string:
 			return object, nil
 		case *value.ObjArray:
+			if object == nil {
+				return nil, errJSONUnsupported
+			}
 			return t.convertArray(object)
 		case *value.ObjMap:
+			if object == nil {
+				return nil, errJSONUnsupported
+			}
 			return t.convertMap(object)
 		default:
 			return nil, errJSONUnsupported

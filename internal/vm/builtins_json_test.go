@@ -101,6 +101,25 @@ func TestStrictJSONValToGoRejectsCyclesAndAcceptsSharedChildren(t *testing.T) {
 	}
 }
 
+func TestStrictJSONValToGoRejectsTypedNilContainers(t *testing.T) {
+	var nilArray *value.ObjArray
+	var nilMap *value.ObjMap
+	tests := []struct {
+		name  string
+		input value.Value
+	}{
+		{"typed nil array", value.Value{Type: value.VAL_OBJ, Obj: nilArray}},
+		{"typed nil map", value.Value{Type: value.VAL_OBJ, Obj: nilMap}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := strictJSONValToGo(tt.input); err == nil {
+				t.Fatal("strict conversion accepted a typed nil container")
+			}
+		})
+	}
+}
+
 func requireBuiltinMap(t *testing.T, got value.Value) *value.ObjMap {
 	t.Helper()
 	if got.Type != value.VAL_OBJ {
