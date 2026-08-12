@@ -30,6 +30,17 @@ test_report(written.success && written.bytes_written == 2 && written.error == ""
 	testExpectedObject(t, true, got)
 }
 
+func TestJSONModuleExposesStrictObservableEncoding(t *testing.T) {
+	source := "\nuse json\n" +
+		"let values: any[] = [1, true, null]\n" +
+		"let document: map[string, any] = {\"name\": \"Noxy\", \"values\": values}\n" +
+		"let encoded: json.EncodeResult = json.dumps_result(document)\n" +
+		"let invalid: map[string, any] = {\"raw\": b\"abc\"}\n" +
+		"let rejected: json.EncodeResult = json.dumps_result(invalid)\n" +
+		"test_report(encoded.success && encoded.data != \"\" && encoded.error == \"\" && !rejected.success && rejected.data == \"\" && rejected.error != \"\")"
+	testExpectedObject(t, true, runTypedFunctionProgram(t, source))
+}
+
 func runWithTypedTestNative(t *testing.T, input string, sig value.NativeSignature, called *bool) error {
 	t.Helper()
 	l := lexer.New(input)

@@ -166,6 +166,28 @@ func TestJSONDumpsBuiltin(t *testing.T) {
 	}
 }
 
+func TestJSONDumpsResultBuiltinReportsSuccessAndFailure(t *testing.T) {
+	machine := New()
+	resultType := value.NewStruct("EncodeResult", []string{"success", "data", "error"})
+	valid := value.NewMap()
+	valid.Obj.(*value.ObjMap).Data["name"] = value.NewString("Noxy")
+	success := callBuiltin(t, machine, "json_dumps_result", valid, resultType)
+	successFields := success.Obj.(*value.ObjInstance).Fields
+	assertBuiltinValue(t, successFields["success"], value.NewBool(true))
+	assertBuiltinValue(t, successFields["data"], value.NewString("{\"name\":\"Noxy\"}"))
+	assertBuiltinValue(t, successFields["error"], value.NewString(""))
+
+	invalid := value.NewMap()
+	invalid.Obj.(*value.ObjMap).Data["raw"] = value.NewBytes("abc")
+	failure := callBuiltin(t, machine, "json_dumps_result", invalid, resultType)
+	failureFields := failure.Obj.(*value.ObjInstance).Fields
+	assertBuiltinValue(t, failureFields["success"], value.NewBool(false))
+	assertBuiltinValue(t, failureFields["data"], value.NewString(""))
+	if failureFields["error"].String() == "" {
+		t.Fatal("strict encoder returned an empty error")
+	}
+}
+
 func TestJSONParseBuiltin(t *testing.T) {
 	machine := New()
 	scalarTests := []struct {

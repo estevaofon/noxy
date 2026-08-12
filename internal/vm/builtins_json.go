@@ -22,6 +22,35 @@ func (vm *VM) defineJSONBuiltins() {
 		return value.NewString(string(bytes))
 	})
 
+	vm.DefineNative("json_dumps_result", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		resultType, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+		result := value.NewInstance(resultType).Obj.(*value.ObjInstance)
+		result.Fields["success"] = value.NewBool(false)
+		result.Fields["data"] = value.NewString("")
+		result.Fields["error"] = value.NewString(errJSONUnsupported.Error())
+
+		goValue, err := strictJSONValToGo(args[0])
+		if err != nil {
+			result.Fields["error"] = value.NewString(err.Error())
+			return value.Value{Type: value.VAL_OBJ, Obj: result}
+		}
+		encoded, err := json.Marshal(goValue)
+		if err != nil {
+			result.Fields["error"] = value.NewString(err.Error())
+			return value.Value{Type: value.VAL_OBJ, Obj: result}
+		}
+		result.Fields["success"] = value.NewBool(true)
+		result.Fields["data"] = value.NewString(string(encoded))
+		result.Fields["error"] = value.NewString("")
+		return value.Value{Type: value.VAL_OBJ, Obj: result}
+	})
+
 	// json_parse(str) -> Value
 	vm.DefineNative("json_parse", func(args []value.Value) value.Value {
 		if len(args) < 1 {

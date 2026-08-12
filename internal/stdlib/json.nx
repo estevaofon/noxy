@@ -1,0 +1,9 @@
+struct EncodeResult
+    success: bool
+    data: string
+    error: string
+end
+
+func dumps_result(value: any) -> EncodeResult
+    return json_dumps_result(value, EncodeResult)
+end

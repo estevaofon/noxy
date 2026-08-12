@@ -119,3 +119,29 @@ print(conf.port) // 8080
 - **Extra Fields:** Fields in the JSON that do not match any Struct field are ignored.
 - **Type Mismatch:** The system attempts to cast compatible types (e.g., float to int if lossless), but fundamentally incompatible types (e.g., string to int) will generally result in the field being skipped or zero-valued.
 - **Nested Structures:** `json_unmarshal` works recursively. If a Struct contains fields that are other Structs, the corresponding nested JSON object will populate that child Struct in-place.
+
+## Strict observable encoding
+
+The json module exposes strict encoding when callers need explicit failure:
+
+```noxy
+use json
+
+let value: map[string, any] = {"name": "Noxy", "active": true}
+let result: json.EncodeResult = json.dumps_result(value)
+if result.success then
+    print(result.data)
+else
+    print(result.error)
+end
+```
+
+json.dumps_result accepts null, bool, int, finite float, string, arrays, and
+recursively string-keyed maps. It rejects bytes, structs, references,
+callables, channels, wait groups, non-string map keys, NaN, infinities,
+unsupported runtime values, and cycles. Reusing an acyclic child in multiple
+branches is valid.
+
+On success, data contains complete JSON and error is empty. On failure, data is
+empty and error is non-empty. The legacy json_dumps function is unchanged and
+retains its permissive compatibility behavior.
