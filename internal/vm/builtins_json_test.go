@@ -2,11 +2,104 @@ package vm
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"testing"
 
 	"noxy-vm/internal/value"
 )
+
+func TestStrictJSONValToGoAcceptsJSONDomain(t *testing.T) {
+	nested := value.NewMap()
+	nested.Obj.(*value.ObjMap).Data["city"] = value.NewString("Cuiabá")
+	document := value.NewMap()
+	document.Obj.(*value.ObjMap).Data["empty"] = value.NewString("")
+	document.Obj.(*value.ObjMap).Data["int"] = value.NewInt(30)
+	document.Obj.(*value.ObjMap).Data["minimum"] = value.NewInt(-9223372036854775807 - 1)
+	document.Obj.(*value.ObjMap).Data["maximum"] = value.NewInt(9223372036854775807)
+	document.Obj.(*value.ObjMap).Data["float"] = value.NewFloat(1.25)
+	document.Obj.(*value.ObjMap).Data["active"] = value.NewBool(true)
+	document.Obj.(*value.ObjMap).Data["nothing"] = value.NewNull()
+	document.Obj.(*value.ObjMap).Data["items"] = value.NewArray(
+		[]value.Value{value.NewString("Noxy"), value.NewInt(2), nested},
+	)
+
+	got, err := strictJSONValToGo(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]interface{}{
+		"empty": "", "int": int64(30),
+		"minimum": int64(-9223372036854775807 - 1),
+		"maximum": int64(9223372036854775807),
+		"float":   1.25, "active": true,
+		"nothing": nil,
+		"items":   []interface{}{"Noxy", int64(2), map[string]interface{}{"city": "Cuiabá"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("strict conversion = %#v, want %#v", got, want)
+	}
+}
+
+func TestStrictJSONValToGoRejectsNonJSONValues(t *testing.T) {
+	definition := value.NewStruct("Point", []string{"x"})
+	instance := value.NewInstance(definition.Obj.(*value.ObjStruct))
+	badKeyMap := value.NewMap()
+	badKeyMap.Obj.(*value.ObjMap).Data[int64(7)] = value.NewString("seven")
+	tests := []struct {
+		name  string
+		input value.Value
+	}{
+		{"bytes", value.NewBytes("raw")},
+		{"struct definition", definition},
+		{"struct instance", instance},
+		{"function", value.NewFunction("noop", 0, 0, nil, nil, nil)},
+		{"native", value.NewNative("noop", func([]value.Value) value.Value { return value.NewNull() })},
+		{"channel", value.NewChannel(1)},
+		{"wait group", value.NewWaitGroup()},
+		{"reference", value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{}}},
+		{"non-string key", badKeyMap},
+		{"nan", value.NewFloat(math.NaN())},
+		{"positive infinity", value.NewFloat(math.Inf(1))},
+		{"negative infinity", value.NewFloat(math.Inf(-1))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := strictJSONValToGo(tt.input); err == nil {
+				t.Fatal("strict conversion accepted a non-JSON value")
+			}
+		})
+	}
+}
+
+func TestStrictJSONValToGoRejectsCyclesAndAcceptsSharedChildren(t *testing.T) {
+	arrayCycle := value.NewArray(nil)
+	arrayCycle.Obj.(*value.ObjArray).Elements = []value.Value{arrayCycle}
+	if _, err := strictJSONValToGo(arrayCycle); err == nil {
+		t.Fatal("array cycle was accepted")
+	}
+
+	mapCycle := value.NewMap()
+	mapCycle.Obj.(*value.ObjMap).Data["self"] = mapCycle
+	if _, err := strictJSONValToGo(mapCycle); err == nil {
+		t.Fatal("map cycle was accepted")
+	}
+
+	left := value.NewMap()
+	right := value.NewArray(nil)
+	left.Obj.(*value.ObjMap).Data["right"] = right
+	right.Obj.(*value.ObjArray).Elements = []value.Value{left}
+	if _, err := strictJSONValToGo(left); err == nil {
+		t.Fatal("indirect cycle was accepted")
+	}
+
+	child := value.NewMap()
+	child.Obj.(*value.ObjMap).Data["value"] = value.NewInt(1)
+	root := value.NewArray([]value.Value{child, child})
+	if _, err := strictJSONValToGo(root); err != nil {
+		t.Fatalf("shared acyclic child rejected: %v", err)
+	}
+}
 
 func requireBuiltinMap(t *testing.T, got value.Value) *value.ObjMap {
 	t.Helper()
