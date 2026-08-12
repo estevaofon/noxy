@@ -18,6 +18,91 @@ func assertIOErrorResult(t *testing.T, got, definition value.Value) {
 	assertBuiltinValue(t, result.Fields["error"], value.NewString("File not open"))
 }
 
+func testIOWriteResultDefinition() value.Value {
+	return value.NewStruct("IOWriteResult", []string{"success", "bytes_written", "error"})
+}
+
+func testIOCloseResultDefinition() value.Value {
+	return value.NewStruct("IOCloseResult", []string{"success", "error"})
+}
+
+func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
+	machine := New()
+	defer func() {
+		for descriptor, file := range machine.openFiles {
+			_ = file.Close()
+			delete(machine.openFiles, descriptor)
+		}
+	}()
+
+	path := filepath.Join(t.TempDir(), "observable-write.txt")
+	fileDefinition := testFileDefinition()
+	handleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("w"), fileDefinition)
+	handle := requireBuiltinInstance(t, handleValue, fileDefinition)
+	resultDefinition := testIOWriteResultDefinition()
+	contents := "Noxy 🐍"
+
+	success := requireBuiltinInstance(t, callBuiltin(t, machine, "io_write_result", handleValue, value.NewString(contents), resultDefinition), resultDefinition)
+	assertBuiltinValue(t, success.Fields["success"], value.NewBool(true))
+	assertBuiltinValue(t, success.Fields["bytes_written"], value.NewInt(int64(len([]byte(contents)))))
+	assertBuiltinValue(t, success.Fields["error"], value.NewString(""))
+
+	fd := handle.Fields["fd"].AsInt
+	if err := machine.openFiles[fd].Close(); err != nil {
+		t.Fatalf("close underlying file: %v", err)
+	}
+
+	failure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_write_result", handleValue, value.NewString("ignored"), resultDefinition), resultDefinition)
+	assertBuiltinValue(t, failure.Fields["success"], value.NewBool(false))
+	assertBuiltinValue(t, failure.Fields["bytes_written"], value.NewInt(0))
+	if failure.Fields["error"].String() == "" {
+		t.Fatal("failed write returned an empty error")
+	}
+}
+
+func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
+	machine := New()
+	defer func() {
+		for descriptor, file := range machine.openFiles {
+			_ = file.Close()
+			delete(machine.openFiles, descriptor)
+		}
+	}()
+
+	path := filepath.Join(t.TempDir(), "observable-close.txt")
+	fileDefinition := testFileDefinition()
+	handleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("w"), fileDefinition)
+	handle := requireBuiltinInstance(t, handleValue, fileDefinition)
+	resultDefinition := testIOCloseResultDefinition()
+
+	success := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", handleValue, resultDefinition), resultDefinition)
+	assertBuiltinValue(t, success.Fields["success"], value.NewBool(true))
+	assertBuiltinValue(t, success.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, handle.Fields["open"], value.NewBool(false))
+
+	failure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", handleValue, resultDefinition), resultDefinition)
+	assertBuiltinValue(t, failure.Fields["success"], value.NewBool(false))
+	if failure.Fields["error"].String() == "" {
+		t.Fatal("failed close returned an empty error")
+	}
+
+	failedHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("a"), fileDefinition)
+	failedHandle := requireBuiltinInstance(t, failedHandleValue, fileDefinition)
+	failedFD := failedHandle.Fields["fd"].AsInt
+	if err := machine.openFiles[failedFD].Close(); err != nil {
+		t.Fatalf("close underlying file: %v", err)
+	}
+	underlyingFailure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", failedHandleValue, resultDefinition), resultDefinition)
+	assertBuiltinValue(t, underlyingFailure.Fields["success"], value.NewBool(false))
+	if underlyingFailure.Fields["error"].String() == "" {
+		t.Fatal("underlying close failure returned an empty error")
+	}
+	assertBuiltinValue(t, failedHandle.Fields["open"], value.NewBool(false))
+	if _, ok := machine.openFiles[failedFD]; ok {
+		t.Fatalf("failed close descriptor %d remains in VM state", failedFD)
+	}
+}
+
 func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	machine := New()
 	defer func() {

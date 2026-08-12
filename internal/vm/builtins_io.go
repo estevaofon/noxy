@@ -69,6 +69,41 @@ func (vm *VM) defineIOBuiltins() {
 		}
 		return value.NewNull()
 	})
+	vm.DefineNative("io_close_result", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resultStruct, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		result := value.NewInstance(resultStruct).Obj.(*value.ObjInstance)
+		result.Fields["success"] = value.NewBool(false)
+		result.Fields["error"] = value.NewString("File not open")
+
+		fd := inst.Fields["fd"].AsInt
+		f, exists := vm.openFiles[fd]
+		if !exists {
+			return value.Value{Type: value.VAL_OBJ, Obj: result}
+		}
+
+		err := f.Close()
+		delete(vm.openFiles, fd)
+		inst.Fields["open"] = value.NewBool(false)
+		if err != nil {
+			result.Fields["error"] = value.NewString(err.Error())
+			return value.Value{Type: value.VAL_OBJ, Obj: result}
+		}
+
+		result.Fields["success"] = value.NewBool(true)
+		result.Fields["error"] = value.NewString("")
+		return value.Value{Type: value.VAL_OBJ, Obj: result}
+	})
 	vm.DefineNative("io_write", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
@@ -90,6 +125,47 @@ func (vm *VM) defineIOBuiltins() {
 			}
 		}
 		return value.NewNull()
+	})
+	vm.DefineNative("io_write_result", func(args []value.Value) value.Value {
+		if len(args) < 3 {
+			return value.NewNull()
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		resultStruct, ok := args[2].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		result := value.NewInstance(resultStruct).Obj.(*value.ObjInstance)
+		result.Fields["success"] = value.NewBool(false)
+		result.Fields["bytes_written"] = value.NewInt(0)
+		result.Fields["error"] = value.NewString("File not open")
+
+		fd := inst.Fields["fd"].AsInt
+		f, exists := vm.openFiles[fd]
+		if !exists {
+			return value.Value{Type: value.VAL_OBJ, Obj: result}
+		}
+
+		var written int
+		var err error
+		if args[1].Type == value.VAL_BYTES {
+			written, err = f.Write([]byte(args[1].Obj.(string)))
+		} else {
+			written, err = f.WriteString(args[1].String())
+		}
+		result.Fields["bytes_written"] = value.NewInt(int64(written))
+		if err != nil {
+			result.Fields["error"] = value.NewString(err.Error())
+			return value.Value{Type: value.VAL_OBJ, Obj: result}
+		}
+
+		result.Fields["success"] = value.NewBool(true)
+		result.Fields["error"] = value.NewString("")
+		return value.Value{Type: value.VAL_OBJ, Obj: result}
 	})
 	vm.DefineNative("io_read", func(args []value.Value) value.Value {
 		// args: fileInst, IOResultStructDef
