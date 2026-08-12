@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,23 @@ import (
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
 )
+
+func TestIOModuleExposesObservableResultsAndPreservesLegacyCalls(t *testing.T) {
+	path := strings.ReplaceAll(filepath.Join(t.TempDir(), "io-results.txt"), `\`, `\\`)
+	got := runTypedFunctionProgram(t, fmt.Sprintf(`
+use io
+let observable_write: any = io.write_result
+let observable_close: any = io.close_result
+let legacy: io.File = io.open("%s", "w")
+io.write(legacy, "legacy")
+io.close(legacy)
+
+let observable: io.File = io.open("%s", "a")
+let written: io.IOWriteResult = io.write_result(observable, "é")
+let closed: io.IOCloseResult = io.close_result(observable)
+test_report(written.success && written.bytes_written == 2 && written.error == "" && closed.success && closed.error == "")`, path, path))
+	testExpectedObject(t, true, got)
+}
 
 func runWithTypedTestNative(t *testing.T, input string, sig value.NativeSignature, called *bool) error {
 	t.Helper()

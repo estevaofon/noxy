@@ -17,6 +17,17 @@ struct IOBytesResult
     error: string
 end
 
+struct IOWriteResult
+    success: bool
+    bytes_written: int
+    error: string
+end
+
+struct IOCloseResult
+    success: bool
+    error: string
+end
+
 struct IOLinesResult
     ok: bool
     data: string[]
@@ -40,6 +51,10 @@ func close(file: File) -> void
     io_close(file)
 end
 
+func close_result(file: File) -> IOCloseResult
+    return io_close_result(file, IOCloseResult)
+end
+
 func read(file: File) -> IOResult
     return io_read(file, IOResult)
 end
@@ -58,6 +73,10 @@ end
 
 func write(file: File, content: string) -> void
     io_write(file, content)
+end
+
+func write_result(file: File, content: string) -> IOWriteResult
+    return io_write_result(file, content, IOWriteResult)
 end
 
 func exists(path: string) -> bool
