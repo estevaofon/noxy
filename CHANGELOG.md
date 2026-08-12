@@ -4,9 +4,17 @@
 
 ### Added
 
+- Observable strict JSON encoding through `json.dumps_result`, with explicit
+  success, payload, and error fields. `#stdlib` @estevaofon
 - Experimental external terminal package backed by a Go plugin.
 - Complete Space Invaders example using the external terminal package.
 - Neo Arcade Space Invaders 2 example with colored terminal sprites, deterministic starfield, smoke validation, and safe interactive terminal cleanup. `#examples` @estevaofon
+
+### Fixed
+
+- Strict JSON encoding now rejects unsupported values, non-finite floats,
+  cycles, typed nil containers, and invalid UTF-8 without lossy fallback.
+  `#vm` @estevaofon
 
 ## [0.1.0] - 2026-08-10
 
