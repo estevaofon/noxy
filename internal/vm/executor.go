@@ -999,17 +999,11 @@ func (vm *VM) run(minFrameCount int) error {
 			nameConstant := c.Constants[index]
 			moduleName := nameConstant.Obj.(string)
 
-			// Check cache
-			if mod, ok := vm.GetModule(moduleName); ok {
-				vm.push(mod)
-			} else {
-				mod, err := vm.loadModule(moduleName)
-				if err != nil {
-					return vm.runtimeError(c, ip, "failed to import module '%s': %v", moduleName, err)
-				}
-				vm.SetModule(moduleName, mod)
-				vm.push(mod)
+			mod, err := vm.loadModule(moduleName)
+			if err != nil {
+				return vm.runtimeError(c, ip, "failed to import module '%s': %v", moduleName, err)
 			}
+			vm.push(mod)
 
 			frame = vm.currentFrame
 

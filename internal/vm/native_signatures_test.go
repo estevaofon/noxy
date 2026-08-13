@@ -2293,7 +2293,7 @@ test_report(length(sliced) * 10 + length(generated))`
 	if len(results) != 2 || results[0] != 23 || results[1] != 23 {
 		t.Fatalf("wildcard first/cache results=%v, want [23 23]", results)
 	}
-	module, ok := machine.shared.Modules["array_utils"]
+	module, ok := machine.GetModule("array_utils")
 	if !ok {
 		t.Fatal("array_utils was not cached")
 	}

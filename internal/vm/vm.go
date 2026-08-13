@@ -34,9 +34,8 @@ type CallFrame struct {
 }
 
 type SharedState struct {
-	Root        *value.GlobalEnvironment
-	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
-	GlobalsLock sync.RWMutex
+	Root    *value.GlobalEnvironment
+	Modules *moduleCache
 
 	// Shared Network Resources
 	NetListeners map[int]net.Listener
@@ -66,6 +65,8 @@ type VM struct {
 
 	shared *SharedState
 	Config VMConfig
+
+	moduleLoadStack []moduleKey
 
 	// IO Management
 	openFiles map[int64]*os.File
@@ -102,7 +103,7 @@ func New() *VM {
 func NewWithConfig(cfg VMConfig) *VM {
 	shared := &SharedState{
 		Root:         value.NewGlobalEnvironment(nil),
-		Modules:      make(map[string]value.Value),
+		Modules:      newModuleCache(),
 		NetListeners: make(map[int]net.Listener),
 		NetConns:     make(map[int]net.Conn),
 		NextNetID:    1,
@@ -118,6 +119,9 @@ func NewWithConfig(cfg VMConfig) *VM {
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	if shared.Root == nil {
 		shared.Root = value.NewGlobalEnvironment(nil)
+	}
+	if shared.Modules == nil {
+		shared.Modules = newModuleCache()
 	}
 	vm := &VM{
 		shared:    shared,
@@ -158,14 +162,16 @@ func (vm *VM) GetGlobal(name string) (value.Value, bool) {
 }
 
 func (vm *VM) SetModule(name string, val value.Value) {
-	vm.shared.GlobalsLock.Lock()
-	defer vm.shared.GlobalsLock.Unlock()
-	vm.shared.Modules[name] = val
+	source, err := vm.resolveModule(name)
+	if err == nil {
+		vm.shared.Modules.store(source.Key, val)
+	}
 }
 
 func (vm *VM) GetModule(name string) (value.Value, bool) {
-	vm.shared.GlobalsLock.RLock()
-	defer vm.shared.GlobalsLock.RUnlock()
-	val, ok := vm.shared.Modules[name]
-	return val, ok
+	source, err := vm.resolveModule(name)
+	if err != nil {
+		return value.NewNull(), false
+	}
+	return vm.shared.Modules.get(source.Key)
 }
