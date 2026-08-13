@@ -146,9 +146,6 @@ func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSigna
 }
 
 func (vm *VM) DefineContextualNative(name string, fn value.ContextualNativeFunc) {
-	if _, ok := vm.GetGlobal(name); ok {
-		return
-	}
 	vm.SetGlobal(name, value.NewContextualNative(name, fn))
 }
 

@@ -18,3 +18,13 @@ func TestContextualNativeReceivesCallingVM(t *testing.T) {
 	})
 	assertBuiltinValue(t, callBuiltin(t, child, "active_root"), value.NewString("child"))
 }
+
+func TestDefineContextualNativeReplacesExistingGlobal(t *testing.T) {
+	machine := New()
+	machine.SetGlobal("replacement", value.NewString("previous"))
+	machine.DefineContextualNative("replacement", func(value.NativeContext, []value.Value) (value.Value, error) {
+		return value.NewString("contextual"), nil
+	})
+
+	assertBuiltinValue(t, callBuiltin(t, machine, "replacement"), value.NewString("contextual"))
+}
