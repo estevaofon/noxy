@@ -60,7 +60,7 @@ dynamic(malformed_ref())`, value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)
 }
 
 func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
-	moduleGlobals := map[string]value.Value{"present": value.NewInt(1)}
+	moduleEnvironment := value.NewGlobalEnvironmentFrom(map[string]value.Value{"present": value.NewInt(1)}, nil)
 	tests := []struct {
 		name      string
 		malformed value.Value
@@ -70,7 +70,7 @@ func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
 		{name: "nil upvalue", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_UPVALUE}}},
 		{name: "nil upvalue location", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_UPVALUE, Upvalue: &value.ObjUpvalue{}}}},
 		{name: "nil global owner", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "present"}}},
-		{name: "missing global", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &moduleGlobals}}},
+		{name: "missing global", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: moduleEnvironment}}},
 		{name: "property container", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PROPERTY, Container: value.NewInt(1), Name: "field"}}},
 		{name: "array index type", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewArray([]value.Value{value.NewInt(1)}), Index: value.NewBool(false)}}},
 		{name: "array bounds", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewArray([]value.Value{value.NewInt(1)}), Index: value.NewInt(2)}}},

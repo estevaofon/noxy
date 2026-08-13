@@ -81,7 +81,7 @@ func TestModuleSourceLayout(t *testing.T) {
 
 func TestExecutorSourceLayout(t *testing.T) {
 	t.Run("executor declarations", func(t *testing.T) {
-		requireSourceFunctions(t, "executor.go", "Interpret", "InterpretWithGlobals", "run")
+		requireSourceFunctions(t, "executor.go", "Interpret", "InterpretWithGlobals", "InterpretWithEnvironment", "run")
 	})
 
 	t.Run("vm.go boundary", func(t *testing.T) {
@@ -132,6 +132,54 @@ func TestExecutorSourceLayout(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRuntimeOwnershipDoesNotUseRawGlobalMaps(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valueFiles, err := filepath.Glob(filepath.Join("..", "value", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files = append(files, valueFiles...)
+
+	for _, filename := range files {
+		if strings.HasSuffix(filename, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", filename, err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.SelectorExpr:
+				if typed.Sel.Name == "Globals" {
+					t.Errorf("%s accesses obsolete Globals ownership", filename)
+				}
+			case *ast.KeyValueExpr:
+				if key, ok := typed.Key.(*ast.Ident); ok && key.Name == "Globals" {
+					t.Errorf("%s initializes obsolete Globals ownership", filename)
+				}
+			case *ast.Field:
+				for _, name := range typed.Names {
+					if name.Name == "Globals" {
+						t.Errorf("%s declares obsolete Globals ownership", filename)
+					}
+					if name.Name == "GlobalOwner" {
+						if pointer, ok := typed.Type.(*ast.StarExpr); ok {
+							if _, rawMap := pointer.X.(*ast.MapType); rawMap {
+								t.Errorf("%s declares GlobalOwner as a map pointer", filename)
+							}
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
 }
 
 func TestRuntimeDoesNotAccessObjMapDataDirectly(t *testing.T) {

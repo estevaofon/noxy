@@ -9,40 +9,37 @@ import (
 )
 
 func (vm *VM) Interpret(c *chunk.Chunk) error {
-	// Pass nil to indicate using Shared State Globals
-	return vm.InterpretWithGlobals(c, nil)
+	return vm.InterpretWithEnvironment(c, vm.shared.Root)
 }
 
-func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) error {
-	scriptFn := &value.ObjFunction{
-		Name:    "script",
-		Arity:   0,
-		Chunk:   c,
-		Globals: globals,
+func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) (err error) {
+	if globals == nil {
+		return vm.InterpretWithEnvironment(c, vm.shared.Root)
 	}
+	environment := value.NewGlobalEnvironmentFrom(globals, vm.shared.Root)
+	defer func() {
+		for name := range globals {
+			delete(globals, name)
+		}
+		for name, item := range environment.LocalSnapshot() {
+			globals[name] = item
+		}
+	}()
+	return vm.InterpretWithEnvironment(c, environment)
+}
 
+func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.GlobalEnvironment) error {
+	if environment == nil {
+		return fmt.Errorf("interpret requires a global environment")
+	}
+	scriptFunction := &value.ObjFunction{Name: "script", Arity: 0, Chunk: c, Environment: environment}
+	scriptClosure := &value.ObjClosure{Function: scriptFunction, Upvalues: []*value.ObjUpvalue{}, Environment: environment}
 	vm.stackTop = 0
-	vm.push(value.NewFunction("script", 0, 0, nil, c, globals)) // Push script function to stack slot 0
-
-	// Call frame for script
-	scriptClosure := &value.ObjClosure{Function: scriptFn, Upvalues: []*value.ObjUpvalue{}, Globals: globals}
-	frame := &CallFrame{
-		Closure: scriptClosure,
-		IP:      0,
-		Slots:   1,   // Locals start at 1
-		Globals: nil, // Use nil to force fallback to Shared VM Globals (Locked)
-	}
-
-	if globals != nil && len(globals) > 0 {
-		frame.Globals = globals
-	} else {
-		frame.Globals = nil
-	}
-
+	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: scriptClosure})
+	frame := &CallFrame{Closure: scriptClosure, IP: 0, Slots: 1, Environment: environment}
 	vm.frames[0] = frame
 	vm.frameCount = 1
 	vm.currentFrame = frame
-
 	return vm.run(1)
 }
 
@@ -67,17 +64,17 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			constant := c.Constants[index]
 
-			// If it's a function, bind it to current globals (Module binding)
+			// If it's a function, bind it to the current environment.
 			if constant.Type == value.VAL_FUNCTION {
 				fn := constant.Obj.(*value.ObjFunction)
-				// Clone to bind globals
+				// Clone so compiler constants remain unbound and reusable.
 				boundFn := &value.ObjFunction{
 					Name:         fn.Name,
 					Arity:        fn.Arity,
 					UpvalueCount: fn.UpvalueCount,
 					Params:       fn.Params,
 					Chunk:        fn.Chunk,
-					Globals:      frame.Globals,
+					Environment:  frame.Environment,
 					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
@@ -98,7 +95,7 @@ func (vm *VM) run(minFrameCount int) error {
 					UpvalueCount: fn.UpvalueCount,
 					Params:       fn.Params,
 					Chunk:        fn.Chunk,
-					Globals:      frame.Globals,
+					Environment:  frame.Environment,
 					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
@@ -179,14 +176,9 @@ func (vm *VM) run(minFrameCount int) error {
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
-			// Try frame globals (Module scope)
-			val, ok := frame.Globals[name]
+			val, ok := frame.Environment.Resolve(name)
 			if !ok {
-				// Try VM globals (Builtins / Shared)
-				val, ok = vm.GetGlobal(name)
-				if !ok {
-					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
-				}
+				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 			}
 			vm.push(val)
 
@@ -195,12 +187,7 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
-			// Set in frame globals (Module scope)
-			if frame.Globals != nil {
-				frame.Globals[name] = vm.peek(0)
-			} else {
-				vm.SetGlobal(name, vm.peek(0))
-			}
+			frame.Environment.SetLocal(name, vm.peek(0))
 
 		case chunk.OP_GET_LOCAL:
 			slot := c.Code[ip]
@@ -246,17 +233,9 @@ func (vm *VM) run(minFrameCount int) error {
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
-			var owner *map[string]value.Value
-			if frame.Globals != nil {
-				if _, ok := frame.Globals[name]; ok {
-					owner = &frame.Globals
-				}
-			}
-			if owner == nil {
-				if _, ok := vm.GetGlobal(name); !ok {
-					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
-				}
-				owner = &vm.shared.Globals
+			owner, ok := frame.Environment.ResolveOwner(name)
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
@@ -883,11 +862,20 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			fnVal := c.Constants[idx]
 			fn := fnVal.Obj.(*value.ObjFunction)
+			boundFn := &value.ObjFunction{
+				Name:         fn.Name,
+				Arity:        fn.Arity,
+				UpvalueCount: fn.UpvalueCount,
+				Params:       fn.Params,
+				Chunk:        fn.Chunk,
+				Environment:  frame.Environment,
+				RuntimeType:  fn.RuntimeType,
+			}
 
 			closure := &value.ObjClosure{
-				Function: fn,
-				Upvalues: make([]*value.ObjUpvalue, fn.UpvalueCount),
-				Globals:  frame.Globals,
+				Function:    boundFn,
+				Upvalues:    make([]*value.ObjUpvalue, fn.UpvalueCount),
+				Environment: frame.Environment,
 			}
 
 			for i := 0; i < fn.UpvalueCount; i++ {
@@ -1031,11 +1019,7 @@ func (vm *VM) run(minFrameCount int) error {
 				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
 					for k, v := range modMap.Snapshot() {
 						if keyStr, ok := k.(string); ok {
-							if frame.Globals != nil {
-								frame.Globals[keyStr] = v
-							} else {
-								vm.SetGlobal(keyStr, v)
-							}
+							frame.Environment.SetLocal(keyStr, v)
 						}
 					}
 				} else {

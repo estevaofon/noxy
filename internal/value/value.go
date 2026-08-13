@@ -137,7 +137,7 @@ type ObjFunction struct {
 	UpvalueCount int // Added for Closures
 	Params       []ParamInfo
 	Chunk        interface{}
-	Globals      map[string]Value // Module/Context globals
+	Environment  *GlobalEnvironment
 	RuntimeType  *RuntimeTypeInfo
 }
 
@@ -148,9 +148,9 @@ type ObjUpvalue struct {
 }
 
 type ObjClosure struct {
-	Function *ObjFunction
-	Upvalues []*ObjUpvalue
-	Globals  map[string]Value // Context globals
+	Function    *ObjFunction
+	Upvalues    []*ObjUpvalue
+	Environment *GlobalEnvironment
 }
 
 func (oc *ObjClosure) String() string {
@@ -329,7 +329,7 @@ type ObjRef struct {
 	JSONDynamic atomic.Bool // Declared any target: JSON may replace its concrete runtime type.
 	TargetType  atomic.Pointer[RuntimeTypeInfo]
 	Name        string // For Global or Property Name
-	GlobalOwner *map[string]Value
+	GlobalOwner *GlobalEnvironment
 	Ptr         *Value      // For Local (unsafe if escapes)
 	Upvalue     *ObjUpvalue // For Local (safe, captured)
 	Container   Value       // For Property/Index (Object, Array, Map)
@@ -479,17 +479,17 @@ func NewInstance(def *ObjStruct) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
-func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, globals map[string]Value) Value {
+func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, environment *GlobalEnvironment) Value {
 	return Value{
 		Type: VAL_FUNCTION,
-		Obj:  &ObjFunction{Name: name, Arity: arity, UpvalueCount: upvalueCount, Params: params, Chunk: chunk, Globals: globals},
+		Obj:  &ObjFunction{Name: name, Arity: arity, UpvalueCount: upvalueCount, Params: params, Chunk: chunk, Environment: environment},
 	}
 }
 
 func NewClosure(fn *ObjFunction) Value {
 	return Value{
 		Type: VAL_FUNCTION, // Reuse VAL_FUNCTION to mean "Callable" (VM will assume ObjClosure or handle translation?)
-		Obj:  &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount)},
+		Obj:  &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount), Environment: fn.Environment},
 	}
 }
 

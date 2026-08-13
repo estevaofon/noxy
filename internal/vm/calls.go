@@ -118,10 +118,10 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 	}
 
 	frame := &CallFrame{
-		Closure: closure,
-		IP:      0,
-		Slots:   vm.stackTop - argCount - 1, // Start of locals window (fn + args)
-		Globals: closure.Globals,
+		Closure:     closure,
+		IP:          0,
+		Slots:       vm.stackTop - argCount - 1, // Start of locals window (fn + args)
+		Environment: closure.Environment,
 	}
 	// Push new frame
 	vm.frames[vm.frameCount] = frame

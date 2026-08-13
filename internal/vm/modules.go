@@ -102,25 +102,26 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 			if err != nil {
 				return value.NewNull(), err
 			}
-			moduleGlobals := make(map[string]value.Value)
+			moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
 			modFn := &value.ObjFunction{
-				Name:    name,
-				Arity:   0,
-				Chunk:   chunk,
-				Globals: moduleGlobals,
+				Name:        name,
+				Arity:       0,
+				Chunk:       chunk,
+				Environment: moduleEnvironment,
 			}
-			modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Globals: moduleGlobals}
+			modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Environment: moduleEnvironment}
 			modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modClosure}
 			vm.push(modVal)
-			if ok, err := vm.callValue(modVal, 0, nil, 0); !ok {
+			if ok, err := vm.callValue(vm.peek(0), 0, nil, 0); !ok {
 				return value.NewNull(), err
 			}
-			err = vm.run(vm.frameCount) // Run until return
+			startFrameCount := vm.frameCount
+			err = vm.run(startFrameCount)
 			if err != nil {
 				return value.NewNull(), err
 			}
-			vm.pop() // Pop result
-			return value.NewMapWithData(moduleGlobals), nil
+			vm.pop()
+			return moduleEnvironment.ExportMap(), nil
 		}
 
 		return value.NewNull(), fmt.Errorf("module not found: %s", name)
@@ -150,7 +151,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 			return value.NewNull(), err
 		}
 
-		moduleGlobals := make(map[string]value.Value)
+		moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
 
 		for _, f := range files {
 			if f.IsDir() {
@@ -161,7 +162,7 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 					// Ignore subdirectories that fail to load (e.g., empty or invalid)
 					continue
 				}
-				moduleGlobals[f.Name()] = subMod
+				moduleEnvironment.SetLocal(f.Name(), subMod)
 			} else if strings.HasSuffix(f.Name(), ".nx") {
 				baseName := strings.TrimSuffix(f.Name(), ".nx")
 				subModuleName := name + "." + baseName
@@ -171,10 +172,10 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 				if err != nil {
 					return value.NewNull(), fmt.Errorf("failed to load submodule %s: %v", subModuleName, err)
 				}
-				moduleGlobals[baseName] = subMod
+				moduleEnvironment.SetLocal(baseName, subMod)
 			}
 		}
-		return value.NewMapWithData(moduleGlobals), nil
+		return moduleEnvironment.ExportMap(), nil
 	}
 
 FileImport:
@@ -197,22 +198,22 @@ FileImport:
 		return value.NewNull(), err
 	}
 
-	// Create isolated Module Globals
-	moduleGlobals := make(map[string]value.Value)
+	// Create an isolated module environment with root builtins as fallback.
+	moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
 
 	// Prepare Module Function
 	modFn := &value.ObjFunction{
-		Name:    name,
-		Arity:   0,
-		Chunk:   chunk,
-		Globals: moduleGlobals,
+		Name:        name,
+		Arity:       0,
+		Chunk:       chunk,
+		Environment: moduleEnvironment,
 	}
-	modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Globals: moduleGlobals}
+	modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Environment: moduleEnvironment}
 	modVal := value.Value{Type: value.VAL_FUNCTION, Obj: modClosure}
 
 	// Execute Module Synchronously
 	vm.push(modVal)
-	if ok, err := vm.callValue(modVal, 0, nil, 0); !ok {
+	if ok, err := vm.callValue(vm.peek(0), 0, nil, 0); !ok {
 		return value.NewNull(), err
 	}
 
@@ -227,6 +228,6 @@ FileImport:
 	// The result of module (usually null) is on stack. Pop it.
 	vm.pop()
 
-	// Return the Module Map
-	return value.NewMapWithData(moduleGlobals), nil
+	// Return a live view containing only the module's local exports.
+	return moduleEnvironment.ExportMap(), nil
 }

@@ -27,14 +27,14 @@ func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interf
 }
 
 type CallFrame struct {
-	Closure *value.ObjClosure
-	IP      int
-	Slots   int                    // Offset in stack where this frame's locals start
-	Globals map[string]value.Value // Globals visible to this frame
+	Closure     *value.ObjClosure
+	IP          int
+	Slots       int // Offset in stack where this frame's locals start
+	Environment *value.GlobalEnvironment
 }
 
 type SharedState struct {
-	Globals     map[string]value.Value // Global variables/functions
+	Root        *value.GlobalEnvironment
 	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
 	GlobalsLock sync.RWMutex
 
@@ -101,7 +101,7 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	shared := &SharedState{
-		Globals:      make(map[string]value.Value),
+		Root:         value.NewGlobalEnvironment(nil),
 		Modules:      make(map[string]value.Value),
 		NetListeners: make(map[int]net.Listener),
 		NetConns:     make(map[int]net.Conn),
@@ -116,6 +116,9 @@ func NewWithConfig(cfg VMConfig) *VM {
 }
 
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
+	if shared.Root == nil {
+		shared.Root = value.NewGlobalEnvironment(nil)
+	}
 	vm := &VM{
 		shared:    shared,
 		Config:    cfg,
@@ -131,18 +134,11 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
-	// Check if already defined in shared globals to avoid overwriting with thread-local closure
-	if _, ok := vm.GetGlobal(name); ok {
-		return
-	}
-	vm.SetGlobal(name, value.NewNative(name, fn))
+	vm.shared.Root.DefineLocalIfAbsent(name, value.NewNative(name, fn))
 }
 
 func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSignature, fn value.NativeFunc) {
-	if _, ok := vm.GetGlobal(name); ok {
-		return
-	}
-	vm.SetGlobal(name, value.NewNativeWithSignature(name, signature, fn))
+	vm.shared.Root.DefineLocalIfAbsent(name, value.NewNativeWithSignature(name, signature, fn))
 }
 
 func (vm *VM) DefineContextualNative(name string, fn value.ContextualNativeFunc) {
@@ -150,23 +146,15 @@ func (vm *VM) DefineContextualNative(name string, fn value.ContextualNativeFunc)
 }
 
 func (vm *VM) DefineContextualNativeWithSignature(name string, signature value.NativeSignature, fn value.ContextualNativeFunc) {
-	if _, ok := vm.GetGlobal(name); ok {
-		return
-	}
-	vm.SetGlobal(name, value.NewContextualNativeWithSignature(name, signature, fn))
+	vm.shared.Root.DefineLocalIfAbsent(name, value.NewContextualNativeWithSignature(name, signature, fn))
 }
 
 func (vm *VM) SetGlobal(name string, val value.Value) {
-	vm.shared.GlobalsLock.Lock()
-	defer vm.shared.GlobalsLock.Unlock()
-	vm.shared.Globals[name] = val
+	vm.shared.Root.SetLocal(name, val)
 }
 
 func (vm *VM) GetGlobal(name string) (value.Value, bool) {
-	vm.shared.GlobalsLock.RLock()
-	defer vm.shared.GlobalsLock.RUnlock()
-	val, ok := vm.shared.Globals[name]
-	return val, ok
+	return vm.shared.Root.GetLocal(name)
 }
 
 func (vm *VM) SetModule(name string, val value.Value) {

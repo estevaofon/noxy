@@ -46,14 +46,13 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"wg_add", "wg_done", "wg_wait",
 	}
 
-	machine.shared.GlobalsLock.RLock()
-	actual := make([]string, 0, len(machine.shared.Globals))
-	for name, global := range machine.shared.Globals {
+	globals := machine.shared.Root.LocalSnapshot()
+	actual := make([]string, 0, len(globals))
+	for name, global := range globals {
 		if global.Type == value.VAL_NATIVE {
 			actual = append(actual, name)
 		}
 	}
-	machine.shared.GlobalsLock.RUnlock()
 	sort.Strings(actual)
 
 	if !reflect.DeepEqual(actual, expected) {

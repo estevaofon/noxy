@@ -69,22 +69,14 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 	}
 	switch ref.RefType {
 	case value.REF_GLOBAL:
-		if ref.GlobalOwner == nil || *ref.GlobalOwner == nil {
+		if ref.GlobalOwner == nil {
 			return value.Value{}, false, nil, fmt.Errorf("invalid global reference owner")
 		}
-		if ref.GlobalOwner == &vm.shared.Globals {
-			stored, ok := vm.GetGlobal(ref.Name)
-			if !ok {
-				return value.Value{}, false, nil, fmt.Errorf("undefined global variable '%s'", ref.Name)
-			}
-			return stored, true, func(updated value.Value) { vm.SetGlobal(ref.Name, updated) }, nil
-		}
-		owner := *ref.GlobalOwner
-		stored, ok := owner[ref.Name]
+		stored, ok := ref.GlobalOwner.GetLocal(ref.Name)
 		if !ok {
 			return value.Value{}, false, nil, fmt.Errorf("undefined global variable '%s'", ref.Name)
 		}
-		return stored, true, func(updated value.Value) { owner[ref.Name] = updated }, nil
+		return stored, true, func(updated value.Value) { ref.GlobalOwner.SetLocal(ref.Name, updated) }, nil
 	case value.REF_UPVALUE:
 		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
 			return value.Value{}, false, nil, fmt.Errorf("invalid upvalue reference")

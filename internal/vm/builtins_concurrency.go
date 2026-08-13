@@ -30,7 +30,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		if cl, ok := fnVal.Obj.(*value.ObjClosure); ok {
 			closure = cl
 		} else if fn, ok := fnVal.Obj.(*value.ObjFunction); ok {
-			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}}
+			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}, Environment: fn.Environment}
 		} else {
 			fmt.Println("Runtime Error: spawn expects a function or closure")
 			return value.NewNull()
@@ -54,14 +54,11 @@ func (vm *VM) defineConcurrencyBuiltins() {
 
 		// Create Frame
 		frame := &CallFrame{
-			Closure: closure,
-			IP:      0,
-			Slots:   0,
-			Globals: nil,
+			Closure:     closure,
+			IP:          0,
+			Slots:       0,
+			Environment: closure.Environment,
 		}
-
-		// Inherit globals from the function/closure.
-		frame.Globals = fnObj.Globals
 
 		threadVM.frames[0] = frame
 		threadVM.frameCount = 1

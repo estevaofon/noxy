@@ -270,9 +270,9 @@ test_report(targets["slot"]["answer"])`)
 func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 	machine := New()
 	moduleTarget := value.NewMapWithData(map[string]value.Value{"old": value.NewInt(0)})
-	moduleGlobals := map[string]value.Value{"target": moduleTarget}
-	machine.currentFrame = &CallFrame{Globals: moduleGlobals}
-	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target", GlobalOwner: &moduleGlobals}}
+	moduleEnvironment := value.NewGlobalEnvironmentFrom(map[string]value.Value{"target": moduleTarget}, machine.shared.Root)
+	machine.currentFrame = &CallFrame{Environment: moduleEnvironment}
+	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target", GlobalOwner: moduleEnvironment}}
 
 	jsonLoadsValue, ok := machine.GetGlobal("json_loads")
 	if !ok {
@@ -282,9 +282,10 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 	if result := jsonLoads.Fn([]value.Value{value.NewString(`{"answer":42}`), target}); result.Type != value.VAL_BOOL || !result.AsBool {
 		t.Fatal("module-frame global target was rejected")
 	}
-	got := requireTestMapValue(t, moduleGlobals["target"].Obj.(*value.ObjMap), "answer")
+	moduleTarget, _ = moduleEnvironment.GetLocal("target")
+	got := requireTestMapValue(t, moduleTarget.Obj.(*value.ObjMap), "answer")
 	if got.Type != value.VAL_INT || got.AsInt != 42 {
-		t.Fatalf("module target=%v, want answer=42", moduleGlobals["target"])
+		t.Fatalf("module target=%v, want answer=42", moduleTarget)
 	}
 	if _, leaked := machine.GetGlobal("target"); leaked {
 		t.Fatal("module target must not be written to shared globals")
@@ -293,7 +294,7 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 
 func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	machine := New()
-	missingGlobals := map[string]value.Value{}
+	missingEnvironment := value.NewGlobalEnvironment(nil)
 	instance := value.NewInstance(&value.ObjStruct{Name: "Holder", Fields: []string{"known"}})
 	instance.Obj.(*value.ObjInstance).Fields["known"] = value.NewInt(1)
 	tests := []struct {
@@ -302,7 +303,7 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	}{
 		{
 			name: "missing global",
-			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &missingGlobals},
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: missingEnvironment},
 		},
 		{
 			name: "missing property",

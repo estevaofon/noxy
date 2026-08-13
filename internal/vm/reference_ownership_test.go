@@ -39,3 +39,31 @@ func TestModuleFrameGlobalReferenceCapturesSharedFallbackOwner(t *testing.T) {
 		t.Fatalf("shared fallback=%v, want 42", got)
 	}
 }
+
+func TestInterpretWithGlobalsUsesNonNilEmptyEnvironment(t *testing.T) {
+	code := compileVMSource(t, "let answer: int = 42")
+	globals := map[string]value.Value{}
+	if err := New().InterpretWithGlobals(code, globals); err != nil {
+		t.Fatal(err)
+	}
+	if got := globals["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+		t.Fatalf("answer=%v", got)
+	}
+}
+
+func TestModuleGlobalReferenceRetainsResolvedEnvironment(t *testing.T) {
+	root := value.NewGlobalEnvironment(nil)
+	root.SetLocal("root", value.NewInt(1))
+	module := value.NewGlobalEnvironment(root)
+	module.SetLocal("module", value.NewInt(2))
+	machine := New()
+	machine.shared.Root = root
+	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "module", GlobalOwner: module}
+	if err := machine.storeGlobalReferenceValue(ref, value.NewInt(3)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := module.GetLocal("module")
+	if got.AsInt != 3 {
+		t.Fatalf("module value=%v", got)
+	}
+}
