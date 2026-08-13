@@ -34,8 +34,14 @@ type CallFrame struct {
 }
 
 type SharedState struct {
-	Root    *value.GlobalEnvironment
-	Modules *moduleCache
+	Root       *value.GlobalEnvironment
+	Modules    *moduleCache
+	Files      *handleRegistry[*FileResource]
+	Listeners  *handleRegistry[*ListenerResource]
+	Sockets    *handleRegistry[*SocketResource]
+	Databases  *handleRegistry[*DatabaseResource]
+	Statements *handleRegistry[*StatementResource]
+	initOnce   sync.Once
 
 	// Shared Network Resources
 	NetListeners map[int]net.Listener
@@ -104,6 +110,11 @@ func NewWithConfig(cfg VMConfig) *VM {
 	shared := &SharedState{
 		Root:         value.NewGlobalEnvironment(nil),
 		Modules:      newModuleCache(),
+		Files:        newHandleRegistry[*FileResource](),
+		Listeners:    newHandleRegistry[*ListenerResource](),
+		Sockets:      newHandleRegistry[*SocketResource](),
+		Databases:    newHandleRegistry[*DatabaseResource](),
+		Statements:   newHandleRegistry[*StatementResource](),
 		NetListeners: make(map[int]net.Listener),
 		NetConns:     make(map[int]net.Conn),
 		NextNetID:    1,
