@@ -6,7 +6,6 @@ import (
 	"net"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
-	"os"
 	"sync"
 )
 
@@ -74,10 +73,6 @@ type VM struct {
 
 	moduleLoadStack []moduleKey
 
-	// IO Management
-	openFiles map[int64]*os.File
-	nextFD    int64
-
 	// Net Management (Moved to SharedState)
 	netBufferedData  map[int][]byte   // For peeked data during select (Local to thread/VM?)
 	netBufferedConns map[int]net.Conn // For peeked accepts (Local to thread/VM?)
@@ -135,10 +130,8 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		shared.Modules = newModuleCache()
 	}
 	vm := &VM{
-		shared:    shared,
-		Config:    cfg,
-		openFiles: make(map[int64]*os.File),
-		nextFD:    1,
+		shared: shared,
+		Config: cfg,
 
 		netBufferedData:  make(map[int][]byte),
 		netBufferedConns: make(map[int]net.Conn),

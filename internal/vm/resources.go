@@ -5,6 +5,8 @@ import (
 	"net"
 	"os"
 	"sync"
+
+	"noxy-vm/internal/value"
 )
 
 type handleRegistry[T any] struct {
@@ -46,11 +48,48 @@ func (registry *handleRegistry[T]) remove(handle int) (T, bool) {
 	return item, ok
 }
 
+func (registry *handleRegistry[T]) snapshot() map[int]T {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+
+	items := make(map[int]T, len(registry.items))
+	for handle, item := range registry.items {
+		items[handle] = item
+	}
+	return items
+}
+
 type FileResource struct {
 	stateMu     sync.Mutex
 	operationMu sync.Mutex
 	file        *os.File
 	closed      bool
+}
+
+func (resource *FileResource) use(operation func(*os.File) value.Value) (value.Value, bool) {
+	resource.operationMu.Lock()
+	defer resource.operationMu.Unlock()
+
+	resource.stateMu.Lock()
+	if resource.closed || resource.file == nil {
+		resource.stateMu.Unlock()
+		return value.NewNull(), false
+	}
+	file := resource.file
+	resource.stateMu.Unlock()
+	return operation(file), true
+}
+
+func (resource *FileResource) close() error {
+	resource.stateMu.Lock()
+	if resource.closed || resource.file == nil {
+		resource.stateMu.Unlock()
+		return os.ErrClosed
+	}
+	resource.closed = true
+	file := resource.file
+	resource.stateMu.Unlock()
+	return file.Close()
 }
 
 type ListenerResource struct {

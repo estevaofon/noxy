@@ -1,8 +1,10 @@
 package vm
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/value"
 )
@@ -26,14 +28,76 @@ func testIOCloseResultDefinition() value.Value {
 	return value.NewStruct("IOCloseResult", []string{"success", "error"})
 }
 
+func cleanupFileResources(t *testing.T, machine *VM) {
+	t.Helper()
+	t.Cleanup(func() {
+		for handle := range machine.shared.Files.snapshot() {
+			if resource, ok := machine.shared.Files.remove(handle); ok {
+				_ = resource.close()
+			}
+		}
+	})
+}
+
+func TestFileHandleIsUsableAcrossSharedVMs(t *testing.T) {
+	parent := New()
+	child := NewWithShared(parent.shared, parent.Config)
+	path := filepath.Join(t.TempDir(), "shared.txt")
+	fileType := testFileDefinition()
+	handle := callBuiltin(t, parent, "io_open", value.NewString(path), value.NewString("w"), fileType)
+	defer callBuiltin(t, parent, "io_close", handle)
+	fd := int(requireBuiltinInstance(t, handle, fileType).Fields["fd"].AsInt)
+	if _, ok := parent.shared.Files.get(fd); !ok {
+		t.Fatalf("file handle %d was not published to shared resources", fd)
+	}
+	callBuiltin(t, child, "io_write", handle, value.NewString("shared"))
+	callBuiltin(t, child, "io_close", handle)
+	contents, err := os.ReadFile(path)
+	if err != nil || string(contents) != "shared" {
+		t.Fatalf("contents=%q err=%v", contents, err)
+	}
+}
+
+func TestFileCloseInterruptsBlockedReadWithoutRegistryDeadlock(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	machine := New()
+	resource := &FileResource{file: reader}
+	handle := machine.shared.Files.add(resource)
+	done := make(chan error, 1)
+	go func() {
+		resource.operationMu.Lock()
+		defer resource.operationMu.Unlock()
+		buffer := make([]byte, 1)
+		_, readErr := resource.file.Read(buffer)
+		done <- readErr
+	}()
+	removed, ok := machine.shared.Files.remove(handle)
+	if !ok {
+		t.Fatal("file handle disappeared")
+	}
+	removed.stateMu.Lock()
+	removed.closed = true
+	removed.stateMu.Unlock()
+	if err := removed.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case readErr := <-done:
+		if readErr == nil {
+			t.Fatal("blocked read succeeded after close")
+		}
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("close did not interrupt blocked read")
+	}
+}
+
 func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
 	machine := New()
-	defer func() {
-		for descriptor, file := range machine.openFiles {
-			_ = file.Close()
-			delete(machine.openFiles, descriptor)
-		}
-	}()
+	cleanupFileResources(t, machine)
 
 	path := filepath.Join(t.TempDir(), "observable-write.txt")
 	fileDefinition := testFileDefinition()
@@ -47,8 +111,12 @@ func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
 	assertBuiltinValue(t, success.Fields["bytes_written"], value.NewInt(int64(len([]byte(contents)))))
 	assertBuiltinValue(t, success.Fields["error"], value.NewString(""))
 
-	fd := handle.Fields["fd"].AsInt
-	if err := machine.openFiles[fd].Close(); err != nil {
+	fd := int(handle.Fields["fd"].AsInt)
+	resource, ok := machine.shared.Files.get(fd)
+	if !ok {
+		t.Fatalf("open file descriptor %d is absent from shared resources", fd)
+	}
+	if err := resource.file.Close(); err != nil {
 		t.Fatalf("close underlying file: %v", err)
 	}
 
@@ -62,12 +130,7 @@ func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
 
 func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
 	machine := New()
-	defer func() {
-		for descriptor, file := range machine.openFiles {
-			_ = file.Close()
-			delete(machine.openFiles, descriptor)
-		}
-	}()
+	cleanupFileResources(t, machine)
 
 	path := filepath.Join(t.TempDir(), "observable-close.txt")
 	fileDefinition := testFileDefinition()
@@ -88,8 +151,12 @@ func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
 
 	failedHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("a"), fileDefinition)
 	failedHandle := requireBuiltinInstance(t, failedHandleValue, fileDefinition)
-	failedFD := failedHandle.Fields["fd"].AsInt
-	if err := machine.openFiles[failedFD].Close(); err != nil {
+	failedFD := int(failedHandle.Fields["fd"].AsInt)
+	failedResource, ok := machine.shared.Files.get(failedFD)
+	if !ok {
+		t.Fatalf("open file descriptor %d is absent from shared resources", failedFD)
+	}
+	if err := failedResource.file.Close(); err != nil {
 		t.Fatalf("close underlying file: %v", err)
 	}
 	underlyingFailure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", failedHandleValue, resultDefinition), resultDefinition)
@@ -98,19 +165,14 @@ func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
 		t.Fatal("underlying close failure returned an empty error")
 	}
 	assertBuiltinValue(t, failedHandle.Fields["open"], value.NewBool(false))
-	if _, ok := machine.openFiles[failedFD]; ok {
-		t.Fatalf("failed close descriptor %d remains in VM state", failedFD)
+	if _, ok := machine.shared.Files.get(failedFD); ok {
+		t.Fatalf("failed close descriptor %d remains in shared resources", failedFD)
 	}
 }
 
 func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	machine := New()
-	defer func() {
-		for descriptor, file := range machine.openFiles {
-			_ = file.Close()
-			delete(machine.openFiles, descriptor)
-		}
-	}()
+	cleanupFileResources(t, machine)
 	temporaryRoot := t.TempDir()
 	directory := filepath.Join(temporaryRoot, "nested", "data")
 	path := filepath.Join(directory, "sample.txt")
@@ -123,15 +185,15 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	writeHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("w"), fileDefinition)
 	writeHandle := requireBuiltinInstance(t, writeHandleValue, fileDefinition)
 	assertBuiltinValue(t, writeHandle.Fields["open"], value.NewBool(true))
-	writeFD := writeHandle.Fields["fd"].AsInt
-	if _, ok := machine.openFiles[writeFD]; !ok {
-		t.Fatalf("open file descriptor %d is absent from VM state", writeFD)
+	writeFD := int(writeHandle.Fields["fd"].AsInt)
+	if _, ok := machine.shared.Files.get(writeFD); !ok {
+		t.Fatalf("open file descriptor %d is absent from shared resources", writeFD)
 	}
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_write", writeHandleValue, value.NewBytes(contents)), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_close", writeHandleValue), value.NewNull())
 	assertBuiltinValue(t, writeHandle.Fields["open"], value.NewBool(false))
-	if _, ok := machine.openFiles[writeFD]; ok {
-		t.Fatalf("closed file descriptor %d remains in VM state", writeFD)
+	if _, ok := machine.shared.Files.get(writeFD); ok {
+		t.Fatalf("closed file descriptor %d remains in shared resources", writeFD)
 	}
 
 	readHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("r"), fileDefinition)
