@@ -58,6 +58,36 @@ func TestFileHandleIsUsableAcrossSharedVMs(t *testing.T) {
 	}
 }
 
+func TestIOHandleMetadataIsSafeAcrossSharedVMs(t *testing.T) {
+	parent := New()
+	child := NewWithShared(parent.shared, parent.Config)
+	path := filepath.Join(t.TempDir(), "metadata-race.txt")
+	fileType := testFileDefinition()
+	handle := callBuiltin(t, parent, "io_open", value.NewString(path), value.NewString("w"), fileType)
+	defer callBuiltin(t, parent, "io_close", handle)
+
+	writeNative := requireBuiltin(t, child, "io_write")
+	closeNative := requireBuiltin(t, parent, "io_close")
+	start := make(chan struct{})
+	done := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := writeNative.Invoke(child, []value.Value{handle, value.NewString("")})
+		done <- err
+	}()
+	go func() {
+		<-start
+		_, err := closeNative.Invoke(parent, []value.Value{handle})
+		done <- err
+	}()
+	close(start)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestFileCloseInterruptsBlockedReadWithoutRegistryDeadlock(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -67,26 +97,44 @@ func TestFileCloseInterruptsBlockedReadWithoutRegistryDeadlock(t *testing.T) {
 	machine := New()
 	resource := &FileResource{file: reader}
 	handle := machine.shared.Files.add(resource)
-	done := make(chan error, 1)
+	fileType := testFileDefinition()
+	handleValue := value.NewInstance(fileType.Obj.(*value.ObjStruct))
+	instance := handleValue.Obj.(*value.ObjInstance)
+	instance.Fields["fd"] = value.NewInt(int64(handle))
+	instance.Fields["open"] = value.NewBool(true)
+	closeNative := requireBuiltin(t, machine, "io_close")
+	readStarted := make(chan struct{})
+	readDone := make(chan error, 1)
 	go func() {
 		resource.operationMu.Lock()
 		defer resource.operationMu.Unlock()
+		close(readStarted)
 		buffer := make([]byte, 1)
 		_, readErr := resource.file.Read(buffer)
-		done <- readErr
+		readDone <- readErr
 	}()
-	removed, ok := machine.shared.Files.remove(handle)
-	if !ok {
-		t.Fatal("file handle disappeared")
-	}
-	removed.stateMu.Lock()
-	removed.closed = true
-	removed.stateMu.Unlock()
-	if err := removed.file.Close(); err != nil {
-		t.Fatal(err)
-	}
+	<-readStarted
+
+	closeDone := make(chan error, 1)
+	go func() {
+		_, closeErr := closeNative.Invoke(machine, []value.Value{handleValue})
+		closeDone <- closeErr
+	}()
 	select {
-	case readErr := <-done:
+	case closeErr := <-closeDone:
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("close waited for the active file operation")
+	}
+	if _, ok := machine.shared.Files.get(handle); ok {
+		t.Fatal("closed file handle remains in shared resources")
+	}
+	assertBuiltinValue(t, instance.Fields["open"], value.NewBool(false))
+
+	select {
+	case readErr := <-readDone:
 		if readErr == nil {
 			t.Fatal("blocked read succeeded after close")
 		}

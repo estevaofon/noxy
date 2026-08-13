@@ -36,6 +36,7 @@ type SharedState struct {
 	Root       *value.GlobalEnvironment
 	Modules    *moduleCache
 	Files      *handleRegistry[*FileResource]
+	fileMetaMu sync.RWMutex
 	Listeners  *handleRegistry[*ListenerResource]
 	Sockets    *handleRegistry[*SocketResource]
 	Databases  *handleRegistry[*DatabaseResource]
