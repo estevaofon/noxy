@@ -41,9 +41,9 @@ func TestLengthAndKeysBuiltins(t *testing.T) {
 	machine := New()
 	mapValue := value.NewMap()
 	mapObject := mapValue.Obj.(*value.ObjMap)
-	mapObject.Data["name"] = value.NewString("Noxy")
-	mapObject.Data[int64(7)] = value.NewBool(true)
-	mapObject.Data[false] = value.NewInt(99)
+	setTestMap(mapObject, "name", value.NewString("Noxy"))
+	setTestMap(mapObject, int64(7), value.NewBool(true))
+	setTestMap(mapObject, false, value.NewInt(99))
 
 	lengthTests := []struct {
 		name string
@@ -98,25 +98,25 @@ func TestMutatingCollectionBuiltinsUseReferencedTarget(t *testing.T) {
 
 	storedMap := value.NewMap()
 	mapObject := storedMap.Obj.(*value.ObjMap)
-	mapObject.Data["remove"] = value.NewInt(1)
-	mapObject.Data["keep"] = value.NewInt(2)
-	mapObject.Data[int64(3)] = value.NewString("three")
+	setTestMap(mapObject, "remove", value.NewInt(1))
+	setTestMap(mapObject, "keep", value.NewInt(2))
+	setTestMap(mapObject, int64(3), value.NewString("three"))
 	mapRef := pointerReference(&storedMap)
 	assertBuiltinValue(t, callBuiltin(t, machine, "delete", mapRef, value.NewString("remove")), value.NewNull())
-	if _, exists := storedMap.Obj.(*value.ObjMap).Data["remove"]; exists {
+	if _, exists := storedMap.Obj.(*value.ObjMap).Get("remove"); exists {
 		t.Fatal("delete did not mutate the referenced map")
 	}
 	assertBuiltinValue(t, callBuiltin(t, machine, "delete", mapRef, value.NewInt(3)), value.NewNull())
-	if _, exists := storedMap.Obj.(*value.ObjMap).Data[int64(3)]; exists {
+	if _, exists := storedMap.Obj.(*value.ObjMap).Get(int64(3)); exists {
 		t.Fatal("delete did not remove an integer key")
 	}
 	assertBuiltinValue(t, callBuiltin(t, machine, "delete", mapRef, value.NewBool(true)), value.NewNull())
-	if _, exists := storedMap.Obj.(*value.ObjMap).Data["keep"]; !exists {
+	if _, exists := storedMap.Obj.(*value.ObjMap).Get("keep"); !exists {
 		t.Fatal("delete with an unsupported key changed the map")
 	}
 	plainMap := value.NewMapWithData(map[string]value.Value{"still": value.NewInt(1)})
 	assertBuiltinValue(t, callBuiltin(t, machine, "delete", plainMap, value.NewString("still")), value.NewNull())
-	if _, exists := plainMap.Obj.(*value.ObjMap).Data["still"]; !exists {
+	if _, exists := plainMap.Obj.(*value.ObjMap).Get("still"); !exists {
 		t.Fatal("delete mutated a non-reference argument")
 	}
 
@@ -196,8 +196,8 @@ func TestCollectionMembershipBuiltins(t *testing.T) {
 
 	mapValue := value.NewMap()
 	mapObject := mapValue.Obj.(*value.ObjMap)
-	mapObject.Data["one"] = value.NewInt(1)
-	mapObject.Data[int64(2)] = value.NewString("two")
+	setTestMap(mapObject, "one", value.NewInt(1))
+	setTestMap(mapObject, int64(2), value.NewString("two"))
 	hasKeyTests := []struct {
 		name string
 		args []value.Value

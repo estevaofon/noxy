@@ -117,18 +117,15 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 			return array.Elements[index], true, func(updated value.Value) { array.Elements[index] = updated }, nil
 		}
 		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ref.Container.Type == value.VAL_OBJ && ok && mapping != nil {
-			if mapping.Data == nil {
-				return value.Value{}, false, nil, fmt.Errorf("invalid map reference container")
-			}
 			key, err := referenceMapKey(ref.Index)
 			if err != nil {
 				return value.Value{}, false, nil, err
 			}
-			stored, exists := mapping.Data[key]
+			stored, exists := mapping.Get(key)
 			if !exists {
 				stored = value.NewNull()
 			}
-			return stored, exists, func(updated value.Value) { mapping.Data[key] = updated }, nil
+			return stored, exists, func(updated value.Value) { mapping.Set(key, updated) }, nil
 		}
 		return value.Value{}, false, nil, fmt.Errorf("Target is not indexable")
 	default:

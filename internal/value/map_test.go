@@ -24,28 +24,27 @@ func TestObjMapOperationsUseSnapshots(t *testing.T) {
 	}
 }
 
-func TestObjMapReplaceKeepsDataAliasCurrent(t *testing.T) {
+func TestObjMapReplaceReplacesLiveValues(t *testing.T) {
 	mapping := NewMap().Obj.(*ObjMap)
-	data := mapping.Data
 	mapping.Set("old", NewInt(1))
 	mapping.Replace(map[interface{}]Value{"new": NewInt(2)})
 
-	if mapping.Data == nil || len(data) != 1 {
-		t.Fatal("replace did not preserve the legacy data map")
+	if mapping.Len() != 1 {
+		t.Fatal("replace did not replace values")
 	}
-	if _, found := data["old"]; found {
-		t.Fatal("replace did not clear legacy data")
+	if _, found := mapping.Get("old"); found {
+		t.Fatal("replace did not clear old value")
 	}
-	if got, found := data["new"]; !found || got.AsInt != 2 {
-		t.Fatalf("legacy data new=(%v,%t)", got, found)
+	if got, found := mapping.Get("new"); !found || got.AsInt != 2 {
+		t.Fatalf("new=(%v,%t)", got, found)
 	}
 }
 
-func TestObjMapReplaceAcceptsItsDataAlias(t *testing.T) {
+func TestObjMapReplaceAcceptsSnapshot(t *testing.T) {
 	mapping := NewMap().Obj.(*ObjMap)
 	mapping.Set("answer", NewInt(42))
 
-	mapping.Replace(mapping.Data)
+	mapping.Replace(mapping.Snapshot())
 
 	if got, found := mapping.Get("answer"); !found || got.AsInt != 42 {
 		t.Fatalf("answer=(%v,%t)", got, found)

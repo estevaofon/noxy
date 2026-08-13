@@ -35,11 +35,7 @@ func callBuiltinWithinBound(t *testing.T, machine *VM, name string, args ...valu
 func builtinMapField(t *testing.T, object value.Value, field string) value.Value {
 	t.Helper()
 	mapped := requireBuiltinMap(t, object)
-	got, ok := mapped.Data[field]
-	if !ok {
-		t.Fatalf("map does not contain field %q", field)
-	}
-	return got
+	return requireTestMapValue(t, mapped, field)
 }
 
 func TestNetworkBuiltinsLoopbackLifecycle(t *testing.T) {

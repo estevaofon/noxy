@@ -6,8 +6,25 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"noxy-vm/internal/value"
 )
+
+func setTestMap(mapping *value.ObjMap, key interface{}, item value.Value) {
+	mapping.Set(key, item)
+}
+
+func requireTestMapValue(t *testing.T, mapping *value.ObjMap, key interface{}) value.Value {
+	t.Helper()
+	item, ok := mapping.Get(key)
+	if !ok {
+		t.Fatalf("map is missing key %v", key)
+	}
+	return item
+}
 
 func requireSourceFunctions(t *testing.T, filename string, names ...string) {
 	t.Helper()
@@ -115,4 +132,23 @@ func TestExecutorSourceLayout(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRuntimeDoesNotAccessObjMapDataDirectly(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") || file == "architecture_test.go" {
+			continue
+		}
+		source, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(source, []byte(".Dat"+"a")) {
+			t.Errorf("%s accesses ObjMap.Dat"+"a directly", file)
+		}
+	}
 }

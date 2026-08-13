@@ -372,7 +372,7 @@ func (vm *VM) run(minFrameCount int) error {
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
-				stored = mapObj.Data[key]
+				stored, _ = mapObj.Get(key)
 			} else {
 				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
 			}
@@ -582,7 +582,7 @@ func (vm *VM) run(minFrameCount int) error {
 				if arr, ok := val.Obj.(*value.ObjArray); ok {
 					vm.push(value.NewInt(int64(len(arr.Elements))))
 				} else if m, ok := val.Obj.(*value.ObjMap); ok {
-					vm.push(value.NewInt(int64(len(m.Data))))
+					vm.push(value.NewInt(int64(m.Len())))
 				} else if s, ok := val.Obj.(string); ok {
 					vm.push(value.NewInt(int64(utf8.RuneCountInString(s))))
 				} else {
@@ -980,7 +980,7 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Map expects keys and values on stack: K1, V1, K2, V2...
 			mapObj := value.NewMap()
-			mapData := mapObj.Obj.(*value.ObjMap).Data
+			mapping := mapObj.Obj.(*value.ObjMap)
 
 			for i := 0; i < count; i++ {
 				val := vm.pop()
@@ -998,7 +998,7 @@ func (vm *VM) run(minFrameCount int) error {
 				} else {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
-				mapData[key] = val
+				mapping.Set(key, val)
 			}
 			vm.push(mapObj)
 
@@ -1029,7 +1029,7 @@ func (vm *VM) run(minFrameCount int) error {
 			modVal := vm.pop()
 			if modVal.Type == value.VAL_OBJ {
 				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
-					for k, v := range modMap.Data {
+					for k, v := range modMap.Snapshot() {
 						if keyStr, ok := k.(string); ok {
 							if frame.Globals != nil {
 								frame.Globals[keyStr] = v
@@ -1074,7 +1074,7 @@ func (vm *VM) run(minFrameCount int) error {
 						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
 
-					val, ok := mapObj.Data[key]
+					val, ok := mapObj.Get(key)
 					if !ok {
 						vm.push(value.NewNull())
 					} else {
@@ -1140,7 +1140,7 @@ func (vm *VM) run(minFrameCount int) error {
 					} else {
 						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
-					mapObj.Data[key] = val
+					mapObj.Set(key, val)
 					vm.push(val)
 					continue
 				}
@@ -1176,7 +1176,7 @@ func (vm *VM) run(minFrameCount int) error {
 				vm.push(val)
 			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
 				// Allow accessing map keys as properties (for modules)
-				val, ok := mapObj.Data[name]
+				val, ok := mapObj.Get(name)
 				if !ok {
 					return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
 				}

@@ -189,7 +189,7 @@ func ValueToInterface(v value.Value) interface{} {
 			return arr
 		case *value.ObjMap:
 			m := make(map[string]interface{})
-			for k, val := range o.Data {
+			for k, val := range o.Snapshot() {
 				if keyStr, ok := k.(string); ok {
 					m[keyStr] = ValueToInterface(val)
 				} else {

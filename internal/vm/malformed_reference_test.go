@@ -61,7 +61,6 @@ dynamic(malformed_ref())`, value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)
 
 func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
 	moduleGlobals := map[string]value.Value{"present": value.NewInt(1)}
-	nilDataMap := value.Value{Type: value.VAL_OBJ, Obj: &value.ObjMap{}}
 	tests := []struct {
 		name      string
 		malformed value.Value
@@ -76,7 +75,6 @@ func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
 		{name: "array index type", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewArray([]value.Value{value.NewInt(1)}), Index: value.NewBool(false)}}},
 		{name: "array bounds", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewArray([]value.Value{value.NewInt(1)}), Index: value.NewInt(2)}}},
 		{name: "map key", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewMap(), Index: value.Value{Type: value.VAL_OBJ, Obj: []int{1}}}}},
-		{name: "nil map data", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: nilDataMap, Index: value.NewString("key")}}},
 		{name: "index container", malformed: value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_INDEX, Container: value.NewInt(1), Index: value.NewInt(0)}}},
 	}
 

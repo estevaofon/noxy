@@ -54,7 +54,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		if !ok {
 			return value.NewNull()
 		}
-		fdVal, exists := sockMap.Data["fd"]
+		fdVal, exists := sockMap.Get("fd")
 		if !exists {
 			return value.NewNull()
 		}
@@ -154,7 +154,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		if !ok {
 			return value.NewNull()
 		}
-		fdVal, _ := sockMap.Data["fd"]
+		fdVal, _ := sockMap.Get("fd")
 		fd := int(fdVal.AsInt)
 		size := int(args[1].AsInt)
 
@@ -236,7 +236,7 @@ func (vm *VM) defineNetworkBuiltins() {
 			fmt.Printf("DEBUG: net_send args[0] not map: %T %v\n", args[0].Obj, args[0].Obj)
 			return value.NewNull()
 		}
-		fdVal, _ := sockMap.Data["fd"]
+		fdVal, _ := sockMap.Get("fd")
 		fd := int(fdVal.AsInt)
 		var data string
 		if args[1].Type == value.VAL_BYTES {
@@ -291,7 +291,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		} else if args[0].Type == value.VAL_OBJ {
 			// Fallback for old calls? Or just error.
 			if sockMap, ok := args[0].Obj.(*value.ObjMap); ok {
-				if fdVal, found := sockMap.Data["fd"]; found {
+				if fdVal, found := sockMap.Get("fd"); found {
 					fd = int(fdVal.AsInt)
 				}
 			}
@@ -349,7 +349,7 @@ func (vm *VM) defineNetworkBuiltins() {
 						var fd int64 = -1
 
 						if m, ok := el.Obj.(*value.ObjMap); ok {
-							if f, ok := m.Data["fd"]; ok {
+							if f, ok := m.Get("fd"); ok {
 								fd = f.AsInt
 							}
 						} else if inst, ok := el.Obj.(*value.ObjInstance); ok {

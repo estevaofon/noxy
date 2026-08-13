@@ -200,7 +200,6 @@ func (oa *ObjArray) Format(f fmt.State, verb rune) {
 }
 
 type ObjMap struct {
-	Data        map[interface{}]Value
 	store       *bindingStore
 	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
@@ -209,9 +208,10 @@ type ObjMap struct {
 func (om *ObjMap) String() string {
 	s := "{"
 	i := 0
-	for k, v := range om.Data {
+	values := om.Snapshot()
+	for k, v := range values {
 		s += fmt.Sprintf("%v: %s", k, v.String())
-		if i < len(om.Data)-1 {
+		if i < len(values)-1 {
 			s += ", "
 		}
 		i++
@@ -456,16 +456,19 @@ func NewArray(elements []Value) Value {
 }
 
 func NewMap() Value {
-	data := make(map[interface{}]Value)
-	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: data, store: newBindingStore(data)}}
+	mapping := &ObjMap{store: newBindingStore(nil)}
+	mapping.ensureStore()
+	return Value{Type: VAL_OBJ, Obj: mapping}
 }
 
 func NewMapWithData(data map[string]Value) Value {
-	m := make(map[interface{}]Value)
+	values := make(map[interface{}]Value, len(data))
 	for k, v := range data {
-		m[k] = v
+		values[k] = v
 	}
-	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: m, store: newBindingStore(m)}}
+	mapping := NewMap()
+	mapping.Obj.(*ObjMap).Replace(values)
+	return mapping
 }
 
 func NewStruct(name string, fields []string) Value {

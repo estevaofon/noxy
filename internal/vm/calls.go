@@ -142,13 +142,10 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjMap:
-		newData := make(map[interface{}]value.Value)
-		for k, val := range obj.Data {
-			newData[k] = val
-		}
+		newData := obj.Snapshot()
 		copied := value.NewMap()
 		copiedMap := copied.Obj.(*value.ObjMap)
-		copiedMap.Data = newData
+		copiedMap.Replace(newData)
 		copiedMap.RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjInstance:

@@ -282,7 +282,7 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 	if result := jsonLoads.Fn([]value.Value{value.NewString(`{"answer":42}`), target}); result.Type != value.VAL_BOOL || !result.AsBool {
 		t.Fatal("module-frame global target was rejected")
 	}
-	got := moduleGlobals["target"].Obj.(*value.ObjMap).Data["answer"]
+	got := requireTestMapValue(t, moduleGlobals["target"].Obj.(*value.ObjMap), "answer")
 	if got.Type != value.VAL_INT || got.AsInt != 42 {
 		t.Fatalf("module target=%v, want answer=42", moduleGlobals["target"])
 	}
@@ -739,7 +739,7 @@ func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {
 		t.Fatalf("items=%v, want [42]", fields["items"])
 	}
 	metadata := fields["metadata"].Obj.(*value.ObjMap)
-	if got := metadata.Data["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got := requireTestMapValue(t, metadata, "answer"); got.Type != value.VAL_INT || got.AsInt != 42 {
 		t.Fatalf("metadata=%v, want answer=42", fields["metadata"])
 	}
 }
@@ -1883,11 +1883,11 @@ func TestCollectionRuntimeMetadataPreservesShallowCopyAndIdentity(t *testing.T) 
 
 	mapping := value.NewMap()
 	mapObject := mapping.Obj.(*value.ObjMap)
-	mapObject.Data["item"] = shared
+	setTestMap(mapObject, "item", shared)
 	mapObject.RuntimeType.Store(mapSchema)
 	mapCopy := machine.copyValue(mapping)
 	mapCopyObject := mapCopy.Obj.(*value.ObjMap)
-	if mapCopyObject == mapObject || mapCopyObject.RuntimeType.Load() != mapSchema || mapCopyObject.Data["item"].Obj != shared.Obj {
+	if mapCopyObject == mapObject || mapCopyObject.RuntimeType.Load() != mapSchema || requireTestMapValue(t, mapCopyObject, "item").Obj != shared.Obj {
 		t.Fatal("map shallow copy lost collection schema or nested identity")
 	}
 }
@@ -2296,7 +2296,7 @@ test_report(length(sliced) * 10 + length(generated))`
 	if !ok {
 		t.Fatal("array_utils was not cached")
 	}
-	exports := module.Obj.(*value.ObjMap).Data
+	exports := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := exports["slice"]; !ok {
 		t.Fatal("array_utils omitted slice export")
 	}

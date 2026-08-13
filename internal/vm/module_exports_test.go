@@ -81,7 +81,7 @@ func TestRuntimeFileModuleGlobalsContainDirectExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := module.Obj.(*value.ObjMap).Data
+	data := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime file module omitted direct delete export")
 	}
@@ -92,7 +92,7 @@ func TestRuntimeEmbeddedWildcardExportsAreDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := module.Obj.(*value.ObjMap).Data
+	data := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime http module omitted wildcard-imported delete")
 	}
@@ -132,8 +132,8 @@ func TestRuntimeModuleCachePreservesStructConstructorCallableSchema(t *testing.T
 	if !ok {
 		t.Fatal("missing cached module alias")
 	}
-	firstConstructor := first.Obj.(*value.ObjMap).Data["Box"]
-	secondConstructor := second.Obj.(*value.ObjMap).Data["Box"]
+	firstConstructor := requireTestMapValue(t, first.Obj.(*value.ObjMap), "Box")
+	secondConstructor := requireTestMapValue(t, second.Obj.(*value.ObjMap), "Box")
 	if firstConstructor.Obj != secondConstructor.Obj {
 		t.Fatal("cached import replaced the constructor definition")
 	}
@@ -159,7 +159,7 @@ func TestRuntimeDirectoryModuleGlobalsContainOnlyLoadableChildren(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := module.Obj.(*value.ObjMap).Data
+	data := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime directory module omitted loadable file child")
 	}
@@ -257,7 +257,7 @@ func TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := module.Obj.(*value.ObjMap).Data["delete"]; !ok {
+			if _, ok := module.Obj.(*value.ObjMap).Get("delete"); !ok {
 				t.Fatal("runtime module omitted direct delete export")
 			}
 		})
@@ -346,7 +346,7 @@ end
 			if err != nil {
 				t.Fatal(err)
 			}
-			deleteBinding, ok := module.Obj.(*value.ObjMap).Data["delete"]
+			deleteBinding, ok := module.Obj.(*value.ObjMap).Get("delete")
 			if !ok {
 				t.Fatal("nested wrapper omitted root dependency delete")
 			}

@@ -75,8 +75,9 @@ func (store *bindingStore) replace(values map[interface{}]Value) {
 
 func (mapping *ObjMap) ensureStore() *bindingStore {
 	mapping.storeOnce.Do(func() {
-		mapping.store = newBindingStore(mapping.Data)
-		mapping.Data = mapping.store.values
+		if mapping.store == nil {
+			mapping.store = newBindingStore(nil)
+		}
 	})
 	return mapping.store
 }

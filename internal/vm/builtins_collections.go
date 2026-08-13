@@ -25,7 +25,7 @@ func (vm *VM) defineCollectionBuiltins() {
 				return value.NewInt(int64(len(arr.Elements)))
 			}
 			if mp, ok := arg.Obj.(*value.ObjMap); ok {
-				return value.NewInt(int64(len(mp.Data)))
+				return value.NewInt(int64(mp.Len()))
 			}
 		}
 		return value.NewInt(0)
@@ -38,8 +38,9 @@ func (vm *VM) defineCollectionBuiltins() {
 		mapVal := args[0]
 		if mapVal.Type == value.VAL_OBJ {
 			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
-				keys := make([]value.Value, 0, len(m.Data))
-				for k := range m.Data {
+				values := m.Snapshot()
+				keys := make([]value.Value, 0, len(values))
+				for k := range values {
 					if kInt, ok := k.(int64); ok {
 						keys = append(keys, value.NewInt(kInt))
 					} else if kStr, ok := k.(string); ok {
@@ -80,7 +81,7 @@ func (vm *VM) defineCollectionBuiltins() {
 					}
 				}
 				if key != nil {
-					delete(m.Data, key)
+					m.Delete(key)
 				}
 			}
 		}
@@ -231,7 +232,7 @@ func (vm *VM) defineCollectionBuiltins() {
 				} else {
 					return value.NewBool(false)
 				}
-				_, ok := mapObj.Data[key]
+				_, ok := mapObj.Get(key)
 				return value.NewBool(ok)
 			}
 		}

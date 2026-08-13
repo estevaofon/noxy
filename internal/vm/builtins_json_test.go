@@ -11,18 +11,18 @@ import (
 
 func TestStrictJSONValToGoAcceptsJSONDomain(t *testing.T) {
 	nested := value.NewMap()
-	nested.Obj.(*value.ObjMap).Data["city"] = value.NewString("Cuiabá")
+	setTestMap(nested.Obj.(*value.ObjMap), "city", value.NewString("Cuiabá"))
 	document := value.NewMap()
-	document.Obj.(*value.ObjMap).Data["empty"] = value.NewString("")
-	document.Obj.(*value.ObjMap).Data["int"] = value.NewInt(30)
-	document.Obj.(*value.ObjMap).Data["minimum"] = value.NewInt(-9223372036854775807 - 1)
-	document.Obj.(*value.ObjMap).Data["maximum"] = value.NewInt(9223372036854775807)
-	document.Obj.(*value.ObjMap).Data["float"] = value.NewFloat(1.25)
-	document.Obj.(*value.ObjMap).Data["active"] = value.NewBool(true)
-	document.Obj.(*value.ObjMap).Data["nothing"] = value.NewNull()
-	document.Obj.(*value.ObjMap).Data["items"] = value.NewArray(
+	setTestMap(document.Obj.(*value.ObjMap), "empty", value.NewString(""))
+	setTestMap(document.Obj.(*value.ObjMap), "int", value.NewInt(30))
+	setTestMap(document.Obj.(*value.ObjMap), "minimum", value.NewInt(-9223372036854775807-1))
+	setTestMap(document.Obj.(*value.ObjMap), "maximum", value.NewInt(9223372036854775807))
+	setTestMap(document.Obj.(*value.ObjMap), "float", value.NewFloat(1.25))
+	setTestMap(document.Obj.(*value.ObjMap), "active", value.NewBool(true))
+	setTestMap(document.Obj.(*value.ObjMap), "nothing", value.NewNull())
+	setTestMap(document.Obj.(*value.ObjMap), "items", value.NewArray(
 		[]value.Value{value.NewString("Noxy"), value.NewInt(2), nested},
-	)
+	))
 
 	got, err := strictJSONValToGo(document)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestStrictJSONValToGoRejectsNonJSONValues(t *testing.T) {
 	definition := value.NewStruct("Point", []string{"x"})
 	instance := value.NewInstance(definition.Obj.(*value.ObjStruct))
 	badKeyMap := value.NewMap()
-	badKeyMap.Obj.(*value.ObjMap).Data[int64(7)] = value.NewString("seven")
+	setTestMap(badKeyMap.Obj.(*value.ObjMap), int64(7), value.NewString("seven"))
 	tests := []struct {
 		name  string
 		input value.Value
@@ -75,7 +75,7 @@ func TestStrictJSONValToGoRejectsNonJSONValues(t *testing.T) {
 func TestStrictJSONValToGoRejectsInvalidUTF8Strings(t *testing.T) {
 	invalidValue := value.NewString(string([]byte{0xff}))
 	invalidKey := value.NewMap()
-	invalidKey.Obj.(*value.ObjMap).Data[string([]byte{0xff})] = value.NewBool(true)
+	setTestMap(invalidKey.Obj.(*value.ObjMap), string([]byte{0xff}), value.NewBool(true))
 	tests := []struct {
 		name  string
 		input value.Value
@@ -100,21 +100,21 @@ func TestStrictJSONValToGoRejectsCyclesAndAcceptsSharedChildren(t *testing.T) {
 	}
 
 	mapCycle := value.NewMap()
-	mapCycle.Obj.(*value.ObjMap).Data["self"] = mapCycle
+	setTestMap(mapCycle.Obj.(*value.ObjMap), "self", mapCycle)
 	if _, err := strictJSONValToGo(mapCycle); err == nil {
 		t.Fatal("map cycle was accepted")
 	}
 
 	left := value.NewMap()
 	right := value.NewArray(nil)
-	left.Obj.(*value.ObjMap).Data["right"] = right
+	setTestMap(left.Obj.(*value.ObjMap), "right", right)
 	right.Obj.(*value.ObjArray).Elements = []value.Value{left}
 	if _, err := strictJSONValToGo(left); err == nil {
 		t.Fatal("indirect cycle was accepted")
 	}
 
 	child := value.NewMap()
-	child.Obj.(*value.ObjMap).Data["value"] = value.NewInt(1)
+	setTestMap(child.Obj.(*value.ObjMap), "value", value.NewInt(1))
 	root := value.NewArray([]value.Value{child, child})
 	if _, err := strictJSONValToGo(root); err != nil {
 		t.Fatalf("shared acyclic child rejected: %v", err)
@@ -155,8 +155,8 @@ func requireBuiltinMap(t *testing.T, got value.Value) *value.ObjMap {
 func TestJSONDumpsBuiltin(t *testing.T) {
 	machine := New()
 	mapValue := value.NewMap()
-	mapValue.Obj.(*value.ObjMap).Data["name"] = value.NewString("Noxy")
-	mapValue.Obj.(*value.ObjMap).Data[int64(7)] = value.NewBool(true)
+	setTestMap(mapValue.Obj.(*value.ObjMap), "name", value.NewString("Noxy"))
+	setTestMap(mapValue.Obj.(*value.ObjMap), int64(7), value.NewBool(true))
 	definition := value.NewStruct("Point", []string{"x", "label"})
 	instance := value.NewInstance(definition.Obj.(*value.ObjStruct))
 	instance.Obj.(*value.ObjInstance).Fields["x"] = value.NewInt(3)
@@ -190,7 +190,7 @@ func TestJSONDumpsResultBuiltinReportsSuccessAndFailure(t *testing.T) {
 	machine := New()
 	resultType := value.NewStruct("EncodeResult", []string{"success", "data", "error"})
 	valid := value.NewMap()
-	valid.Obj.(*value.ObjMap).Data["name"] = value.NewString("Noxy")
+	setTestMap(valid.Obj.(*value.ObjMap), "name", value.NewString("Noxy"))
 	success := callBuiltin(t, machine, "json_dumps_result", valid, resultType)
 	successFields := success.Obj.(*value.ObjInstance).Fields
 	assertBuiltinValue(t, successFields["success"], value.NewBool(true))
@@ -198,7 +198,7 @@ func TestJSONDumpsResultBuiltinReportsSuccessAndFailure(t *testing.T) {
 	assertBuiltinValue(t, successFields["error"], value.NewString(""))
 
 	invalid := value.NewMap()
-	invalid.Obj.(*value.ObjMap).Data["raw"] = value.NewBytes("abc")
+	setTestMap(invalid.Obj.(*value.ObjMap), "raw", value.NewBytes("abc"))
 	failure := callBuiltin(t, machine, "json_dumps_result", invalid, resultType)
 	failureFields := failure.Obj.(*value.ObjInstance).Fields
 	assertBuiltinValue(t, failureFields["success"], value.NewBool(false))
@@ -212,11 +212,11 @@ func TestJSONDumpsResultBuiltinRejectsInvalidStrictValues(t *testing.T) {
 	machine := New()
 	resultType := value.NewStruct("EncodeResult", []string{"success", "data", "error"})
 	invalidKey := value.NewMap()
-	invalidKey.Obj.(*value.ObjMap).Data[string([]byte{0xff})] = value.NewBool(true)
+	setTestMap(invalidKey.Obj.(*value.ObjMap), string([]byte{0xff}), value.NewBool(true))
 	arrayCycle := value.NewArray(nil)
 	arrayCycle.Obj.(*value.ObjArray).Elements = []value.Value{arrayCycle}
 	mapCycle := value.NewMap()
-	mapCycle.Obj.(*value.ObjMap).Data["self"] = mapCycle
+	setTestMap(mapCycle.Obj.(*value.ObjMap), "self", mapCycle)
 	tests := []struct {
 		name  string
 		input value.Value
@@ -244,16 +244,16 @@ func TestJSONLoadsBuiltinRejectsInvalidUTF8WithoutMutation(t *testing.T) {
 	machine := New()
 	target := value.NewMap()
 	targetMap := target.Obj.(*value.ObjMap)
-	targetMap.Data["sentinel"] = value.NewString("keep")
+	setTestMap(targetMap, "sentinel", value.NewString("keep"))
 	invalidJSON := value.NewString(string([]byte{'{', '"', 'n', 'a', 'm', 'e', '"', ':', '"', 0xff, '"', '}'}))
 
 	result := callBuiltin(t, machine, "json_loads", invalidJSON, target)
 	assertBuiltinValue(t, result, value.NewBool(false))
-	if len(targetMap.Data) != 1 {
-		t.Fatalf("target mutated after invalid JSON: %#v", targetMap.Data)
+	if targetMap.Len() != 1 {
+		t.Fatalf("target mutated after invalid JSON: %#v", targetMap.Snapshot())
 	}
-	assertBuiltinValue(t, targetMap.Data["sentinel"], value.NewString("keep"))
-	if _, exists := targetMap.Data["name"]; exists {
+	assertBuiltinValue(t, requireTestMapValue(t, targetMap, "sentinel"), value.NewString("keep"))
+	if _, exists := targetMap.Get("name"); exists {
 		t.Fatal("target gained a field from invalid JSON")
 	}
 }
@@ -290,15 +290,15 @@ func TestJSONParseBuiltin(t *testing.T) {
 	assertBuiltinValue(t, parsedArray.Elements[3], value.NewNull())
 
 	parsedMap := requireBuiltinMap(t, callBuiltin(t, machine, "json_parse", value.NewString(`{"a":1,"nested":{"ok":true}}`)))
-	assertBuiltinValue(t, parsedMap.Data["a"], value.NewInt(1))
-	nested := requireBuiltinMap(t, parsedMap.Data["nested"])
-	assertBuiltinValue(t, nested.Data["ok"], value.NewBool(true))
+	assertBuiltinValue(t, requireTestMapValue(t, parsedMap, "a"), value.NewInt(1))
+	nested := requireBuiltinMap(t, requireTestMapValue(t, parsedMap, "nested"))
+	assertBuiltinValue(t, requireTestMapValue(t, nested, "ok"), value.NewBool(true))
 }
 
 func TestJSONValToGo(t *testing.T) {
 	mapValue := value.NewMap()
-	mapValue.Obj.(*value.ObjMap).Data["name"] = value.NewString("Noxy")
-	mapValue.Obj.(*value.ObjMap).Data[int64(7)] = value.NewBool(true)
+	setTestMap(mapValue.Obj.(*value.ObjMap), "name", value.NewString("Noxy"))
+	setTestMap(mapValue.Obj.(*value.ObjMap), int64(7), value.NewBool(true))
 	definition := value.NewStruct("Point", []string{"x"})
 	instance := value.NewInstance(definition.Obj.(*value.ObjStruct))
 	instance.Obj.(*value.ObjInstance).Fields["x"] = value.NewInt(3)
@@ -356,8 +356,8 @@ func TestGoValToNoxy(t *testing.T) {
 	assertBuiltinValue(t, array.Elements[2], value.NewNull())
 
 	mapping := requireBuiltinMap(t, goValToNoxy(map[string]interface{}{"answer": float64(42), "ok": true}))
-	assertBuiltinValue(t, mapping.Data["answer"], value.NewInt(42))
-	assertBuiltinValue(t, mapping.Data["ok"], value.NewBool(true))
+	assertBuiltinValue(t, requireTestMapValue(t, mapping, "answer"), value.NewInt(42))
+	assertBuiltinValue(t, requireTestMapValue(t, mapping, "ok"), value.NewBool(true))
 }
 
 func TestJSONReplacementCompatible(t *testing.T) {
