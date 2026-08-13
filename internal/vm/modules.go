@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/compiler"
@@ -148,8 +149,13 @@ func (vm *VM) loadResolvedDirectory(source resolvedModule) (value.Value, error) 
 	moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
 	for _, file := range files {
 		if file.IsDir() {
-			submodule, loadErr := vm.loadModule(source.Name + "." + file.Name())
+			submoduleName := source.Name + "." + file.Name()
+			submodule, loadErr := vm.loadModule(submoduleName)
 			if loadErr != nil {
+				var cycleErr *moduleCycleError
+				if errors.As(loadErr, &cycleErr) {
+					return value.NewNull(), fmt.Errorf("failed to load submodule %s: %w", submoduleName, loadErr)
+				}
 				continue
 			}
 			moduleEnvironment.SetLocal(file.Name(), submodule)

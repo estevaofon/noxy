@@ -26,6 +26,14 @@ type moduleCache struct {
 	dependencies map[moduleKey]map[moduleKey]struct{}
 }
 
+type moduleCycleError struct {
+	path []moduleKey
+}
+
+func (err *moduleCycleError) Error() string {
+	return fmt.Sprintf("module import cycle: %s", formatModulePath(err.path))
+}
+
 func newModuleCache() *moduleCache {
 	return &moduleCache{
 		entries:      make(map[moduleKey]*moduleEntry),
@@ -74,7 +82,7 @@ func (cache *moduleCache) Do(key moduleKey, parent *moduleKey, load func() (valu
 		if path, found := cache.pathLocked(key, *parent); found {
 			cycle := append(path, key)
 			cache.mu.Unlock()
-			return value.NewNull(), fmt.Errorf("module import cycle: %s", formatModulePath(cycle))
+			return value.NewNull(), &moduleCycleError{path: cycle}
 		}
 		children := cache.dependencies[*parent]
 		if children == nil {
