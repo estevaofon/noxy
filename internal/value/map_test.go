@@ -5,6 +5,38 @@ import (
 	"testing"
 )
 
+func TestObjMapZeroValueSupportsPublicOperations(t *testing.T) {
+	mapping := &ObjMap{}
+	if _, found := mapping.Get("missing"); found {
+		t.Fatal("zero-value map unexpectedly contains missing key")
+	}
+
+	mapping.Set("answer", NewInt(42))
+	snapshot := mapping.Snapshot()
+	if got, found := snapshot["answer"]; !found || got.AsInt != 42 {
+		t.Fatalf("snapshot answer=(%v,%t)", got, found)
+	}
+	if got := mapping.String(); got != "{answer: 42}" {
+		t.Fatalf("String()=%q", got)
+	}
+}
+
+func TestObjMapPreservesInjectedBindingStore(t *testing.T) {
+	injected := newBindingStore(map[interface{}]Value{"seed": NewInt(7)})
+	mapping := &ObjMap{store: injected}
+
+	if got := mapping.ensureStore(); got != injected {
+		t.Fatal("ensureStore replaced injected store")
+	}
+	if got, found := mapping.Get("seed"); !found || got.AsInt != 7 {
+		t.Fatalf("seed=(%v,%t)", got, found)
+	}
+	mapping.Set("added", NewInt(9))
+	if got, found := injected.get("added"); !found || got.AsInt != 9 {
+		t.Fatalf("injected added=(%v,%t)", got, found)
+	}
+}
+
 func TestObjMapOperationsUseSnapshots(t *testing.T) {
 	mapping := NewMap().Obj.(*ObjMap)
 	mapping.Set("answer", NewInt(42))
