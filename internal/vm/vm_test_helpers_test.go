@@ -60,5 +60,9 @@ func requireBuiltin(t *testing.T, machine *VM, name string) *value.ObjNative {
 
 func callBuiltin(t *testing.T, machine *VM, name string, args ...value.Value) value.Value {
 	t.Helper()
-	return requireBuiltin(t, machine, name).Fn(args)
+	result, err := requireBuiltin(t, machine, name).Invoke(machine, args)
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	return result
 }

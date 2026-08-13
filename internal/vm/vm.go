@@ -81,6 +81,16 @@ type VM struct {
 	openUpvalues *value.ObjUpvalue // Head of linked list of open upvalues
 }
 
+func (*VM) IsNativeContext() {}
+
+func nativeVM(context value.NativeContext) (*VM, error) {
+	machine, ok := context.(*VM)
+	if !ok || machine == nil {
+		return nil, fmt.Errorf("invalid VM native context")
+	}
+	return machine, nil
+}
+
 type VMConfig struct {
 	RootPath string
 }
@@ -133,6 +143,20 @@ func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSigna
 		return
 	}
 	vm.SetGlobal(name, value.NewNativeWithSignature(name, signature, fn))
+}
+
+func (vm *VM) DefineContextualNative(name string, fn value.ContextualNativeFunc) {
+	if _, ok := vm.GetGlobal(name); ok {
+		return
+	}
+	vm.SetGlobal(name, value.NewContextualNative(name, fn))
+}
+
+func (vm *VM) DefineContextualNativeWithSignature(name string, signature value.NativeSignature, fn value.ContextualNativeFunc) {
+	if _, ok := vm.GetGlobal(name); ok {
+		return
+	}
+	vm.SetGlobal(name, value.NewContextualNativeWithSignature(name, signature, fn))
 }
 
 func (vm *VM) SetGlobal(name string, val value.Value) {

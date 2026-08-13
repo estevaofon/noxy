@@ -3,6 +3,7 @@ package vm
 import (
 	"net"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/value"
 )
@@ -10,11 +11,25 @@ import (
 func callBuiltinWithinBound(t *testing.T, machine *VM, name string, args ...value.Value) value.Value {
 	t.Helper()
 	native := requireBuiltin(t, machine, name)
-	result := make(chan value.Value, 1)
+	type invocationResult struct {
+		value value.Value
+		err   error
+	}
+	result := make(chan invocationResult, 1)
 	go func() {
-		result <- native.Fn(args)
+		value, err := native.Invoke(machine, args)
+		result <- invocationResult{value: value, err: err}
 	}()
-	return awaitBuiltinResult(t, result, name)
+	select {
+	case invocation := <-result:
+		if invocation.err != nil {
+			t.Fatalf("%s: %v", name, invocation.err)
+		}
+		return invocation.value
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatalf("%s did not complete within %s", name, statefulBuiltinTimeout)
+		return value.NewNull()
+	}
 }
 
 func builtinMapField(t *testing.T, object value.Value, field string) value.Value {

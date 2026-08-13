@@ -75,8 +75,11 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			args = callArgs
 		}
 		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
-		result := native.Fn(args)
-		vm.stackTop -= argCount + 1 // args + function
+		result, err := native.Invoke(vm, args)
+		if err != nil {
+			return false, vm.runtimeError(c, ip, "%s", err)
+		}
+		vm.stackTop -= argCount + 1
 		vm.push(result)
 		return true, nil
 	}

@@ -85,16 +85,20 @@ func TestExecutorSourceLayout(t *testing.T) {
 			t.Fatalf("parse vm.go: %v", err)
 		}
 		allowed := map[string]bool{
-			"runtimeError":              true,
-			"New":                       true,
-			"NewWithConfig":             true,
-			"NewWithShared":             true,
-			"DefineNative":              true,
-			"DefineNativeWithSignature": true,
-			"SetGlobal":                 true,
-			"GetGlobal":                 true,
-			"SetModule":                 true,
-			"GetModule":                 true,
+			"runtimeError":                        true,
+			"IsNativeContext":                     true,
+			"nativeVM":                            true,
+			"New":                                 true,
+			"NewWithConfig":                       true,
+			"NewWithShared":                       true,
+			"DefineNative":                        true,
+			"DefineNativeWithSignature":           true,
+			"DefineContextualNative":              true,
+			"DefineContextualNativeWithSignature": true,
+			"SetGlobal":                           true,
+			"GetGlobal":                           true,
+			"SetModule":                           true,
+			"GetModule":                           true,
 		}
 		found := make(map[string]bool)
 		for _, declaration := range file.Decls {

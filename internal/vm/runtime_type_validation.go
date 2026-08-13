@@ -225,7 +225,7 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 			}
 		case value.VAL_NATIVE:
 			native, ok := actual.Obj.(*value.ObjNative)
-			return ok && native != nil && native.Fn != nil
+			return ok && native.IsCallable()
 		}
 		return false
 	}
@@ -250,7 +250,7 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 		return actualType != nil && runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool))
 	case value.VAL_NATIVE:
 		native, ok := actual.Obj.(*value.ObjNative)
-		return ok && native != nil && native.Fn != nil && nativeSignatureMatchesRuntimeType(native.Signature, expected)
+		return ok && native.IsCallable() && nativeSignatureMatchesRuntimeType(native.Signature, expected)
 	default:
 		return false
 	}

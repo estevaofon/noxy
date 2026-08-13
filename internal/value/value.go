@@ -161,14 +161,6 @@ func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 	fmt.Fprint(f, oc.String())
 }
 
-type NativeFunc func(args []Value) Value
-
-type ObjNative struct {
-	Name      string
-	Fn        NativeFunc
-	Signature *NativeSignature
-}
-
 type ObjArray struct {
 	Elements    []Value
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
@@ -492,20 +484,6 @@ func NewClosure(fn *ObjFunction) Value {
 	return Value{
 		Type: VAL_FUNCTION, // Reuse VAL_FUNCTION to mean "Callable" (VM will assume ObjClosure or handle translation?)
 		Obj:  &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount)},
-	}
-}
-
-func NewNative(name string, fn NativeFunc) Value {
-	return Value{
-		Type: VAL_NATIVE,
-		Obj:  &ObjNative{Name: name, Fn: fn, Signature: nil},
-	}
-}
-
-func NewNativeWithSignature(name string, signature NativeSignature, fn NativeFunc) Value {
-	return Value{
-		Type: VAL_NATIVE,
-		Obj:  &ObjNative{Name: name, Fn: fn, Signature: &signature},
 	}
 }
 
