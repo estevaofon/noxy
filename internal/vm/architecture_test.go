@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -183,6 +184,7 @@ func TestRuntimeOwnershipDoesNotUseRawGlobalMaps(t *testing.T) {
 }
 
 func TestRuntimeDoesNotAccessObjMapDataDirectly(t *testing.T) {
+	directDataSelector := regexp.MustCompile(`\.Data\b`)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -195,8 +197,26 @@ func TestRuntimeDoesNotAccessObjMapDataDirectly(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if bytes.Contains(source, []byte(".Dat"+"a")) {
+		if directDataSelector.Match(source) {
 			t.Errorf("%s accesses ObjMap.Dat"+"a directly", file)
+		}
+	}
+}
+
+func TestDirectDataSelectorPatternUsesWordBoundary(t *testing.T) {
+	pattern := regexp.MustCompile(`\.Data\b`)
+	tests := []struct {
+		source string
+		match  bool
+	}{
+		{source: "mapping.Data", match: true},
+		{source: "mapping.Data[key]", match: true},
+		{source: "shared.Databases", match: false},
+		{source: "item.Dataset", match: false},
+	}
+	for _, test := range tests {
+		if got := pattern.MatchString(test.source); got != test.match {
+			t.Errorf("pattern match for %q = %t, want %t", test.source, got, test.match)
 		}
 	}
 }

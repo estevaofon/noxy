@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"database/sql"
 	"fmt"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
@@ -41,14 +40,6 @@ type SharedState struct {
 	Databases  *handleRegistry[*DatabaseResource]
 	Statements *handleRegistry[*StatementResource]
 	initOnce   sync.Once
-
-	// Shared Database Resources
-	DbHandles   map[int]*sql.DB
-	StmtHandles map[int]*sql.Stmt
-	StmtParams  map[int]map[int]interface{}
-	NextDbID    int
-	NextStmtID  int
-	DbLock      sync.Mutex
 }
 
 type VM struct {
@@ -92,18 +83,13 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	shared := &SharedState{
-		Root:        value.NewGlobalEnvironment(nil),
-		Modules:     newModuleCache(),
-		Files:       newHandleRegistry[*FileResource](),
-		Listeners:   newSequencedHandleRegistry[*ListenerResource](1, 2),
-		Sockets:     newSequencedHandleRegistry[*SocketResource](2, 2),
-		Databases:   newHandleRegistry[*DatabaseResource](),
-		Statements:  newHandleRegistry[*StatementResource](),
-		DbHandles:   make(map[int]*sql.DB),
-		StmtHandles: make(map[int]*sql.Stmt),
-		StmtParams:  make(map[int]map[int]interface{}),
-		NextDbID:    1,
-		NextStmtID:  1,
+		Root:       value.NewGlobalEnvironment(nil),
+		Modules:    newModuleCache(),
+		Files:      newHandleRegistry[*FileResource](),
+		Listeners:  newSequencedHandleRegistry[*ListenerResource](1, 2),
+		Sockets:    newSequencedHandleRegistry[*SocketResource](2, 2),
+		Databases:  newHandleRegistry[*DatabaseResource](),
+		Statements: newHandleRegistry[*StatementResource](),
 	}
 	return NewWithShared(shared, cfg)
 }
