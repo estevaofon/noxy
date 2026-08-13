@@ -3,7 +3,6 @@ package vm
 import (
 	"database/sql"
 	"fmt"
-	"net"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
 	"sync"
@@ -43,12 +42,6 @@ type SharedState struct {
 	Statements *handleRegistry[*StatementResource]
 	initOnce   sync.Once
 
-	// Shared Network Resources
-	NetListeners map[int]net.Listener
-	NetConns     map[int]net.Conn
-	NextNetID    int
-	NetLock      sync.Mutex
-
 	// Shared Database Resources
 	DbHandles   map[int]*sql.DB
 	StmtHandles map[int]*sql.Stmt
@@ -73,11 +66,6 @@ type VM struct {
 	Config VMConfig
 
 	moduleLoadStack []moduleKey
-
-	// Net Management (Moved to SharedState)
-	netBufferedData  map[int][]byte   // For peeked data during select (Local to thread/VM?)
-	netBufferedConns map[int]net.Conn // For peeked accepts (Local to thread/VM?)
-	// netListeners, netConns, nextNetID removed from VM
 
 	LastPopped value.Value
 
@@ -104,21 +92,18 @@ func New() *VM {
 
 func NewWithConfig(cfg VMConfig) *VM {
 	shared := &SharedState{
-		Root:         value.NewGlobalEnvironment(nil),
-		Modules:      newModuleCache(),
-		Files:        newHandleRegistry[*FileResource](),
-		Listeners:    newHandleRegistry[*ListenerResource](),
-		Sockets:      newHandleRegistry[*SocketResource](),
-		Databases:    newHandleRegistry[*DatabaseResource](),
-		Statements:   newHandleRegistry[*StatementResource](),
-		NetListeners: make(map[int]net.Listener),
-		NetConns:     make(map[int]net.Conn),
-		NextNetID:    1,
-		DbHandles:    make(map[int]*sql.DB),
-		StmtHandles:  make(map[int]*sql.Stmt),
-		StmtParams:   make(map[int]map[int]interface{}),
-		NextDbID:     1,
-		NextStmtID:   1,
+		Root:        value.NewGlobalEnvironment(nil),
+		Modules:     newModuleCache(),
+		Files:       newHandleRegistry[*FileResource](),
+		Listeners:   newSequencedHandleRegistry[*ListenerResource](1, 2),
+		Sockets:     newSequencedHandleRegistry[*SocketResource](2, 2),
+		Databases:   newHandleRegistry[*DatabaseResource](),
+		Statements:  newHandleRegistry[*StatementResource](),
+		DbHandles:   make(map[int]*sql.DB),
+		StmtHandles: make(map[int]*sql.Stmt),
+		StmtParams:  make(map[int]map[int]interface{}),
+		NextDbID:    1,
+		NextStmtID:  1,
 	}
 	return NewWithShared(shared, cfg)
 }
@@ -130,12 +115,15 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	if shared.Modules == nil {
 		shared.Modules = newModuleCache()
 	}
+	if shared.Listeners == nil {
+		shared.Listeners = newSequencedHandleRegistry[*ListenerResource](1, 2)
+	}
+	if shared.Sockets == nil {
+		shared.Sockets = newSequencedHandleRegistry[*SocketResource](2, 2)
+	}
 	vm := &VM{
 		shared: shared,
 		Config: cfg,
-
-		netBufferedData:  make(map[int][]byte),
-		netBufferedConns: make(map[int]net.Conn),
 	}
 
 	vm.defineBuiltins()

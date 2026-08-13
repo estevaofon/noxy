@@ -12,11 +12,16 @@ import (
 type handleRegistry[T any] struct {
 	mu    sync.RWMutex
 	next  int
+	step  int
 	items map[int]T
 }
 
 func newHandleRegistry[T any]() *handleRegistry[T] {
-	return &handleRegistry[T]{next: 1, items: make(map[int]T)}
+	return newSequencedHandleRegistry[T](1, 1)
+}
+
+func newSequencedHandleRegistry[T any](next int, step int) *handleRegistry[T] {
+	return &handleRegistry[T]{next: next, step: step, items: make(map[int]T)}
 }
 
 func (registry *handleRegistry[T]) add(item T) int {
@@ -24,7 +29,7 @@ func (registry *handleRegistry[T]) add(item T) int {
 	defer registry.mu.Unlock()
 
 	handle := registry.next
-	registry.next++
+	registry.next += registry.step
 	registry.items[handle] = item
 	return handle
 }
