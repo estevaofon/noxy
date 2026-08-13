@@ -120,6 +120,31 @@ func TestDirectoryImportCycleReportsPath(t *testing.T) {
 	}
 }
 
+func TestNestedDirectoryImportCycleReportsPath(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "bundle", "child")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "x.nx"), []byte("use bundle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code := compileModuleProgram(t, root, "use bundle\n")
+	result := make(chan error, 1)
+	go func() {
+		result <- NewWithConfig(VMConfig{RootPath: root}).Interpret(code)
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "bundle -> bundle.child -> bundle.child.x -> bundle") {
+			t.Fatalf("cycle error=%v, want path bundle -> bundle.child -> bundle.child.x -> bundle", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("nested directory import cycle did not complete")
+	}
+}
+
 func compileModuleProgram(t *testing.T, root, source string) *chunk.Chunk {
 	t.Helper()
 	l := lexer.New(source)

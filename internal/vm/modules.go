@@ -168,7 +168,7 @@ func (vm *VM) loadResolvedDirectory(source resolvedModule) (value.Value, error) 
 		submoduleName := source.Name + "." + baseName
 		submodule, loadErr := vm.loadModule(submoduleName)
 		if loadErr != nil {
-			return value.NewNull(), fmt.Errorf("failed to load submodule %s: %v", submoduleName, loadErr)
+			return value.NewNull(), fmt.Errorf("failed to load submodule %s: %w", submoduleName, loadErr)
 		}
 		moduleEnvironment.SetLocal(baseName, submodule)
 	}
