@@ -45,8 +45,63 @@ func TestInvokePreparedCallDoesNotCopyArgumentsAgainAndRestoresStack(t *testing.
 	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
 		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
 	}
-	if machine.stack[base] != (value.Value{}) {
-		t.Fatalf("temporary slot was not cleared: %#v", machine.stack[base])
+	for i := base; i < base+2; i++ {
+		if machine.stack[i] != (value.Value{}) {
+			t.Fatalf("temporary slot %d was not cleared: %#v", i, machine.stack[i])
+		}
+	}
+}
+
+func TestInvokePreparedConstructorClearsAllTemporarySlots(t *testing.T) {
+	machine := New()
+	constructor := value.NewStruct("Pair", []string{"left", "right"})
+	prepared, err := machine.prepareDeferredCall(constructor, []value.Value{
+		value.NewArray([]value.Value{value.NewInt(1)}),
+		value.NewArray([]value.Value{value.NewInt(2)}),
+	}, SourceLocation{})
+	if err != nil {
+		t.Fatalf("prepare deferred constructor: %v", err)
+	}
+	machine.push(value.NewInt(42))
+	base := machine.stackTop
+
+	if err := machine.invokePreparedCall(prepared); err != nil {
+		t.Fatalf("invoke prepared constructor: %v", err)
+	}
+	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
+		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
+	}
+	for i := base; i < base+3; i++ {
+		if machine.stack[i] != (value.Value{}) {
+			t.Fatalf("temporary slot %d was not cleared: %#v", i, machine.stack[i])
+		}
+	}
+}
+
+func TestInvokePreparedClosureClearsAllTemporarySlots(t *testing.T) {
+	machine := New()
+	body := chunk.New()
+	body.Write(byte(chunk.OP_NULL), 1)
+	body.Write(byte(chunk.OP_RETURN), 1)
+	function := value.NewFunction("cleanup", 1, 0, []value.ParamInfo{{TypeName: "int"}}, body, machine.shared.Root)
+	closure := &value.ObjClosure{Function: function.Obj.(*value.ObjFunction), Environment: machine.shared.Root}
+	prepared, err := machine.prepareDeferredCall(value.Value{Type: value.VAL_FUNCTION, Obj: closure}, []value.Value{value.NewInt(7)}, SourceLocation{})
+	if err != nil {
+		t.Fatalf("prepare deferred closure: %v", err)
+	}
+	machine.push(value.NewInt(42))
+	base := machine.stackTop
+
+	if err := machine.invokePreparedCall(prepared); err != nil {
+		t.Fatalf("invoke prepared closure: %v", err)
+	}
+	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
+		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
+	}
+	for i := base; i < base+2; i++ {
+		if machine.stack[i] != (value.Value{}) {
+			t.Fatalf("temporary slot %d was not cleared: %#v", i, machine.stack[i])
+		}
 	}
 }
 
@@ -56,7 +111,7 @@ func TestInvokePreparedCallRestoresStackAfterNativeFailure(t *testing.T) {
 	native := value.NewContextualNative("failing", func(value.NativeContext, []value.Value) (value.Value, error) {
 		return value.NewNull(), wantErr
 	})
-	prepared, err := machine.prepareDeferredCall(native, nil, SourceLocation{})
+	prepared, err := machine.prepareDeferredCall(native, []value.Value{value.NewArray([]value.Value{value.NewInt(1)})}, SourceLocation{})
 	if err != nil {
 		t.Fatalf("prepare deferred call: %v", err)
 	}
@@ -70,8 +125,10 @@ func TestInvokePreparedCallRestoresStackAfterNativeFailure(t *testing.T) {
 	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
 		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
 	}
-	if machine.stack[base] != (value.Value{}) {
-		t.Fatalf("temporary slot was not cleared: %#v", machine.stack[base])
+	for i := base; i < base+2; i++ {
+		if machine.stack[i] != (value.Value{}) {
+			t.Fatalf("temporary slot %d was not cleared: %#v", i, machine.stack[i])
+		}
 	}
 }
 

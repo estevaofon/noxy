@@ -106,8 +106,13 @@ func (vm *VM) copyPreparedArguments(args []value.Value, params []value.ParamInfo
 
 func (vm *VM) invokePreparedCall(call PreparedCall) (err error) {
 	base := vm.stackTop
+	temporaryTop := base
 	defer func() {
-		for i := base; i < vm.stackTop; i++ {
+		cleanupTop := vm.stackTop
+		if temporaryTop > cleanupTop {
+			cleanupTop = temporaryTop
+		}
+		for i := base; i < cleanupTop; i++ {
 			vm.stack[i] = value.Value{}
 		}
 		vm.stackTop = base
@@ -118,6 +123,7 @@ func (vm *VM) invokePreparedCall(call PreparedCall) (err error) {
 	for _, argument := range call.Arguments {
 		vm.push(argument)
 	}
+	temporaryTop = vm.stackTop
 
 	ok, err := vm.callPreparedValue(call.Callee, len(call.Arguments), nil, 0)
 	if !ok {
