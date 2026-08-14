@@ -120,13 +120,53 @@ func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
 	return strings.Join(frames, "\n")
 }
 
+func deepestRuntimeStack(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	current := ""
+	if runtimeErr, ok := err.(*RuntimeError); ok {
+		current = runtimeErr.Stack
+	}
+
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, cause := range wrapped.Unwrap() {
+			if stack := deepestRuntimeStack(cause); stack != "" {
+				return stack
+			}
+		}
+	case interface{ Unwrap() error }:
+		if stack := deepestRuntimeStack(wrapped.Unwrap()); stack != "" {
+			return stack
+		}
+	}
+
+	return current
+}
+
 func (vm *VM) runtimeErrorCause(c *chunk.Chunk, ip int, cause error, format string, args ...interface{}) error {
+	stack := vm.captureNoxyStack(c, ip)
+	if causeStack := deepestRuntimeStack(cause); causeStack != "" {
+		stack = causeStack
+	}
 	return &RuntimeError{
 		Location: sourceLocation(c, ip),
 		Message:  fmt.Sprintf(format, args...),
 		Cause:    cause,
-		Stack:    vm.captureNoxyStack(c, ip),
+		Stack:    stack,
 	}
+}
+
+func (vm *VM) runtimeErrorAtCurrentFrame(format string, args ...interface{}) error {
+	var activeChunk *chunk.Chunk
+	activeIP := 0
+	if frame := vm.currentFrame; frame != nil && frame.Closure != nil && frame.Closure.Function != nil {
+		activeChunk, _ = frame.Closure.Function.Chunk.(*chunk.Chunk)
+		activeIP = frame.IP
+	}
+	return vm.runtimeErrorCause(activeChunk, activeIP, nil, format, args...)
 }
 
 func renderErrorCause(prefix string, cause error) string {

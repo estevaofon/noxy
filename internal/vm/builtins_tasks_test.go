@@ -2,6 +2,8 @@ package vm
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -426,5 +428,71 @@ end`, "worker")
 	stack := taskEnvelopeField(t, failure, "stack")
 	if stack.Type != value.VAL_OBJ || stack.Obj.(string) == "" {
 		t.Fatal("deferred cleanup failure lost its Noxy stack")
+	}
+}
+
+func TestSpawnTaskPreservesDeepModuleFailureStack(t *testing.T) {
+	root := t.TempDir()
+	moduleSource := `
+func nested_failure() -> int
+    return 1 / 0
+end
+nested_failure()
+`
+	if err := os.WriteFile(filepath.Join(root, "broken_task.nx"), []byte(moduleSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> int
+    use broken_task
+    return 1
+end`, "worker")
+	envelope, err := invokeTaskAwait(machine, task)
+	if err != nil {
+		t.Fatalf("task_await: %v", err)
+	}
+	failure := taskEnvelopeField(t, envelope, "error")
+	stack := taskEnvelopeField(t, failure, "stack")
+	if stack.Type != value.VAL_OBJ {
+		t.Fatalf("stack = %v, want string", stack)
+	}
+	stackText := stack.Obj.(string)
+	if !strings.Contains(stackText, "in nested_failure") || !strings.Contains(stackText, "in worker") {
+		t.Fatalf("stack = %q, want module failure and worker frames", stackText)
+	}
+}
+
+func TestSpawnTaskDeferredHeadroomFailureHasNoxyStack(t *testing.T) {
+	machine := New()
+	machine.DefineNative("headroom_cleanup", func([]value.Value) value.Value {
+		return value.NewNull()
+	})
+	machine.DefineContextualNative("fill_task_stack", func(context value.NativeContext, _ []value.Value) (value.Value, error) {
+		worker, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		worker.stackTop = StackMax
+		return value.NewNull(), nil
+	})
+
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> void
+    defer headroom_cleanup(1)
+    fill_task_stack()
+end`, "worker")
+	envelope, err := invokeTaskAwait(machine, task)
+	if err != nil {
+		t.Fatalf("task_await: %v", err)
+	}
+	if got := taskEnvelopeField(t, envelope, "status"); !valuesEqual(got, value.NewString("error")) {
+		t.Fatalf("status = %v, want error", got)
+	}
+	failure := taskEnvelopeField(t, envelope, "error")
+	stack := taskEnvelopeField(t, failure, "stack")
+	if stack.Type != value.VAL_OBJ || !strings.Contains(stack.Obj.(string), "in worker") {
+		t.Fatalf("stack = %v, want worker frame", stack)
 	}
 }

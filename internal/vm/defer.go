@@ -105,7 +105,7 @@ func (vm *VM) copyPreparedArguments(args []value.Value, params []value.ParamInfo
 func (vm *VM) invokePreparedCall(call PreparedCall) (err error) {
 	base := vm.stackTop
 	if base < 0 || base >= len(vm.stack) || len(call.Arguments) > len(vm.stack)-base-1 {
-		return fmt.Errorf("stack overflow while invoking deferred call")
+		return vm.runtimeErrorAtCurrentFrame("stack overflow while invoking deferred call")
 	}
 	temporaryTop := base
 	defer func() {

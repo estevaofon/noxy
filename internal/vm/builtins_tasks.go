@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"runtime/debug"
@@ -132,15 +131,10 @@ func (vm *VM) startSupervisedTask(task *value.ObjTask, call preparedTaskCall) {
 
 	result, err := vm.executePreparedTaskCall(call)
 	if err != nil {
-		stack := ""
-		var runtimeErr *RuntimeError
-		if errors.As(err, &runtimeErr) {
-			stack = runtimeErr.Stack
-		}
 		task.Complete(value.TaskOutcome{Failure: &value.TaskFailure{
 			Kind:    "runtime",
 			Message: err.Error(),
-			Stack:   stack,
+			Stack:   deepestRuntimeStack(err),
 			Cause:   err,
 		}})
 		return
