@@ -3,12 +3,15 @@ package vm
 import (
 	"bytes"
 	"go/ast"
+	"go/constant"
+	"go/importer"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
-	"strconv"
+	"sort"
 	"strings"
 	"testing"
 
@@ -246,225 +249,184 @@ func sourceStructFields(t *testing.T, filename, structName string) map[string]st
 	return fields
 }
 
-type architectureTypeInfo struct {
-	aliases   map[string]string
-	fields    map[string]map[string]string
-	functions map[string]string
-	known     map[string]bool
-	globals   map[string]string
+type architectureSource struct {
+	filename string
+	source   string
 }
 
-type architectureTypeResolver struct {
-	info      *architectureTypeInfo
-	variables map[string]string
+type architecturePackage struct {
+	fileSet *token.FileSet
+	files   []*ast.File
+	info    *types.Info
+	pkg     *types.Package
+	errors  []error
 }
 
-func newArchitectureTypeInfo(file *ast.File) *architectureTypeInfo {
-	info := &architectureTypeInfo{
-		aliases: map[string]string{},
-		fields: map[string]map[string]string{
-			"VM": {
-				"frameCount":   "int",
-				"frames":       "CallFrame",
-				"currentFrame": "CallFrame",
-				"stack":        "Value",
-				"stackTop":     "int",
-			},
-			"CallFrame": {
-				"StackBase": "int",
-			},
-		},
-		functions: map[string]string{
-			"New":           "VM",
-			"NewWithConfig": "VM",
-			"NewWithShared": "VM",
-		},
-		known: map[string]bool{
-			"VM":        true,
-			"CallFrame": true,
-		},
-		globals: map[string]string{},
+type architectureImporter struct {
+	moduleRoot string
+	packages   map[string]*types.Package
+	loading    map[string]bool
+	fallback   types.Importer
+}
+
+func newArchitectureImporter(t *testing.T) *architectureImporter {
+	t.Helper()
+	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
 	}
+	return &architectureImporter{
+		moduleRoot: moduleRoot,
+		packages:   make(map[string]*types.Package),
+		loading:    make(map[string]bool),
+		fallback:   importer.Default(),
+	}
+}
 
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok || general.Tok != token.TYPE {
+func (loader *architectureImporter) Import(importPath string) (*types.Package, error) {
+	if loaded := loader.packages[importPath]; loaded != nil {
+		return loaded, nil
+	}
+	if strings.HasPrefix(importPath, "noxy-vm/") && !loader.loading[importPath] {
+		loader.loading[importPath] = true
+		defer delete(loader.loading, importPath)
+		directory := filepath.Join(loader.moduleRoot, filepath.FromSlash(strings.TrimPrefix(importPath, "noxy-vm/")))
+		sources, err := readArchitectureSources(directory)
+		if err == nil && len(sources) != 0 {
+			checked := checkArchitecturePackage(importPath, sources, loader, true)
+			if checked.pkg != nil {
+				loader.packages[importPath] = checked.pkg
+				return checked.pkg, nil
+			}
+		}
+	}
+	if loaded, err := loader.fallback.Import(importPath); err == nil {
+		loader.packages[importPath] = loaded
+		return loaded, nil
+	}
+	name := importPath[strings.LastIndex(importPath, "/")+1:]
+	stub := types.NewPackage(importPath, name)
+	stub.MarkComplete()
+	loader.packages[importPath] = stub
+	return stub, nil
+}
+
+func readArchitectureSources(directory string) ([]architectureSource, error) {
+	filenames, err := filepath.Glob(filepath.Join(directory, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	var sources []architectureSource
+	for _, filename := range filenames {
+		if strings.HasSuffix(filename, "_test.go") {
 			continue
 		}
-		for _, specification := range general.Specs {
-			typeSpec, ok := specification.(*ast.TypeSpec)
-			if !ok {
-				continue
-			}
-			info.known[typeSpec.Name.Name] = true
-			if typeSpec.Assign.IsValid() {
-				if target := architectureDeclaredTypeName(typeSpec.Type, nil); target != "" {
-					info.aliases[typeSpec.Name.Name] = target
-				}
-			}
+		source, err := os.ReadFile(filename)
+		if err != nil {
+			return nil, err
 		}
+		sources = append(sources, architectureSource{filename: filename, source: string(source)})
 	}
-
-	for _, declaration := range file.Decls {
-		switch typed := declaration.(type) {
-		case *ast.GenDecl:
-			for _, specification := range typed.Specs {
-				switch spec := specification.(type) {
-				case *ast.TypeSpec:
-					structure, ok := spec.Type.(*ast.StructType)
-					if !ok {
-						continue
-					}
-					fields := info.fields[spec.Name.Name]
-					if fields == nil {
-						fields = make(map[string]string)
-						info.fields[spec.Name.Name] = fields
-					}
-					for _, field := range structure.Fields.List {
-						fieldType := architectureDeclaredTypeName(field.Type, info.aliases)
-						for _, name := range field.Names {
-							fields[name.Name] = fieldType
-						}
-					}
-				case *ast.ValueSpec:
-					if typed.Tok == token.VAR {
-						info.recordValueSpec(spec, info.globals)
-					}
-				}
-			}
-		case *ast.FuncDecl:
-			if typed.Type.Results != nil && len(typed.Type.Results.List) == 1 {
-				if result := architectureDeclaredTypeName(typed.Type.Results.List[0].Type, info.aliases); result != "" {
-					info.functions[typed.Name.Name] = result
-				}
-			}
-		}
-	}
-	return info
+	sort.Slice(sources, func(left, right int) bool { return sources[left].filename < sources[right].filename })
+	return sources, nil
 }
 
-func architectureDeclaredTypeName(expression ast.Expr, aliases map[string]string) string {
-	var name string
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		name = typed.Name
-	case *ast.SelectorExpr:
-		name = typed.Sel.Name
-	case *ast.StarExpr:
-		return architectureDeclaredTypeName(typed.X, aliases)
-	case *ast.ParenExpr:
-		return architectureDeclaredTypeName(typed.X, aliases)
-	case *ast.ArrayType:
-		return architectureDeclaredTypeName(typed.Elt, aliases)
-	case *ast.Ellipsis:
-		return architectureDeclaredTypeName(typed.Elt, aliases)
+func checkArchitecturePackage(packagePath string, sources []architectureSource, loader types.Importer, ignoreBodies bool) *architecturePackage {
+	fileSet := token.NewFileSet()
+	files := make([]*ast.File, 0, len(sources))
+	for _, source := range sources {
+		file, err := parser.ParseFile(fileSet, source.filename, source.source, 0)
+		if err != nil {
+			return &architecturePackage{fileSet: fileSet, errors: []error{err}}
+		}
+		files = append(files, file)
 	}
-	for aliases != nil && name != "" {
-		next, ok := aliases[name]
-		if !ok || next == name {
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	var typeErrors []error
+	configuration := types.Config{
+		Importer:                 loader,
+		IgnoreFuncBodies:         ignoreBodies,
+		DisableUnusedImportCheck: true,
+		Error:                    func(err error) { typeErrors = append(typeErrors, err) },
+	}
+	pkg, _ := configuration.Check(packagePath, fileSet, files, info)
+	return &architecturePackage{fileSet: fileSet, files: files, info: info, pkg: pkg, errors: typeErrors}
+}
+
+func typeCheckArchitecturePackage(t *testing.T, packagePath string, sources []architectureSource) *architecturePackage {
+	t.Helper()
+	checked := checkArchitecturePackage(packagePath, sources, newArchitectureImporter(t), false)
+	if checked.pkg == nil || len(checked.files) != len(sources) || len(checked.errors) != 0 {
+		t.Fatalf("could not parse and type-check architecture package %s: %v", packagePath, checked.errors)
+	}
+	return checked
+}
+
+func typeCheckProductionPackages(t *testing.T) []*architecturePackage {
+	t.Helper()
+	loader := newArchitectureImporter(t)
+	grouped := make(map[string][]architectureSource)
+	for _, filename := range productionGoFiles(t) {
+		source, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Clean(filepath.Dir(filename))
+		grouped[directory] = append(grouped[directory], architectureSource{filename: filename, source: string(source)})
+	}
+	directories := make([]string, 0, len(grouped))
+	for directory := range grouped {
+		directories = append(directories, directory)
+	}
+	sort.Strings(directories)
+	packages := make([]*architecturePackage, 0, len(directories))
+	for _, directory := range directories {
+		absoluteDirectory, err := filepath.Abs(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		relativeDirectory, err := filepath.Rel(loader.moduleRoot, absoluteDirectory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packagePath := "noxy-vm"
+		if relativeDirectory != "." {
+			packagePath += "/" + filepath.ToSlash(relativeDirectory)
+		}
+		checked := checkArchitecturePackage(packagePath, grouped[directory], loader, false)
+		if checked.pkg == nil || len(checked.files) != len(grouped[directory]) || len(checked.errors) != 0 {
+			t.Fatalf("could not parse and type-check architecture package %s: %v", packagePath, checked.errors)
+		}
+		packages = append(packages, checked)
+	}
+	return packages
+}
+
+func architectureNamedType(typ types.Type) *types.TypeName {
+	if typ == nil {
+		return nil
+	}
+	for {
+		typ = types.Unalias(typ)
+		pointer, ok := typ.(*types.Pointer)
+		if !ok {
 			break
 		}
-		name = next
+		typ = pointer.Elem()
 	}
-	return name
+	named, ok := typ.(*types.Named)
+	if !ok {
+		return nil
+	}
+	return named.Obj()
 }
 
-func (info *architectureTypeInfo) recordValueSpec(spec *ast.ValueSpec, variables map[string]string) {
-	declared := architectureDeclaredTypeName(spec.Type, info.aliases)
-	resolver := &architectureTypeResolver{info: info, variables: variables}
-	for index, name := range spec.Names {
-		actual := declared
-		if actual == "" && index < len(spec.Values) {
-			actual = resolver.expressionType(spec.Values[index])
-		}
-		if actual != "" {
-			variables[name.Name] = actual
-		}
-	}
-}
-
-func newArchitectureTypeResolver(info *architectureTypeInfo, function *ast.FuncDecl) *architectureTypeResolver {
-	variables := make(map[string]string, len(info.globals))
-	for name, target := range info.globals {
-		variables[name] = target
-	}
-	resolver := &architectureTypeResolver{info: info, variables: variables}
-	resolver.recordFieldList(function.Recv)
-	resolver.recordFieldList(function.Type.Params)
-	return resolver
-}
-
-func (resolver *architectureTypeResolver) clone() *architectureTypeResolver {
-	variables := make(map[string]string, len(resolver.variables))
-	for name, target := range resolver.variables {
-		variables[name] = target
-	}
-	return &architectureTypeResolver{info: resolver.info, variables: variables}
-}
-
-func (resolver *architectureTypeResolver) recordFieldList(fields *ast.FieldList) {
-	if fields == nil {
-		return
-	}
-	for _, field := range fields.List {
-		target := architectureDeclaredTypeName(field.Type, resolver.info.aliases)
-		for _, name := range field.Names {
-			resolver.variables[name.Name] = target
-		}
-	}
-}
-
-func (resolver *architectureTypeResolver) expressionType(expression ast.Expr) string {
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		return resolver.variables[typed.Name]
-	case *ast.ParenExpr:
-		return resolver.expressionType(typed.X)
-	case *ast.UnaryExpr:
-		return resolver.expressionType(typed.X)
-	case *ast.CompositeLit:
-		return architectureDeclaredTypeName(typed.Type, resolver.info.aliases)
-	case *ast.SelectorExpr:
-		owner := resolver.expressionType(typed.X)
-		return resolver.info.fields[owner][typed.Sel.Name]
-	case *ast.IndexExpr:
-		return resolver.expressionType(typed.X)
-	case *ast.CallExpr:
-		if identifier, ok := typed.Fun.(*ast.Ident); ok {
-			if result := resolver.info.functions[identifier.Name]; result != "" {
-				return result
-			}
-			if identifier.Name == "new" && len(typed.Args) == 1 {
-				target := architectureDeclaredTypeName(typed.Args[0], resolver.info.aliases)
-				if resolver.info.known[target] {
-					return target
-				}
-			}
-		}
-		converted := architectureDeclaredTypeName(typed.Fun, resolver.info.aliases)
-		if resolver.info.known[converted] {
-			return converted
-		}
-	}
-	return ""
-}
-
-func (resolver *architectureTypeResolver) recordAssignment(assignment *ast.AssignStmt) {
-	if len(assignment.Lhs) != len(assignment.Rhs) {
-		return
-	}
-	for index, left := range assignment.Lhs {
-		identifier, ok := left.(*ast.Ident)
-		if !ok {
-			continue
-		}
-		if target := resolver.expressionType(assignment.Rhs[index]); target != "" {
-			resolver.variables[identifier.Name] = target
-		}
-	}
-}
-
-func (resolver *architectureTypeResolver) isField(expression ast.Expr, ownerType, fieldName string) bool {
+func (checked *architecturePackage) selectorIsField(expression ast.Expr, ownerType, fieldName string) bool {
 	for {
 		parenthesized, ok := expression.(*ast.ParenExpr)
 		if !ok {
@@ -473,14 +435,18 @@ func (resolver *architectureTypeResolver) isField(expression ast.Expr, ownerType
 		expression = parenthesized.X
 	}
 	selector, ok := expression.(*ast.SelectorExpr)
-	return ok && selector.Sel.Name == fieldName && resolver.expressionType(selector.X) == ownerType
+	if !ok || selector.Sel.Name != fieldName {
+		return false
+	}
+	selection := checked.info.Selections[selector]
+	owner := architectureNamedType(checked.info.TypeOf(selector.X))
+	return selection != nil && selection.Kind() == types.FieldVal && owner != nil && owner.Pkg() == checked.pkg && owner.Name() == ownerType
 }
 
-func (resolver *architectureTypeResolver) containsField(expression ast.Expr, ownerType, fieldName string) bool {
+func (checked *architecturePackage) expressionContainsField(expression ast.Expr, ownerType, fieldName string) bool {
 	found := false
 	ast.Inspect(expression, func(node ast.Node) bool {
-		selector, ok := node.(*ast.SelectorExpr)
-		if ok && resolver.isField(selector, ownerType, fieldName) {
+		if selector, ok := node.(*ast.SelectorExpr); ok && checked.selectorIsField(selector, ownerType, fieldName) {
 			found = true
 			return false
 		}
@@ -489,33 +455,28 @@ func (resolver *architectureTypeResolver) containsField(expression ast.Expr, own
 	return found
 }
 
-func (resolver *architectureTypeResolver) indexesField(expression ast.Expr, ownerType, fieldName string) bool {
+func (checked *architecturePackage) indexesField(expression ast.Expr, ownerType, fieldName string) bool {
 	index, ok := expression.(*ast.IndexExpr)
-	return ok && resolver.isField(index.X, ownerType, fieldName)
+	return ok && checked.selectorIsField(index.X, ownerType, fieldName)
 }
 
-func (resolver *architectureTypeResolver) isNilForType(expression ast.Expr, target string) bool {
+func (checked *architecturePackage) isNil(expression ast.Expr) bool {
+	if parenthesized, ok := expression.(*ast.ParenExpr); ok {
+		return checked.isNil(parenthesized.X)
+	}
 	if identifier, ok := expression.(*ast.Ident); ok {
-		return identifier.Name == "nil"
+		return checked.info.Uses[identifier] == types.Universe.Lookup("nil")
 	}
 	call, ok := expression.(*ast.CallExpr)
-	if !ok || len(call.Args) != 1 {
+	if !ok || len(call.Args) != 1 || !checked.info.Types[call.Fun].IsType() {
 		return false
 	}
-	identifier, ok := call.Args[0].(*ast.Ident)
-	return ok && identifier.Name == "nil" && architectureDeclaredTypeName(call.Fun, resolver.info.aliases) == target
+	return checked.isNil(call.Args[0])
 }
 
-func isZeroInteger(expression ast.Expr) bool {
-	if parenthesized, ok := expression.(*ast.ParenExpr); ok {
-		return isZeroInteger(parenthesized.X)
-	}
-	literal, ok := expression.(*ast.BasicLit)
-	if !ok || literal.Kind != token.INT {
-		return false
-	}
-	value, err := strconv.ParseInt(literal.Value, 0, 64)
-	return err == nil && value == 0
+func (checked *architecturePackage) isZero(expression ast.Expr) bool {
+	value := checked.info.Types[expression].Value
+	return value != nil && constant.Sign(value) == 0
 }
 
 func isEmptyCompositeLiteral(expression ast.Expr) bool {
@@ -523,33 +484,29 @@ func isEmptyCompositeLiteral(expression ast.Expr) bool {
 	return ok && len(literal.Elts) == 0
 }
 
-func isEmptyValueLiteral(expression ast.Expr) bool {
-	literal, ok := expression.(*ast.CompositeLit)
-	return ok && len(literal.Elts) == 0 && expressionTextForArchitecture(literal.Type) == "value.Value"
+func (checked *architecturePackage) isBuiltin(identifier *ast.Ident, name string) bool {
+	return identifier != nil && checked.info.Uses[identifier] == types.Universe.Lookup(name)
 }
 
-func expressionTextForArchitecture(expression ast.Expr) string {
-	var text strings.Builder
-	_ = printer.Fprint(&text, token.NewFileSet(), expression)
-	return text.String()
+func (checked *architecturePackage) assignmentObject(identifier *ast.Ident) types.Object {
+	if object := checked.info.Defs[identifier]; object != nil {
+		return object
+	}
+	return checked.info.Uses[identifier]
 }
 
-func forClearsStackFromStackBase(loop *ast.ForStmt, resolver *architectureTypeResolver) bool {
+func (checked *architecturePackage) forClearsStackFromStackBase(loop *ast.ForStmt) bool {
 	initialization, ok := loop.Init.(*ast.AssignStmt)
 	if !ok || len(initialization.Lhs) != len(initialization.Rhs) {
 		return false
 	}
-	loopIndexes := make(map[string]bool)
+	loopIndexes := make(map[types.Object]bool)
 	for index, left := range initialization.Lhs {
 		identifier, ok := left.(*ast.Ident)
-		if ok && resolver.containsField(initialization.Rhs[index], "CallFrame", "StackBase") {
-			loopIndexes[identifier.Name] = true
+		if ok && checked.expressionContainsField(initialization.Rhs[index], "CallFrame", "StackBase") {
+			loopIndexes[checked.assignmentObject(identifier)] = true
 		}
 	}
-	if len(loopIndexes) == 0 {
-		return false
-	}
-
 	clears := false
 	ast.Inspect(loop.Body, func(node ast.Node) bool {
 		assignment, ok := node.(*ast.AssignStmt)
@@ -558,11 +515,11 @@ func forClearsStackFromStackBase(loop *ast.ForStmt, resolver *architectureTypeRe
 		}
 		for index, left := range assignment.Lhs {
 			stackIndex, ok := left.(*ast.IndexExpr)
-			if !ok {
+			if !ok || !checked.selectorIsField(stackIndex.X, "VM", "stack") || !isEmptyCompositeLiteral(assignment.Rhs[index]) {
 				continue
 			}
-			identifier, indexOK := stackIndex.Index.(*ast.Ident)
-			if indexOK && resolver.isField(stackIndex.X, "VM", "stack") && loopIndexes[identifier.Name] && isEmptyValueLiteral(assignment.Rhs[index]) {
+			identifier, ok := stackIndex.Index.(*ast.Ident)
+			if ok && loopIndexes[checked.info.Uses[identifier]] {
 				clears = true
 				return false
 			}
@@ -572,62 +529,28 @@ func forClearsStackFromStackBase(loop *ast.ForStmt, resolver *architectureTypeRe
 	return clears
 }
 
-func architectureIntroducesScope(node ast.Node) bool {
-	switch node.(type) {
-	case *ast.BlockStmt, *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt,
-		*ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt,
-		*ast.CaseClause, *ast.CommClause, *ast.FuncLit:
-		return true
+func (checked *architecturePackage) unwindTerminalMutationMatches(ignoredFiles ...string) []string {
+	ignored := make(map[string]bool, len(ignoredFiles))
+	for _, filename := range ignoredFiles {
+		ignored[filename] = true
 	}
-	return false
-}
-
-func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte) []string {
-	t.Helper()
-	fileSet := token.NewFileSet()
-	file, err := parser.ParseFile(fileSet, filename, source, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", filename, err)
-	}
-
-	info := newArchitectureTypeInfo(file)
 	var matches []string
 	record := func(node ast.Node, description string) {
-		matches = append(matches, description+" at line "+fileSet.Position(node.Pos()).String())
+		matches = append(matches, description+" at line "+checked.fileSet.Position(node.Pos()).String())
 	}
-	for _, declaration := range file.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
+	for _, file := range checked.files {
+		if ignored[filepath.Base(checked.fileSet.Position(file.Pos()).Filename)] {
 			continue
 		}
-		resolvers := []*architectureTypeResolver{newArchitectureTypeResolver(info, function)}
-		var nodes []ast.Node
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			if node == nil {
-				last := nodes[len(nodes)-1]
-				nodes = nodes[:len(nodes)-1]
-				if architectureIntroducesScope(last) {
-					resolvers = resolvers[:len(resolvers)-1]
-				}
-				return true
-			}
-			nodes = append(nodes, node)
-			if architectureIntroducesScope(node) {
-				nested := resolvers[len(resolvers)-1].clone()
-				if literal, ok := node.(*ast.FuncLit); ok {
-					nested.recordFieldList(literal.Type.Params)
-				}
-				resolvers = append(resolvers, nested)
-			}
-			resolver := resolvers[len(resolvers)-1]
+		ast.Inspect(file, func(node ast.Node) bool {
 			switch typed := node.(type) {
 			case *ast.IncDecStmt:
-				if typed.Tok == token.DEC && resolver.isField(typed.X, "VM", "frameCount") {
+				if typed.Tok == token.DEC && checked.selectorIsField(typed.X, "VM", "frameCount") {
 					record(typed, "decrements frameCount")
 				}
 			case *ast.AssignStmt:
 				for index, left := range typed.Lhs {
-					frameCount := resolver.isField(left, "VM", "frameCount")
+					frameCount := checked.selectorIsField(left, "VM", "frameCount")
 					if frameCount && typed.Tok == token.SUB_ASSIGN {
 						record(typed, "decrements frameCount")
 					}
@@ -637,52 +560,42 @@ func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte)
 					right := typed.Rhs[index]
 					if frameCount && typed.Tok == token.ASSIGN {
 						binary, subtraction := right.(*ast.BinaryExpr)
-						if subtraction && binary.Op == token.SUB && resolver.containsField(binary.X, "VM", "frameCount") {
+						if subtraction && binary.Op == token.SUB && checked.expressionContainsField(binary.X, "VM", "frameCount") {
 							record(typed, "decrements frameCount")
-						} else if isZeroInteger(right) {
+						} else if checked.isZero(right) {
 							record(typed, "resets frameCount")
 						}
 					}
-					if resolver.isField(left, "VM", "frames") && isEmptyCompositeLiteral(right) {
+					if checked.selectorIsField(left, "VM", "frames") && isEmptyCompositeLiteral(right) {
 						record(typed, "resets frames")
 					}
-					if resolver.indexesField(left, "VM", "frames") && resolver.isNilForType(right, "CallFrame") {
+					if checked.indexesField(left, "VM", "frames") && checked.isNil(right) {
 						record(typed, "removes a frame")
 					}
-					if resolver.isField(left, "VM", "currentFrame") && resolver.isNilForType(right, "CallFrame") {
+					if checked.selectorIsField(left, "VM", "currentFrame") && checked.isNil(right) {
 						record(typed, "clears currentFrame")
 					}
-					if resolver.isField(left, "VM", "stackTop") && resolver.containsField(right, "CallFrame", "StackBase") {
+					if checked.selectorIsField(left, "VM", "stackTop") && checked.expressionContainsField(right, "CallFrame", "StackBase") {
 						record(typed, "resets stackTop to StackBase")
-					}
-				}
-				resolver.recordAssignment(typed)
-			case *ast.DeclStmt:
-				general, ok := typed.Decl.(*ast.GenDecl)
-				if ok && general.Tok == token.VAR {
-					for _, specification := range general.Specs {
-						if valueSpec, ok := specification.(*ast.ValueSpec); ok {
-							info.recordValueSpec(valueSpec, resolver.variables)
-						}
 					}
 				}
 			case *ast.CallExpr:
 				identifier, ok := typed.Fun.(*ast.Ident)
-				if !ok || identifier.Name != "clear" || len(typed.Args) != 1 {
+				if !ok || !checked.isBuiltin(identifier, "clear") || len(typed.Args) != 1 {
 					break
 				}
 				slice, ok := typed.Args[0].(*ast.SliceExpr)
 				if !ok {
 					break
 				}
-				if resolver.isField(slice.X, "VM", "frames") {
+				if checked.selectorIsField(slice.X, "VM", "frames") {
 					record(typed, "clears frames")
 				}
-				if resolver.isField(slice.X, "VM", "stack") && slice.Low != nil && resolver.containsField(slice.Low, "CallFrame", "StackBase") {
+				if checked.selectorIsField(slice.X, "VM", "stack") && slice.Low != nil && checked.expressionContainsField(slice.Low, "CallFrame", "StackBase") {
 					record(typed, "clears stack from StackBase")
 				}
 			case *ast.ForStmt:
-				if forClearsStackFromStackBase(typed, resolver) {
+				if checked.forClearsStackFromStackBase(typed) {
 					record(typed, "clears stack from StackBase")
 				}
 			}
@@ -692,216 +605,112 @@ func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte)
 	return matches
 }
 
-func runtimeTargetTypeName(expression ast.Expr, aliases map[string]string) string {
-	var name string
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		name = typed.Name
-	case *ast.SelectorExpr:
-		name = typed.Sel.Name
-	case *ast.StarExpr:
-		return runtimeTargetTypeName(typed.X, aliases)
-	case *ast.ParenExpr:
-		return runtimeTargetTypeName(typed.X, aliases)
-	}
-	for name != "" {
-		if name == "ObjMap" || name == "ObjNative" {
-			return name
-		}
-		next, ok := aliases[name]
-		if !ok || next == name {
-			break
-		}
-		name = next
-	}
-	return ""
-}
-
-func runtimeValueTargetType(expression ast.Expr, variables, aliases map[string]string) string {
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		return variables[typed.Name]
-	case *ast.ParenExpr:
-		return runtimeValueTargetType(typed.X, variables, aliases)
-	case *ast.UnaryExpr:
-		return runtimeValueTargetType(typed.X, variables, aliases)
-	case *ast.TypeAssertExpr:
-		return runtimeTargetTypeName(typed.Type, aliases)
-	case *ast.CallExpr:
-		return runtimeTargetTypeName(typed.Fun, aliases)
-	}
-	return ""
-}
-
-func recordRuntimeVariableField(field *ast.Field, variables, aliases map[string]string) {
-	target := runtimeTargetTypeName(field.Type, aliases)
-	if target == "" {
-		return
-	}
-	for _, name := range field.Names {
-		variables[name.Name] = target
-	}
-}
-
-func recordRuntimeVariableSpec(specification *ast.ValueSpec, variables, aliases map[string]string) {
-	target := runtimeTargetTypeName(specification.Type, aliases)
-	for index, name := range specification.Names {
-		actual := target
-		if actual == "" && index < len(specification.Values) {
-			actual = runtimeValueTargetType(specification.Values[index], variables, aliases)
-		}
-		if actual != "" {
-			variables[name.Name] = actual
-		}
-	}
-}
-
-func recordRuntimeAssignment(assignment *ast.AssignStmt, variables, aliases map[string]string) {
-	if len(assignment.Lhs) != len(assignment.Rhs) {
-		return
-	}
-	for index, left := range assignment.Lhs {
-		name, ok := left.(*ast.Ident)
-		if !ok {
-			continue
-		}
-		if target := runtimeValueTargetType(assignment.Rhs[index], variables, aliases); target != "" {
-			variables[name.Name] = target
-		}
-	}
-}
-
-func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte) []string {
+func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte) []string {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), filename, source, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", filename, err)
+	return unwindTerminalPackageMutationMatches(t, []architectureSource{{filename: filename, source: string(source)}})
+}
+
+func unwindTerminalPackageMutationMatches(t *testing.T, sources []architectureSource) []string {
+	t.Helper()
+	return typeCheckArchitecturePackage(t, "architecture/unwind", sources).unwindTerminalMutationMatches()
+}
+
+func runtimeNamedType(typ types.Type, checked *architecturePackage, name string) bool {
+	object := architectureNamedType(typ)
+	if object == nil || object.Name() != name {
+		return false
 	}
+	return object.Pkg() == checked.pkg || object.Pkg() != nil && object.Pkg().Path() == "noxy-vm/internal/value"
+}
+
+func (checked *architecturePackage) runtimeSelectorIsField(selector *ast.SelectorExpr, ownerType, fieldName string) bool {
+	selection := checked.info.Selections[selector]
+	return selector.Sel.Name == fieldName && selection != nil && selection.Kind() == types.FieldVal && runtimeNamedType(checked.info.TypeOf(selector.X), checked, ownerType)
+}
+
+func isMapType(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	_, ok := types.Unalias(typ).Underlying().(*types.Map)
+	return ok
+}
+
+func isMapPointerType(typ types.Type) bool {
+	pointer, ok := types.Unalias(typ).(*types.Pointer)
+	return ok && isMapType(pointer.Elem())
+}
+
+func (checked *architecturePackage) runtimeForbiddenMatches() []string {
 	found := make(map[string]bool)
-	aliases := make(map[string]string)
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok {
-			continue
-		}
-		for _, specification := range general.Specs {
-			typeSpec, ok := specification.(*ast.TypeSpec)
-			if !ok {
+	for _, file := range checked.files {
+		for _, declaration := range file.Decls {
+			if general, ok := declaration.(*ast.GenDecl); ok {
+				for _, specification := range general.Specs {
+					typeSpec, ok := specification.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					structure, ok := typeSpec.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					for _, field := range structure.Fields.List {
+						fieldType := checked.info.TypeOf(field.Type)
+						for _, name := range field.Names {
+							switch {
+							case typeSpec.Name.Name == "VM" && name.Name == "openFiles":
+								found["VM.openFiles field"] = true
+							case typeSpec.Name.Name == "VM" && name.Name == "netBufferedData":
+								found["VM.netBufferedData field"] = true
+							case typeSpec.Name.Name == "VM" && name.Name == "netBufferedConns":
+								found["VM.netBufferedConns field"] = true
+							case name.Name == "Globals" && isMapType(fieldType):
+								found["Globals raw map field"] = true
+							case name.Name == "GlobalOwner" && isMapPointerType(fieldType):
+								found["GlobalOwner raw map pointer field"] = true
+							case name.Name == "DbHandles" && isMapType(fieldType):
+								found["DbHandles raw map field"] = true
+							case name.Name == "StmtHandles" && isMapType(fieldType):
+								found["StmtHandles raw map field"] = true
+							case name.Name == "StmtParams" && isMapType(fieldType):
+								found["StmtParams raw map field"] = true
+							}
+						}
+					}
+				}
+			}
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
 				continue
 			}
-			if target := runtimeTargetTypeName(typeSpec.Type, aliases); target != "" {
-				aliases[typeSpec.Name.Name] = target
-			}
-		}
-	}
-	globalVariables := make(map[string]string)
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok || general.Tok != token.VAR {
-			continue
-		}
-		for _, specification := range general.Specs {
-			if valueSpec, ok := specification.(*ast.ValueSpec); ok {
-				recordRuntimeVariableSpec(valueSpec, globalVariables, aliases)
-			}
-		}
-	}
-	for _, declaration := range file.Decls {
-		if general, ok := declaration.(*ast.GenDecl); ok {
-			for _, specification := range general.Specs {
-				typeSpec, ok := specification.(*ast.TypeSpec)
-				if !ok {
-					continue
+			var legacyDispatchReceiver types.Object
+			if function.Name.Name == "Invoke" && function.Recv != nil && len(function.Recv.List) == 1 {
+				receiver := function.Recv.List[0]
+				if len(receiver.Names) == 1 && runtimeNamedType(checked.info.TypeOf(receiver.Type), checked, "ObjNative") {
+					legacyDispatchReceiver = checked.info.Defs[receiver.Names[0]]
 				}
-				structure, ok := typeSpec.Type.(*ast.StructType)
-				if !ok {
-					continue
-				}
-				for _, field := range structure.Fields.List {
-					_, rawMap := field.Type.(*ast.MapType)
-					pointer, pointerType := field.Type.(*ast.StarExpr)
-					rawMapPointer := false
-					if pointerType {
-						_, rawMapPointer = pointer.X.(*ast.MapType)
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				switch typed := node.(type) {
+				case *ast.SelectorExpr:
+					if checked.runtimeSelectorIsField(typed, "ObjMap", "Data") {
+						found["ObjMap.Data selector"] = true
 					}
-					for _, name := range field.Names {
-						switch {
-						case typeSpec.Name.Name == "VM" && name.Name == "openFiles":
-							found["VM.openFiles field"] = true
-						case typeSpec.Name.Name == "VM" && name.Name == "netBufferedData":
-							found["VM.netBufferedData field"] = true
-						case typeSpec.Name.Name == "VM" && name.Name == "netBufferedConns":
-							found["VM.netBufferedConns field"] = true
-						case name.Name == "Globals" && rawMap:
-							found["Globals raw map field"] = true
-						case name.Name == "GlobalOwner" && pointerType && rawMapPointer:
-							found["GlobalOwner raw map pointer field"] = true
-						case name.Name == "DbHandles" && rawMap:
-							found["DbHandles raw map field"] = true
-						case name.Name == "StmtHandles" && rawMap:
-							found["StmtHandles raw map field"] = true
-						case name.Name == "StmtParams" && rawMap:
-							found["StmtParams raw map field"] = true
-						}
+				case *ast.CallExpr:
+					selector, ok := typed.Fun.(*ast.SelectorExpr)
+					if !ok || !checked.runtimeSelectorIsField(selector, "ObjNative", "Fn") {
+						break
+					}
+					receiver, identifier := selector.X.(*ast.Ident)
+					allowed := identifier && checked.info.Uses[receiver] == legacyDispatchReceiver
+					if !allowed {
+						found["direct native.Fn invocation"] = true
 					}
 				}
-			}
+				return true
+			})
 		}
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
-		}
-		legacyDispatchReceiver := ""
-		if function.Name.Name == "Invoke" && function.Recv != nil && len(function.Recv.List) == 1 {
-			receiver := function.Recv.List[0]
-			if len(receiver.Names) == 1 && expressionText(t, receiver.Type) == "*ObjNative" {
-				legacyDispatchReceiver = receiver.Names[0].Name
-			}
-		}
-		variables := make(map[string]string, len(globalVariables))
-		for name, target := range globalVariables {
-			variables[name] = target
-		}
-		if function.Recv != nil {
-			for _, field := range function.Recv.List {
-				recordRuntimeVariableField(field, variables, aliases)
-			}
-		}
-		if function.Type.Params != nil {
-			for _, field := range function.Type.Params.List {
-				recordRuntimeVariableField(field, variables, aliases)
-			}
-		}
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			switch typed := node.(type) {
-			case *ast.AssignStmt:
-				recordRuntimeAssignment(typed, variables, aliases)
-			case *ast.DeclStmt:
-				general, ok := typed.Decl.(*ast.GenDecl)
-				if ok && general.Tok == token.VAR {
-					for _, specification := range general.Specs {
-						if valueSpec, ok := specification.(*ast.ValueSpec); ok {
-							recordRuntimeVariableSpec(valueSpec, variables, aliases)
-						}
-					}
-				}
-			case *ast.SelectorExpr:
-				if typed.Sel.Name == "Data" && runtimeValueTargetType(typed.X, variables, aliases) == "ObjMap" {
-					found["ObjMap.Data selector"] = true
-				}
-			case *ast.CallExpr:
-				selector, ok := typed.Fun.(*ast.SelectorExpr)
-				allowedLegacyDispatch := false
-				if ok && legacyDispatchReceiver != "" {
-					receiver, isIdentifier := selector.X.(*ast.Ident)
-					allowedLegacyDispatch = isIdentifier && receiver.Name == legacyDispatchReceiver
-				}
-				if ok && selector.Sel.Name == "Fn" && !allowedLegacyDispatch && runtimeValueTargetType(selector.X, variables, aliases) == "ObjNative" {
-					found["direct native.Fn invocation"] = true
-				}
-			}
-			return true
-		})
 	}
 	order := []string{
 		"ObjMap.Data selector",
@@ -924,14 +733,15 @@ func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte)
 	return matches
 }
 
+func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte) []string {
+	t.Helper()
+	return typeCheckArchitecturePackage(t, "architecture/runtime", []architectureSource{{filename: filename, source: string(source)}}).runtimeForbiddenMatches()
+}
+
 func TestRuntimeFoundationExcludesObsoleteProductionStructures(t *testing.T) {
-	for _, filename := range productionGoFiles(t) {
-		source, err := os.ReadFile(filename)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, issue := range runtimeForbiddenSourceMatches(t, filename, source) {
-			t.Errorf("%s: %s", filename, issue)
+	for _, checked := range typeCheckProductionPackages(t) {
+		for _, issue := range checked.runtimeForbiddenMatches() {
+			t.Errorf("%s: %s", checked.pkg.Path(), issue)
 		}
 	}
 }
@@ -1049,21 +859,13 @@ func TestUnwindArchitectureCentralizesTerminalFrameTeardown(t *testing.T) {
 		}
 	}
 
-	files, err := filepath.Glob("*.go")
+	sources, err := readArchitectureSources(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, filename := range files {
-		if filename == "unwind.go" || strings.HasSuffix(filename, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(filename)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, match := range unwindTerminalMutationMatches(t, filename, source) {
-			t.Errorf("terminal frame teardown must remain in unwind.go: %s", match)
-		}
+	checked := typeCheckArchitecturePackage(t, "noxy-vm/internal/vm", sources)
+	for _, match := range checked.unwindTerminalMutationMatches("unwind.go") {
+		t.Errorf("terminal frame teardown must remain in unwind.go: %s", match)
 	}
 }
 
@@ -1138,12 +940,27 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 			want: []string{"removes a frame", "clears currentFrame"},
 		},
 		{
+			name: "shadowed nil identifier is allowed",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { currentFrame *CallFrame }
+				func install(vm *VM, nil *CallFrame) { vm.currentFrame = nil }`,
+		},
+		{
 			name: "clear frame array",
 			source: `package vm
 				type CallFrame struct{}
 				type VM struct { frames [4]*CallFrame }
 				func teardown(vm *VM) { clear(vm.frames[:]) }`,
 			want: []string{"clears frames"},
+		},
+		{
+			name: "declared clear function shadows builtin",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames [4]*CallFrame }
+				func clear(frames []*CallFrame) {}
+				func reset(vm *VM) { clear(vm.frames[:]) }`,
 		},
 		{
 			name: "stack clearing loop",
@@ -1215,7 +1032,7 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 				type VM struct { frameCount int }
 				type Mirror VM
 				func new(value VM) *Mirror { return nil }
-				func reset() { vm := new(VM); vm.frameCount = 0 }`,
+				func reset() { vm := new(VM{}); vm.frameCount = 0 }`,
 		},
 		{
 			name: "shadowed receiver types stay in lexical scope",
@@ -1251,6 +1068,80 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			matches := unwindTerminalMutationMatches(t, "architecture.go", []byte(test.source))
+			got := make([]string, len(matches))
+			for index, match := range matches {
+				got[index] = strings.SplitN(match, " at line ", 2)[0]
+			}
+			if strings.Join(got, "|") != strings.Join(test.want, "|") {
+				t.Fatalf("matches=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestUnwindArchitectureMatcherResolvesCrossFileFunctionResults(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources []architectureSource
+		want    []string
+	}{
+		{
+			name: "function result",
+			sources: []architectureSource{
+				{
+					filename: "runtime_types.go",
+					source: `package vm
+						type VM struct { frameCount int }
+						func currentVM() *VM { return nil }`,
+				},
+				{
+					filename: "teardown.go",
+					source: `package vm
+						func teardown() { currentVM().frameCount-- }`,
+				},
+			},
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "aliased function result",
+			sources: []architectureSource{
+				{
+					filename: "runtime_types.go",
+					source: `package vm
+						type VM struct { frameCount int }
+						type ActiveVM = VM
+						func currentVM() *ActiveVM { return nil }`,
+				},
+				{
+					filename: "teardown.go",
+					source: `package vm
+						func teardown() { currentVM().frameCount-- }`,
+				},
+			},
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "method result",
+			sources: []architectureSource{
+				{
+					filename: "runtime_types.go",
+					source: `package vm
+						type VM struct { frameCount int }
+						type runtimeState struct { active *VM }
+						func (state *runtimeState) currentVM() *VM { return state.active }`,
+				},
+				{
+					filename: "teardown.go",
+					source: `package vm
+						func teardown(state *runtimeState) { state.currentVM().frameCount-- }`,
+				},
+			},
+			want: []string{"decrements frameCount"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			matches := unwindTerminalPackageMutationMatches(t, test.sources)
 			got := make([]string, len(matches))
 			for index, match := range matches {
 				got[index] = strings.SplitN(match, " at line ", 2)[0]
@@ -1309,7 +1200,7 @@ func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 			source: `package vm
 				var assertion = "openFiles netBufferedData DbHandles native.Fn(args) .Data"
 				// Globals map[string]int; GlobalOwner *map[string]int
-				type holder struct { Data int }
+				type holder struct { Data int; Dataset int }
 				type callable struct { Fn func([]int) int }
 				type SharedState struct { Databases int }
 				func use(item *holder, function *callable, args []int) {
