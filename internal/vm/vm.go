@@ -19,6 +19,7 @@ type CallFrame struct {
 	IP          int
 	StackBase   int // First stack slot owned by this frame
 	LocalBase   int // Offset in stack where this frame's locals start
+	Deferred    []PreparedCall
 	Environment *value.GlobalEnvironment
 }
 

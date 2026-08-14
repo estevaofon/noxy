@@ -197,6 +197,7 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 	moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
 	modFn := &value.ObjFunction{Name: source.Name, Arity: 0, Chunk: code, Environment: moduleEnvironment}
 	modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Environment: moduleEnvironment}
+	callerFrameCount := vm.frameCount
 	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: modClosure})
 	if ok, callErr := vm.callValue(vm.peek(0), 0, nil, 0); !ok {
 		return value.NewNull(), callErr
@@ -205,6 +206,8 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 	if err := vm.run(startFrameCount); err != nil {
 		return value.NewNull(), err
 	}
-	vm.pop()
+	if callerFrameCount > 0 {
+		vm.pop()
+	}
 	return moduleEnvironment.ExportMap(), nil
 }

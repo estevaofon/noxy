@@ -857,6 +857,30 @@ func (vm *VM) run(minFrameCount int) error {
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
 
+		case chunk.OP_DEFER:
+			registration := sourceLocation(c, ip)
+			argCount := int(c.Code[ip])
+			ip++
+
+			frame.IP = ip
+			callee := vm.peek(argCount)
+			arguments := vm.stack[vm.stackTop-argCount : vm.stackTop]
+			prepared, err := vm.prepareDeferredCall(callee, arguments, registration)
+			if err != nil {
+				return &RuntimeError{
+					Location: registration,
+					Message:  "failed to register defer",
+					Cause:    err,
+				}
+			}
+
+			operandBase := vm.stackTop - argCount - 1
+			for index := operandBase; index < vm.stackTop; index++ {
+				vm.stack[index] = value.Value{}
+			}
+			vm.stackTop = operandBase
+			frame.Deferred = append(frame.Deferred, prepared)
+
 		case chunk.OP_CLOSURE:
 			idx := c.Code[ip]
 			ip++
@@ -908,47 +932,18 @@ func (vm *VM) run(minFrameCount int) error {
 			vm.pop()
 
 		case chunk.OP_RETURN:
-			// Return from function
-
-			// 1. Pop result
 			result := vm.pop()
-			calleeFrame := vm.currentFrame
-
-			// 2. Clear the stack range used by the function (args + locals)
-			// This is CRITICAL for GC. We must nullify the references.
-			// calleeFrame.StackBase points to the function object itself.
-			// We iterate up to stackTop (which is where result WAS before pop).
-			for i := calleeFrame.StackBase; i < vm.stackTop; i++ {
-				vm.closeUpvalue(&vm.stack[i]) // Close any upvalues pointing to this slot
-				vm.stack[i] = value.Value{}
+			frame.IP = ip
+			outcome := vm.finishFrame(frameOutcome{Result: result})
+			if outcome.Err != nil {
+				return outcome.Err
 			}
 
-			// 3. Decrement frame count
-			vm.frameCount--
-
-			// 4. Update current frame pointer
-			if vm.frameCount > 0 {
-				vm.currentFrame = vm.frames[vm.frameCount-1]
-			} else {
-				vm.currentFrame = nil
-			}
-
-			// 5. Return from run() if we drop below call depth
 			if vm.frameCount < minFrameCount {
-				// We are exiting the run loop.
-				// We need to place result at the location expected by the caller.
-				// The caller expects the function and args to be consumed, and result pushed.
-				// calleeFrame.StackBase is the start of the window (Function object).
-				vm.stackTop = calleeFrame.StackBase
-				vm.push(result)
 				return nil
 			}
 
-			// 6. Restore execution context
 			frame = vm.currentFrame
-			vm.stackTop = calleeFrame.StackBase // Drop args/locals/function from stackTop
-			vm.push(result)                     // Push result replacing the function
-
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
 
