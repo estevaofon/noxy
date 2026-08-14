@@ -54,12 +54,16 @@ type Compiler struct {
 	moduleDiscovery     *moduleDiscoveryState
 }
 
-type callEmission uint8
+type callEmission struct {
+	deferred         bool
+	registrationLine int
+}
 
-const (
-	emitImmediateCall callEmission = iota
-	emitDeferredCall
-)
+var emitImmediateCall callEmission
+
+func emitDeferredCall(line int) callEmission {
+	return callEmission{deferred: true, registrationLine: line}
+}
 
 func New() *Compiler {
 	return NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), "")
@@ -1576,7 +1580,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.DeferStmt:
 		c.setLine(n.Token.Line)
-		return c.compileCallExpression(n.Call, emitDeferredCall)
+		return c.compileCallExpression(n.Call, emitDeferredCall(n.Token.Line))
 
 	case *ast.CallExpression:
 		return c.compileCallExpression(n, emitImmediateCall)
@@ -1591,10 +1595,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 func (c *Compiler) emitCall(argCount int, emission callEmission) {
 	op := chunk.OP_CALL
-	if emission == emitDeferredCall {
+	line := c.currentLine
+	if emission.deferred {
 		op = chunk.OP_DEFER
+		line = emission.registrationLine
 	}
-	c.emitBytes(byte(op), byte(argCount))
+	c.currentChunk.Write(byte(op), line)
+	c.currentChunk.Write(byte(argCount), line)
 }
 
 func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission callEmission) (*chunk.Chunk, ast.NoxyType, error) {
@@ -1679,7 +1686,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			c.emitCall(1, emission)
 			return c.currentChunk, retType, nil
 		} else if ident.Value == "addr" {
-			if emission == emitDeferredCall {
+			if emission.deferred {
 				return nil, nil, fmt.Errorf("[line %d] cannot defer addr: addr does not produce a callable", c.currentLine)
 			}
 			// addr(ref x) debug function.

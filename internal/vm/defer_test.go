@@ -2,11 +2,31 @@ package vm
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
 )
+
+func testStructConstructor(name string, fields []string, params []*value.RuntimeTypeInfo) value.Value {
+	fieldTypes := make(map[string]*value.RuntimeTypeInfo, len(fields))
+	for index, field := range fields {
+		fieldTypes[field] = params[index]
+	}
+	constructor := value.NewStruct(name, fields)
+	constructor.Obj.(*value.ObjStruct).ConstructorType = &value.RuntimeTypeInfo{
+		Kind:       value.TYPE_CALLABLE,
+		Params:     append([]*value.RuntimeTypeInfo(nil), params...),
+		ParamIsRef: make([]bool, len(params)),
+		Return: &value.RuntimeTypeInfo{
+			Kind:   value.TYPE_STRUCT,
+			Name:   name,
+			Fields: fieldTypes,
+		},
+	}
+	return constructor
+}
 
 func defineCleanupFailureNative(machine *VM, sentinel error) {
 	machine.DefineContextualNative("cleanup_fail", func(value.NativeContext, []value.Value) (value.Value, error) {
@@ -60,7 +80,8 @@ func TestInvokePreparedCallDoesNotCopyArgumentsAgainAndRestoresStack(t *testing.
 
 func TestInvokePreparedConstructorClearsAllTemporarySlots(t *testing.T) {
 	machine := New()
-	constructor := value.NewStruct("Pair", []string{"left", "right"})
+	anyType := &value.RuntimeTypeInfo{Kind: value.TYPE_ANY}
+	constructor := testStructConstructor("Pair", []string{"left", "right"}, []*value.RuntimeTypeInfo{anyType, anyType})
 	prepared, err := machine.prepareDeferredCall(constructor, []value.Value{
 		value.NewArray([]value.Value{value.NewInt(1)}),
 		value.NewArray([]value.Value{value.NewInt(2)}),
@@ -184,7 +205,8 @@ func TestPrepareDeferredCallUsesCallableCaptureSemantics(t *testing.T) {
 		t.Fatalf("signed native did not shallow-copy array")
 	}
 
-	constructor := value.NewStruct("Box", []string{"items"})
+	intType := &value.RuntimeTypeInfo{Kind: value.TYPE_INT}
+	constructor := testStructConstructor("Box", []string{"items"}, []*value.RuntimeTypeInfo{{Kind: value.TYPE_ARRAY, Element: intType}})
 	prepared, err = machine.prepareDeferredCall(constructor, []value.Value{array}, SourceLocation{})
 	if err != nil || prepared.Arguments[0].Obj != array.Obj {
 		t.Fatalf("constructor capture changed identity")
@@ -192,6 +214,102 @@ func TestPrepareDeferredCallUsesCallableCaptureSemantics(t *testing.T) {
 
 	if _, err = machine.prepareDeferredCall(constructor, nil, SourceLocation{}); err == nil {
 		t.Fatal("constructor arity accepted")
+	}
+}
+
+func TestPrepareDeferredCallRejectsStructWithoutRuntimeMetadataLikeImmediateCall(t *testing.T) {
+	machine := New()
+	constructor := value.NewStruct("Box", []string{"value"})
+	argument := value.NewInt(1)
+
+	_, deferredErr := machine.prepareDeferredCall(constructor, []value.Value{argument}, SourceLocation{})
+	if deferredErr == nil {
+		t.Fatal("deferred constructor accepted incomplete runtime type metadata")
+	}
+
+	machine.push(constructor)
+	machine.push(argument)
+	ok, immediateErr := machine.callValue(constructor, 1, nil, 0)
+	if ok || immediateErr == nil {
+		t.Fatalf("ok=%v error=%v, want immediate constructor validation failure", ok, immediateErr)
+	}
+	if !strings.Contains(immediateErr.Error(), deferredErr.Error()) {
+		t.Fatalf("deferred error=%q immediate error=%q, want matching validation", deferredErr, immediateErr)
+	}
+}
+
+func TestDeferredStructConstructorTypeErrorOccursAtRegistration(t *testing.T) {
+	machine := New()
+	olderRan := false
+	machine.DefineNative("older_cleanup", func([]value.Value) value.Value {
+		olderRan = true
+		return value.NewNull()
+	})
+
+	err := interpretVMSource(t, machine, `struct Box
+    value: int
+end
+let dynamic: func = Box
+defer older_cleanup()
+defer dynamic("wrong")
+`)
+	if err == nil {
+		t.Fatal("deferred constructor accepted wrong field type")
+	}
+	var runtimeErr *RuntimeError
+	if !errors.As(err, &runtimeErr) {
+		t.Fatalf("error=%T %[1]v, want RuntimeError", err)
+	}
+	if runtimeErr.Location.Line != 6 || runtimeErr.Cause == nil || !strings.Contains(runtimeErr.Cause.Error(), "expected int, got object") {
+		t.Fatalf("runtime error=%#v, want registration-line constructor type error", runtimeErr)
+	}
+	if !olderRan {
+		t.Fatal("registration failure skipped an older defer")
+	}
+}
+
+func TestFinishFrameAggregatesPreparedCallHeadroomFailureAndContinues(t *testing.T) {
+	machine := New()
+	olderRan := false
+	older := value.NewNative("older", func([]value.Value) value.Value {
+		olderRan = true
+		return value.NewNull()
+	})
+	newer := value.NewNative("newer", func([]value.Value) value.Value {
+		t.Fatal("deferred call ran without enough fixed-stack headroom")
+		return value.NewNull()
+	})
+	frame := &CallFrame{
+		StackBase: 0,
+		LocalBase: 0,
+		Deferred: []PreparedCall{
+			{Callee: older, Registration: SourceLocation{File: "headroom.nx", Line: 4}},
+			{Callee: newer, Arguments: []value.Value{value.NewInt(1)}, Registration: SourceLocation{File: "headroom.nx", Line: 5}},
+		},
+	}
+	machine.frames[0] = frame
+	machine.frameCount = 1
+	machine.currentFrame = frame
+	machine.stackTop = StackMax - 1
+	machine.stack[StackMax-2] = value.NewInt(99)
+
+	outcome := machine.finishFrame(frameOutcome{Result: value.NewNull()})
+	var unwind *UnwindError
+	if !errors.As(outcome.Err, &unwind) || len(unwind.Deferred) != 1 {
+		t.Fatalf("error=%T %[1]v unwind=%#v, want one aggregated cleanup failure", outcome.Err, unwind)
+	}
+	deferred := unwind.Deferred[0]
+	if deferred.Registration != (SourceLocation{File: "headroom.nx", Line: 5}) || deferred.Cause == nil || !strings.Contains(deferred.Cause.Error(), "stack overflow") {
+		t.Fatalf("deferred=%#v, want registered headroom failure", deferred)
+	}
+	if !olderRan {
+		t.Fatal("headroom failure skipped the older deferred call")
+	}
+	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0] != nil || machine.openUpvalues != nil {
+		t.Fatalf("dirty terminal VM: frames=%d current=%p stack=%d frame0=%p open=%p", machine.frameCount, machine.currentFrame, machine.stackTop, machine.frames[0], machine.openUpvalues)
+	}
+	if machine.stack[StackMax-2] != (value.Value{}) {
+		t.Fatalf("owned stack slot was not cleared: %#v", machine.stack[StackMax-2])
 	}
 }
 

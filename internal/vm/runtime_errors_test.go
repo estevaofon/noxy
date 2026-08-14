@@ -41,6 +41,22 @@ func TestUnwindErrorPreservesLIFOOrderAndNestedCause(t *testing.T) {
 	}
 }
 
+func TestNilUnwindErrorUnwrapIsSafe(t *testing.T) {
+	var unwind *UnwindError
+
+	t.Run("direct", func(t *testing.T) {
+		if causes := unwind.Unwrap(); causes != nil {
+			t.Fatalf("causes=%v, want nil", causes)
+		}
+	})
+
+	t.Run("errors Is", func(t *testing.T) {
+		if errors.Is(unwind, errors.New("sentinel")) {
+			t.Fatal("typed-nil unwind unexpectedly matched sentinel")
+		}
+	})
+}
+
 func TestNativeRuntimeErrorPreservesNativeCause(t *testing.T) {
 	sentinel := errors.New("native sentinel")
 	machine := New()

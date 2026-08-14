@@ -72,6 +72,9 @@ func (err *UnwindError) Error() string {
 }
 
 func (err *UnwindError) Unwrap() []error {
+	if err == nil {
+		return nil
+	}
 	causes := make([]error, 0, len(err.Deferred)+1)
 	if err.Primary != nil {
 		causes = append(causes, err.Primary)

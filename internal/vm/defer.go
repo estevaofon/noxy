@@ -61,10 +61,8 @@ func (vm *VM) prepareDeferredCall(callee value.Value, args []value.Value, regist
 		if len(args) != len(definition.Fields) {
 			return PreparedCall{}, fmt.Errorf("expected %d arguments for struct %s but got %d", len(definition.Fields), definition.Name, len(args))
 		}
-		if definition.ConstructorType != nil {
-			if err := vm.validateStructConstructorArguments(definition, args); err != nil {
-				return PreparedCall{}, err
-			}
+		if err := vm.validateStructConstructorArguments(definition, args); err != nil {
+			return PreparedCall{}, err
 		}
 		return prepared, nil
 	}
@@ -106,6 +104,9 @@ func (vm *VM) copyPreparedArguments(args []value.Value, params []value.ParamInfo
 
 func (vm *VM) invokePreparedCall(call PreparedCall) (err error) {
 	base := vm.stackTop
+	if base < 0 || base >= len(vm.stack) || len(call.Arguments) > len(vm.stack)-base-1 {
+		return fmt.Errorf("stack overflow while invoking deferred call")
+	}
 	temporaryTop := base
 	defer func() {
 		cleanupTop := vm.stackTop
