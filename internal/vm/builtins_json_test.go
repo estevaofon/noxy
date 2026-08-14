@@ -72,6 +72,12 @@ func TestStrictJSONValToGoRejectsNonJSONValues(t *testing.T) {
 	}
 }
 
+func TestStrictJSONValToGoRejectsTaskHandle(t *testing.T) {
+	if _, err := strictJSONValToGo(value.NewTask()); err != errJSONUnsupported {
+		t.Fatalf("task conversion error = %v, want %v", err, errJSONUnsupported)
+	}
+}
+
 func TestStrictJSONValToGoRejectsInvalidUTF8Strings(t *testing.T) {
 	invalidValue := value.NewString(string([]byte{0xff}))
 	invalidKey := value.NewMap()

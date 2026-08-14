@@ -147,3 +147,16 @@ func TestFmtBuiltin(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskHandleIdentityAndFormat(t *testing.T) {
+	machine := New()
+	handle := value.NewTask()
+	if !valuesEqual(handle, handle) {
+		t.Fatal("task handle is not equal to itself")
+	}
+	if valuesEqual(handle, value.NewTask()) {
+		t.Fatal("distinct task handles compare equal")
+	}
+	got := callBuiltin(t, machine, "fmt", value.NewString("%T"), handle)
+	assertBuiltinValue(t, got, value.NewString("task"))
+}

@@ -21,6 +21,7 @@ const (
 	VAL_CHANNEL
 	VAL_WAITGROUP
 	VAL_REF
+	VAL_TASK
 )
 
 type Value struct {
@@ -421,6 +422,12 @@ func (v Value) String() string {
 			return "<invalid reference>"
 		}
 		return ref.String()
+	case VAL_TASK:
+		task, ok := v.Obj.(*ObjTask)
+		if !ok || task == nil {
+			return "<invalid task>"
+		}
+		return task.String()
 	default:
 		return "unknown"
 	}

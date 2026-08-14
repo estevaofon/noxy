@@ -27,6 +27,8 @@ func valuesEqual(a, b value.Value) bool {
 			return a.Obj == b.Obj // Simple pointer/string comparison
 		case value.VAL_BYTES:
 			return a.Obj.(string) == b.Obj.(string)
+		case value.VAL_TASK:
+			return a.Obj == b.Obj
 		default:
 			return false
 		}

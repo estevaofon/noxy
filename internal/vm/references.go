@@ -26,7 +26,7 @@ type referenceSetter func(value.Value)
 func validateReferencedValue(stored value.Value) error {
 	switch stored.Type {
 	case value.VAL_OBJ, value.VAL_FUNCTION, value.VAL_NATIVE, value.VAL_BYTES,
-		value.VAL_CHANNEL, value.VAL_WAITGROUP, value.VAL_REF:
+		value.VAL_CHANNEL, value.VAL_WAITGROUP, value.VAL_REF, value.VAL_TASK:
 		// These tags require a concrete payload in Obj.
 	default:
 		return nil
@@ -38,6 +38,11 @@ func validateReferencedValue(stored value.Value) error {
 	switch object.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
 		if object.IsNil() {
+			return fmt.Errorf("invalid referenced object")
+		}
+	}
+	if stored.Type == value.VAL_TASK {
+		if _, ok := stored.Obj.(*value.ObjTask); !ok {
 			return fmt.Errorf("invalid referenced object")
 		}
 	}

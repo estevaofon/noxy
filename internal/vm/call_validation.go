@@ -29,6 +29,8 @@ func runtimeValueMode(v value.Value) string {
 		return "waitgroup"
 	case value.VAL_REF:
 		return "ref"
+	case value.VAL_TASK:
+		return "task"
 	default:
 		return "unknown"
 	}

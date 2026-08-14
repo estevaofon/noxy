@@ -323,6 +323,8 @@ func (vm *VM) defineCoreBuiltins() {
 						typeName = "function"
 					case value.VAL_NATIVE:
 						typeName = "function"
+					case value.VAL_TASK:
+						typeName = "task"
 					case value.VAL_OBJ:
 						// Determine specific object type
 						if _, ok := val.Obj.(*value.ObjArray); ok {

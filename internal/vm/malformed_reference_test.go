@@ -224,6 +224,7 @@ func TestReferencesToTypedNilObjectsAreRuntimeErrors(t *testing.T) {
 		{name: "bytes", stored: value.Value{Type: value.VAL_BYTES, Obj: (*string)(nil)}},
 		{name: "channel", stored: value.Value{Type: value.VAL_CHANNEL, Obj: (*value.ObjChannel)(nil)}},
 		{name: "waitgroup", stored: value.Value{Type: value.VAL_WAITGROUP, Obj: (*value.ObjWaitGroup)(nil)}},
+		{name: "task", stored: value.Value{Type: value.VAL_TASK, Obj: (*value.ObjTask)(nil)}},
 		{name: "reference", stored: value.Value{Type: value.VAL_REF, Obj: (*value.ObjRef)(nil)}},
 	}
 	for _, tt := range tests {
@@ -232,6 +233,23 @@ func TestReferencesToTypedNilObjectsAreRuntimeErrors(t *testing.T) {
 			input := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &stored}}
 			if _, err := New().resolveReferenceValue(input); err == nil {
 				t.Fatal("typed-nil referenced object resolved without runtime error")
+			}
+		})
+	}
+}
+
+func TestMalformedReferenceRejectsTaskPayload(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored value.Value
+	}{
+		{name: "nil", stored: value.Value{Type: value.VAL_TASK}},
+		{name: "wrong type", stored: value.Value{Type: value.VAL_TASK, Obj: "not a task"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateReferencedValue(tt.stored); err == nil {
+				t.Fatal("malformed task payload was accepted")
 			}
 		})
 	}
