@@ -3,7 +3,9 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
+	"time"
 
 	"noxy-vm/internal/value"
 )
@@ -34,8 +36,8 @@ func (vm *VM) defineTaskBuiltins() {
 		if _, err := nativeVM(context); err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) != 1 {
-			return value.NewNull(), fmt.Errorf("task_await expects exactly 1 argument, got %d", len(args))
+		if len(args) < 1 || len(args) > 2 {
+			return value.NewNull(), fmt.Errorf("task_await expects 1 or 2 arguments, got %d", len(args))
 		}
 		if args[0].Type != value.VAL_TASK {
 			return value.NewNull(), fmt.Errorf("task_await expects a task handle")
@@ -45,9 +47,76 @@ func (vm *VM) defineTaskBuiltins() {
 			return value.NewNull(), fmt.Errorf("task_await received a malformed task handle")
 		}
 
-		<-task.Done()
+		var timeout *int64
+		if len(args) == 2 {
+			if args[1].Type != value.VAL_INT {
+				return value.NewNull(), fmt.Errorf("task_await timeout must be an integer")
+			}
+			timeoutValue := args[1].AsInt
+			timeout = &timeoutValue
+		}
+
+		completed, err := awaitTask(task, timeout)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if !completed {
+			return taskTimeoutEnvelope(), nil
+		}
 		return taskOutcomeEnvelope(task.Outcome()), nil
 	})
+}
+
+func awaitTask(task *value.ObjTask, timeout *int64) (bool, error) {
+	if timeout != nil {
+		if *timeout < 0 {
+			return false, fmt.Errorf("task timeout must be non-negative")
+		}
+		if *timeout > int64(math.MaxInt64)/int64(time.Millisecond) {
+			return false, fmt.Errorf("task timeout is too large")
+		}
+	}
+
+	select {
+	case <-task.Done():
+		return true, nil
+	default:
+	}
+
+	if timeout == nil {
+		<-task.Done()
+		return true, nil
+	}
+	if *timeout == 0 {
+		return false, nil
+	}
+
+	timer := time.NewTimer(time.Duration(*timeout) * time.Millisecond)
+	defer stopAndDrainTaskTimer(timer)
+	return awaitTaskUntilDeadline(task, timer.C), nil
+}
+
+func awaitTaskUntilDeadline(task *value.ObjTask, deadline <-chan time.Time) bool {
+	select {
+	case <-task.Done():
+		return true
+	case <-deadline:
+		select {
+		case <-task.Done():
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+func stopAndDrainTaskTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 }
 
 func (vm *VM) startSupervisedTask(task *value.ObjTask, call preparedTaskCall) {
@@ -98,5 +167,13 @@ func taskOutcomeEnvelope(outcome value.TaskOutcome) value.Value {
 			"message": value.NewString(failure.Message),
 			"stack":   value.NewString(failure.Stack),
 		}),
+	})
+}
+
+func taskTimeoutEnvelope() value.Value {
+	return value.NewMapWithData(map[string]value.Value{
+		"status": value.NewString("timeout"),
+		"value":  value.NewNull(),
+		"error":  value.NewNull(),
 	})
 }

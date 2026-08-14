@@ -1,10 +1,68 @@
 package vm
 
 import (
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/value"
 )
+
+func spawnCompiledTestTask(t *testing.T, machine *VM, source, functionName string) value.Value {
+	t.Helper()
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatalf("compile task source: %v", err)
+	}
+	callable, ok := machine.GetGlobal(functionName)
+	if !ok {
+		t.Fatalf("task function %q is not defined", functionName)
+	}
+	handle, err := requireBuiltin(t, machine, "spawn_task").Invoke(machine, []value.Value{callable})
+	if err != nil {
+		t.Fatalf("spawn_task: %v", err)
+	}
+	return handle
+}
+
+func invokeTaskAwait(machine *VM, args ...value.Value) (value.Value, error) {
+	builtin, ok := machine.GetGlobal("task_await")
+	if !ok {
+		return value.NewNull(), nil
+	}
+	return builtin.Obj.(*value.ObjNative).Invoke(machine, args)
+}
+
+func taskEnvelopeField(t *testing.T, envelope value.Value, name string) value.Value {
+	t.Helper()
+	mapping, ok := envelope.Obj.(*value.ObjMap)
+	if envelope.Type != value.VAL_OBJ || !ok || mapping == nil {
+		t.Fatalf("task envelope = %#v, want map", envelope)
+	}
+	field, ok := mapping.Get(name)
+	if !ok {
+		t.Fatalf("task envelope has no %q field", name)
+	}
+	return field
+}
+
+func requireTaskEnvelope(t *testing.T, envelope value.Value, status string, result, failure value.Value) {
+	t.Helper()
+	if got := taskEnvelopeField(t, envelope, "status"); !valuesEqual(got, value.NewString(status)) {
+		t.Fatalf("task status = %v, want %q", got, status)
+	}
+	if got := taskEnvelopeField(t, envelope, "value"); !valuesEqual(got, result) {
+		t.Fatalf("task value = %v, want %v", got, result)
+	}
+	if got := taskEnvelopeField(t, envelope, "error"); !valuesEqual(got, failure) {
+		t.Fatalf("task error = %v, want %v", got, failure)
+	}
+}
+
+func requireTaskOK(t *testing.T, envelope, result value.Value) {
+	t.Helper()
+	requireTaskEnvelope(t, envelope, "ok", result, value.NewNull())
+}
 
 func TestSpawnTaskReplaysSuccessfulResult(t *testing.T) {
 	got := captureVMSource(t, `
@@ -85,4 +143,175 @@ let second: any = task_await(task)
 test_report(first != second && first["value"] == second["value"] && first["error"] == null && second["error"] == null)
 `)
 	assertBuiltinValue(t, got, value.NewBool(true))
+}
+
+func TestTaskTimeoutZeroPollDoesNotConsumeLaterSuccess(t *testing.T) {
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	machine := New()
+	machine.DefineNative("wait_for_gate", func([]value.Value) value.Value {
+		entered <- struct{}{}
+		<-gate
+		return value.NewInt(42)
+	})
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> int
+    return wait_for_gate()
+end`, "worker")
+	<-entered
+
+	timed, err := invokeTaskAwait(machine, task, value.NewInt(0))
+	if err != nil {
+		t.Fatalf("zero poll: %v", err)
+	}
+	requireTaskEnvelope(t, timed, "timeout", value.NewNull(), value.NewNull())
+
+	close(gate)
+	completed, err := invokeTaskAwait(machine, task)
+	if err != nil {
+		t.Fatalf("later wait: %v", err)
+	}
+	requireTaskOK(t, completed, value.NewInt(42))
+}
+
+func TestTaskTimeoutPositiveWaitIsBoundedAndNonTerminal(t *testing.T) {
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	machine := New()
+	machine.DefineNative("wait_for_gate", func([]value.Value) value.Value {
+		entered <- struct{}{}
+		<-gate
+		return value.NewInt(7)
+	})
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> int
+    return wait_for_gate()
+end`, "worker")
+	<-entered
+
+	timed, err := invokeTaskAwait(machine, task, value.NewInt(1))
+	if err != nil {
+		t.Fatalf("positive timeout: %v", err)
+	}
+	requireTaskEnvelope(t, timed, "timeout", value.NewNull(), value.NewNull())
+
+	close(gate)
+	completed, err := invokeTaskAwait(machine, task, value.NewInt(1000))
+	if err != nil {
+		t.Fatalf("later bounded wait: %v", err)
+	}
+	requireTaskOK(t, completed, value.NewInt(7))
+}
+
+func TestTaskAwaitCompletedTaskWinsZeroPoll(t *testing.T) {
+	machine := New()
+	handle := value.NewTask()
+	handle.Obj.(*value.ObjTask).Complete(value.TaskOutcome{Value: value.NewInt(9)})
+
+	got, err := invokeTaskAwait(machine, handle, value.NewInt(0))
+	if err != nil {
+		t.Fatalf("completed poll: %v", err)
+	}
+	requireTaskOK(t, got, value.NewInt(9))
+}
+
+func TestTaskAwaitRejectsInvalidArguments(t *testing.T) {
+	machine := New()
+	handle := value.NewTask()
+	completedHandle := value.NewTask()
+	completedHandle.Obj.(*value.ObjTask).Complete(value.TaskOutcome{Value: value.NewInt(1)})
+	overflow := int64((1<<63-1)/int64(time.Millisecond) + 1)
+	tests := []struct {
+		name string
+		args []value.Value
+		want string
+	}{
+		{name: "no arguments", want: "1 or 2 arguments"},
+		{name: "too many arguments", args: []value.Value{handle, value.NewInt(0), value.NewInt(0)}, want: "1 or 2 arguments"},
+		{name: "invalid handle", args: []value.Value{value.NewInt(1)}, want: "task handle"},
+		{name: "malformed nil handle", args: []value.Value{{Type: value.VAL_TASK, Obj: (*value.ObjTask)(nil)}}, want: "malformed task handle"},
+		{name: "malformed handle object", args: []value.Value{{Type: value.VAL_TASK, Obj: "not a task"}}, want: "malformed task handle"},
+		{name: "negative timeout", args: []value.Value{handle, value.NewInt(-1)}, want: "non-negative"},
+		{name: "negative timeout on completed task", args: []value.Value{completedHandle, value.NewInt(-1)}, want: "non-negative"},
+		{name: "non-integer timeout", args: []value.Value{handle, value.NewFloat(1)}, want: "integer"},
+		{name: "overflow timeout", args: []value.Value{handle, value.NewInt(overflow)}, want: "too large"},
+		{name: "overflow timeout on completed task", args: []value.Value{completedHandle, value.NewInt(overflow)}, want: "too large"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := invokeTaskAwait(machine, test.args...)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestConcurrentTaskWaitersReplayCompositeIdentity(t *testing.T) {
+	const waiterCount = 16
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	composite := value.NewArray([]value.Value{value.NewInt(1), value.NewInt(2), value.NewInt(3)})
+	machine := New()
+	machine.DefineNative("wait_for_gate", func([]value.Value) value.Value {
+		entered <- struct{}{}
+		<-gate
+		return composite
+	})
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> any
+    return wait_for_gate()
+end`, "worker")
+	<-entered
+
+	type waitResult struct {
+		envelope value.Value
+		err      error
+	}
+	started := make(chan struct{}, waiterCount)
+	results := make(chan waitResult, waiterCount)
+	var waiters sync.WaitGroup
+	waiters.Add(waiterCount)
+	for range waiterCount {
+		go func() {
+			defer waiters.Done()
+			started <- struct{}{}
+			envelope, err := invokeTaskAwait(machine, task)
+			results <- waitResult{envelope: envelope, err: err}
+		}()
+	}
+	for range waiterCount {
+		<-started
+	}
+	close(gate)
+	waiters.Wait()
+	close(results)
+
+	seenEnvelopes := make(map[any]struct{}, waiterCount)
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent wait: %v", result.err)
+		}
+		requireTaskOK(t, result.envelope, composite)
+		if got := taskEnvelopeField(t, result.envelope, "value"); got.Obj != composite.Obj {
+			t.Fatalf("result identity = %p, want %p", got.Obj, composite.Obj)
+		}
+		if _, duplicate := seenEnvelopes[result.envelope.Obj]; duplicate {
+			t.Fatal("concurrent waits reused an envelope")
+		}
+		seenEnvelopes[result.envelope.Obj] = struct{}{}
+	}
+}
+
+func TestTaskAwaitCompletionWinsAtDeadlineBoundary(t *testing.T) {
+	for range 256 {
+		handle := value.NewTask()
+		task := handle.Obj.(*value.ObjTask)
+		deadline := make(chan time.Time, 1)
+		deadline <- time.Time{}
+		task.Complete(value.TaskOutcome{Value: value.NewInt(1)})
+		if !awaitTaskUntilDeadline(task, deadline) {
+			t.Fatal("ready task lost to ready deadline")
+		}
+	}
 }
