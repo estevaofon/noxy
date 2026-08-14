@@ -297,7 +297,7 @@ func newArchitectureTypeInfo(file *ast.File) *architectureTypeInfo {
 				continue
 			}
 			info.known[typeSpec.Name.Name] = true
-			if _, structure := typeSpec.Type.(*ast.StructType); !structure {
+			if typeSpec.Assign.IsValid() {
 				if target := architectureDeclaredTypeName(typeSpec.Type, nil); target != "" {
 					info.aliases[typeSpec.Name.Name] = target
 				}
@@ -431,6 +431,12 @@ func (resolver *architectureTypeResolver) expressionType(expression ast.Expr) st
 		return resolver.expressionType(typed.X)
 	case *ast.CallExpr:
 		if identifier, ok := typed.Fun.(*ast.Ident); ok {
+			if identifier.Name == "new" && len(typed.Args) == 1 {
+				target := architectureDeclaredTypeName(typed.Args[0], resolver.info.aliases)
+				if resolver.info.known[target] {
+					return target
+				}
+			}
 			if result := resolver.info.functions[identifier.Name]; result != "" {
 				return result
 			}
@@ -1188,6 +1194,20 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 					cache.stackTop = window.StackBase
 					clear(cache.frames[:])
 				}`,
+		},
+		{
+			name: "defined type based on VM is not VM",
+			source: `package vm
+				type VM struct { frameCount int }
+				type Mirror VM
+				func reset(mirror *Mirror) { mirror.frameCount = 0 }`,
+		},
+		{
+			name: "new VM receiver reset is detected",
+			source: `package vm
+				type VM struct { frameCount int }
+				func reset() { vm := new(VM); vm.frameCount = 0 }`,
+			want: []string{"resets frameCount"},
 		},
 		{
 			name: "shadowed receiver types stay in lexical scope",
