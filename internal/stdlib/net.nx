@@ -53,6 +53,10 @@ func setblocking(sock: Socket, blocking: bool) -> void
     net_setblocking(sock, blocking)
 end
 
+func settimeout(sock: Socket, timeout_ms: int) -> void
+    net_settimeout(sock, timeout_ms)
+end
+
 func socket_set() -> Socket[64]
     return net_socket_set()
 end

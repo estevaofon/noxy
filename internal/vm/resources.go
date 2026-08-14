@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"noxy-vm/internal/value"
 )
@@ -98,20 +99,31 @@ func (resource *FileResource) close() error {
 }
 
 type ListenerResource struct {
-	stateMu        sync.Mutex
-	acceptMu       sync.Mutex
-	listener       net.Listener
-	bufferedAccept net.Conn
-	closed         bool
+	stateMu             sync.Mutex
+	deadlineMu          sync.Mutex
+	acceptMu            sync.Mutex
+	listener            deadlineListener
+	bufferedAccept      net.Conn
+	ioTimeout           time.Duration
+	acceptProbeDeadline time.Time
+	lastAcceptDeadline  time.Time
+	deadlineGeneration  uint64
+	closed              bool
 }
 
 type SocketResource struct {
-	stateMu      sync.Mutex
-	readMu       sync.Mutex
-	writeMu      sync.Mutex
-	connection   net.Conn
-	bufferedRead []byte
-	closed       bool
+	stateMu            sync.Mutex
+	deadlineMu         sync.Mutex
+	readMu             sync.Mutex
+	writeMu            sync.Mutex
+	connection         net.Conn
+	bufferedRead       []byte
+	ioTimeout          time.Duration
+	readProbeDeadline  time.Time
+	lastReadDeadline   time.Time
+	lastWriteDeadline  time.Time
+	deadlineGeneration uint64
+	closed             bool
 }
 
 type DatabaseResource struct {

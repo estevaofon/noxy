@@ -1,0 +1,25 @@
+name: Network deadlines
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  network-deadlines:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - run: go test ./internal/vm -run 'Test(ValidateNetworkTimeout|Network|NetSet|NetSelect|Socket|Listener|ReceiveSocket|SendSocket|CloseDoes|BufferedAccept|ConnectedSocket|ConcurrentNetSelect)' -count=1 -timeout=120s
+      - run: go test ./internal/... -count=1
