@@ -109,7 +109,7 @@ Parameters declared with `ref` skip the shallow copy and access the caller's ori
 
 #### Concurrency and composite values
 
-Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Arrays, structs, and nested composite values may still share mutable identity because parameter copying remains shallow. Concurrent compound operations or nested composite mutation require coordination through channels or another explicit single-owner protocol.
+Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Normal calls and `spawn_task` use the shallow-copy parameter rules above. The legacy detached `spawn` is a compatibility exception and forwards argument values directly, preserving the top-level identity of mutable composites. Concurrent compound operations or mutation through any shared identity require coordination through channels or another explicit single-owner protocol.
 
 This runtime foundation does not change any public Noxy syntax, builtin signature, result shape, or shallow-copy rule.
 
@@ -644,7 +644,7 @@ let back: bytes = hex_decode(hex)   // b"Hello"
 
 ### Concurrency and Supervised Tasks
 
-`spawn(function, ...arguments)` starts a detached Noxy routine and immediately returns `null`. It exposes no handle and does not propagate the worker's result, runtime error, or panic to its caller. Its existing validation and asynchronous diagnostics remain compatible.
+`spawn(function, ...arguments)` starts a detached Noxy routine and immediately returns `null`. It exposes no handle and does not propagate the worker's result, runtime error, or panic to its caller. For compatibility, it also forwards arguments without the normal top-level shallow copy, so mutable composite arguments keep the same identity in caller and worker and require explicit coordination to avoid races. Its existing validation and asynchronous diagnostics remain compatible.
 
 `spawn_task(function, ...arguments)` instead validates a Noxy function or closure, arity, and parameter modes synchronously, launches it in a shared child VM, and returns an opaque task handle. Handles may be stored as `any`, passed, printed, and compared by identity, but cannot be constructed or inspected by Noxy code.
 

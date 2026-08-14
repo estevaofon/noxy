@@ -16,7 +16,7 @@ Individual global-binding and map operations are synchronized and do not crash t
 
 These guarantees do not make a sequence of operations atomic. For example, `counter = counter + 1` is still a separate read and write. Likewise, arrays, structs, and composite values nested inside a map or global binding are not recursively synchronized. Coordinate compound operations and mutation of nested composite values with channels (or another explicit single-owner protocol).
 
-Function arguments preserve Noxy's shallow-copy rules: the outer array, map, or struct is copied for an ordinary parameter, while nested composites remain shared. The synchronized runtime foundation does not turn that shallow copy into a deep copy.
+Normal function calls, including functions launched by `spawn_task`, preserve Noxy's shallow-copy rules: the outer array, map, or struct is copied for an ordinary parameter, while nested composites remain shared. The legacy detached `spawn` is a compatibility exception: it forwards its argument values directly, so mutable composites retain their top-level identity. Coordinate every concurrent access to those shared values explicitly; the synchronized runtime foundation neither deep-copies them nor prevents data races in compound mutations.
 
 This foundation does not change the behavior of existing concurrency primitives. It also underpins supervised tasks, described below, without changing detached `spawn`.
 
@@ -47,6 +47,7 @@ end
 - **Non-blocking**: `spawn` returns immediately.
 - **Concurrent**: The spawned function runs in parallel (on multi-core systems).
 - **Detached**: `spawn` returns `null`, exposes no handle, and never propagates a worker result or failure to its caller. Existing validation and worker diagnostics remain on standard output as `Runtime Error:`, `Thread Error:`, or `Thread Panic:` messages.
+- **Argument compatibility**: Unlike a normal call or `spawn_task`, legacy `spawn` forwards mutable arguments without a top-level shallow copy. Caller and worker therefore observe the same composite identity and must coordinate reads and writes to avoid races.
 
 ---
 
