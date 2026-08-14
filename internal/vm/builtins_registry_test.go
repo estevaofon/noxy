@@ -22,7 +22,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"json_dumps_result", "json_loads", "json_parse", "keys", "length", "make_chan",
 		"make_wg", "net_accept", "net_close", "net_connect", "net_listen",
 		"net_recv", "net_select", "net_send", "net_setblocking", "ord",
-		"pop", "print", "slice", "spawn", "sqlite_bind_float",
+		"pop", "print", "slice", "spawn", "spawn_task", "sqlite_bind_float",
 		"sqlite_bind_int", "sqlite_bind_text", "sqlite_close", "sqlite_exec",
 		"sqlite_exec_params", "sqlite_finalize", "sqlite_open",
 		"sqlite_prepare", "sqlite_query", "sqlite_reset", "sqlite_step_exec",
@@ -35,7 +35,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"strings_starts_with", "strings_substring", "strings_to_lower",
 		"strings_to_upper", "strings_trim", "sys_argv", "sys_exec",
 		"sys_exec_output", "sys_exit", "sys_getcwd", "sys_getenv",
-		"sys_load_plugin", "sys_os", "sys_setenv", "sys_sleep",
+		"sys_load_plugin", "sys_os", "sys_setenv", "sys_sleep", "task_await",
 		"time_add_days", "time_add_seconds", "time_after", "time_before",
 		"time_days_in_month", "time_diff", "time_diff_duration", "time_format",
 		"time_format_custom", "time_format_date", "time_format_time",
@@ -115,7 +115,7 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 func TestStatefulBuiltinsUseContextualHandlers(t *testing.T) {
 	machine := New()
 	for _, name := range []string{
-		"spawn", "delete", "append", "pop", "json_loads", "sys_load_plugin",
+		"spawn", "spawn_task", "task_await", "delete", "append", "pop", "json_loads", "sys_load_plugin",
 		"io_open", "net_listen", "sqlite_open",
 	} {
 		native := requireBuiltin(t, machine, name)
