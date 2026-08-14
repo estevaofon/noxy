@@ -404,7 +404,13 @@ func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte)
 		if !ok || function.Body == nil {
 			continue
 		}
-		allowedLegacyDispatch := function.Name.Name == "Invoke" && function.Recv != nil && expressionText(t, function.Recv.List[0].Type) == "*ObjNative"
+		legacyDispatchReceiver := ""
+		if function.Name.Name == "Invoke" && function.Recv != nil && len(function.Recv.List) == 1 {
+			receiver := function.Recv.List[0]
+			if len(receiver.Names) == 1 && expressionText(t, receiver.Type) == "*ObjNative" {
+				legacyDispatchReceiver = receiver.Names[0].Name
+			}
+		}
 		variables := make(map[string]string, len(globalVariables))
 		for name, target := range globalVariables {
 			variables[name] = target
@@ -438,6 +444,11 @@ func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte)
 				}
 			case *ast.CallExpr:
 				selector, ok := typed.Fun.(*ast.SelectorExpr)
+				allowedLegacyDispatch := false
+				if ok && legacyDispatchReceiver != "" {
+					receiver, isIdentifier := selector.X.(*ast.Ident)
+					allowedLegacyDispatch = isIdentifier && receiver.Name == legacyDispatchReceiver
+				}
 				if ok && selector.Sel.Name == "Fn" && !allowedLegacyDispatch && runtimeValueTargetType(selector.X, variables, aliases) == "ObjNative" {
 					found["direct native.Fn invocation"] = true
 				}
@@ -642,6 +653,18 @@ func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 			source: `package value
 				type ObjNative struct { Fn func([]int) int }
 				func (native *ObjNative) Invoke(args []int) int { return native.Fn(args) }`,
+		},
+		{
+			name:     "legacy dispatch rejects receiver aliases inside Invoke",
+			filename: "native.go",
+			source: `package value
+				type ObjNative struct { Fn func([]int) int }
+				func (native *ObjNative) Invoke(args []int) int {
+					other := native
+					_ = native.Fn(args)
+					return other.Fn(args)
+				}`,
+			want: []string{"direct native.Fn invocation"},
 		},
 	}
 	for _, test := range tests {
