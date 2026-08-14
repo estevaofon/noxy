@@ -143,9 +143,101 @@ type ObjFunction struct {
 }
 
 type ObjUpvalue struct {
-	Location *Value // Pointer to stack variable or Closed field
-	Closed   Value  // The closed value
-	Next     *ObjUpvalue
+	mu       sync.RWMutex
+	location *Value
+	closed   Value
+	next     *ObjUpvalue
+}
+
+func NewOpenUpvalue(location *Value, next *ObjUpvalue) *ObjUpvalue {
+	return &ObjUpvalue{location: location, next: next}
+}
+
+func (upvalue *ObjUpvalue) IsValid() bool {
+	if upvalue == nil {
+		return false
+	}
+	upvalue.mu.RLock()
+	defer upvalue.mu.RUnlock()
+	return upvalue.location != nil
+}
+
+func (upvalue *ObjUpvalue) PointsTo(location *Value) bool {
+	if upvalue == nil || location == nil {
+		return false
+	}
+	upvalue.mu.RLock()
+	defer upvalue.mu.RUnlock()
+	return upvalue.location == location
+}
+
+func (upvalue *ObjUpvalue) Load() (Value, bool) {
+	if upvalue == nil {
+		return Value{}, false
+	}
+	upvalue.mu.RLock()
+	defer upvalue.mu.RUnlock()
+	if upvalue.location == nil {
+		return Value{}, false
+	}
+	return *upvalue.location, true
+}
+
+func (upvalue *ObjUpvalue) Store(updated Value) bool {
+	if upvalue == nil {
+		return false
+	}
+	upvalue.mu.Lock()
+	defer upvalue.mu.Unlock()
+	if upvalue.location == nil {
+		return false
+	}
+	*upvalue.location = updated
+	return true
+}
+
+func (upvalue *ObjUpvalue) Close(location *Value) bool {
+	if upvalue == nil || location == nil {
+		return false
+	}
+	upvalue.mu.Lock()
+	defer upvalue.mu.Unlock()
+	if upvalue.location != location {
+		return false
+	}
+	upvalue.closed = *location
+	upvalue.location = &upvalue.closed
+	return true
+}
+
+func (upvalue *ObjUpvalue) Next() *ObjUpvalue {
+	if upvalue == nil {
+		return nil
+	}
+	upvalue.mu.RLock()
+	defer upvalue.mu.RUnlock()
+	return upvalue.next
+}
+
+func (upvalue *ObjUpvalue) SetNext(next *ObjUpvalue) {
+	if upvalue == nil {
+		return
+	}
+	upvalue.mu.Lock()
+	defer upvalue.mu.Unlock()
+	upvalue.next = next
+}
+
+func (upvalue *ObjUpvalue) LocationAddress() (string, bool) {
+	if upvalue == nil {
+		return "", false
+	}
+	upvalue.mu.RLock()
+	defer upvalue.mu.RUnlock()
+	if upvalue.location == nil {
+		return "", false
+	}
+	return fmt.Sprintf("%p", upvalue.location), true
 }
 
 type ObjClosure struct {

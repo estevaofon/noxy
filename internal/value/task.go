@@ -23,6 +23,10 @@ func NewTask() Value {
 	return Value{Type: VAL_TASK, Obj: &ObjTask{done: make(chan struct{})}}
 }
 
+func (task *ObjTask) IsValid() bool {
+	return task != nil && task.done != nil
+}
+
 func (task *ObjTask) Done() <-chan struct{} { return task.done }
 
 func (task *ObjTask) Complete(outcome TaskOutcome) {

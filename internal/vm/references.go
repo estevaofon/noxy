@@ -42,7 +42,8 @@ func validateReferencedValue(stored value.Value) error {
 		}
 	}
 	if stored.Type == value.VAL_TASK {
-		if _, ok := stored.Obj.(*value.ObjTask); !ok {
+		task, ok := stored.Obj.(*value.ObjTask)
+		if !ok || !task.IsValid() {
 			return fmt.Errorf("invalid referenced object")
 		}
 	}
@@ -83,10 +84,11 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 		}
 		return stored, true, func(updated value.Value) { ref.GlobalOwner.SetLocal(ref.Name, updated) }, nil
 	case value.REF_UPVALUE:
-		if ref.Upvalue == nil || ref.Upvalue.Location == nil {
+		stored, ok := ref.Upvalue.Load()
+		if !ok {
 			return value.Value{}, false, nil, fmt.Errorf("invalid upvalue reference")
 		}
-		return *ref.Upvalue.Location, true, func(updated value.Value) { *ref.Upvalue.Location = updated }, nil
+		return stored, true, func(updated value.Value) { ref.Upvalue.Store(updated) }, nil
 	case value.REF_PTR:
 		if ref.Ptr == nil {
 			return value.Value{}, false, nil, fmt.Errorf("invalid pointer reference")

@@ -43,7 +43,7 @@ func (vm *VM) defineTaskBuiltins() {
 			return value.NewNull(), fmt.Errorf("task_await expects a task handle")
 		}
 		task, ok := args[0].Obj.(*value.ObjTask)
-		if !ok || task == nil {
+		if !ok || !task.IsValid() {
 			return value.NewNull(), fmt.Errorf("task_await received a malformed task handle")
 		}
 

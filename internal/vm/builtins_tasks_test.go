@@ -145,6 +145,56 @@ test_report(first != second && first["value"] == second["value"] && first["error
 	assertBuiltinValue(t, got, value.NewBool(true))
 }
 
+func TestSpawnTaskSynchronizesCapturedLocalHandoff(t *testing.T) {
+	got := captureVMSource(t, `
+func launch(value: int) -> any
+    let captured: int = value
+    func worker() -> int
+        return captured
+    end
+    return spawn_task(worker)
+end
+
+let iteration: int = 0
+let valid: bool = true
+while iteration < 1000 do
+    let outcome: any = task_await(launch(iteration))
+    if outcome["status"] != "ok" || outcome["value"] != iteration then
+        valid = false
+    end
+    iteration = iteration + 1
+end
+test_report(valid)
+`)
+	assertBuiltinValue(t, got, value.NewBool(true))
+}
+
+func TestSpawnTaskSynchronizesCapturedReferenceHandoff(t *testing.T) {
+	got := captureVMSource(t, `
+func launch(value: int) -> any
+    let captured: int = value
+    func worker() -> int
+        let pointer: ref int = ref captured
+        *pointer = pointer + 1
+        return captured
+    end
+    return spawn_task(worker)
+end
+
+let iteration: int = 0
+let valid: bool = true
+while iteration < 1000 do
+    let outcome: any = task_await(launch(iteration))
+    if outcome["status"] != "ok" || outcome["value"] != iteration + 1 then
+        valid = false
+    end
+    iteration = iteration + 1
+end
+test_report(valid)
+`)
+	assertBuiltinValue(t, got, value.NewBool(true))
+}
+
 func TestTaskTimeoutZeroPollDoesNotConsumeLaterSuccess(t *testing.T) {
 	gate := make(chan struct{})
 	entered := make(chan struct{}, 1)
@@ -231,6 +281,7 @@ func TestTaskAwaitRejectsInvalidArguments(t *testing.T) {
 		{name: "invalid handle", args: []value.Value{value.NewInt(1)}, want: "task handle"},
 		{name: "malformed nil handle", args: []value.Value{{Type: value.VAL_TASK, Obj: (*value.ObjTask)(nil)}}, want: "malformed task handle"},
 		{name: "malformed handle object", args: []value.Value{{Type: value.VAL_TASK, Obj: "not a task"}}, want: "malformed task handle"},
+		{name: "zero-value handle", args: []value.Value{{Type: value.VAL_TASK, Obj: &value.ObjTask{}}, value.NewInt(0)}, want: "malformed task handle"},
 		{name: "negative timeout", args: []value.Value{handle, value.NewInt(-1)}, want: "non-negative"},
 		{name: "negative timeout on completed task", args: []value.Value{completedHandle, value.NewInt(-1)}, want: "non-negative"},
 		{name: "non-integer timeout", args: []value.Value{handle, value.NewFloat(1)}, want: "integer"},

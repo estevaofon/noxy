@@ -43,7 +43,7 @@ func (vm *VM) prepareTaskCall(callable value.Value, arguments []value.Value) (pr
 		return preparedTaskCall{}, fmt.Errorf("task received a malformed function value")
 	}
 	for _, upvalue := range closure.Upvalues {
-		if upvalue == nil || upvalue.Location == nil {
+		if !upvalue.IsValid() {
 			return preparedTaskCall{}, fmt.Errorf("task received a malformed function value")
 		}
 	}

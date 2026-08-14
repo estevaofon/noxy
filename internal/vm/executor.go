@@ -157,7 +157,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 					// For global references, display the name as the address proxy.
 					addrStr = fmt.Sprintf("<global %s>", ref.Name)
 				case value.REF_UPVALUE:
-					addrStr = fmt.Sprintf("%p", ref.Upvalue.Location)
+					address, ok := ref.Upvalue.LocationAddress()
+					if !ok {
+						return vm.runtimeError(c, ip, "invalid upvalue reference")
+					}
+					addrStr = address
 				case value.REF_PROPERTY:
 					containerAddr := fmt.Sprintf("%p", ref.Container.Obj)
 					addrStr = fmt.Sprintf("<prop %s of %s>", ref.Name, containerAddr)
@@ -895,13 +899,18 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 		case chunk.OP_GET_UPVALUE:
 			slot := c.Code[ip]
 			ip++
-			val := *frame.Closure.Upvalues[slot].Location
+			val, ok := frame.Closure.Upvalues[slot].Load()
+			if !ok {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
 			vm.push(val)
 
 		case chunk.OP_SET_UPVALUE:
 			slot := c.Code[ip]
 			ip++
-			*frame.Closure.Upvalues[slot].Location = vm.peek(0)
+			if !frame.Closure.Upvalues[slot].Store(vm.peek(0)) {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
 
 		case chunk.OP_CLOSE_UPVALUE:
 			vm.closeUpvalue(&vm.stack[vm.stackTop-1])

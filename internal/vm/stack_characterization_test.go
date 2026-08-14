@@ -89,14 +89,22 @@ func TestUpvalueCaptureAndClose(t *testing.T) {
 
 	machine.closeUpvalue(slot)
 	machine.stack[0] = value.NewInt(42)
-	if got := first.Location; got != &first.Closed {
-		t.Fatal("closed upvalue does not point to its closed value")
+	if first.PointsTo(slot) {
+		t.Fatal("closed upvalue still points to its former stack slot")
 	}
-	if got := first.Closed; !valuesEqual(got, value.NewInt(7)) {
-		t.Fatalf("closed value=%v, want 7", got)
+	got, ok := first.Load()
+	if !ok || !valuesEqual(got, value.NewInt(7)) {
+		t.Fatalf("closed value=%v valid=%v, want 7", got, ok)
 	}
-	if got := *first.Location; !valuesEqual(got, value.NewInt(7)) {
-		t.Fatalf("closed location value=%v, want 7", got)
+	if !first.Store(value.NewInt(9)) {
+		t.Fatal("closed upvalue rejected a store")
+	}
+	got, ok = first.Load()
+	if !ok || !valuesEqual(got, value.NewInt(9)) {
+		t.Fatalf("stored closed value=%v valid=%v, want 9", got, ok)
+	}
+	if got := machine.stack[0]; !valuesEqual(got, value.NewInt(42)) {
+		t.Fatalf("closed upvalue store mutated former stack slot: %v", got)
 	}
 	if machine.openUpvalues != nil {
 		t.Fatal("closed upvalue remained in the open list")

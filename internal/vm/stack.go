@@ -77,19 +77,16 @@ func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 	upvalue := vm.openUpvalues
 
 	// Walk list
-	for upvalue != nil && upvalue.Location != local {
+	for upvalue != nil && !upvalue.PointsTo(local) {
 		// prevUpvalue = upvalue
-		upvalue = upvalue.Next
+		upvalue = upvalue.Next()
 	}
 
-	if upvalue != nil && upvalue.Location == local {
+	if upvalue != nil {
 		return upvalue
 	}
 
-	createdUpvalue := &value.ObjUpvalue{
-		Location: local,
-		Next:     vm.openUpvalues,
-	}
+	createdUpvalue := value.NewOpenUpvalue(local, vm.openUpvalues)
 	vm.openUpvalues = createdUpvalue
 
 	return createdUpvalue
@@ -100,18 +97,16 @@ func (vm *VM) closeUpvalue(slot *value.Value) {
 	curr := vm.openUpvalues
 
 	for curr != nil {
-		if curr.Location == slot {
-			curr.Closed = *slot          // Copy value to heap
-			curr.Location = &curr.Closed // Point to heap
-
+		if curr.Close(slot) {
+			next := curr.Next()
 			if prev == nil {
-				vm.openUpvalues = curr.Next
+				vm.openUpvalues = next
 			} else {
-				prev.Next = curr.Next
+				prev.SetNext(next)
 			}
 			return
 		}
 		prev = curr
-		curr = curr.Next
+		curr = curr.Next()
 	}
 }

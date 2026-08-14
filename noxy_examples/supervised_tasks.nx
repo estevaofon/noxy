@@ -15,8 +15,8 @@ func fail() -> int
     return 1 / 0
 end
 
-func delayed() -> string
-    time_sleep(25)
+func delayed(gate: any) -> string
+    chan_recv(gate)
     return "ready"
 end
 
@@ -30,9 +30,11 @@ let failed: any = task_await(spawn_task(fail))
 assert(failed["status"] == "error", "task failure")
 assert(failed["error"]["kind"] == "runtime", "runtime kind")
 
-let slow: any = spawn_task(delayed)
+let gate: any = make_chan(0)
+let slow: any = spawn_task(delayed, gate)
 let timeout: any = task_await(slow, 0)
 assert(timeout["status"] == "timeout", "non-terminal timeout")
+chan_send(gate, true)
 let completed: any = task_await(slow)
 assert(completed["status"] == "ok" && completed["value"] == "ready", "later wait")
 

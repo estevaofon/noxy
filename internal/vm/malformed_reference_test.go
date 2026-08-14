@@ -245,6 +245,7 @@ func TestMalformedReferenceRejectsTaskPayload(t *testing.T) {
 	}{
 		{name: "nil", stored: value.Value{Type: value.VAL_TASK}},
 		{name: "wrong type", stored: value.Value{Type: value.VAL_TASK, Obj: "not a task"}},
+		{name: "zero value", stored: value.Value{Type: value.VAL_TASK, Obj: &value.ObjTask{}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
