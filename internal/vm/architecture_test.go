@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -183,40 +183,327 @@ func TestRuntimeOwnershipDoesNotUseRawGlobalMaps(t *testing.T) {
 	}
 }
 
-func TestRuntimeDoesNotAccessObjMapDataDirectly(t *testing.T) {
-	directDataSelector := regexp.MustCompile(`\.Data\b`)
-	files, err := filepath.Glob("*.go")
+func productionGoFiles(t *testing.T) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir("..", func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") || file == "architecture_test.go" {
+	return files
+}
+
+func expressionText(t *testing.T, expression ast.Expr) string {
+	t.Helper()
+	var text strings.Builder
+	if err := printer.Fprint(&text, token.NewFileSet(), expression); err != nil {
+		t.Fatal(err)
+	}
+	return text.String()
+}
+
+func sourceStructFields(t *testing.T, filename, structName string) map[string]string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", filename, err)
+	}
+	fields := make(map[string]string)
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok {
 			continue
 		}
-		source, err := os.ReadFile(file)
+		for _, specification := range general.Specs {
+			typeSpec, ok := specification.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != structName {
+				continue
+			}
+			structure, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatalf("%s.%s is not a struct", filename, structName)
+			}
+			for _, field := range structure.Fields.List {
+				for _, name := range field.Names {
+					fields[name.Name] = expressionText(t, field.Type)
+				}
+			}
+		}
+	}
+	if len(fields) == 0 {
+		t.Fatalf("%s does not declare struct %s", filename, structName)
+	}
+	return fields
+}
+
+func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte) []string {
+	t.Helper()
+	file, err := parser.ParseFile(token.NewFileSet(), filename, source, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", filename, err)
+	}
+	found := make(map[string]bool)
+	for _, declaration := range file.Decls {
+		if general, ok := declaration.(*ast.GenDecl); ok {
+			for _, specification := range general.Specs {
+				typeSpec, ok := specification.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				structure, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				for _, field := range structure.Fields.List {
+					_, rawMap := field.Type.(*ast.MapType)
+					pointer, pointerType := field.Type.(*ast.StarExpr)
+					rawMapPointer := false
+					if pointerType {
+						_, rawMapPointer = pointer.X.(*ast.MapType)
+					}
+					for _, name := range field.Names {
+						switch {
+						case typeSpec.Name.Name == "VM" && name.Name == "openFiles":
+							found["VM.openFiles field"] = true
+						case typeSpec.Name.Name == "VM" && name.Name == "netBufferedData":
+							found["VM.netBufferedData field"] = true
+						case typeSpec.Name.Name == "VM" && name.Name == "netBufferedConns":
+							found["VM.netBufferedConns field"] = true
+						case name.Name == "Globals" && rawMap:
+							found["Globals raw map field"] = true
+						case name.Name == "GlobalOwner" && pointerType && rawMapPointer:
+							found["GlobalOwner raw map pointer field"] = true
+						case name.Name == "DbHandles" && rawMap:
+							found["DbHandles raw map field"] = true
+						case name.Name == "StmtHandles" && rawMap:
+							found["StmtHandles raw map field"] = true
+						case name.Name == "StmtParams" && rawMap:
+							found["StmtParams raw map field"] = true
+						}
+					}
+				}
+			}
+		}
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		allowedLegacyDispatch := function.Name.Name == "Invoke" && function.Recv != nil && expressionText(t, function.Recv.List[0].Type) == "*ObjNative"
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.SelectorExpr:
+				if typed.Sel.Name == "Data" {
+					found["ObjMap.Data selector"] = true
+				}
+			case *ast.CallExpr:
+				selector, ok := typed.Fun.(*ast.SelectorExpr)
+				if ok && selector.Sel.Name == "Fn" && !allowedLegacyDispatch {
+					found["direct native.Fn invocation"] = true
+				}
+			}
+			return true
+		})
+	}
+	order := []string{
+		"ObjMap.Data selector",
+		"VM.openFiles field",
+		"VM.netBufferedData field",
+		"VM.netBufferedConns field",
+		"direct native.Fn invocation",
+		"Globals raw map field",
+		"GlobalOwner raw map pointer field",
+		"DbHandles raw map field",
+		"StmtHandles raw map field",
+		"StmtParams raw map field",
+	}
+	var matches []string
+	for _, issue := range order {
+		if found[issue] {
+			matches = append(matches, issue)
+		}
+	}
+	return matches
+}
+
+func TestRuntimeFoundationExcludesObsoleteProductionStructures(t *testing.T) {
+	for _, filename := range productionGoFiles(t) {
+		source, err := os.ReadFile(filename)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if directDataSelector.Match(source) {
-			t.Errorf("%s accesses ObjMap.Dat"+"a directly", file)
+		for _, issue := range runtimeForbiddenSourceMatches(t, filename, source) {
+			t.Errorf("%s: %s", filename, issue)
 		}
 	}
 }
 
-func TestDirectDataSelectorPatternUsesWordBoundary(t *testing.T) {
-	pattern := regexp.MustCompile(`\.Data\b`)
+func TestRuntimeFoundationRequiresContextAndEnvironmentOwnership(t *testing.T) {
+	callFrame := sourceStructFields(t, "vm.go", "CallFrame")
+	if got := callFrame["Environment"]; got != "*value.GlobalEnvironment" {
+		t.Errorf("CallFrame.Environment=%q", got)
+	}
+	for _, structName := range []string{"ObjFunction", "ObjClosure"} {
+		fields := sourceStructFields(t, filepath.Join("..", "value", "value.go"), structName)
+		if got := fields["Environment"]; got != "*GlobalEnvironment" {
+			t.Errorf("%s.Environment=%q", structName, got)
+		}
+	}
+	reference := sourceStructFields(t, filepath.Join("..", "value", "value.go"), "ObjRef")
+	if got := reference["GlobalOwner"]; got != "*GlobalEnvironment" {
+		t.Errorf("ObjRef.GlobalOwner=%q", got)
+	}
+
+	calls, err := os.ReadFile("calls.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), "calls.go", calls, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundInvoke := false
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		receiver, receiverOK := selector.X.(*ast.Ident)
+		activeContext, contextOK := call.Args[0].(*ast.Ident)
+		if receiverOK && contextOK && selector.Sel.Name == "Invoke" && receiver.Name == "native" && activeContext.Name == "vm" {
+			foundInvoke = true
+		}
+		return true
+	})
+	if !foundInvoke {
+		t.Error("calls.go does not dispatch natives through Invoke")
+	}
+}
+
+func TestResourceRegistriesAndModuleCacheHaveSharedOwners(t *testing.T) {
+	shared := sourceStructFields(t, "vm.go", "SharedState")
+	wantRegistries := map[string]string{
+		"Files":      "*handleRegistry[*FileResource]",
+		"Listeners":  "*handleRegistry[*ListenerResource]",
+		"Sockets":    "*handleRegistry[*SocketResource]",
+		"Databases":  "*handleRegistry[*DatabaseResource]",
+		"Statements": "*handleRegistry[*StatementResource]",
+	}
+	for name, want := range wantRegistries {
+		if got := shared[name]; got != want {
+			t.Errorf("SharedState.%s=%q want %q", name, got, want)
+		}
+	}
+	if got := shared["Modules"]; got != "*moduleCache" {
+		t.Errorf("SharedState.Modules=%q", got)
+	}
+
+	for _, filename := range productionGoFiles(t) {
+		if filepath.Dir(filename) != "." && filepath.Clean(filepath.Dir(filename)) != filepath.Clean("../vm") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range file.Decls {
+			general, ok := declaration.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, specification := range general.Specs {
+				typeSpec, ok := specification.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				if typeSpec.Name.Name == "moduleCache" && filepath.Base(filename) != "module_cache.go" {
+					t.Errorf("moduleCache declared outside module_cache.go: %s", filename)
+				}
+				structure, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				for _, field := range structure.Fields.List {
+					if strings.Contains(expressionText(t, field.Type), "handleRegistry[") && typeSpec.Name.Name != "SharedState" {
+						t.Errorf("resource registry declared on %s in %s", typeSpec.Name.Name, filename)
+					}
+				}
+			}
+		}
+	}
+	requireSourceFunctions(t, "module_cache.go", "newModuleCache")
+}
+
+func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 	tests := []struct {
-		source string
-		match  bool
+		name     string
+		filename string
+		source   string
+		want     []string
 	}{
-		{source: "mapping.Data", match: true},
-		{source: "mapping.Data[key]", match: true},
-		{source: "shared.Databases", match: false},
-		{source: "item.Dataset", match: false},
+		{
+			name:     "forbidden selectors and VM fields",
+			filename: "runtime.go",
+			source: `package vm
+				type VM struct {
+					openFiles map[int]int
+					netBufferedData map[int][]byte
+					netBufferedConns map[int]int
+				}
+				func use(mapping *holder, native *callable, args []int) {
+					_ = mapping.Data
+					_ = native.Fn(args)
+				}`,
+			want: []string{"ObjMap.Data selector", "VM.openFiles field", "VM.netBufferedData field", "VM.netBufferedConns field", "direct native.Fn invocation"},
+		},
+		{
+			name:     "forbidden raw ownership fields",
+			filename: "ownership.go",
+			source: `package vm
+				type owner struct {
+					Globals map[string]int
+					GlobalOwner *map[string]int
+					DbHandles map[int]int
+					StmtHandles map[int]int
+					StmtParams map[int]map[int]int
+				}`,
+			want: []string{"Globals raw map field", "GlobalOwner raw map pointer field", "DbHandles raw map field", "StmtHandles raw map field", "StmtParams raw map field"},
+		},
+		{
+			name:     "comments strings and longer names are allowed",
+			filename: "allowed.go",
+			source: `package vm
+				var assertion = "openFiles netBufferedData DbHandles native.Fn(args) .Data"
+				// Globals map[string]int; GlobalOwner *map[string]int
+				type SharedState struct { Databases int }
+				func use(item *holder) { _ = item.Dataset }`,
+		},
+		{
+			name:     "legacy dispatch is allowed only inside Invoke",
+			filename: "native.go",
+			source: `package value
+				type ObjNative struct { Fn func([]int) int }
+				func (native *ObjNative) Invoke(args []int) int { return native.Fn(args) }`,
+		},
 	}
 	for _, test := range tests {
-		if got := pattern.MatchString(test.source); got != test.match {
-			t.Errorf("pattern match for %q = %t, want %t", test.source, got, test.match)
-		}
+		t.Run(test.name, func(t *testing.T) {
+			got := runtimeForbiddenSourceMatches(t, test.filename, []byte(test.source))
+			if strings.Join(got, "|") != strings.Join(test.want, "|") {
+				t.Fatalf("matches=%v want=%v", got, test.want)
+			}
+		})
 	}
 }

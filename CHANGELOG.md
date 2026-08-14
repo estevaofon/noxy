@@ -12,9 +12,18 @@
 
 ### Fixed
 
+- Stateful native calls now receive the actively executing VM instead of a VM captured during builtin registration.
+- File, network, SQLite database, and SQLite statement handles now have shared ownership and synchronized lifecycle state across VMs sharing one runtime.
+- Concurrent requests for the same module now share one successful initialization, with coordinated failure retry and import-cycle detection.
+- Global bindings, module exports, maps, registries, and per-resource mutable state no longer expose the migrated concurrent Go-map crash paths.
 - Strict JSON encoding now rejects unsupported values, non-finite floats,
   cycles, typed nil containers, and invalid UTF-8 without lossy fallback.
   `#vm` @estevaofon
+
+### Follow-up
+
+- Corrected `net_select` polling semantics remain follow-up work; this foundation only moves the existing buffered state into shared synchronized resources.
+- Supervised `spawn` and task values remain follow-up work; this foundation does not change current public spawn behavior.
 
 ## [0.1.0] - 2026-08-10
 

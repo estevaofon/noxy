@@ -107,6 +107,12 @@ Consequently, replacing or directly mutating the top-level copy does not affect 
 
 Parameters declared with `ref` skip the shallow copy and access the caller's original value directly.
 
+#### Concurrency and composite values
+
+Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Arrays, structs, and nested composite values may still share mutable identity because parameter copying remains shallow. Concurrent compound operations or nested composite mutation require coordination through channels or another explicit single-owner protocol.
+
+This runtime foundation does not change any public Noxy syntax, builtin signature, result shape, or shallow-copy rule.
+
 #### Arrays (Dynamic and Fixed)
 
 **1. Dynamic Arrays (Recommended)**
