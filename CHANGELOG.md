@@ -5,10 +5,13 @@
 ### Added
 
 - `defer call(...)` with immediate argument capture and frame-level LIFO cleanup across functions, scripts, modules, loops, and spawned functions.
+- Portable positive TCP read, write, and accept timeouts through `net.settimeout`.
 
 ### Fixed
 
 - Normal returns and runtime failures now share safe frame unwinding, preserving primary errors while collecting observable cleanup failures.
+- `net.setblocking(sock, true)` now restores indefinite blocking, while the deprecated `false` branch remains a compatibility no-op until the network poller lands.
+- Temporary `net_select` deadlines now preserve the latest persistent timeout and buffered readiness without blocking concurrent close.
 
 ## [0.2.0] - 2026-08-13
 

@@ -756,6 +756,82 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
 
+### Network deadlines
+
+The `net` module supports portable blocking sockets with optional positive
+deadlines:
+
+```noxy
+net.settimeout(sock, 250)
+net.setblocking(sock, true)
+```
+
+`settimeout(sock, timeout_ms)` selects timed mode. `timeout_ms` must be a
+positive `int` whose conversion to Go `time.Duration` milliseconds does not
+overflow. Each `recv`, `send`, or listener `accept` starts with a fresh
+deadline, so time spent between configuration and the operation does not
+consume the operation's timeout.
+
+`setblocking(sock, true)` clears the persistent timeout and restores
+indefinite blocking, including I/O that is already pending. The compatibility
+call `setblocking(sock, false)` is deprecated and remains an unconditional
+no-op until true portable non-blocking I/O is implemented by the network
+poller. It does not inspect the socket and does not alter an existing timeout.
+An expired deadline is never used to simulate non-blocking behavior.
+
+The latest successfully completed `settimeout` or `setblocking(..., true)`
+call determines the persistent mode. A rejected call leaves that mode
+unchanged. Configuration belongs to the shared network resource, so related
+VMs observe the same mode.
+
+For effective configuration calls, a socket may be the existing map-backed
+`Socket` value or a typed `Socket` instance. The `fd` field must exist, be an
+exact `int`, fit the platform descriptor type without narrowing, resolve to a
+listener before a connected socket, and name an open resource. `fd` is
+authoritative; mutable `open`, `addr`, and `port` fields are not trusted.
+`settimeout` validates exact arity, timeout type and range, socket shape and
+descriptor, lookup, then open state. `setblocking` retains its compatibility
+behavior for malformed arity/type; only the exact `true` branch performs
+socket validation.
+
+`net.poll`/`net_select` retains its call-local timeout. While a read or accept
+probe is active, its absolute deadline is an upper bound: blocking mode or a
+longer persistent timeout cannot extend it, while a shorter persistent timeout
+may shorten it. Cleanup restores the latest persistent mode. A failure to
+install or restore a deadline is synchronous and produces no partial
+`SelectResult`; ordinary read/accept errors remain not-ready candidates.
+Read bytes or accepted connections consumed successfully are published before
+deadline restoration, so a restoration failure does not discard readiness.
+For one probe start instant `t`, the effective deadline is exactly:
+
+```text
+probe_bound = t + select_timeout
+effective = min(probe_bound, t + io_timeout), when io_timeout > 0
+effective = probe_bound, otherwise
+```
+
+The preservation guarantee above is specific to deadline-management failure.
+The existing ordinary `Read(n > 0, err != nil)` probe behavior remains
+unchanged and is reserved for the later network-poller work.
+
+Accepted and connected sockets explicitly clear prior deadlines before being
+registered and start in indefinite blocking mode; a listener timeout is not
+inherited. Failure to clear that initial deadline closes the connection and
+returns the existing `Socket{open:false}` result. Listener accept timeout also
+uses that existing result shape.
+
+Read and write expiry is reported as `"operation timed out"` using portable
+deadline-error classification. A receive that obtained bytes before an error
+remains successful with those bytes. A failed partial send reports `ok=false`
+and its actual transferred `count`. If a multi-step configuration cannot
+restore its exact prior absolute deadline snapshots after failure, the runtime
+marks the shared resource closed, detaches its OS handles and buffers, and
+closes them rather than leaving pending I/O in an unknown deadline state. The
+poisoned entry remains invalid in the shared registry until ordinary
+`net_close` removes the handle. If concurrent close invalidates a deadline
+transition, that close owns cleanup; the stale transition cannot commit,
+register, roll back, poison, or close the resource again.
+
 ---
 
 ## 13. Implementation Notes
