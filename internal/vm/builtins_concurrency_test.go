@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -8,6 +10,30 @@ import (
 )
 
 const statefulBuiltinTimeout = 2 * time.Second
+
+func captureConcurrencyStdout(t *testing.T, operation func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdout
+	os.Stdout = writer
+	defer func() { os.Stdout = previous }()
+
+	operation()
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(output)
+}
 
 func awaitBuiltinResult(t *testing.T, result <-chan value.Value, operation string) value.Value {
 	t.Helper()
@@ -146,4 +172,89 @@ test_report(chan_recv(channel))
 		t.Fatal("spawn did not complete")
 	}
 	assertBuiltinValue(t, captured, value.NewString("child"))
+}
+
+func TestSpawnPreservesLegacyDiagnosticsOnStdout(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(item: int)
+end`); err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := machine.GetGlobal("worker")
+	spawn := requireBuiltin(t, machine, "spawn")
+
+	tests := []struct {
+		name string
+		args []value.Value
+		want string
+	}{
+		{name: "non-function", args: []value.Value{value.NewInt(1)}, want: "Runtime Error: spawn expects a function\n"},
+		{name: "arity", args: []value.Value{worker}, want: "Runtime Error: spawn expected 1 args, got 0\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := captureConcurrencyStdout(t, func() {
+				result, err := spawn.Invoke(machine, test.args)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertBuiltinValue(t, result, value.NewNull())
+			})
+			if got != test.want {
+				t.Fatalf("stdout = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSpawnLaunchesDetachedWorkerWithoutSynchronousTypeValidation(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(item: int, channel: any)
+    chan_send(channel, item)
+end`); err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := machine.GetGlobal("worker")
+	channel := value.NewChannel(1)
+
+	result, err := requireBuiltin(t, machine, "spawn").Invoke(machine, []value.Value{
+		worker, value.NewString("legacy"), channel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBuiltinValue(t, result, value.NewNull())
+	select {
+	case got := <-channel.Obj.(*value.ObjChannel).Chan:
+		assertBuiltinValue(t, got, value.NewString("legacy"))
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("legacy spawn did not launch worker with a runtime type mismatch")
+	}
+}
+
+func TestSpawnPassesMutableArgumentsWithoutCopying(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(item: any, channel: any)
+    chan_send(channel, item)
+end`); err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := machine.GetGlobal("worker")
+	channel := value.NewChannel(1)
+	argument := value.NewArray([]value.Value{value.NewInt(1)})
+
+	if _, err := requireBuiltin(t, machine, "spawn").Invoke(machine, []value.Value{worker, argument, channel}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-channel.Obj.(*value.ObjChannel).Chan:
+		if got.Obj != argument.Obj {
+			t.Fatal("legacy spawn copied a mutable argument before launching the worker")
+		}
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("legacy spawn worker did not return its argument")
+	}
 }
