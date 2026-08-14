@@ -8,6 +8,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -245,24 +246,235 @@ func sourceStructFields(t *testing.T, filename, structName string) map[string]st
 	return fields
 }
 
-func selectorNamed(expression ast.Expr, name string) bool {
-	for {
-		switch typed := expression.(type) {
-		case *ast.ParenExpr:
-			expression = typed.X
-		case *ast.SelectorExpr:
-			return typed.Sel.Name == name
-		default:
-			return false
+type architectureTypeInfo struct {
+	aliases   map[string]string
+	fields    map[string]map[string]string
+	functions map[string]string
+	known     map[string]bool
+	globals   map[string]string
+}
+
+type architectureTypeResolver struct {
+	info      *architectureTypeInfo
+	variables map[string]string
+}
+
+func newArchitectureTypeInfo(file *ast.File) *architectureTypeInfo {
+	info := &architectureTypeInfo{
+		aliases: map[string]string{},
+		fields: map[string]map[string]string{
+			"VM": {
+				"frameCount":   "int",
+				"frames":       "CallFrame",
+				"currentFrame": "CallFrame",
+				"stack":        "Value",
+				"stackTop":     "int",
+			},
+			"CallFrame": {
+				"StackBase": "int",
+			},
+		},
+		functions: map[string]string{
+			"New":           "VM",
+			"NewWithConfig": "VM",
+			"NewWithShared": "VM",
+		},
+		known: map[string]bool{
+			"VM":        true,
+			"CallFrame": true,
+		},
+		globals: map[string]string{},
+	}
+
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.TYPE {
+			continue
+		}
+		for _, specification := range general.Specs {
+			typeSpec, ok := specification.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			info.known[typeSpec.Name.Name] = true
+			if _, structure := typeSpec.Type.(*ast.StructType); !structure {
+				if target := architectureDeclaredTypeName(typeSpec.Type, nil); target != "" {
+					info.aliases[typeSpec.Name.Name] = target
+				}
+			}
+		}
+	}
+
+	for _, declaration := range file.Decls {
+		switch typed := declaration.(type) {
+		case *ast.GenDecl:
+			for _, specification := range typed.Specs {
+				switch spec := specification.(type) {
+				case *ast.TypeSpec:
+					structure, ok := spec.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					fields := info.fields[spec.Name.Name]
+					if fields == nil {
+						fields = make(map[string]string)
+						info.fields[spec.Name.Name] = fields
+					}
+					for _, field := range structure.Fields.List {
+						fieldType := architectureDeclaredTypeName(field.Type, info.aliases)
+						for _, name := range field.Names {
+							fields[name.Name] = fieldType
+						}
+					}
+				case *ast.ValueSpec:
+					if typed.Tok == token.VAR {
+						info.recordValueSpec(spec, info.globals)
+					}
+				}
+			}
+		case *ast.FuncDecl:
+			if typed.Type.Results != nil && len(typed.Type.Results.List) == 1 {
+				if result := architectureDeclaredTypeName(typed.Type.Results.List[0].Type, info.aliases); result != "" {
+					info.functions[typed.Name.Name] = result
+				}
+			}
+		}
+	}
+	return info
+}
+
+func architectureDeclaredTypeName(expression ast.Expr, aliases map[string]string) string {
+	var name string
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		name = typed.Name
+	case *ast.SelectorExpr:
+		name = typed.Sel.Name
+	case *ast.StarExpr:
+		return architectureDeclaredTypeName(typed.X, aliases)
+	case *ast.ParenExpr:
+		return architectureDeclaredTypeName(typed.X, aliases)
+	case *ast.ArrayType:
+		return architectureDeclaredTypeName(typed.Elt, aliases)
+	case *ast.Ellipsis:
+		return architectureDeclaredTypeName(typed.Elt, aliases)
+	}
+	for aliases != nil && name != "" {
+		next, ok := aliases[name]
+		if !ok || next == name {
+			break
+		}
+		name = next
+	}
+	return name
+}
+
+func (info *architectureTypeInfo) recordValueSpec(spec *ast.ValueSpec, variables map[string]string) {
+	declared := architectureDeclaredTypeName(spec.Type, info.aliases)
+	resolver := &architectureTypeResolver{info: info, variables: variables}
+	for index, name := range spec.Names {
+		actual := declared
+		if actual == "" && index < len(spec.Values) {
+			actual = resolver.expressionType(spec.Values[index])
+		}
+		if actual != "" {
+			variables[name.Name] = actual
 		}
 	}
 }
 
-func expressionContainsSelector(expression ast.Expr, name string) bool {
+func newArchitectureTypeResolver(info *architectureTypeInfo, function *ast.FuncDecl) *architectureTypeResolver {
+	variables := make(map[string]string, len(info.globals))
+	for name, target := range info.globals {
+		variables[name] = target
+	}
+	resolver := &architectureTypeResolver{info: info, variables: variables}
+	resolver.recordFieldList(function.Recv)
+	resolver.recordFieldList(function.Type.Params)
+	return resolver
+}
+
+func (resolver *architectureTypeResolver) clone() *architectureTypeResolver {
+	variables := make(map[string]string, len(resolver.variables))
+	for name, target := range resolver.variables {
+		variables[name] = target
+	}
+	return &architectureTypeResolver{info: resolver.info, variables: variables}
+}
+
+func (resolver *architectureTypeResolver) recordFieldList(fields *ast.FieldList) {
+	if fields == nil {
+		return
+	}
+	for _, field := range fields.List {
+		target := architectureDeclaredTypeName(field.Type, resolver.info.aliases)
+		for _, name := range field.Names {
+			resolver.variables[name.Name] = target
+		}
+	}
+}
+
+func (resolver *architectureTypeResolver) expressionType(expression ast.Expr) string {
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		return resolver.variables[typed.Name]
+	case *ast.ParenExpr:
+		return resolver.expressionType(typed.X)
+	case *ast.UnaryExpr:
+		return resolver.expressionType(typed.X)
+	case *ast.CompositeLit:
+		return architectureDeclaredTypeName(typed.Type, resolver.info.aliases)
+	case *ast.SelectorExpr:
+		owner := resolver.expressionType(typed.X)
+		return resolver.info.fields[owner][typed.Sel.Name]
+	case *ast.IndexExpr:
+		return resolver.expressionType(typed.X)
+	case *ast.CallExpr:
+		if identifier, ok := typed.Fun.(*ast.Ident); ok {
+			if result := resolver.info.functions[identifier.Name]; result != "" {
+				return result
+			}
+		}
+		converted := architectureDeclaredTypeName(typed.Fun, resolver.info.aliases)
+		if resolver.info.known[converted] {
+			return converted
+		}
+	}
+	return ""
+}
+
+func (resolver *architectureTypeResolver) recordAssignment(assignment *ast.AssignStmt) {
+	if len(assignment.Lhs) != len(assignment.Rhs) {
+		return
+	}
+	for index, left := range assignment.Lhs {
+		identifier, ok := left.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		if target := resolver.expressionType(assignment.Rhs[index]); target != "" {
+			resolver.variables[identifier.Name] = target
+		}
+	}
+}
+
+func (resolver *architectureTypeResolver) isField(expression ast.Expr, ownerType, fieldName string) bool {
+	for {
+		parenthesized, ok := expression.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		expression = parenthesized.X
+	}
+	selector, ok := expression.(*ast.SelectorExpr)
+	return ok && selector.Sel.Name == fieldName && resolver.expressionType(selector.X) == ownerType
+}
+
+func (resolver *architectureTypeResolver) containsField(expression ast.Expr, ownerType, fieldName string) bool {
 	found := false
 	ast.Inspect(expression, func(node ast.Node) bool {
 		selector, ok := node.(*ast.SelectorExpr)
-		if ok && selector.Sel.Name == name {
+		if ok && resolver.isField(selector, ownerType, fieldName) {
 			found = true
 			return false
 		}
@@ -271,14 +483,38 @@ func expressionContainsSelector(expression ast.Expr, name string) bool {
 	return found
 }
 
-func indexesSelector(expression ast.Expr, name string) bool {
+func (resolver *architectureTypeResolver) indexesField(expression ast.Expr, ownerType, fieldName string) bool {
 	index, ok := expression.(*ast.IndexExpr)
-	return ok && selectorNamed(index.X, name)
+	return ok && resolver.isField(index.X, ownerType, fieldName)
 }
 
-func isNilExpression(expression ast.Expr) bool {
-	identifier, ok := expression.(*ast.Ident)
-	return ok && identifier.Name == "nil"
+func (resolver *architectureTypeResolver) isNilForType(expression ast.Expr, target string) bool {
+	if identifier, ok := expression.(*ast.Ident); ok {
+		return identifier.Name == "nil"
+	}
+	call, ok := expression.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	identifier, ok := call.Args[0].(*ast.Ident)
+	return ok && identifier.Name == "nil" && architectureDeclaredTypeName(call.Fun, resolver.info.aliases) == target
+}
+
+func isZeroInteger(expression ast.Expr) bool {
+	if parenthesized, ok := expression.(*ast.ParenExpr); ok {
+		return isZeroInteger(parenthesized.X)
+	}
+	literal, ok := expression.(*ast.BasicLit)
+	if !ok || literal.Kind != token.INT {
+		return false
+	}
+	value, err := strconv.ParseInt(literal.Value, 0, 64)
+	return err == nil && value == 0
+}
+
+func isEmptyCompositeLiteral(expression ast.Expr) bool {
+	literal, ok := expression.(*ast.CompositeLit)
+	return ok && len(literal.Elts) == 0
 }
 
 func isEmptyValueLiteral(expression ast.Expr) bool {
@@ -292,7 +528,7 @@ func expressionTextForArchitecture(expression ast.Expr) string {
 	return text.String()
 }
 
-func forClearsStackFromStackBase(loop *ast.ForStmt) bool {
+func forClearsStackFromStackBase(loop *ast.ForStmt, resolver *architectureTypeResolver) bool {
 	initialization, ok := loop.Init.(*ast.AssignStmt)
 	if !ok || len(initialization.Lhs) != len(initialization.Rhs) {
 		return false
@@ -300,7 +536,7 @@ func forClearsStackFromStackBase(loop *ast.ForStmt) bool {
 	loopIndexes := make(map[string]bool)
 	for index, left := range initialization.Lhs {
 		identifier, ok := left.(*ast.Ident)
-		if ok && expressionContainsSelector(initialization.Rhs[index], "StackBase") {
+		if ok && resolver.containsField(initialization.Rhs[index], "CallFrame", "StackBase") {
 			loopIndexes[identifier.Name] = true
 		}
 	}
@@ -320,7 +556,7 @@ func forClearsStackFromStackBase(loop *ast.ForStmt) bool {
 				continue
 			}
 			identifier, indexOK := stackIndex.Index.(*ast.Ident)
-			if indexOK && selectorNamed(stackIndex.X, "stack") && loopIndexes[identifier.Name] && isEmptyValueLiteral(assignment.Rhs[index]) {
+			if indexOK && resolver.isField(stackIndex.X, "VM", "stack") && loopIndexes[identifier.Name] && isEmptyValueLiteral(assignment.Rhs[index]) {
 				clears = true
 				return false
 			}
@@ -328,6 +564,16 @@ func forClearsStackFromStackBase(loop *ast.ForStmt) bool {
 		return !clears
 	})
 	return clears
+}
+
+func architectureIntroducesScope(node ast.Node) bool {
+	switch node.(type) {
+	case *ast.BlockStmt, *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt,
+		*ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt,
+		*ast.CaseClause, *ast.CommClause, *ast.FuncLit:
+		return true
+	}
+	return false
 }
 
 func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte) []string {
@@ -338,57 +584,105 @@ func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte)
 		t.Fatalf("parse %s: %v", filename, err)
 	}
 
+	info := newArchitectureTypeInfo(file)
 	var matches []string
 	record := func(node ast.Node, description string) {
 		matches = append(matches, description+" at line "+fileSet.Position(node.Pos()).String())
 	}
-	ast.Inspect(file, func(node ast.Node) bool {
-		switch typed := node.(type) {
-		case *ast.IncDecStmt:
-			if typed.Tok == token.DEC && selectorNamed(typed.X, "frameCount") {
-				record(typed, "decrements frameCount")
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		resolvers := []*architectureTypeResolver{newArchitectureTypeResolver(info, function)}
+		var nodes []ast.Node
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if node == nil {
+				last := nodes[len(nodes)-1]
+				nodes = nodes[:len(nodes)-1]
+				if architectureIntroducesScope(last) {
+					resolvers = resolvers[:len(resolvers)-1]
+				}
+				return true
 			}
-		case *ast.AssignStmt:
-			for index, left := range typed.Lhs {
-				if selectorNamed(left, "frameCount") && typed.Tok == token.SUB_ASSIGN {
+			nodes = append(nodes, node)
+			if architectureIntroducesScope(node) {
+				nested := resolvers[len(resolvers)-1].clone()
+				if literal, ok := node.(*ast.FuncLit); ok {
+					nested.recordFieldList(literal.Type.Params)
+				}
+				resolvers = append(resolvers, nested)
+			}
+			resolver := resolvers[len(resolvers)-1]
+			switch typed := node.(type) {
+			case *ast.IncDecStmt:
+				if typed.Tok == token.DEC && resolver.isField(typed.X, "VM", "frameCount") {
 					record(typed, "decrements frameCount")
 				}
-				if index >= len(typed.Rhs) {
-					continue
-				}
-				right := typed.Rhs[index]
-				if selectorNamed(left, "frameCount") && typed.Tok == token.ASSIGN {
-					binary, ok := right.(*ast.BinaryExpr)
-					if ok && binary.Op == token.SUB && expressionContainsSelector(binary.X, "frameCount") {
+			case *ast.AssignStmt:
+				for index, left := range typed.Lhs {
+					frameCount := resolver.isField(left, "VM", "frameCount")
+					if frameCount && typed.Tok == token.SUB_ASSIGN {
 						record(typed, "decrements frameCount")
 					}
+					if index >= len(typed.Rhs) {
+						continue
+					}
+					right := typed.Rhs[index]
+					if frameCount && typed.Tok == token.ASSIGN {
+						binary, subtraction := right.(*ast.BinaryExpr)
+						if subtraction && binary.Op == token.SUB && resolver.containsField(binary.X, "VM", "frameCount") {
+							record(typed, "decrements frameCount")
+						} else if isZeroInteger(right) {
+							record(typed, "resets frameCount")
+						}
+					}
+					if resolver.isField(left, "VM", "frames") && isEmptyCompositeLiteral(right) {
+						record(typed, "resets frames")
+					}
+					if resolver.indexesField(left, "VM", "frames") && resolver.isNilForType(right, "CallFrame") {
+						record(typed, "removes a frame")
+					}
+					if resolver.isField(left, "VM", "currentFrame") && resolver.isNilForType(right, "CallFrame") {
+						record(typed, "clears currentFrame")
+					}
+					if resolver.isField(left, "VM", "stackTop") && resolver.containsField(right, "CallFrame", "StackBase") {
+						record(typed, "resets stackTop to StackBase")
+					}
 				}
-				if indexesSelector(left, "frames") && isNilExpression(right) {
-					record(typed, "removes a frame")
+				resolver.recordAssignment(typed)
+			case *ast.DeclStmt:
+				general, ok := typed.Decl.(*ast.GenDecl)
+				if ok && general.Tok == token.VAR {
+					for _, specification := range general.Specs {
+						if valueSpec, ok := specification.(*ast.ValueSpec); ok {
+							info.recordValueSpec(valueSpec, resolver.variables)
+						}
+					}
 				}
-				if selectorNamed(left, "currentFrame") && isNilExpression(right) {
-					record(typed, "clears currentFrame")
+			case *ast.CallExpr:
+				identifier, ok := typed.Fun.(*ast.Ident)
+				if !ok || identifier.Name != "clear" || len(typed.Args) != 1 {
+					break
 				}
-				if selectorNamed(left, "stackTop") && expressionContainsSelector(right, "StackBase") {
-					record(typed, "resets stackTop to StackBase")
+				slice, ok := typed.Args[0].(*ast.SliceExpr)
+				if !ok {
+					break
+				}
+				if resolver.isField(slice.X, "VM", "frames") {
+					record(typed, "clears frames")
+				}
+				if resolver.isField(slice.X, "VM", "stack") && slice.Low != nil && resolver.containsField(slice.Low, "CallFrame", "StackBase") {
+					record(typed, "clears stack from StackBase")
+				}
+			case *ast.ForStmt:
+				if forClearsStackFromStackBase(typed, resolver) {
+					record(typed, "clears stack from StackBase")
 				}
 			}
-		case *ast.CallExpr:
-			identifier, ok := typed.Fun.(*ast.Ident)
-			if !ok || identifier.Name != "clear" || len(typed.Args) != 1 {
-				break
-			}
-			slice, ok := typed.Args[0].(*ast.SliceExpr)
-			if ok && selectorNamed(slice.X, "stack") && slice.Low != nil && expressionContainsSelector(slice.Low, "StackBase") {
-				record(typed, "clears stack from StackBase")
-			}
-		case *ast.ForStmt:
-			if forClearsStackFromStackBase(typed) {
-				record(typed, "clears stack from StackBase")
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
 	return matches
 }
 
@@ -795,6 +1089,22 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 			want: []string{"decrements frameCount"},
 		},
 		{
+			name: "frame count reset assignment",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount = 0 }`,
+			want: []string{"resets frameCount"},
+		},
+		{
+			name: "whole frame array reset",
+			source: `package vm
+				const FramesMax = 4
+				type CallFrame struct{}
+				type VM struct { frames [FramesMax]*CallFrame }
+				func teardown(vm *VM) { vm.frames = [FramesMax]*CallFrame{} }`,
+			want: []string{"resets frames"},
+		},
+		{
 			name: "nil frame assignment",
 			source: `package vm
 				type CallFrame struct{}
@@ -809,6 +1119,25 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 				type VM struct { currentFrame *CallFrame }
 				func teardown(vm *VM) { vm.currentFrame = nil }`,
 			want: []string{"clears currentFrame"},
+		},
+		{
+			name: "typed nil frame assignments",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames []*CallFrame; currentFrame *CallFrame }
+				func teardown(vm *VM, index int) {
+					vm.frames[index] = (*CallFrame)(nil)
+					vm.currentFrame = (*CallFrame)(nil)
+				}`,
+			want: []string{"removes a frame", "clears currentFrame"},
+		},
+		{
+			name: "clear frame array",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames [4]*CallFrame }
+				func teardown(vm *VM) { clear(vm.frames[:]) }`,
+			want: []string{"clears frames"},
 		},
 		{
 			name: "stack clearing loop",
@@ -844,6 +1173,35 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 				func inspect(frame *CallFrame, top int) {
 					for index := frame.StackBase; index < top; index++ { current := index; _ = current }
 				}`,
+		},
+		{
+			name: "homonymous fields on non runtime types are allowed",
+			source: `package vm
+				type CallFrame struct{}
+				type queue struct { frameCount int }
+				type cache struct { frames []*CallFrame; currentFrame *CallFrame; stackTop int }
+				type window struct { StackBase int }
+				func mutate(queue *queue, cache *cache, window *window, index int) {
+					queue.frameCount--
+					cache.frames[index] = nil
+					cache.currentFrame = (*CallFrame)(nil)
+					cache.stackTop = window.StackBase
+					clear(cache.frames[:])
+				}`,
+		},
+		{
+			name: "shadowed receiver types stay in lexical scope",
+			source: `package vm
+				type VM struct { frameCount int }
+				type queue struct { frameCount int }
+				func inspect(vm *VM, queue *queue) {
+					if true {
+						vm := queue
+						vm.frameCount--
+					}
+					vm.frameCount = 0
+				}`,
+			want: []string{"resets frameCount"},
 		},
 		{
 			name: "frame construction and similar text are allowed",
