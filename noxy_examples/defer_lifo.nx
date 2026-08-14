@@ -1,3 +1,5 @@
+use io
+use sqlite
 use sys select exit
 
 func assert(condition: bool, message: string) -> void
@@ -8,6 +10,8 @@ func assert(condition: bool, message: string) -> void
 end
 
 let order: string = ""
+let file_path: string = "noxy_examples/.defer_lifo_resource.txt"
+let database_path: string = "noxy_examples/.defer_lifo_resource.sqlite"
 
 func record(label: string) -> void
     order = order + label
@@ -18,6 +22,40 @@ func cleanup_demo() -> void
     defer record("2")
 end
 
+func cleanup_sqlite() -> void
+    let db: sqlite.Database = sqlite.open(database_path)
+    assert(db.open, "SQLite database must open")
+    defer sqlite.close(db)
+
+    let create: sqlite.ExecResult = sqlite.exec(db, "CREATE TABLE cleanup_values (value INTEGER NOT NULL)")
+    assert(create.ok, "SQLite table must be created")
+
+    let statement: sqlite.Statement = sqlite.prepare(db, "INSERT INTO cleanup_values VALUES (?)")
+    assert(statement.handle > 0, "SQLite statement must prepare")
+    defer sqlite.finalize(statement)
+    sqlite.bind_int(statement, 1, 21)
+    let inserted: sqlite.ExecResult = sqlite.step_exec(statement)
+    assert(inserted.ok, "SQLite statement must execute")
+end
+
+func cleanup_resources() -> void
+    let file: io.File = io.open(file_path, "w")
+    assert(file.open, "file must open")
+    defer io.close(file)
+    io.write(file, "defer cleanup\n")
+
+    cleanup_sqlite()
+end
+
+if io.exists(file_path) then
+    assert(io.remove(file_path), "stale file must be removable")
+end
+if io.exists(database_path) then
+    assert(io.remove(database_path), "stale SQLite database must be removable")
+end
 cleanup_demo()
 assert(order == "21", "defer must execute in LIFO order")
+cleanup_resources()
+assert(io.remove(file_path), "deferred file close must allow removal")
+assert(io.remove(database_path), "deferred SQLite cleanup must allow removal")
 print("defer LIFO: " + order)
