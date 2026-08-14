@@ -59,7 +59,7 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 				params = expanded
 			}
 			if err := validateParameterModes(native.Name, params, args); err != nil {
-				return false, vm.runtimeError(c, ip, "%s", err)
+				return false, vm.runtimeErrorCause(c, ip, err, "native '%s' failed", native.Name)
 			}
 
 			callArgs := make([]value.Value, len(args))
@@ -77,7 +77,7 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
 		result, err := native.Invoke(vm, args)
 		if err != nil {
-			return false, vm.runtimeError(c, ip, "%s", err)
+			return false, vm.runtimeErrorCause(c, ip, err, "native '%s' failed", native.Name)
 		}
 		vm.stackTop -= argCount + 1
 		vm.push(result)

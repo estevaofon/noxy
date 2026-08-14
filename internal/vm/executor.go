@@ -1001,8 +1001,7 @@ func (vm *VM) run(minFrameCount int) error {
 
 			mod, err := vm.loadModule(moduleName)
 			if err != nil {
-				context := vm.runtimeError(c, ip, "failed to import module '%s'", moduleName)
-				return fmt.Errorf("%v: %w", context, err)
+				return vm.runtimeErrorCause(c, ip, err, "failed to import module '%s'", moduleName)
 			}
 			vm.push(mod)
 
