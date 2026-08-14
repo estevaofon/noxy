@@ -56,6 +56,6 @@ end
 cleanup_demo()
 assert(order == "21", "defer must execute in LIFO order")
 cleanup_resources()
-assert(io.remove(file_path), "deferred file close must allow removal")
-assert(io.remove(database_path), "deferred SQLite cleanup must allow removal")
+assert(io.remove(file_path), "temporary file must be removable after cleanup frame")
+assert(io.remove(database_path), "temporary database must be removable after cleanup frame")
 print("defer LIFO: " + order)
