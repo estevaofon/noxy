@@ -431,14 +431,14 @@ func (resolver *architectureTypeResolver) expressionType(expression ast.Expr) st
 		return resolver.expressionType(typed.X)
 	case *ast.CallExpr:
 		if identifier, ok := typed.Fun.(*ast.Ident); ok {
+			if result := resolver.info.functions[identifier.Name]; result != "" {
+				return result
+			}
 			if identifier.Name == "new" && len(typed.Args) == 1 {
 				target := architectureDeclaredTypeName(typed.Args[0], resolver.info.aliases)
 				if resolver.info.known[target] {
 					return target
 				}
-			}
-			if result := resolver.info.functions[identifier.Name]; result != "" {
-				return result
 			}
 		}
 		converted := architectureDeclaredTypeName(typed.Fun, resolver.info.aliases)
@@ -1208,6 +1208,14 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 				type VM struct { frameCount int }
 				func reset() { vm := new(VM); vm.frameCount = 0 }`,
 			want: []string{"resets frameCount"},
+		},
+		{
+			name: "declared new function shadows builtin",
+			source: `package vm
+				type VM struct { frameCount int }
+				type Mirror VM
+				func new(value VM) *Mirror { return nil }
+				func reset() { vm := new(VM); vm.frameCount = 0 }`,
 		},
 		{
 			name: "shadowed receiver types stay in lexical scope",
