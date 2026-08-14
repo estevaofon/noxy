@@ -1,8 +1,10 @@
 package vm
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -37,6 +39,84 @@ func cleanupFileResources(t *testing.T, machine *VM) {
 			}
 		}
 	})
+}
+
+func recordDeferredFileResource(machine *VM, captured **FileResource) {
+	machine.DefineNative("record_file_resource", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		instance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull()
+		}
+		*captured, _ = machine.shared.Files.get(fileHandle(machine.shared, instance))
+		return value.NewNull()
+	})
+}
+
+func requireDeferredFileClosed(t *testing.T, machine *VM, resource *FileResource, path string) {
+	t.Helper()
+	if got := len(machine.shared.Files.snapshot()); got != 0 {
+		t.Fatalf("files=%d, want 0", got)
+	}
+	if resource == nil {
+		t.Fatal("file resource was not recorded")
+	}
+	resource.stateMu.Lock()
+	closed := resource.closed
+	resource.stateMu.Unlock()
+	if !closed {
+		t.Fatal("file resource remains open")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove deferred file: %v", err)
+	}
+}
+
+func TestDeferredFileCleanupClosesResourceOnEveryExit(t *testing.T) {
+	tests := []struct {
+		name      string
+		suffix    string
+		wantError bool
+	}{
+		{"normal", "", false},
+		{"runtime error", "\nlet zero: int = 0\nprint(1 / zero)", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			machine := New()
+			cleanupFileResources(t, machine)
+			path := filepath.Join(t.TempDir(), "deferred.txt")
+			var resource *FileResource
+			recordDeferredFileResource(machine, &resource)
+
+			source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"w\")\n" +
+				"record_file_resource(file)\ndefer io.close(file)" + test.suffix
+			err := interpretVMSource(t, machine, source)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error=%v, wantError=%v", err, test.wantError)
+			}
+			requireDeferredFileClosed(t, machine, resource, path)
+		})
+	}
+}
+
+func TestDeferredFileResourceCleanupContinuesAfterFailure(t *testing.T) {
+	machine := New()
+	cleanupFileResources(t, machine)
+	path := filepath.Join(t.TempDir(), "deferred-failure.txt")
+	var resource *FileResource
+	recordDeferredFileResource(machine, &resource)
+	sentinel := errors.New("sentinel cleanup failure")
+	defineCleanupFailureNative(machine, sentinel)
+
+	err := interpretVMSource(t, machine, "use io\nlet file: io.File = io.open("+strconv.Quote(path)+", \"w\")\n"+
+		"record_file_resource(file)\ndefer io.close(file)\ndefer cleanup_fail()")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error=%v, want sentinel cleanup failure", err)
+	}
+	requireDeferredFileClosed(t, machine, resource, path)
 }
 
 func TestFileHandleIsUsableAcrossSharedVMs(t *testing.T) {

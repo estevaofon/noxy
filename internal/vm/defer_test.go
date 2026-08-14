@@ -8,6 +8,12 @@ import (
 	"noxy-vm/internal/value"
 )
 
+func defineCleanupFailureNative(machine *VM, sentinel error) {
+	machine.DefineContextualNative("cleanup_fail", func(value.NativeContext, []value.Value) (value.Value, error) {
+		return value.NewNull(), sentinel
+	})
+}
+
 func TestPrepareDeferredCallLegacyNativeKeepsValueIdentity(t *testing.T) {
 	machine := New()
 	array := value.NewArray([]value.Value{value.NewInt(1)})

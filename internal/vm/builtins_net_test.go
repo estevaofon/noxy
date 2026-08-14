@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -30,6 +31,122 @@ func callBuiltinWithinBound(t *testing.T, machine *VM, name string, args ...valu
 		t.Fatalf("%s did not complete within %s", name, statefulBuiltinTimeout)
 		return value.NewNull()
 	}
+}
+
+func interpretVMSourceWithinBound(t *testing.T, machine *VM, source string) error {
+	t.Helper()
+	code := compileVMSource(t, source)
+	result := make(chan error, 1)
+	go func() {
+		result <- machine.Interpret(code)
+	}()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatalf("network program did not complete within %s", statefulBuiltinTimeout)
+		return nil
+	}
+}
+
+func recordDeferredListenerResource(machine *VM, captured **ListenerResource) {
+	machine.DefineNative("record_listener_resource", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewNull()
+		}
+		socket, ok := args[0].Obj.(*value.ObjMap)
+		if !ok {
+			return value.NewNull()
+		}
+		handle, ok := socket.Get("fd")
+		if !ok {
+			return value.NewNull()
+		}
+		*captured, _ = machine.shared.Listeners.get(int(handle.AsInt))
+		return value.NewNull()
+	})
+}
+
+func requireDeferredListenerClosed(t *testing.T, machine *VM, resource *ListenerResource) {
+	t.Helper()
+	if got := len(machine.shared.Listeners.snapshot()); got != 0 {
+		t.Fatalf("listeners=%d, want 0", got)
+	}
+	if got := len(machine.shared.Sockets.snapshot()); got != 0 {
+		t.Fatalf("sockets=%d, want 0", got)
+	}
+	if resource == nil {
+		t.Fatal("listener resource was not recorded")
+	}
+	resource.stateMu.Lock()
+	closed := resource.closed
+	resource.stateMu.Unlock()
+	if !closed {
+		t.Fatal("listener resource remains open")
+	}
+}
+
+func cleanupNetworkResources(t *testing.T, machine *VM) {
+	t.Helper()
+	t.Cleanup(func() {
+		for handle, listener := range machine.shared.Listeners.snapshot() {
+			machine.shared.Listeners.remove(handle)
+			closeListener(listener)
+		}
+		for handle, socket := range machine.shared.Sockets.snapshot() {
+			machine.shared.Sockets.remove(handle)
+			closeSocket(socket)
+		}
+	})
+}
+
+func TestDeferredSocketCleanupClosesListenerOnEveryExit(t *testing.T) {
+	tests := []struct {
+		name      string
+		suffix    string
+		wantError bool
+	}{
+		{"normal", "", false},
+		{"runtime error", "\nlet zero: int = 0\nprint(1 / zero)", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			machine := New()
+			cleanupNetworkResources(t, machine)
+			var resource *ListenerResource
+			recordDeferredListenerResource(machine, &resource)
+			source := `use net
+let listener: net.Socket = net.listen("127.0.0.1", 0)
+record_listener_resource(listener)
+defer net.socket_close(listener)` + test.suffix
+
+			err := interpretVMSourceWithinBound(t, machine, source)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error=%v, wantError=%v", err, test.wantError)
+			}
+			requireDeferredListenerClosed(t, machine, resource)
+		})
+	}
+}
+
+func TestDeferredSocketResourceCleanupContinuesAfterFailure(t *testing.T) {
+	machine := New()
+	cleanupNetworkResources(t, machine)
+	var resource *ListenerResource
+	recordDeferredListenerResource(machine, &resource)
+	sentinel := errors.New("sentinel cleanup failure")
+	defineCleanupFailureNative(machine, sentinel)
+	source := `use net
+let listener: net.Socket = net.listen("127.0.0.1", 0)
+record_listener_resource(listener)
+defer net.socket_close(listener)
+defer cleanup_fail()`
+
+	err := interpretVMSourceWithinBound(t, machine, source)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error=%v, want sentinel cleanup failure", err)
+	}
+	requireDeferredListenerClosed(t, machine, resource)
 }
 
 func builtinMapField(t *testing.T, object value.Value, field string) value.Value {
