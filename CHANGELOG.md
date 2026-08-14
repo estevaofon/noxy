@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-13
+
 ### Added
 
 - Observable strict JSON encoding through `json.dumps_result`, with explicit
