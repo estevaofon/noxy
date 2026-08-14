@@ -245,6 +245,85 @@ func sourceStructFields(t *testing.T, filename, structName string) map[string]st
 	return fields
 }
 
+func runtimeTargetTypeName(expression ast.Expr, aliases map[string]string) string {
+	var name string
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		name = typed.Name
+	case *ast.SelectorExpr:
+		name = typed.Sel.Name
+	case *ast.StarExpr:
+		return runtimeTargetTypeName(typed.X, aliases)
+	case *ast.ParenExpr:
+		return runtimeTargetTypeName(typed.X, aliases)
+	}
+	for name != "" {
+		if name == "ObjMap" || name == "ObjNative" {
+			return name
+		}
+		next, ok := aliases[name]
+		if !ok || next == name {
+			break
+		}
+		name = next
+	}
+	return ""
+}
+
+func runtimeValueTargetType(expression ast.Expr, variables, aliases map[string]string) string {
+	switch typed := expression.(type) {
+	case *ast.Ident:
+		return variables[typed.Name]
+	case *ast.ParenExpr:
+		return runtimeValueTargetType(typed.X, variables, aliases)
+	case *ast.UnaryExpr:
+		return runtimeValueTargetType(typed.X, variables, aliases)
+	case *ast.TypeAssertExpr:
+		return runtimeTargetTypeName(typed.Type, aliases)
+	case *ast.CallExpr:
+		return runtimeTargetTypeName(typed.Fun, aliases)
+	}
+	return ""
+}
+
+func recordRuntimeVariableField(field *ast.Field, variables, aliases map[string]string) {
+	target := runtimeTargetTypeName(field.Type, aliases)
+	if target == "" {
+		return
+	}
+	for _, name := range field.Names {
+		variables[name.Name] = target
+	}
+}
+
+func recordRuntimeVariableSpec(specification *ast.ValueSpec, variables, aliases map[string]string) {
+	target := runtimeTargetTypeName(specification.Type, aliases)
+	for index, name := range specification.Names {
+		actual := target
+		if actual == "" && index < len(specification.Values) {
+			actual = runtimeValueTargetType(specification.Values[index], variables, aliases)
+		}
+		if actual != "" {
+			variables[name.Name] = actual
+		}
+	}
+}
+
+func recordRuntimeAssignment(assignment *ast.AssignStmt, variables, aliases map[string]string) {
+	if len(assignment.Lhs) != len(assignment.Rhs) {
+		return
+	}
+	for index, left := range assignment.Lhs {
+		name, ok := left.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		if target := runtimeValueTargetType(assignment.Rhs[index], variables, aliases); target != "" {
+			variables[name.Name] = target
+		}
+	}
+}
+
 func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), filename, source, 0)
@@ -252,6 +331,34 @@ func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte)
 		t.Fatalf("parse %s: %v", filename, err)
 	}
 	found := make(map[string]bool)
+	aliases := make(map[string]string)
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, specification := range general.Specs {
+			typeSpec, ok := specification.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+			if target := runtimeTargetTypeName(typeSpec.Type, aliases); target != "" {
+				aliases[typeSpec.Name.Name] = target
+			}
+		}
+	}
+	globalVariables := make(map[string]string)
+	for _, declaration := range file.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.VAR {
+			continue
+		}
+		for _, specification := range general.Specs {
+			if valueSpec, ok := specification.(*ast.ValueSpec); ok {
+				recordRuntimeVariableSpec(valueSpec, globalVariables, aliases)
+			}
+		}
+	}
 	for _, declaration := range file.Decls {
 		if general, ok := declaration.(*ast.GenDecl); ok {
 			for _, specification := range general.Specs {
@@ -298,15 +405,40 @@ func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte)
 			continue
 		}
 		allowedLegacyDispatch := function.Name.Name == "Invoke" && function.Recv != nil && expressionText(t, function.Recv.List[0].Type) == "*ObjNative"
+		variables := make(map[string]string, len(globalVariables))
+		for name, target := range globalVariables {
+			variables[name] = target
+		}
+		if function.Recv != nil {
+			for _, field := range function.Recv.List {
+				recordRuntimeVariableField(field, variables, aliases)
+			}
+		}
+		if function.Type.Params != nil {
+			for _, field := range function.Type.Params.List {
+				recordRuntimeVariableField(field, variables, aliases)
+			}
+		}
 		ast.Inspect(function.Body, func(node ast.Node) bool {
 			switch typed := node.(type) {
+			case *ast.AssignStmt:
+				recordRuntimeAssignment(typed, variables, aliases)
+			case *ast.DeclStmt:
+				general, ok := typed.Decl.(*ast.GenDecl)
+				if ok && general.Tok == token.VAR {
+					for _, specification := range general.Specs {
+						if valueSpec, ok := specification.(*ast.ValueSpec); ok {
+							recordRuntimeVariableSpec(valueSpec, variables, aliases)
+						}
+					}
+				}
 			case *ast.SelectorExpr:
-				if typed.Sel.Name == "Data" {
+				if typed.Sel.Name == "Data" && runtimeValueTargetType(typed.X, variables, aliases) == "ObjMap" {
 					found["ObjMap.Data selector"] = true
 				}
 			case *ast.CallExpr:
 				selector, ok := typed.Fun.(*ast.SelectorExpr)
-				if ok && selector.Sel.Name == "Fn" && !allowedLegacyDispatch {
+				if ok && selector.Sel.Name == "Fn" && !allowedLegacyDispatch && runtimeValueTargetType(selector.X, variables, aliases) == "ObjNative" {
 					found["direct native.Fn invocation"] = true
 				}
 			}
@@ -457,14 +589,20 @@ func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 			name:     "forbidden selectors and VM fields",
 			filename: "runtime.go",
 			source: `package vm
+				type ObjMap struct { Data map[string]int }
+				type ObjNative struct { Fn func([]int) int }
+				type MapAlias = ObjMap
+				type NativeAlias = ObjNative
 				type VM struct {
 					openFiles map[int]int
 					netBufferedData map[int][]byte
 					netBufferedConns map[int]int
 				}
-				func use(mapping *holder, native *callable, args []int) {
-					_ = mapping.Data
-					_ = native.Fn(args)
+				func use(mapping *MapAlias, native *NativeAlias, args []int) {
+					mappingAlias := mapping
+					nativeAlias := native
+					_ = mappingAlias.Data
+					_ = nativeAlias.Fn(args)
 				}`,
 			want: []string{"ObjMap.Data selector", "VM.openFiles field", "VM.netBufferedData field", "VM.netBufferedConns field", "direct native.Fn invocation"},
 		},
@@ -482,13 +620,21 @@ func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 			want: []string{"Globals raw map field", "GlobalOwner raw map pointer field", "DbHandles raw map field", "StmtHandles raw map field", "StmtParams raw map field"},
 		},
 		{
-			name:     "comments strings and longer names are allowed",
+			name:     "unrelated fields comments strings and longer names are allowed",
 			filename: "allowed.go",
 			source: `package vm
 				var assertion = "openFiles netBufferedData DbHandles native.Fn(args) .Data"
 				// Globals map[string]int; GlobalOwner *map[string]int
+				type holder struct { Data int }
+				type callable struct { Fn func([]int) int }
 				type SharedState struct { Databases int }
-				func use(item *holder) { _ = item.Dataset }`,
+				func use(item *holder, function *callable, args []int) {
+					itemAlias := item
+					functionAlias := function
+					_ = itemAlias.Data
+					_ = item.Dataset
+					_ = functionAlias.Fn(args)
+				}`,
 		},
 		{
 			name:     "legacy dispatch is allowed only inside Invoke",
