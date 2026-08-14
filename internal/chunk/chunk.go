@@ -47,6 +47,7 @@ const (
 	OP_SHIFT_LEFT
 	OP_SHIFT_RIGHT
 	OP_CALL
+	OP_DEFER
 	OP_INVOKE
 	OP_RETURN
 	OP_PRINT
@@ -167,6 +168,8 @@ func (op OpCode) String() string {
 		return "OP_SHIFT_RIGHT"
 	case OP_CALL:
 		return "OP_CALL"
+	case OP_DEFER:
+		return "OP_DEFER"
 	case OP_INVOKE:
 		return "OP_INVOKE"
 	case OP_RETURN:
@@ -366,6 +369,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.shortInstruction("OP_LOOP", offset)
 	case OP_CALL:
 		return c.byteInstruction("OP_CALL", offset)
+	case OP_DEFER:
+		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
 		return c.simpleInstruction("OP_RETURN", offset)
 	case OP_ARRAY:

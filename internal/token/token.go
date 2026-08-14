@@ -30,6 +30,7 @@ const (
 	WHILE   TokenType = "WHILE"
 	DO      TokenType = "DO"
 	RETURN  TokenType = "RETURN"
+	DEFER   TokenType = "DEFER"
 	BREAK   TokenType = "BREAK"
 	FOR     TokenType = "FOR"
 	IN      TokenType = "IN"
@@ -126,6 +127,7 @@ var keywords = map[string]TokenType{
 	"while":   WHILE,
 	"do":      DO,
 	"return":  RETURN,
+	"defer":   DEFER,
 	"break":   BREAK,
 	"int":     TYPE_INT,
 	"float":   TYPE_FLOAT,

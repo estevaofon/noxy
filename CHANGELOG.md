@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `defer call(...)` with immediate argument capture and frame-level LIFO cleanup across functions, scripts, modules, loops, and spawned functions.
+
+### Fixed
+
+- Normal returns and runtime failures now share safe frame unwinding, preserving primary errors while collecting observable cleanup failures.
+
 ## [0.2.0] - 2026-08-13
 
 ### Added

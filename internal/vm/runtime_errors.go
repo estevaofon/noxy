@@ -7,25 +7,98 @@ import (
 	"noxy-vm/internal/chunk"
 )
 
+// SourceLocation identifies a Noxy source position associated with a runtime error.
+type SourceLocation struct {
+	File string
+	Line int
+}
+
+func (location SourceLocation) String() string {
+	return fmt.Sprintf("%s:line %d", location.File, location.Line)
+}
+
+// RuntimeError adds Noxy source context and a captured Noxy stack to an
+// underlying runtime failure.
 type RuntimeError struct {
-	Rendered string
+	Location SourceLocation
+	Message  string
+	Cause    error
 	Stack    string
 }
 
-func (failure *RuntimeError) Error() string {
-	return failure.Rendered
+func (err *RuntimeError) Error() string {
+	prefix := fmt.Sprintf("[%s] %s", err.Location, err.Message)
+	return renderErrorCause(prefix, err.Cause)
 }
 
-func runtimeLocation(c *chunk.Chunk, ip int) (string, int) {
-	file := "?"
-	line := 0
-	if c != nil {
-		file = c.FileName
-		if ip > 0 && ip <= len(c.Lines) {
-			line = c.Lines[ip-1]
-		}
+func (err *RuntimeError) Unwrap() error {
+	return err.Cause
+}
+
+// DeferredError describes a failure from a call registered by defer.
+type DeferredError struct {
+	Registration SourceLocation
+	Cause        error
+}
+
+func (err DeferredError) Error() string {
+	prefix := fmt.Sprintf("defer registered at %s failed", err.Registration)
+	return renderErrorCause(prefix, err.Cause)
+}
+
+func (err DeferredError) Unwrap() error {
+	return err.Cause
+}
+
+// UnwindError keeps the original failure and each deferred failure in execution order.
+type UnwindError struct {
+	Primary  error
+	Deferred []DeferredError
+}
+
+func (err *UnwindError) Error() string {
+	if err == nil {
+		return "<nil>"
 	}
-	return file, line
+
+	parts := make([]string, 0, len(err.Deferred)+1)
+	if err.Primary != nil {
+		parts = append(parts, err.Primary.Error())
+	}
+	for _, deferred := range err.Deferred {
+		parts = append(parts, deferred.Error())
+	}
+	if len(parts) == 0 {
+		return "runtime unwind failed"
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (err *UnwindError) Unwrap() []error {
+	if err == nil {
+		return nil
+	}
+	causes := make([]error, 0, len(err.Deferred)+1)
+	if err.Primary != nil {
+		causes = append(causes, err.Primary)
+	}
+	for index := range err.Deferred {
+		causes = append(causes, &err.Deferred[index])
+	}
+	return causes
+}
+
+func sourceLocation(c *chunk.Chunk, ip int) SourceLocation {
+	location := SourceLocation{File: "?"}
+	if c == nil {
+		return location
+	}
+
+	location.File = c.FileName
+	if ip > 0 && ip <= len(c.Lines) {
+		location.Line = c.Lines[ip-1]
+	}
+	return location
 }
 
 func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
@@ -41,16 +114,32 @@ func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
 			c = activeChunk
 			ip = activeIP
 		}
-		file, line := runtimeLocation(c, ip)
-		frames = append(frames, fmt.Sprintf("[%s:line %d] in %s", file, line, frame.Closure.Function.Name))
+		location := sourceLocation(c, ip)
+		frames = append(frames, fmt.Sprintf("[%s] in %s", location, frame.Closure.Function.Name))
 	}
 	return strings.Join(frames, "\n")
 }
 
-func (vm *VM) newRuntimeError(c *chunk.Chunk, ip int, message string) error {
-	file, line := runtimeLocation(c, ip)
+func (vm *VM) runtimeErrorCause(c *chunk.Chunk, ip int, cause error, format string, args ...interface{}) error {
 	return &RuntimeError{
-		Rendered: fmt.Sprintf("[%s:line %d] %s", file, line, message),
+		Location: sourceLocation(c, ip),
+		Message:  fmt.Sprintf(format, args...),
+		Cause:    cause,
 		Stack:    vm.captureNoxyStack(c, ip),
 	}
+}
+
+func renderErrorCause(prefix string, cause error) string {
+	if cause == nil {
+		return prefix
+	}
+	causeText := cause.Error()
+	if !strings.Contains(causeText, "\n") {
+		return prefix + ": " + causeText
+	}
+	return prefix + ":\n" + indentError(causeText, "  ")
+}
+
+func indentError(text, indent string) string {
+	return indent + strings.ReplaceAll(text, "\n", "\n"+indent)
 }

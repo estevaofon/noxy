@@ -20,9 +20,13 @@ func TestModuleFrameGlobalReferenceCapturesSharedFallbackOwner(t *testing.T) {
 	code := chunk.New()
 	code.FileName = "shared_global_reference"
 	name := code.AddConstant(value.NewString("shared_value"))
+	captured := code.AddConstant(value.NewString("captured"))
 	for _, instruction := range []byte{
 		byte(chunk.OP_REF_GLOBAL), byte(name),
 		byte(chunk.OP_DEREF),
+		byte(chunk.OP_SET_GLOBAL), byte(captured),
+		byte(chunk.OP_POP),
+		byte(chunk.OP_NULL),
 		byte(chunk.OP_RETURN),
 	} {
 		code.Write(instruction, 1)
@@ -34,7 +38,7 @@ func TestModuleFrameGlobalReferenceCapturesSharedFallbackOwner(t *testing.T) {
 	if err := machine.InterpretWithGlobals(code, moduleGlobals); err != nil {
 		t.Fatal(err)
 	}
-	got := machine.pop()
+	got := moduleGlobals["captured"]
 	if got.Type != value.VAL_INT || got.AsInt != 42 {
 		t.Fatalf("shared fallback=%v, want 42", got)
 	}

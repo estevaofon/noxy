@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -364,5 +365,66 @@ func TestTaskAwaitCompletionWinsAtDeadlineBoundary(t *testing.T) {
 		if !awaitTaskUntilDeadline(task, deadline) {
 			t.Fatal("ready task lost to ready deadline")
 		}
+	}
+}
+
+func TestSpawnTaskPublishesResultAfterDeferredCleanup(t *testing.T) {
+	machine := New()
+	cleanup := make(chan int64, 1)
+	machine.DefineNative("task_cleanup", func(args []value.Value) value.Value {
+		cleanup <- args[0].AsInt
+		return value.NewNull()
+	})
+
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> int
+    defer task_cleanup(7)
+    return 42
+end`, "worker")
+	envelope, err := invokeTaskAwait(machine, task)
+	if err != nil {
+		t.Fatalf("task_await: %v", err)
+	}
+	requireTaskOK(t, envelope, value.NewInt(42))
+
+	select {
+	case got := <-cleanup:
+		if got != 7 {
+			t.Fatalf("cleanup = %d, want 7", got)
+		}
+	default:
+		t.Fatal("task result was published before deferred cleanup")
+	}
+}
+
+func TestSpawnTaskReportsDeferredCleanupFailure(t *testing.T) {
+	machine := New()
+	machine.DefineContextualNative("task_cleanup_fail", func(value.NativeContext, []value.Value) (value.Value, error) {
+		return value.NewNull(), errors.New("cleanup boom")
+	})
+
+	task := spawnCompiledTestTask(t, machine, `
+func worker() -> int
+    defer task_cleanup_fail()
+    return 42
+end`, "worker")
+	envelope, err := invokeTaskAwait(machine, task)
+	if err != nil {
+		t.Fatalf("task_await: %v", err)
+	}
+	if got := taskEnvelopeField(t, envelope, "status"); !valuesEqual(got, value.NewString("error")) {
+		t.Fatalf("status = %v, want error", got)
+	}
+	failure := taskEnvelopeField(t, envelope, "error")
+	if got := taskEnvelopeField(t, failure, "kind"); !valuesEqual(got, value.NewString("runtime")) {
+		t.Fatalf("kind = %v, want runtime", got)
+	}
+	message := taskEnvelopeField(t, failure, "message")
+	if message.Type != value.VAL_OBJ || !strings.Contains(message.Obj.(string), "cleanup boom") {
+		t.Fatalf("message = %v, want cleanup failure", message)
+	}
+	stack := taskEnvelopeField(t, failure, "stack")
+	if stack.Type != value.VAL_OBJ || stack.Obj.(string) == "" {
+		t.Fatal("deferred cleanup failure lost its Noxy stack")
 	}
 }

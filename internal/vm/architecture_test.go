@@ -3,11 +3,15 @@ package vm
 import (
 	"bytes"
 	"go/ast"
+	"go/constant"
+	"go/importer"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -245,216 +249,468 @@ func sourceStructFields(t *testing.T, filename, structName string) map[string]st
 	return fields
 }
 
-func runtimeTargetTypeName(expression ast.Expr, aliases map[string]string) string {
-	var name string
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		name = typed.Name
-	case *ast.SelectorExpr:
-		name = typed.Sel.Name
-	case *ast.StarExpr:
-		return runtimeTargetTypeName(typed.X, aliases)
-	case *ast.ParenExpr:
-		return runtimeTargetTypeName(typed.X, aliases)
+type architectureSource struct {
+	filename string
+	source   string
+}
+
+type architecturePackage struct {
+	fileSet *token.FileSet
+	files   []*ast.File
+	info    *types.Info
+	pkg     *types.Package
+	errors  []error
+}
+
+type architectureImporter struct {
+	moduleRoot string
+	packages   map[string]*types.Package
+	loading    map[string]bool
+	fallback   types.Importer
+}
+
+func newArchitectureImporter(t *testing.T) *architectureImporter {
+	t.Helper()
+	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for name != "" {
-		if name == "ObjMap" || name == "ObjNative" {
-			return name
+	return &architectureImporter{
+		moduleRoot: moduleRoot,
+		packages:   make(map[string]*types.Package),
+		loading:    make(map[string]bool),
+		fallback:   importer.Default(),
+	}
+}
+
+func (loader *architectureImporter) Import(importPath string) (*types.Package, error) {
+	if loaded := loader.packages[importPath]; loaded != nil {
+		return loaded, nil
+	}
+	if strings.HasPrefix(importPath, "noxy-vm/") && !loader.loading[importPath] {
+		loader.loading[importPath] = true
+		defer delete(loader.loading, importPath)
+		directory := filepath.Join(loader.moduleRoot, filepath.FromSlash(strings.TrimPrefix(importPath, "noxy-vm/")))
+		sources, err := readArchitectureSources(directory)
+		if err == nil && len(sources) != 0 {
+			checked := checkArchitecturePackage(importPath, sources, loader, true)
+			if checked.pkg != nil {
+				loader.packages[importPath] = checked.pkg
+				return checked.pkg, nil
+			}
 		}
-		next, ok := aliases[name]
-		if !ok || next == name {
+	}
+	if loaded, err := loader.fallback.Import(importPath); err == nil {
+		loader.packages[importPath] = loaded
+		return loaded, nil
+	}
+	name := importPath[strings.LastIndex(importPath, "/")+1:]
+	stub := types.NewPackage(importPath, name)
+	stub.MarkComplete()
+	loader.packages[importPath] = stub
+	return stub, nil
+}
+
+func readArchitectureSources(directory string) ([]architectureSource, error) {
+	filenames, err := filepath.Glob(filepath.Join(directory, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	var sources []architectureSource
+	for _, filename := range filenames {
+		if strings.HasSuffix(filename, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(filename)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, architectureSource{filename: filename, source: string(source)})
+	}
+	sort.Slice(sources, func(left, right int) bool { return sources[left].filename < sources[right].filename })
+	return sources, nil
+}
+
+func checkArchitecturePackage(packagePath string, sources []architectureSource, loader types.Importer, ignoreBodies bool) *architecturePackage {
+	fileSet := token.NewFileSet()
+	files := make([]*ast.File, 0, len(sources))
+	for _, source := range sources {
+		file, err := parser.ParseFile(fileSet, source.filename, source.source, 0)
+		if err != nil {
+			return &architecturePackage{fileSet: fileSet, errors: []error{err}}
+		}
+		files = append(files, file)
+	}
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+	var typeErrors []error
+	configuration := types.Config{
+		Importer:                 loader,
+		IgnoreFuncBodies:         ignoreBodies,
+		DisableUnusedImportCheck: true,
+		Error:                    func(err error) { typeErrors = append(typeErrors, err) },
+	}
+	pkg, _ := configuration.Check(packagePath, fileSet, files, info)
+	return &architecturePackage{fileSet: fileSet, files: files, info: info, pkg: pkg, errors: typeErrors}
+}
+
+func typeCheckArchitecturePackage(t *testing.T, packagePath string, sources []architectureSource) *architecturePackage {
+	t.Helper()
+	checked := checkArchitecturePackage(packagePath, sources, newArchitectureImporter(t), false)
+	if checked.pkg == nil || len(checked.files) != len(sources) || len(checked.errors) != 0 {
+		t.Fatalf("could not parse and type-check architecture package %s: %v", packagePath, checked.errors)
+	}
+	return checked
+}
+
+func typeCheckProductionPackages(t *testing.T) []*architecturePackage {
+	t.Helper()
+	loader := newArchitectureImporter(t)
+	grouped := make(map[string][]architectureSource)
+	for _, filename := range productionGoFiles(t) {
+		source, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		directory := filepath.Clean(filepath.Dir(filename))
+		grouped[directory] = append(grouped[directory], architectureSource{filename: filename, source: string(source)})
+	}
+	directories := make([]string, 0, len(grouped))
+	for directory := range grouped {
+		directories = append(directories, directory)
+	}
+	sort.Strings(directories)
+	packages := make([]*architecturePackage, 0, len(directories))
+	for _, directory := range directories {
+		absoluteDirectory, err := filepath.Abs(directory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		relativeDirectory, err := filepath.Rel(loader.moduleRoot, absoluteDirectory)
+		if err != nil {
+			t.Fatal(err)
+		}
+		packagePath := "noxy-vm"
+		if relativeDirectory != "." {
+			packagePath += "/" + filepath.ToSlash(relativeDirectory)
+		}
+		checked := checkArchitecturePackage(packagePath, grouped[directory], loader, false)
+		if checked.pkg == nil || len(checked.files) != len(grouped[directory]) || len(checked.errors) != 0 {
+			t.Fatalf("could not parse and type-check architecture package %s: %v", packagePath, checked.errors)
+		}
+		packages = append(packages, checked)
+	}
+	return packages
+}
+
+func architectureNamedType(typ types.Type) *types.TypeName {
+	if typ == nil {
+		return nil
+	}
+	for {
+		typ = types.Unalias(typ)
+		pointer, ok := typ.(*types.Pointer)
+		if !ok {
 			break
 		}
-		name = next
+		typ = pointer.Elem()
 	}
-	return ""
+	named, ok := typ.(*types.Named)
+	if !ok {
+		return nil
+	}
+	return named.Obj()
 }
 
-func runtimeValueTargetType(expression ast.Expr, variables, aliases map[string]string) string {
-	switch typed := expression.(type) {
-	case *ast.Ident:
-		return variables[typed.Name]
-	case *ast.ParenExpr:
-		return runtimeValueTargetType(typed.X, variables, aliases)
-	case *ast.UnaryExpr:
-		return runtimeValueTargetType(typed.X, variables, aliases)
-	case *ast.TypeAssertExpr:
-		return runtimeTargetTypeName(typed.Type, aliases)
-	case *ast.CallExpr:
-		return runtimeTargetTypeName(typed.Fun, aliases)
-	}
-	return ""
-}
-
-func recordRuntimeVariableField(field *ast.Field, variables, aliases map[string]string) {
-	target := runtimeTargetTypeName(field.Type, aliases)
-	if target == "" {
-		return
-	}
-	for _, name := range field.Names {
-		variables[name.Name] = target
-	}
-}
-
-func recordRuntimeVariableSpec(specification *ast.ValueSpec, variables, aliases map[string]string) {
-	target := runtimeTargetTypeName(specification.Type, aliases)
-	for index, name := range specification.Names {
-		actual := target
-		if actual == "" && index < len(specification.Values) {
-			actual = runtimeValueTargetType(specification.Values[index], variables, aliases)
-		}
-		if actual != "" {
-			variables[name.Name] = actual
-		}
-	}
-}
-
-func recordRuntimeAssignment(assignment *ast.AssignStmt, variables, aliases map[string]string) {
-	if len(assignment.Lhs) != len(assignment.Rhs) {
-		return
-	}
-	for index, left := range assignment.Lhs {
-		name, ok := left.(*ast.Ident)
+func (checked *architecturePackage) selectorIsField(expression ast.Expr, ownerType, fieldName string) bool {
+	for {
+		parenthesized, ok := expression.(*ast.ParenExpr)
 		if !ok {
-			continue
+			break
 		}
-		if target := runtimeValueTargetType(assignment.Rhs[index], variables, aliases); target != "" {
-			variables[name.Name] = target
-		}
+		expression = parenthesized.X
 	}
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != fieldName {
+		return false
+	}
+	selection := checked.info.Selections[selector]
+	owner := architectureNamedType(checked.info.TypeOf(selector.X))
+	return selection != nil && selection.Kind() == types.FieldVal && owner != nil && owner.Pkg() == checked.pkg && owner.Name() == ownerType
 }
 
-func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte) []string {
-	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), filename, source, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", filename, err)
-	}
-	found := make(map[string]bool)
-	aliases := make(map[string]string)
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok {
-			continue
+func (checked *architecturePackage) expressionContainsField(expression ast.Expr, ownerType, fieldName string) bool {
+	found := false
+	ast.Inspect(expression, func(node ast.Node) bool {
+		if selector, ok := node.(*ast.SelectorExpr); ok && checked.selectorIsField(selector, ownerType, fieldName) {
+			found = true
+			return false
 		}
-		for _, specification := range general.Specs {
-			typeSpec, ok := specification.(*ast.TypeSpec)
-			if !ok {
+		return !found
+	})
+	return found
+}
+
+func (checked *architecturePackage) indexesField(expression ast.Expr, ownerType, fieldName string) bool {
+	index, ok := expression.(*ast.IndexExpr)
+	return ok && checked.selectorIsField(index.X, ownerType, fieldName)
+}
+
+func (checked *architecturePackage) isNil(expression ast.Expr) bool {
+	if parenthesized, ok := expression.(*ast.ParenExpr); ok {
+		return checked.isNil(parenthesized.X)
+	}
+	if identifier, ok := expression.(*ast.Ident); ok {
+		return checked.info.Uses[identifier] == types.Universe.Lookup("nil")
+	}
+	call, ok := expression.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 || !checked.info.Types[call.Fun].IsType() {
+		return false
+	}
+	return checked.isNil(call.Args[0])
+}
+
+func (checked *architecturePackage) isZero(expression ast.Expr) bool {
+	value := checked.info.Types[expression].Value
+	return value != nil && constant.Sign(value) == 0
+}
+
+func isEmptyCompositeLiteral(expression ast.Expr) bool {
+	literal, ok := expression.(*ast.CompositeLit)
+	return ok && len(literal.Elts) == 0
+}
+
+func (checked *architecturePackage) isBuiltin(identifier *ast.Ident, name string) bool {
+	return identifier != nil && checked.info.Uses[identifier] == types.Universe.Lookup(name)
+}
+
+func (checked *architecturePackage) assignmentObject(identifier *ast.Ident) types.Object {
+	if object := checked.info.Defs[identifier]; object != nil {
+		return object
+	}
+	return checked.info.Uses[identifier]
+}
+
+func (checked *architecturePackage) forClearsStackFromStackBase(loop *ast.ForStmt) bool {
+	initialization, ok := loop.Init.(*ast.AssignStmt)
+	if !ok || len(initialization.Lhs) != len(initialization.Rhs) {
+		return false
+	}
+	loopIndexes := make(map[types.Object]bool)
+	for index, left := range initialization.Lhs {
+		identifier, ok := left.(*ast.Ident)
+		if ok && checked.expressionContainsField(initialization.Rhs[index], "CallFrame", "StackBase") {
+			loopIndexes[checked.assignmentObject(identifier)] = true
+		}
+	}
+	clears := false
+	ast.Inspect(loop.Body, func(node ast.Node) bool {
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok || len(assignment.Lhs) != len(assignment.Rhs) {
+			return !clears
+		}
+		for index, left := range assignment.Lhs {
+			stackIndex, ok := left.(*ast.IndexExpr)
+			if !ok || !checked.selectorIsField(stackIndex.X, "VM", "stack") || !isEmptyCompositeLiteral(assignment.Rhs[index]) {
 				continue
 			}
-			if target := runtimeTargetTypeName(typeSpec.Type, aliases); target != "" {
-				aliases[typeSpec.Name.Name] = target
+			identifier, ok := stackIndex.Index.(*ast.Ident)
+			if ok && loopIndexes[checked.info.Uses[identifier]] {
+				clears = true
+				return false
 			}
 		}
+		return !clears
+	})
+	return clears
+}
+
+func (checked *architecturePackage) unwindTerminalMutationMatches(ignoredFiles ...string) []string {
+	ignored := make(map[string]bool, len(ignoredFiles))
+	for _, filename := range ignoredFiles {
+		ignored[filename] = true
 	}
-	globalVariables := make(map[string]string)
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok || general.Tok != token.VAR {
+	var matches []string
+	record := func(node ast.Node, description string) {
+		matches = append(matches, description+" at line "+checked.fileSet.Position(node.Pos()).String())
+	}
+	for _, file := range checked.files {
+		if ignored[filepath.Base(checked.fileSet.Position(file.Pos()).Filename)] {
 			continue
 		}
-		for _, specification := range general.Specs {
-			if valueSpec, ok := specification.(*ast.ValueSpec); ok {
-				recordRuntimeVariableSpec(valueSpec, globalVariables, aliases)
-			}
-		}
-	}
-	for _, declaration := range file.Decls {
-		if general, ok := declaration.(*ast.GenDecl); ok {
-			for _, specification := range general.Specs {
-				typeSpec, ok := specification.(*ast.TypeSpec)
-				if !ok {
-					continue
-				}
-				structure, ok := typeSpec.Type.(*ast.StructType)
-				if !ok {
-					continue
-				}
-				for _, field := range structure.Fields.List {
-					_, rawMap := field.Type.(*ast.MapType)
-					pointer, pointerType := field.Type.(*ast.StarExpr)
-					rawMapPointer := false
-					if pointerType {
-						_, rawMapPointer = pointer.X.(*ast.MapType)
-					}
-					for _, name := range field.Names {
-						switch {
-						case typeSpec.Name.Name == "VM" && name.Name == "openFiles":
-							found["VM.openFiles field"] = true
-						case typeSpec.Name.Name == "VM" && name.Name == "netBufferedData":
-							found["VM.netBufferedData field"] = true
-						case typeSpec.Name.Name == "VM" && name.Name == "netBufferedConns":
-							found["VM.netBufferedConns field"] = true
-						case name.Name == "Globals" && rawMap:
-							found["Globals raw map field"] = true
-						case name.Name == "GlobalOwner" && pointerType && rawMapPointer:
-							found["GlobalOwner raw map pointer field"] = true
-						case name.Name == "DbHandles" && rawMap:
-							found["DbHandles raw map field"] = true
-						case name.Name == "StmtHandles" && rawMap:
-							found["StmtHandles raw map field"] = true
-						case name.Name == "StmtParams" && rawMap:
-							found["StmtParams raw map field"] = true
-						}
-					}
-				}
-			}
-		}
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
-		}
-		legacyDispatchReceiver := ""
-		if function.Name.Name == "Invoke" && function.Recv != nil && len(function.Recv.List) == 1 {
-			receiver := function.Recv.List[0]
-			if len(receiver.Names) == 1 && expressionText(t, receiver.Type) == "*ObjNative" {
-				legacyDispatchReceiver = receiver.Names[0].Name
-			}
-		}
-		variables := make(map[string]string, len(globalVariables))
-		for name, target := range globalVariables {
-			variables[name] = target
-		}
-		if function.Recv != nil {
-			for _, field := range function.Recv.List {
-				recordRuntimeVariableField(field, variables, aliases)
-			}
-		}
-		if function.Type.Params != nil {
-			for _, field := range function.Type.Params.List {
-				recordRuntimeVariableField(field, variables, aliases)
-			}
-		}
-		ast.Inspect(function.Body, func(node ast.Node) bool {
+		ast.Inspect(file, func(node ast.Node) bool {
 			switch typed := node.(type) {
+			case *ast.IncDecStmt:
+				if typed.Tok == token.DEC && checked.selectorIsField(typed.X, "VM", "frameCount") {
+					record(typed, "decrements frameCount")
+				}
 			case *ast.AssignStmt:
-				recordRuntimeAssignment(typed, variables, aliases)
-			case *ast.DeclStmt:
-				general, ok := typed.Decl.(*ast.GenDecl)
-				if ok && general.Tok == token.VAR {
-					for _, specification := range general.Specs {
-						if valueSpec, ok := specification.(*ast.ValueSpec); ok {
-							recordRuntimeVariableSpec(valueSpec, variables, aliases)
+				for index, left := range typed.Lhs {
+					frameCount := checked.selectorIsField(left, "VM", "frameCount")
+					if frameCount && typed.Tok == token.SUB_ASSIGN {
+						record(typed, "decrements frameCount")
+					}
+					if index >= len(typed.Rhs) {
+						continue
+					}
+					right := typed.Rhs[index]
+					if frameCount && typed.Tok == token.ASSIGN {
+						binary, subtraction := right.(*ast.BinaryExpr)
+						if subtraction && binary.Op == token.SUB && checked.expressionContainsField(binary.X, "VM", "frameCount") {
+							record(typed, "decrements frameCount")
+						} else if checked.isZero(right) {
+							record(typed, "resets frameCount")
 						}
 					}
-				}
-			case *ast.SelectorExpr:
-				if typed.Sel.Name == "Data" && runtimeValueTargetType(typed.X, variables, aliases) == "ObjMap" {
-					found["ObjMap.Data selector"] = true
+					if checked.selectorIsField(left, "VM", "frames") && isEmptyCompositeLiteral(right) {
+						record(typed, "resets frames")
+					}
+					if checked.indexesField(left, "VM", "frames") && checked.isNil(right) {
+						record(typed, "removes a frame")
+					}
+					if checked.selectorIsField(left, "VM", "currentFrame") && checked.isNil(right) {
+						record(typed, "clears currentFrame")
+					}
+					if checked.selectorIsField(left, "VM", "stackTop") && checked.expressionContainsField(right, "CallFrame", "StackBase") {
+						record(typed, "resets stackTop to StackBase")
+					}
 				}
 			case *ast.CallExpr:
-				selector, ok := typed.Fun.(*ast.SelectorExpr)
-				allowedLegacyDispatch := false
-				if ok && legacyDispatchReceiver != "" {
-					receiver, isIdentifier := selector.X.(*ast.Ident)
-					allowedLegacyDispatch = isIdentifier && receiver.Name == legacyDispatchReceiver
+				identifier, ok := typed.Fun.(*ast.Ident)
+				if !ok || !checked.isBuiltin(identifier, "clear") || len(typed.Args) != 1 {
+					break
 				}
-				if ok && selector.Sel.Name == "Fn" && !allowedLegacyDispatch && runtimeValueTargetType(selector.X, variables, aliases) == "ObjNative" {
-					found["direct native.Fn invocation"] = true
+				slice, ok := typed.Args[0].(*ast.SliceExpr)
+				if !ok {
+					break
+				}
+				if checked.selectorIsField(slice.X, "VM", "frames") {
+					record(typed, "clears frames")
+				}
+				if checked.selectorIsField(slice.X, "VM", "stack") && slice.Low != nil && checked.expressionContainsField(slice.Low, "CallFrame", "StackBase") {
+					record(typed, "clears stack from StackBase")
+				}
+			case *ast.ForStmt:
+				if checked.forClearsStackFromStackBase(typed) {
+					record(typed, "clears stack from StackBase")
 				}
 			}
 			return true
 		})
+	}
+	return matches
+}
+
+func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte) []string {
+	t.Helper()
+	return unwindTerminalPackageMutationMatches(t, []architectureSource{{filename: filename, source: string(source)}})
+}
+
+func unwindTerminalPackageMutationMatches(t *testing.T, sources []architectureSource) []string {
+	t.Helper()
+	return typeCheckArchitecturePackage(t, "architecture/unwind", sources).unwindTerminalMutationMatches()
+}
+
+func runtimeNamedType(typ types.Type, checked *architecturePackage, name string) bool {
+	object := architectureNamedType(typ)
+	if object == nil || object.Name() != name {
+		return false
+	}
+	return object.Pkg() == checked.pkg || object.Pkg() != nil && object.Pkg().Path() == "noxy-vm/internal/value"
+}
+
+func (checked *architecturePackage) runtimeSelectorIsField(selector *ast.SelectorExpr, ownerType, fieldName string) bool {
+	selection := checked.info.Selections[selector]
+	return selector.Sel.Name == fieldName && selection != nil && selection.Kind() == types.FieldVal && runtimeNamedType(checked.info.TypeOf(selector.X), checked, ownerType)
+}
+
+func isMapType(typ types.Type) bool {
+	if typ == nil {
+		return false
+	}
+	_, ok := types.Unalias(typ).Underlying().(*types.Map)
+	return ok
+}
+
+func isMapPointerType(typ types.Type) bool {
+	pointer, ok := types.Unalias(typ).(*types.Pointer)
+	return ok && isMapType(pointer.Elem())
+}
+
+func (checked *architecturePackage) runtimeForbiddenMatches() []string {
+	found := make(map[string]bool)
+	for _, file := range checked.files {
+		for _, declaration := range file.Decls {
+			if general, ok := declaration.(*ast.GenDecl); ok {
+				for _, specification := range general.Specs {
+					typeSpec, ok := specification.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					structure, ok := typeSpec.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+					for _, field := range structure.Fields.List {
+						fieldType := checked.info.TypeOf(field.Type)
+						for _, name := range field.Names {
+							switch {
+							case typeSpec.Name.Name == "VM" && name.Name == "openFiles":
+								found["VM.openFiles field"] = true
+							case typeSpec.Name.Name == "VM" && name.Name == "netBufferedData":
+								found["VM.netBufferedData field"] = true
+							case typeSpec.Name.Name == "VM" && name.Name == "netBufferedConns":
+								found["VM.netBufferedConns field"] = true
+							case name.Name == "Globals" && isMapType(fieldType):
+								found["Globals raw map field"] = true
+							case name.Name == "GlobalOwner" && isMapPointerType(fieldType):
+								found["GlobalOwner raw map pointer field"] = true
+							case name.Name == "DbHandles" && isMapType(fieldType):
+								found["DbHandles raw map field"] = true
+							case name.Name == "StmtHandles" && isMapType(fieldType):
+								found["StmtHandles raw map field"] = true
+							case name.Name == "StmtParams" && isMapType(fieldType):
+								found["StmtParams raw map field"] = true
+							}
+						}
+					}
+				}
+			}
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			var legacyDispatchReceiver types.Object
+			if function.Name.Name == "Invoke" && function.Recv != nil && len(function.Recv.List) == 1 {
+				receiver := function.Recv.List[0]
+				if len(receiver.Names) == 1 && runtimeNamedType(checked.info.TypeOf(receiver.Type), checked, "ObjNative") {
+					legacyDispatchReceiver = checked.info.Defs[receiver.Names[0]]
+				}
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				switch typed := node.(type) {
+				case *ast.SelectorExpr:
+					if checked.runtimeSelectorIsField(typed, "ObjMap", "Data") {
+						found["ObjMap.Data selector"] = true
+					}
+				case *ast.CallExpr:
+					selector, ok := typed.Fun.(*ast.SelectorExpr)
+					if !ok || !checked.runtimeSelectorIsField(selector, "ObjNative", "Fn") {
+						break
+					}
+					receiver, identifier := selector.X.(*ast.Ident)
+					allowed := identifier && checked.info.Uses[receiver] == legacyDispatchReceiver
+					if !allowed {
+						found["direct native.Fn invocation"] = true
+					}
+				}
+				return true
+			})
+		}
 	}
 	order := []string{
 		"ObjMap.Data selector",
@@ -477,14 +733,15 @@ func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte)
 	return matches
 }
 
+func runtimeForbiddenSourceMatches(t *testing.T, filename string, source []byte) []string {
+	t.Helper()
+	return typeCheckArchitecturePackage(t, "architecture/runtime", []architectureSource{{filename: filename, source: string(source)}}).runtimeForbiddenMatches()
+}
+
 func TestRuntimeFoundationExcludesObsoleteProductionStructures(t *testing.T) {
-	for _, filename := range productionGoFiles(t) {
-		source, err := os.ReadFile(filename)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, issue := range runtimeForbiddenSourceMatches(t, filename, source) {
-			t.Errorf("%s: %s", filename, issue)
+	for _, checked := range typeCheckProductionPackages(t) {
+		for _, issue := range checked.runtimeForbiddenMatches() {
+			t.Errorf("%s: %s", checked.pkg.Path(), issue)
 		}
 	}
 }
@@ -589,6 +846,313 @@ func TestResourceRegistriesAndModuleCacheHaveSharedOwners(t *testing.T) {
 	requireSourceFunctions(t, "module_cache.go", "newModuleCache")
 }
 
+func TestUnwindArchitectureCentralizesTerminalFrameTeardown(t *testing.T) {
+	callFrame := sourceStructFields(t, "vm.go", "CallFrame")
+	want := map[string]string{
+		"StackBase": "int",
+		"LocalBase": "int",
+		"Deferred":  "[]PreparedCall",
+	}
+	for name, expectedType := range want {
+		if got := callFrame[name]; got != expectedType {
+			t.Errorf("CallFrame.%s=%q want %q", name, got, expectedType)
+		}
+	}
+
+	sources, err := readArchitectureSources(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := typeCheckArchitecturePackage(t, "noxy-vm/internal/vm", sources)
+	for _, match := range checked.unwindTerminalMutationMatches("unwind.go") {
+		t.Errorf("terminal frame teardown must remain in unwind.go: %s", match)
+	}
+}
+
+func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name: "decrement operator",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount-- }`,
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "subtract assignment",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount -= 2 }`,
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "explicit subtraction",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount = vm.frameCount - 1 }`,
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "frame count reset assignment",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount = 0 }`,
+			want: []string{"resets frameCount"},
+		},
+		{
+			name: "whole frame array reset",
+			source: `package vm
+				const FramesMax = 4
+				type CallFrame struct{}
+				type VM struct { frames [FramesMax]*CallFrame }
+				func teardown(vm *VM) { vm.frames = [FramesMax]*CallFrame{} }`,
+			want: []string{"resets frames"},
+		},
+		{
+			name: "nil frame assignment",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames []*CallFrame }
+				func teardown(vm *VM, index int) { vm.frames[index] = nil }`,
+			want: []string{"removes a frame"},
+		},
+		{
+			name: "nil current frame assignment",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { currentFrame *CallFrame }
+				func teardown(vm *VM) { vm.currentFrame = nil }`,
+			want: []string{"clears currentFrame"},
+		},
+		{
+			name: "typed nil frame assignments",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames []*CallFrame; currentFrame *CallFrame }
+				func teardown(vm *VM, index int) {
+					vm.frames[index] = (*CallFrame)(nil)
+					vm.currentFrame = (*CallFrame)(nil)
+				}`,
+			want: []string{"removes a frame", "clears currentFrame"},
+		},
+		{
+			name: "shadowed nil identifier is allowed",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { currentFrame *CallFrame }
+				func install(vm *VM, nil *CallFrame) { vm.currentFrame = nil }`,
+		},
+		{
+			name: "clear frame array",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames [4]*CallFrame }
+				func teardown(vm *VM) { clear(vm.frames[:]) }`,
+			want: []string{"clears frames"},
+		},
+		{
+			name: "declared clear function shadows builtin",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames [4]*CallFrame }
+				func clear(frames []*CallFrame) {}
+				func reset(vm *VM) { clear(vm.frames[:]) }`,
+		},
+		{
+			name: "stack clearing loop",
+			source: `package vm
+				import "noxy-vm/internal/value"
+				type CallFrame struct { StackBase int }
+				type VM struct { stack []value.Value }
+				func teardown(vm *VM, frame *CallFrame, top int) {
+					for index := frame.StackBase; index < top; index++ { vm.stack[index] = value.Value{} }
+				}`,
+			want: []string{"clears stack from StackBase"},
+		},
+		{
+			name: "stack clear builtin",
+			source: `package vm
+				type CallFrame struct { StackBase int }
+				type VM struct { stack []int }
+				func teardown(vm *VM, frame *CallFrame, top int) { clear(vm.stack[frame.StackBase:top]) }`,
+			want: []string{"clears stack from StackBase"},
+		},
+		{
+			name: "stack top reset",
+			source: `package vm
+				type CallFrame struct { StackBase int }
+				type VM struct { stackTop int }
+				func teardown(vm *VM, frame *CallFrame) { vm.stackTop = frame.StackBase }`,
+			want: []string{"resets stackTop to StackBase"},
+		},
+		{
+			name: "non-clearing stack window loop is allowed",
+			source: `package vm
+				type CallFrame struct { StackBase int }
+				func inspect(frame *CallFrame, top int) {
+					for index := frame.StackBase; index < top; index++ { current := index; _ = current }
+				}`,
+		},
+		{
+			name: "homonymous fields on non runtime types are allowed",
+			source: `package vm
+				type CallFrame struct{}
+				type queue struct { frameCount int }
+				type cache struct { frames []*CallFrame; currentFrame *CallFrame; stackTop int }
+				type window struct { StackBase int }
+				func mutate(queue *queue, cache *cache, window *window, index int) {
+					queue.frameCount--
+					cache.frames[index] = nil
+					cache.currentFrame = (*CallFrame)(nil)
+					cache.stackTop = window.StackBase
+					clear(cache.frames[:])
+				}`,
+		},
+		{
+			name: "defined type based on VM is not VM",
+			source: `package vm
+				type VM struct { frameCount int }
+				type Mirror VM
+				func reset(mirror *Mirror) { mirror.frameCount = 0 }`,
+		},
+		{
+			name: "new VM receiver reset is detected",
+			source: `package vm
+				type VM struct { frameCount int }
+				func reset() { vm := new(VM); vm.frameCount = 0 }`,
+			want: []string{"resets frameCount"},
+		},
+		{
+			name: "declared new function shadows builtin",
+			source: `package vm
+				type VM struct { frameCount int }
+				type Mirror VM
+				func new(value VM) *Mirror { return nil }
+				func reset() { vm := new(VM{}); vm.frameCount = 0 }`,
+		},
+		{
+			name: "shadowed receiver types stay in lexical scope",
+			source: `package vm
+				type VM struct { frameCount int }
+				type queue struct { frameCount int }
+				func inspect(vm *VM, queue *queue) {
+					if true {
+						vm := queue
+						vm.frameCount--
+					}
+					vm.frameCount = 0
+				}`,
+			want: []string{"resets frameCount"},
+		},
+		{
+			name: "frame construction and similar text are allowed",
+			source: `package vm
+				type PreparedCall struct{}
+				type CallFrame struct { StackBase int; LocalBase int; Deferred []PreparedCall }
+				type VM struct { frames []*CallFrame; frameCount int }
+				var note = "vm.frameCount--; vm.frames[index] = nil"
+				func install(vm *VM) {
+					// clear(vm.stack[frame.StackBase:])
+					frame := &CallFrame{StackBase: 0, LocalBase: 1}
+					vm.frames[vm.frameCount] = frame
+					vm.frameCount++
+					_ = frame.StackBase
+				}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			matches := unwindTerminalMutationMatches(t, "architecture.go", []byte(test.source))
+			got := make([]string, len(matches))
+			for index, match := range matches {
+				got[index] = strings.SplitN(match, " at line ", 2)[0]
+			}
+			if strings.Join(got, "|") != strings.Join(test.want, "|") {
+				t.Fatalf("matches=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestUnwindArchitectureMatcherResolvesCrossFileFunctionResults(t *testing.T) {
+	tests := []struct {
+		name    string
+		sources []architectureSource
+		want    []string
+	}{
+		{
+			name: "function result",
+			sources: []architectureSource{
+				{
+					filename: "runtime_types.go",
+					source: `package vm
+						type VM struct { frameCount int }
+						func currentVM() *VM { return nil }`,
+				},
+				{
+					filename: "teardown.go",
+					source: `package vm
+						func teardown() { currentVM().frameCount-- }`,
+				},
+			},
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "aliased function result",
+			sources: []architectureSource{
+				{
+					filename: "runtime_types.go",
+					source: `package vm
+						type VM struct { frameCount int }
+						type ActiveVM = VM
+						func currentVM() *ActiveVM { return nil }`,
+				},
+				{
+					filename: "teardown.go",
+					source: `package vm
+						func teardown() { currentVM().frameCount-- }`,
+				},
+			},
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "method result",
+			sources: []architectureSource{
+				{
+					filename: "runtime_types.go",
+					source: `package vm
+						type VM struct { frameCount int }
+						type runtimeState struct { active *VM }
+						func (state *runtimeState) currentVM() *VM { return state.active }`,
+				},
+				{
+					filename: "teardown.go",
+					source: `package vm
+						func teardown(state *runtimeState) { state.currentVM().frameCount-- }`,
+				},
+			},
+			want: []string{"decrements frameCount"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			matches := unwindTerminalPackageMutationMatches(t, test.sources)
+			got := make([]string, len(matches))
+			for index, match := range matches {
+				got[index] = strings.SplitN(match, " at line ", 2)[0]
+			}
+			if strings.Join(got, "|") != strings.Join(test.want, "|") {
+				t.Fatalf("matches=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -636,7 +1200,7 @@ func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
 			source: `package vm
 				var assertion = "openFiles netBufferedData DbHandles native.Fn(args) .Data"
 				// Globals map[string]int; GlobalOwner *map[string]int
-				type holder struct { Data int }
+				type holder struct { Data int; Dataset int }
 				type callable struct { Fn func([]int) int }
 				type SharedState struct { Databases int }
 				func use(item *holder, function *callable, args []int) {

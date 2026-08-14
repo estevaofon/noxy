@@ -47,8 +47,8 @@ outer()`)
 		!strings.Contains(runtimeErr.Stack, "in outer") {
 		t.Fatalf("stack = %q", runtimeErr.Stack)
 	}
-	if runtimeErr.Error() != runtimeErr.Rendered {
-		t.Fatalf("Error() = %q, Rendered = %q", runtimeErr.Error(), runtimeErr.Rendered)
+	if runtimeErr.Message != "division by zero" {
+		t.Fatalf("message = %q, want division by zero", runtimeErr.Message)
 	}
 }
 

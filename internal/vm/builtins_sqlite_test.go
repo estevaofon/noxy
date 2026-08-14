@@ -1,8 +1,11 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -71,6 +74,125 @@ func cleanupSQLiteResources(t *testing.T, machine *VM) {
 			}
 		}
 	})
+}
+
+type sqliteResourceObservation struct {
+	statements int
+	databases  int
+}
+
+func recordDeferredSQLiteResources(machine *VM, database **DatabaseResource, statement **StatementResource) {
+	machine.DefineNative("record_sqlite_resources", func(args []value.Value) value.Value {
+		if len(args) != 2 {
+			return value.NewNull()
+		}
+		databaseInstance, databaseOK := args[0].Obj.(*value.ObjInstance)
+		statementInstance, statementOK := args[1].Obj.(*value.ObjInstance)
+		if !databaseOK || !statementOK {
+			return value.NewNull()
+		}
+		*database, _ = machine.shared.Databases.get(int(databaseInstance.Fields["handle"].AsInt))
+		*statement, _ = machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+		return value.NewNull()
+	})
+}
+
+func requireDeferredSQLiteClosed(t *testing.T, machine *VM, database *DatabaseResource, statement *StatementResource, path string) {
+	t.Helper()
+	if got := len(machine.shared.Statements.snapshot()); got != 0 {
+		t.Fatalf("statements=%d, want 0", got)
+	}
+	if got := len(machine.shared.Databases.snapshot()); got != 0 {
+		t.Fatalf("databases=%d, want 0", got)
+	}
+	if database == nil || statement == nil {
+		t.Fatalf("resources not recorded: database=%p statement=%p", database, statement)
+	}
+	statement.mu.Lock()
+	statementClosed := statement.closed
+	statement.mu.Unlock()
+	database.stateMu.Lock()
+	databaseClosed := database.closed
+	database.stateMu.Unlock()
+	if !statementClosed || !databaseClosed {
+		t.Fatalf("resources remain open: statement=%v database=%v", statementClosed, databaseClosed)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove deferred database: %v", err)
+	}
+}
+
+func TestDeferredSQLiteCleanupFinalizesStatementBeforeDatabaseOnEveryExit(t *testing.T) {
+	tests := []struct {
+		name      string
+		suffix    string
+		wantError bool
+	}{
+		{"normal", "", false},
+		{"runtime error", "\nlet zero: int = 0\nprint(1 / zero)", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			machine := New()
+			cleanupSQLiteResources(t, machine)
+			path := filepath.Join(t.TempDir(), "deferred.sqlite")
+			var database *DatabaseResource
+			var statement *StatementResource
+			var observations []sqliteResourceObservation
+			recordDeferredSQLiteResources(machine, &database, &statement)
+			machine.DefineContextualNative("assert_statement_finalized", func(value.NativeContext, []value.Value) (value.Value, error) {
+				observations = append(observations, sqliteResourceObservation{
+					statements: len(machine.shared.Statements.snapshot()),
+					databases:  len(machine.shared.Databases.snapshot()),
+				})
+				return value.NewNull(), nil
+			})
+			source := "use sqlite\nlet db: sqlite.Database = sqlite.open(" + strconv.Quote(path) + ")\n" +
+				"defer sqlite.close(db)\nlet stmt: sqlite.Statement = sqlite.prepare(db, \"SELECT 1\")\n" +
+				"defer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\nrecord_sqlite_resources(db, stmt)" + test.suffix
+
+			err := interpretVMSource(t, machine, source)
+			if (err != nil) != test.wantError {
+				t.Fatalf("error=%v, wantError=%v", err, test.wantError)
+			}
+			if len(observations) != 1 || observations[0] != (sqliteResourceObservation{statements: 0, databases: 1}) {
+				t.Fatalf("observations=%v, want [{statements:0 databases:1}]", observations)
+			}
+			requireDeferredSQLiteClosed(t, machine, database, statement, path)
+		})
+	}
+}
+
+func TestDeferredSQLiteResourceCleanupContinuesAfterFailure(t *testing.T) {
+	machine := New()
+	cleanupSQLiteResources(t, machine)
+	path := filepath.Join(t.TempDir(), "deferred-failure.sqlite")
+	var database *DatabaseResource
+	var statement *StatementResource
+	var observations []sqliteResourceObservation
+	recordDeferredSQLiteResources(machine, &database, &statement)
+	machine.DefineContextualNative("assert_statement_finalized", func(value.NativeContext, []value.Value) (value.Value, error) {
+		observations = append(observations, sqliteResourceObservation{
+			statements: len(machine.shared.Statements.snapshot()),
+			databases:  len(machine.shared.Databases.snapshot()),
+		})
+		return value.NewNull(), nil
+	})
+	sentinel := errors.New("sentinel cleanup failure")
+	defineCleanupFailureNative(machine, sentinel)
+	source := "use sqlite\nlet db: sqlite.Database = sqlite.open(" + strconv.Quote(path) + ")\n" +
+		"defer sqlite.close(db)\nlet stmt: sqlite.Statement = sqlite.prepare(db, \"SELECT 1\")\n" +
+		"defer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\n" +
+		"record_sqlite_resources(db, stmt)\ndefer cleanup_fail()"
+
+	err := interpretVMSource(t, machine, source)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error=%v, want sentinel cleanup failure", err)
+	}
+	if len(observations) != 1 || observations[0] != (sqliteResourceObservation{statements: 0, databases: 1}) {
+		t.Fatalf("observations=%v, want [{statements:0 databases:1}]", observations)
+	}
+	requireDeferredSQLiteClosed(t, machine, database, statement, path)
 }
 
 func TestSQLiteHandlesAreSharedAcrossVMs(t *testing.T) {

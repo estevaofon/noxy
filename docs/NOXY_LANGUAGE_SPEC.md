@@ -23,7 +23,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 | Category | Keywords |
 |----------|----------|
 | Declarations | `let`, `global`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in` |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer` |
 | Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
@@ -562,6 +562,55 @@ for char in "hello" do
     print(char)
 end
 ```
+
+### Defer and deterministic cleanup
+
+`defer` registers a call to run when its containing call frame exits. Its
+operand must be a real call; arbitrary expressions and non-call operations
+such as `defer addr(ref value)` are compile-time errors.
+
+```noxy
+let file: io.File = io.open(path, "w")
+defer io.close(file)
+```
+
+The callee and every argument are evaluated immediately, from left to right,
+when the `defer` statement executes. An evaluation or registration error does
+not register that call, although calls registered earlier in the frame still
+run. For typed Noxy functions and signed natives, non-`ref` arguments receive
+the normal top-level shallow copy at registration time, while `ref` parameters
+retain their reference. Nested composite identities therefore remain shared as
+described in [Shallow-Copy Semantics](#shallow-copy-semantics). Legacy untyped
+natives retain values using their existing dynamic calling convention because
+they expose no parameter-mode metadata. Struct constructors retain evaluated
+field values directly, matching their existing constructor semantics.
+
+Deferred calls execute once in last-in, first-out (LIFO) order for each frame.
+A `defer` inside a loop registers once per executed iteration and belongs to
+the containing frame, not to the loop or block. The same frame rule applies to
+ordinary functions, the main script, module initialization, and functions run
+by detached `spawn`. Deferred calls run on explicit and implicit returns, on
+successful script or module completion, and while unwinding runtime errors.
+Nested calls finish their own deferred work before the owning frame continues
+with its next older entry.
+
+An ordinary return value from a deferred call is discarded, including an
+error-shaped Noxy result value. A runtime failure is different: the original
+runtime error remains primary, every observable deferred failure is collected
+in LIFO execution order with its registration location, and older deferred
+calls continue to run. Nested cleanup and module failures remain nested,
+structured causes rather than being flattened into one message. If cleanup is
+the first failure, it converts an otherwise successful return into a runtime
+error.
+
+Resource cleanup uses the existing explicit close APIs. Register dependent
+resources after their owners so LIFO order closes the dependent first; for
+example, register `sqlite.close(db)` before `sqlite.finalize(statement)`.
+Current file, network, and SQLite close builtins suppress some underlying
+Go/operating-system close errors and return success-compatible Noxy values.
+Those suppressed errors cannot participate in defer aggregation; only runtime
+errors observable from the deferred call are aggregated. Likewise, the
+ordinary result from `io.close_result(...)` is discarded when deferred.
 
 ---
 

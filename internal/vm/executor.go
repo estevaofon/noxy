@@ -36,18 +36,26 @@ func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.Global
 	scriptClosure := &value.ObjClosure{Function: scriptFunction, Upvalues: []*value.ObjUpvalue{}, Environment: environment}
 	vm.stackTop = 0
 	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: scriptClosure})
-	frame := &CallFrame{Closure: scriptClosure, IP: 0, Slots: 1, Environment: environment}
+	frame := &CallFrame{Closure: scriptClosure, IP: 0, StackBase: 0, LocalBase: 1, Environment: environment}
 	vm.frames[0] = frame
 	vm.frameCount = 1
 	vm.currentFrame = frame
 	return vm.run(1, nil)
 }
 
-func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
+func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
 	c := frame.Closure.Function.Chunk.(*chunk.Chunk)
 	ip := frame.IP
+	defer func() {
+		if vm.currentFrame == frame {
+			frame.IP = ip
+		}
+		if err != nil {
+			err = vm.unwindTo(minFrameCount-1, frameOutcome{Err: err}).Err
+		}
+	}()
 
 	for {
 		if ip >= len(c.Code) {
@@ -196,19 +204,19 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 		case chunk.OP_GET_LOCAL:
 			slot := c.Code[ip]
 			ip++
-			val := vm.stack[frame.Slots+int(slot)]
+			val := vm.stack[frame.LocalBase+int(slot)]
 			vm.push(val)
 
 		case chunk.OP_SET_LOCAL:
 			slot := c.Code[ip]
 			ip++
-			vm.stack[frame.Slots+int(slot)] = vm.peek(0)
+			vm.stack[frame.LocalBase+int(slot)] = vm.peek(0)
 
 		case chunk.OP_REF_LOCAL:
 			slot := int(c.Code[ip])
 			ip++
 			// Reference to a stack slot - Capture it!
-			upvalue := vm.captureUpvalue(&vm.stack[frame.Slots+slot])
+			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot])
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -433,7 +441,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 			val := vm.pop() // Value to assign
 
 			// The reference itself is in a local variable (e.g., parameter 'x')
-			refVal := vm.stack[frame.Slots+slot]
+			refVal := vm.stack[frame.LocalBase+slot]
 
 			if err := vm.storeReferenceValue(refVal, val); err != nil {
 				return vm.runtimeError(c, ip, "%s", err)
@@ -861,6 +869,31 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
 
+		case chunk.OP_DEFER:
+			registration := sourceLocation(c, ip)
+			argCount := int(c.Code[ip])
+			ip++
+
+			frame.IP = ip
+			callee := vm.peek(argCount)
+			arguments := vm.stack[vm.stackTop-argCount : vm.stackTop]
+			prepared, err := vm.prepareDeferredCall(callee, arguments, registration)
+			if err != nil {
+				return &RuntimeError{
+					Location: registration,
+					Message:  "failed to register defer",
+					Cause:    err,
+					Stack:    vm.captureNoxyStack(c, ip),
+				}
+			}
+
+			operandBase := vm.stackTop - argCount - 1
+			for index := operandBase; index < vm.stackTop; index++ {
+				vm.stack[index] = value.Value{}
+			}
+			vm.stackTop = operandBase
+			frame.Deferred = append(frame.Deferred, prepared)
+
 		case chunk.OP_CLOSURE:
 			idx := c.Code[ip]
 			ip++
@@ -889,7 +922,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 				ip++
 
 				if isLocal == 1 {
-					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[frame.Slots+int(index)])
+					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[frame.LocalBase+int(index)])
 				} else {
 					closure.Upvalues[i] = frame.Closure.Upvalues[index]
 				}
@@ -917,51 +950,21 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 			vm.pop()
 
 		case chunk.OP_RETURN:
-			// Return from function
-
-			// 1. Pop result
 			result := vm.pop()
-			calleeFrame := vm.currentFrame
-			terminal := vm.frameCount-1 < minFrameCount
-			if terminal && terminalResult != nil {
-				*terminalResult = result
+			frame.IP = ip
+			outcome := vm.finishFrame(frameOutcome{Result: result})
+			if outcome.Err != nil {
+				return outcome.Err
 			}
 
-			// 2. Clear the stack range used by the function (args + locals)
-			// This is CRITICAL for GC. We must nullify the references.
-			// calleeFrame.Slots points to the function object itself.
-			// We iterate up to stackTop (which is where result WAS before pop).
-			for i := calleeFrame.Slots; i < vm.stackTop; i++ {
-				vm.closeUpvalue(&vm.stack[i]) // Close any upvalues pointing to this slot
-				vm.stack[i] = value.Value{}
-			}
-
-			// 3. Decrement frame count
-			vm.frameCount--
-
-			// 4. Update current frame pointer
-			if vm.frameCount > 0 {
-				vm.currentFrame = vm.frames[vm.frameCount-1]
-			} else {
-				vm.currentFrame = nil
-			}
-
-			// 5. Return from run() if we drop below call depth
-			if terminal {
-				// We are exiting the run loop.
-				// We need to place result at the location expected by the caller.
-				// The caller expects the function and args to be consumed, and result pushed.
-				// calleeFrame.Slots is the start of the window (Function object).
-				vm.stackTop = calleeFrame.Slots
-				vm.push(result)
+			if vm.frameCount < minFrameCount {
+				if terminalResult != nil {
+					*terminalResult = outcome.Result
+				}
 				return nil
 			}
 
-			// 6. Restore execution context
 			frame = vm.currentFrame
-			vm.stackTop = calleeFrame.Slots // Drop args/locals/function from stackTop
-			vm.push(result)                 // Push result replacing the function
-
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
 			ip = frame.IP
 
@@ -1012,14 +1015,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 			nameConstant := c.Constants[index]
 			moduleName := nameConstant.Obj.(string)
 
+			frame.IP = ip
 			mod, err := vm.loadModule(moduleName)
 			if err != nil {
-				context := vm.runtimeError(c, ip, "failed to import module '%s'", moduleName)
-				return fmt.Errorf("%w: %w", context, err)
+				return vm.runtimeErrorCause(c, ip, err, "failed to import module '%s'", moduleName)
 			}
-			vm.push(mod)
-
 			frame = vm.currentFrame
+			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			ip = frame.IP
+			vm.push(mod)
 
 		case chunk.OP_IMPORT_FROM_ALL:
 			modVal := vm.pop()

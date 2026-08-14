@@ -11,13 +11,15 @@ const StackMax = 2048
 const FramesMax = 64
 
 func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interface{}) error {
-	return vm.newRuntimeError(c, ip, fmt.Sprintf(format, args...))
+	return vm.runtimeErrorCause(c, ip, nil, format, args...)
 }
 
 type CallFrame struct {
 	Closure     *value.ObjClosure
 	IP          int
-	Slots       int // Offset in stack where this frame's locals start
+	StackBase   int // First stack slot owned by this frame
+	LocalBase   int // Offset in stack where this frame's locals start
+	Deferred    []PreparedCall
 	Environment *value.GlobalEnvironment
 }
 

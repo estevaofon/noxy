@@ -87,7 +87,8 @@ func (vm *VM) executePreparedTaskCall(call preparedTaskCall) (value.Value, error
 	frame := &CallFrame{
 		Closure:     call.Closure,
 		IP:          0,
-		Slots:       0,
+		StackBase:   0,
+		LocalBase:   0,
 		Environment: call.Closure.Environment,
 	}
 	vm.frames[0], vm.frameCount, vm.currentFrame = frame, 1, frame

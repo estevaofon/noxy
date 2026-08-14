@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+func TestDeferIsKeyword(t *testing.T) {
+	lex := New("defer cleanup(1)\n")
+	if got := lex.NextToken(); got.Type != token.DEFER || got.Literal != "defer" {
+		t.Fatalf("token=%#v, want DEFER", got)
+	}
+}
+
 func TestNextToken(t *testing.T) {
 	input := `let five = 5
 let ten = 10
