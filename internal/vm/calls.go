@@ -75,8 +75,11 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			args = callArgs
 		}
 		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
-		result := native.Fn(args)
-		vm.stackTop -= argCount + 1 // args + function
+		result, err := native.Invoke(vm, args)
+		if err != nil {
+			return false, vm.runtimeError(c, ip, "%s", err)
+		}
+		vm.stackTop -= argCount + 1
 		vm.push(result)
 		return true, nil
 	}
@@ -115,10 +118,10 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 	}
 
 	frame := &CallFrame{
-		Closure: closure,
-		IP:      0,
-		Slots:   vm.stackTop - argCount - 1, // Start of locals window (fn + args)
-		Globals: closure.Globals,
+		Closure:     closure,
+		IP:          0,
+		Slots:       vm.stackTop - argCount - 1, // Start of locals window (fn + args)
+		Environment: closure.Environment,
 	}
 	// Push new frame
 	vm.frames[vm.frameCount] = frame
@@ -139,13 +142,10 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjMap:
-		newData := make(map[interface{}]value.Value)
-		for k, val := range obj.Data {
-			newData[k] = val
-		}
+		newData := obj.Snapshot()
 		copied := value.NewMap()
 		copiedMap := copied.Obj.(*value.ObjMap)
-		copiedMap.Data = newData
+		copiedMap.Replace(newData)
 		copiedMap.RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjInstance:

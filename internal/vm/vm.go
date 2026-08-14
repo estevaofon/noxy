@@ -1,12 +1,9 @@
 package vm
 
 import (
-	"database/sql"
 	"fmt"
-	"net"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
-	"os"
 	"sync"
 )
 
@@ -27,30 +24,23 @@ func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interf
 }
 
 type CallFrame struct {
-	Closure *value.ObjClosure
-	IP      int
-	Slots   int                    // Offset in stack where this frame's locals start
-	Globals map[string]value.Value // Globals visible to this frame
+	Closure     *value.ObjClosure
+	IP          int
+	Slots       int // Offset in stack where this frame's locals start
+	Environment *value.GlobalEnvironment
 }
 
 type SharedState struct {
-	Globals     map[string]value.Value // Global variables/functions
-	Modules     map[string]value.Value // Cached modules (Name -> ObjMap)
-	GlobalsLock sync.RWMutex
-
-	// Shared Network Resources
-	NetListeners map[int]net.Listener
-	NetConns     map[int]net.Conn
-	NextNetID    int
-	NetLock      sync.Mutex
-
-	// Shared Database Resources
-	DbHandles   map[int]*sql.DB
-	StmtHandles map[int]*sql.Stmt
-	StmtParams  map[int]map[int]interface{}
-	NextDbID    int
-	NextStmtID  int
-	DbLock      sync.Mutex
+	Root         *value.GlobalEnvironment
+	Modules      *moduleCache
+	Files        *handleRegistry[*FileResource]
+	fileMetaMu   sync.RWMutex
+	Listeners    *handleRegistry[*ListenerResource]
+	Sockets      *handleRegistry[*SocketResource]
+	Databases    *handleRegistry[*DatabaseResource]
+	Statements   *handleRegistry[*StatementResource]
+	stateOnce    sync.Once
+	builtinsOnce sync.Once
 }
 
 type VM struct {
@@ -67,18 +57,21 @@ type VM struct {
 	shared *SharedState
 	Config VMConfig
 
-	// IO Management
-	openFiles map[int64]*os.File
-	nextFD    int64
-
-	// Net Management (Moved to SharedState)
-	netBufferedData  map[int][]byte   // For peeked data during select (Local to thread/VM?)
-	netBufferedConns map[int]net.Conn // For peeked accepts (Local to thread/VM?)
-	// netListeners, netConns, nextNetID removed from VM
+	moduleLoadStack []moduleKey
 
 	LastPopped value.Value
 
 	openUpvalues *value.ObjUpvalue // Head of linked list of open upvalues
+}
+
+func (*VM) IsNativeContext() {}
+
+func nativeVM(context value.NativeContext) (*VM, error) {
+	machine, ok := context.(*VM)
+	if !ok || machine == nil {
+		return nil, fmt.Errorf("invalid VM native context")
+	}
+	return machine, nil
 }
 
 type VMConfig struct {
@@ -90,73 +83,55 @@ func New() *VM {
 }
 
 func NewWithConfig(cfg VMConfig) *VM {
-	shared := &SharedState{
-		Globals:      make(map[string]value.Value),
-		Modules:      make(map[string]value.Value),
-		NetListeners: make(map[int]net.Listener),
-		NetConns:     make(map[int]net.Conn),
-		NextNetID:    1,
-		DbHandles:    make(map[int]*sql.DB),
-		StmtHandles:  make(map[int]*sql.Stmt),
-		StmtParams:   make(map[int]map[int]interface{}),
-		NextDbID:     1,
-		NextStmtID:   1,
-	}
-	return NewWithShared(shared, cfg)
+	return NewWithShared(&SharedState{}, cfg)
 }
 
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
+	shared.initializeState()
 	vm := &VM{
-		shared:    shared,
-		Config:    cfg,
-		openFiles: make(map[int64]*os.File),
-		nextFD:    1,
-
-		netBufferedData:  make(map[int][]byte),
-		netBufferedConns: make(map[int]net.Conn),
+		shared: shared,
+		Config: cfg,
 	}
 
-	vm.defineBuiltins()
+	shared.builtinsOnce.Do(vm.defineBuiltins)
 	return vm
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
-	// Check if already defined in shared globals to avoid overwriting with thread-local closure
-	if _, ok := vm.GetGlobal(name); ok {
-		return
-	}
-	vm.SetGlobal(name, value.NewNative(name, fn))
+	vm.shared.Root.DefineLocalIfAbsent(name, value.NewNative(name, fn))
 }
 
 func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSignature, fn value.NativeFunc) {
-	if _, ok := vm.GetGlobal(name); ok {
-		return
-	}
-	vm.SetGlobal(name, value.NewNativeWithSignature(name, signature, fn))
+	vm.shared.Root.DefineLocalIfAbsent(name, value.NewNativeWithSignature(name, signature, fn))
+}
+
+func (vm *VM) DefineContextualNative(name string, fn value.ContextualNativeFunc) {
+	vm.SetGlobal(name, value.NewContextualNative(name, fn))
+}
+
+func (vm *VM) DefineContextualNativeWithSignature(name string, signature value.NativeSignature, fn value.ContextualNativeFunc) {
+	vm.shared.Root.DefineLocalIfAbsent(name, value.NewContextualNativeWithSignature(name, signature, fn))
 }
 
 func (vm *VM) SetGlobal(name string, val value.Value) {
-	vm.shared.GlobalsLock.Lock()
-	defer vm.shared.GlobalsLock.Unlock()
-	vm.shared.Globals[name] = val
+	vm.shared.Root.SetLocal(name, val)
 }
 
 func (vm *VM) GetGlobal(name string) (value.Value, bool) {
-	vm.shared.GlobalsLock.RLock()
-	defer vm.shared.GlobalsLock.RUnlock()
-	val, ok := vm.shared.Globals[name]
-	return val, ok
+	return vm.shared.Root.GetLocal(name)
 }
 
 func (vm *VM) SetModule(name string, val value.Value) {
-	vm.shared.GlobalsLock.Lock()
-	defer vm.shared.GlobalsLock.Unlock()
-	vm.shared.Modules[name] = val
+	source, err := vm.resolveModule(name)
+	if err == nil {
+		vm.shared.Modules.store(source.Key, val)
+	}
 }
 
 func (vm *VM) GetModule(name string) (value.Value, bool) {
-	vm.shared.GlobalsLock.RLock()
-	defer vm.shared.GlobalsLock.RUnlock()
-	val, ok := vm.shared.Modules[name]
-	return val, ok
+	source, err := vm.resolveModule(name)
+	if err != nil {
+		return value.NewNull(), false
+	}
+	return vm.shared.Modules.get(source.Key)
 }

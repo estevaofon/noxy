@@ -46,14 +46,13 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"wg_add", "wg_done", "wg_wait",
 	}
 
-	machine.shared.GlobalsLock.RLock()
-	actual := make([]string, 0, len(machine.shared.Globals))
-	for name, global := range machine.shared.Globals {
+	globals := machine.shared.Root.LocalSnapshot()
+	actual := make([]string, 0, len(globals))
+	for name, global := range globals {
 		if global.Type == value.VAL_NATIVE {
 			actual = append(actual, name)
 		}
 	}
-	machine.shared.GlobalsLock.RUnlock()
 	sort.Strings(actual)
 
 	if !reflect.DeepEqual(actual, expected) {
@@ -111,4 +110,35 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStatefulBuiltinsUseContextualHandlers(t *testing.T) {
+	machine := New()
+	for _, name := range []string{
+		"spawn", "delete", "append", "pop", "json_loads", "sys_load_plugin",
+		"io_open", "net_listen", "sqlite_open",
+	} {
+		native := requireBuiltin(t, machine, name)
+		if native.Contextual == nil || native.Fn != nil || !native.IsCallable() {
+			t.Errorf("%s is not exclusively contextual", name)
+		}
+	}
+}
+
+func TestContextualCollectionHandlersInvokeThroughCallingVM(t *testing.T) {
+	parent := New()
+	child := NewWithShared(parent.shared, parent.Config)
+	target := value.NewArray([]value.Value{value.NewInt(1)})
+	ref := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &target}}
+	assertBuiltinValue(t, callBuiltin(t, child, "append", ref, value.NewInt(2)), value.NewNull())
+	assertBuiltinValue(t, callBuiltin(t, child, "pop", ref), value.NewInt(2))
+}
+
+func TestContextualJSONLoadsInvokesThroughCallingVM(t *testing.T) {
+	parent := New()
+	child := NewWithShared(parent.shared, parent.Config)
+	target := value.NewMap()
+	ref := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_PTR, Ptr: &target}}
+	assertBuiltinValue(t, callBuiltin(t, child, "json_loads", value.NewString(`{"answer":42}`), ref), value.NewBool(true))
+	assertBuiltinValue(t, requireTestMapValue(t, target.Obj.(*value.ObjMap), "answer"), value.NewInt(42))
 }

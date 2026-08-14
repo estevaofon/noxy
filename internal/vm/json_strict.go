@@ -89,8 +89,9 @@ func (t *strictJSONTraversal) convertMap(mapping *value.ObjMap) (map[string]inte
 	}
 	t.maps[mapping] = true
 	defer delete(t.maps, mapping)
-	converted := make(map[string]interface{}, len(mapping.Data))
-	for key, item := range mapping.Data {
+	values := mapping.Snapshot()
+	converted := make(map[string]interface{}, len(values))
+	for key, item := range values {
 		stringKey, ok := key.(string)
 		if !ok {
 			return nil, errJSONUnsupported

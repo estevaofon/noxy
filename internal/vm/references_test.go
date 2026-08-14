@@ -90,7 +90,10 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 				if !ok {
 					t.Fatalf("missing native %s", native.name)
 				}
-				result := nativeValue.Obj.(*value.ObjNative).Fn(native.args(target.value))
+				result, err := nativeValue.Obj.(*value.ObjNative).Invoke(machine, native.args(target.value))
+				if err != nil {
+					t.Fatal(err)
+				}
 				if result.Type != value.VAL_NULL {
 					t.Fatalf("result=%v, want null", result)
 				}
@@ -100,8 +103,8 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 }
 
 func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
-	globals := map[string]value.Value{"answer": value.NewInt(41)}
-	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer", GlobalOwner: &globals}
+	environment := value.NewGlobalEnvironmentFrom(map[string]value.Value{"answer": value.NewInt(41)}, nil)
+	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer", GlobalOwner: environment}
 	machine := New()
 
 	got, err := machine.lookupGlobalReferenceValue(ref)
@@ -114,7 +117,7 @@ func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
 	if err := machine.storeGlobalReferenceValue(ref, value.NewInt(42)); err != nil {
 		t.Fatal(err)
 	}
-	if got := globals["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got, _ := environment.GetLocal("answer"); got.Type != value.VAL_INT || got.AsInt != 42 {
 		t.Fatalf("stored value=%v, want 42", got)
 	}
 
@@ -130,7 +133,7 @@ func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
 		},
 		{
 			name: "missing global",
-			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &globals},
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: environment},
 			want: "undefined global variable 'missing'",
 		},
 	} {

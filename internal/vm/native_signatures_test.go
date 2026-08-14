@@ -270,21 +270,23 @@ test_report(targets["slot"]["answer"])`)
 func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 	machine := New()
 	moduleTarget := value.NewMapWithData(map[string]value.Value{"old": value.NewInt(0)})
-	moduleGlobals := map[string]value.Value{"target": moduleTarget}
-	machine.currentFrame = &CallFrame{Globals: moduleGlobals}
-	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target", GlobalOwner: &moduleGlobals}}
+	moduleEnvironment := value.NewGlobalEnvironmentFrom(map[string]value.Value{"target": moduleTarget}, machine.shared.Root)
+	machine.currentFrame = &CallFrame{Environment: moduleEnvironment}
+	target := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "target", GlobalOwner: moduleEnvironment}}
 
 	jsonLoadsValue, ok := machine.GetGlobal("json_loads")
 	if !ok {
 		t.Fatal("missing json_loads native")
 	}
 	jsonLoads := jsonLoadsValue.Obj.(*value.ObjNative)
-	if result := jsonLoads.Fn([]value.Value{value.NewString(`{"answer":42}`), target}); result.Type != value.VAL_BOOL || !result.AsBool {
+	result, err := jsonLoads.Invoke(machine, []value.Value{value.NewString(`{"answer":42}`), target})
+	if err != nil || result.Type != value.VAL_BOOL || !result.AsBool {
 		t.Fatal("module-frame global target was rejected")
 	}
-	got := moduleGlobals["target"].Obj.(*value.ObjMap).Data["answer"]
+	moduleTarget, _ = moduleEnvironment.GetLocal("target")
+	got := requireTestMapValue(t, moduleTarget.Obj.(*value.ObjMap), "answer")
 	if got.Type != value.VAL_INT || got.AsInt != 42 {
-		t.Fatalf("module target=%v, want answer=42", moduleGlobals["target"])
+		t.Fatalf("module target=%v, want answer=42", moduleTarget)
 	}
 	if _, leaked := machine.GetGlobal("target"); leaked {
 		t.Fatal("module target must not be written to shared globals")
@@ -293,7 +295,7 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 
 func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	machine := New()
-	missingGlobals := map[string]value.Value{}
+	missingEnvironment := value.NewGlobalEnvironment(nil)
 	instance := value.NewInstance(&value.ObjStruct{Name: "Holder", Fields: []string{"known"}})
 	instance.Obj.(*value.ObjInstance).Fields["known"] = value.NewInt(1)
 	tests := []struct {
@@ -302,7 +304,7 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	}{
 		{
 			name: "missing global",
-			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: &missingGlobals},
+			ref:  &value.ObjRef{RefType: value.REF_GLOBAL, Name: "missing", GlobalOwner: missingEnvironment},
 		},
 		{
 			name: "missing property",
@@ -739,7 +741,7 @@ func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {
 		t.Fatalf("items=%v, want [42]", fields["items"])
 	}
 	metadata := fields["metadata"].Obj.(*value.ObjMap)
-	if got := metadata.Data["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got := requireTestMapValue(t, metadata, "answer"); got.Type != value.VAL_INT || got.AsInt != 42 {
 		t.Fatalf("metadata=%v, want answer=42", fields["metadata"])
 	}
 }
@@ -1883,11 +1885,11 @@ func TestCollectionRuntimeMetadataPreservesShallowCopyAndIdentity(t *testing.T) 
 
 	mapping := value.NewMap()
 	mapObject := mapping.Obj.(*value.ObjMap)
-	mapObject.Data["item"] = shared
+	setTestMap(mapObject, "item", shared)
 	mapObject.RuntimeType.Store(mapSchema)
 	mapCopy := machine.copyValue(mapping)
 	mapCopyObject := mapCopy.Obj.(*value.ObjMap)
-	if mapCopyObject == mapObject || mapCopyObject.RuntimeType.Load() != mapSchema || mapCopyObject.Data["item"].Obj != shared.Obj {
+	if mapCopyObject == mapObject || mapCopyObject.RuntimeType.Load() != mapSchema || requireTestMapValue(t, mapCopyObject, "item").Obj != shared.Obj {
 		t.Fatal("map shallow copy lost collection schema or nested identity")
 	}
 }
@@ -2292,11 +2294,11 @@ test_report(length(sliced) * 10 + length(generated))`
 	if len(results) != 2 || results[0] != 23 || results[1] != 23 {
 		t.Fatalf("wildcard first/cache results=%v, want [23 23]", results)
 	}
-	module, ok := machine.shared.Modules["array_utils"]
+	module, ok := machine.GetModule("array_utils")
 	if !ok {
 		t.Fatal("array_utils was not cached")
 	}
-	exports := module.Obj.(*value.ObjMap).Data
+	exports := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := exports["slice"]; !ok {
 		t.Fatal("array_utils omitted slice export")
 	}

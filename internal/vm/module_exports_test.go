@@ -2,6 +2,7 @@ package vm
 
 import (
 	"noxy-vm/internal/ast"
+	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
@@ -9,8 +10,155 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestConcurrentModuleImportInitializesOnce(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "counter.nx"), []byte("test_module_init()\nlet answer: int = 42\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := NewWithConfig(VMConfig{RootPath: root})
+	var initializations atomic.Int32
+	entered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	release := make(chan struct{})
+	parent.DefineNative("test_module_init", func([]value.Value) value.Value {
+		switch initializations.Add(1) {
+		case 1:
+			close(entered)
+		case 2:
+			close(secondEntered)
+		}
+		<-release
+		return value.NewNull()
+	})
+	code := compileModuleProgram(t, root, "use counter\n")
+	machines := []*VM{
+		NewWithShared(parent.shared, parent.Config),
+		NewWithShared(parent.shared, parent.Config),
+	}
+	start := make(chan struct{})
+	errors := make(chan error, len(machines))
+	for _, machine := range machines {
+		go func(machine *VM) {
+			<-start
+			errors <- machine.Interpret(code)
+		}(machine)
+	}
+	close(start)
+	<-entered
+	select {
+	case <-secondEntered:
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(release)
+	for range machines {
+		select {
+		case err := <-errors:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("concurrent imports did not complete")
+		}
+	}
+	if initializations.Load() != 1 {
+		t.Fatalf("initializations=%d, want 1", initializations.Load())
+	}
+}
+
+func TestDirectImportCycleReportsPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.nx"), []byte("use b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.nx"), []byte("use a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code := compileModuleProgram(t, root, "use a\n")
+	result := make(chan error, 1)
+	go func() {
+		result <- NewWithConfig(VMConfig{RootPath: root}).Interpret(code)
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "a -> b -> a") {
+			t.Fatalf("cycle error=%v, want path a -> b -> a", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("direct import cycle did not complete")
+	}
+}
+
+func TestDirectoryImportCycleReportsPath(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "bundle", "child")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "child.nx"), []byte("use bundle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code := compileModuleProgram(t, root, "use bundle\n")
+	result := make(chan error, 1)
+	go func() {
+		result <- NewWithConfig(VMConfig{RootPath: root}).Interpret(code)
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "bundle -> bundle.child -> bundle") {
+			t.Fatalf("cycle error=%v, want path bundle -> bundle.child -> bundle", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("directory import cycle did not complete")
+	}
+}
+
+func TestNestedDirectoryImportCycleReportsPath(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "bundle", "child")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "x.nx"), []byte("use bundle\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	code := compileModuleProgram(t, root, "use bundle\n")
+	result := make(chan error, 1)
+	go func() {
+		result <- NewWithConfig(VMConfig{RootPath: root}).Interpret(code)
+	}()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "bundle -> bundle.child -> bundle.child.x -> bundle") {
+			t.Fatalf("cycle error=%v, want path bundle -> bundle.child -> bundle.child.x -> bundle", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("nested directory import cycle did not complete")
+	}
+}
+
+func compileModuleProgram(t *testing.T, root, source string) *chunk.Chunk {
+	t.Helper()
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"), root).Compile(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
+}
 
 func TestRuntimeModuleCacheSharesIdentityAcrossImportsAndChildVM(t *testing.T) {
 	root := t.TempDir()
@@ -81,7 +229,7 @@ func TestRuntimeFileModuleGlobalsContainDirectExports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := module.Obj.(*value.ObjMap).Data
+	data := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime file module omitted direct delete export")
 	}
@@ -92,7 +240,7 @@ func TestRuntimeEmbeddedWildcardExportsAreDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := module.Obj.(*value.ObjMap).Data
+	data := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime http module omitted wildcard-imported delete")
 	}
@@ -132,8 +280,8 @@ func TestRuntimeModuleCachePreservesStructConstructorCallableSchema(t *testing.T
 	if !ok {
 		t.Fatal("missing cached module alias")
 	}
-	firstConstructor := first.Obj.(*value.ObjMap).Data["Box"]
-	secondConstructor := second.Obj.(*value.ObjMap).Data["Box"]
+	firstConstructor := requireTestMapValue(t, first.Obj.(*value.ObjMap), "Box")
+	secondConstructor := requireTestMapValue(t, second.Obj.(*value.ObjMap), "Box")
 	if firstConstructor.Obj != secondConstructor.Obj {
 		t.Fatal("cached import replaced the constructor definition")
 	}
@@ -159,7 +307,7 @@ func TestRuntimeDirectoryModuleGlobalsContainOnlyLoadableChildren(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := module.Obj.(*value.ObjMap).Data
+	data := module.Obj.(*value.ObjMap).Snapshot()
 	if _, ok := data["delete"]; !ok {
 		t.Fatal("runtime directory module omitted loadable file child")
 	}
@@ -257,7 +405,7 @@ func TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := module.Obj.(*value.ObjMap).Data["delete"]; !ok {
+			if _, ok := module.Obj.(*value.ObjMap).Get("delete"); !ok {
 				t.Fatal("runtime module omitted direct delete export")
 			}
 		})
@@ -346,7 +494,7 @@ end
 			if err != nil {
 				t.Fatal(err)
 			}
-			deleteBinding, ok := module.Obj.(*value.ObjMap).Data["delete"]
+			deleteBinding, ok := module.Obj.(*value.ObjMap).Get("delete")
 			if !ok {
 				t.Fatal("nested wrapper omitted root dependency delete")
 			}

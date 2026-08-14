@@ -137,7 +137,7 @@ type ObjFunction struct {
 	UpvalueCount int // Added for Closures
 	Params       []ParamInfo
 	Chunk        interface{}
-	Globals      map[string]Value // Module/Context globals
+	Environment  *GlobalEnvironment
 	RuntimeType  *RuntimeTypeInfo
 }
 
@@ -148,9 +148,9 @@ type ObjUpvalue struct {
 }
 
 type ObjClosure struct {
-	Function *ObjFunction
-	Upvalues []*ObjUpvalue
-	Globals  map[string]Value // Context globals
+	Function    *ObjFunction
+	Upvalues    []*ObjUpvalue
+	Environment *GlobalEnvironment
 }
 
 func (oc *ObjClosure) String() string {
@@ -159,14 +159,6 @@ func (oc *ObjClosure) String() string {
 
 func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 	fmt.Fprint(f, oc.String())
-}
-
-type NativeFunc func(args []Value) Value
-
-type ObjNative struct {
-	Name      string
-	Fn        NativeFunc
-	Signature *NativeSignature
 }
 
 type ObjArray struct {
@@ -208,16 +200,18 @@ func (oa *ObjArray) Format(f fmt.State, verb rune) {
 }
 
 type ObjMap struct {
-	Data        map[interface{}]Value
+	store       *bindingStore
+	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 }
 
 func (om *ObjMap) String() string {
 	s := "{"
 	i := 0
-	for k, v := range om.Data {
+	values := om.Snapshot()
+	for k, v := range values {
 		s += fmt.Sprintf("%v: %s", k, v.String())
-		if i < len(om.Data)-1 {
+		if i < len(values)-1 {
 			s += ", "
 		}
 		i++
@@ -335,7 +329,7 @@ type ObjRef struct {
 	JSONDynamic atomic.Bool // Declared any target: JSON may replace its concrete runtime type.
 	TargetType  atomic.Pointer[RuntimeTypeInfo]
 	Name        string // For Global or Property Name
-	GlobalOwner *map[string]Value
+	GlobalOwner *GlobalEnvironment
 	Ptr         *Value      // For Local (unsafe if escapes)
 	Upvalue     *ObjUpvalue // For Local (safe, captured)
 	Container   Value       // For Property/Index (Object, Array, Map)
@@ -462,15 +456,19 @@ func NewArray(elements []Value) Value {
 }
 
 func NewMap() Value {
-	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: make(map[interface{}]Value)}}
+	mapping := &ObjMap{store: newBindingStore(nil)}
+	mapping.ensureStore()
+	return Value{Type: VAL_OBJ, Obj: mapping}
 }
 
 func NewMapWithData(data map[string]Value) Value {
-	m := make(map[interface{}]Value)
+	values := make(map[interface{}]Value, len(data))
 	for k, v := range data {
-		m[k] = v
+		values[k] = v
 	}
-	return Value{Type: VAL_OBJ, Obj: &ObjMap{Data: m}}
+	mapping := NewMap()
+	mapping.Obj.(*ObjMap).Replace(values)
+	return mapping
 }
 
 func NewStruct(name string, fields []string) Value {
@@ -481,31 +479,17 @@ func NewInstance(def *ObjStruct) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
-func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, globals map[string]Value) Value {
+func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, environment *GlobalEnvironment) Value {
 	return Value{
 		Type: VAL_FUNCTION,
-		Obj:  &ObjFunction{Name: name, Arity: arity, UpvalueCount: upvalueCount, Params: params, Chunk: chunk, Globals: globals},
+		Obj:  &ObjFunction{Name: name, Arity: arity, UpvalueCount: upvalueCount, Params: params, Chunk: chunk, Environment: environment},
 	}
 }
 
 func NewClosure(fn *ObjFunction) Value {
 	return Value{
 		Type: VAL_FUNCTION, // Reuse VAL_FUNCTION to mean "Callable" (VM will assume ObjClosure or handle translation?)
-		Obj:  &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount)},
-	}
-}
-
-func NewNative(name string, fn NativeFunc) Value {
-	return Value{
-		Type: VAL_NATIVE,
-		Obj:  &ObjNative{Name: name, Fn: fn, Signature: nil},
-	}
-}
-
-func NewNativeWithSignature(name string, signature NativeSignature, fn NativeFunc) Value {
-	return Value{
-		Type: VAL_NATIVE,
-		Obj:  &ObjNative{Name: name, Fn: fn, Signature: &signature},
+		Obj:  &ObjClosure{Function: fn, Upvalues: make([]*ObjUpvalue, fn.UpvalueCount), Environment: fn.Environment},
 	}
 }
 

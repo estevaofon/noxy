@@ -149,10 +149,10 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool)) {
 				return false
 			}
-		} else if len(mapping.Data) == 0 {
+		} else if mapping.Len() == 0 {
 			return false
 		}
-		for key, element := range mapping.Data {
+		for key, element := range mapping.Snapshot() {
 			if !runtimeMapKeyMatchesType(key, expected.Key) || !vm.runtimeValueMatchesType(element, expected.Value) {
 				return false
 			}
@@ -225,7 +225,7 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 			}
 		case value.VAL_NATIVE:
 			native, ok := actual.Obj.(*value.ObjNative)
-			return ok && native != nil && native.Fn != nil
+			return ok && native.IsCallable()
 		}
 		return false
 	}
@@ -250,7 +250,7 @@ func runtimeCallableMatchesType(actual value.Value, expected *value.RuntimeTypeI
 		return actualType != nil && runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool))
 	case value.VAL_NATIVE:
 		native, ok := actual.Obj.(*value.ObjNative)
-		return ok && native != nil && native.Fn != nil && nativeSignatureMatchesRuntimeType(native.Signature, expected)
+		return ok && native.IsCallable() && nativeSignatureMatchesRuntimeType(native.Signature, expected)
 	default:
 		return false
 	}
@@ -355,7 +355,7 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 			}
 			effectiveSchema = actualType
 		}
-		for key, element := range mapping.Data {
+		for key, element := range mapping.Snapshot() {
 			if !runtimeMapKeyMatchesType(key, effectiveSchema.Key) || !vm.walkRuntimeValueType(element, effectiveSchema.Value, apply, seen) {
 				return false
 			}

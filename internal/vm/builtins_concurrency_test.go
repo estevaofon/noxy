@@ -109,3 +109,41 @@ test_report(to_int(received))
 	}
 	assertBuiltinValue(t, captured, value.NewInt(42))
 }
+
+func TestSpawnUsesCallingVMConfig(t *testing.T) {
+	parent := NewWithConfig(VMConfig{RootPath: "parent"})
+	child := NewWithShared(parent.shared, VMConfig{RootPath: "child"})
+	parent.DefineContextualNative("active_root", func(context value.NativeContext, _ []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(machine.Config.RootPath), nil
+	})
+	captured := value.NewNull()
+	parent.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	code := compileVMSource(t, `
+func worker(channel: any)
+    chan_send(channel, active_root())
+end
+let channel: any = make_chan(0)
+spawn(worker, channel)
+test_report(chan_recv(channel))
+`)
+	completed := make(chan error, 1)
+	go func() { completed <- child.Interpret(code) }()
+	select {
+	case err := <-completed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("spawn did not complete")
+	}
+	assertBuiltinValue(t, captured, value.NewString("child"))
+}

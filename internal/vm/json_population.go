@@ -164,14 +164,11 @@ func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.Ru
 	if !ok {
 		return nil, false
 	}
-	newData := make(map[interface{}]value.Value, len(mapping.Data)+len(dataMap))
-	for key, item := range mapping.Data {
-		newData[key] = item
-	}
+	newData := mapping.Snapshot()
 	commits := make([]jsonCommit, 0, len(dataMap))
 	for key, item := range dataMap {
 		mapKey := key
-		if current, exists := mapping.Data[mapKey]; exists {
+		if current, exists := newData[mapKey]; exists {
 			commit, ok := prepareJSONMutation(vm, current, valueSchema, item, func(updated value.Value) {
 				newData[mapKey] = updated
 			})
@@ -199,7 +196,7 @@ func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.Ru
 		for _, commit := range commits {
 			commit()
 		}
-		mapping.Data = newData
+		mapping.Replace(newData)
 	}, true
 }
 
@@ -312,7 +309,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 		mapping := value.NewMap()
 		mapObject := mapping.Obj.(*value.ObjMap)
 		mapObject.RuntimeType.Store(schema)
-		mapData := mapObject.Data
+		mapData := make(map[interface{}]value.Value, len(items))
 		for key, item := range items {
 			created, ok := buildTypedJSONValue(schema.Value, item)
 			if !ok {
@@ -320,6 +317,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			}
 			mapData[key] = created
 		}
+		mapObject.Replace(mapData)
 		return mapping, true
 	case value.TYPE_STRUCT:
 		if data == nil {
@@ -420,7 +418,8 @@ func dynamicJSONValue(data interface{}) (value.Value, bool) {
 		return value.NewArray(elements), true
 	case map[string]interface{}:
 		mapping := value.NewMap()
-		dataMap := mapping.Obj.(*value.ObjMap).Data
+		mapObject := mapping.Obj.(*value.ObjMap)
+		dataMap := make(map[interface{}]value.Value, len(actual))
 		for key, item := range actual {
 			converted, ok := dynamicJSONValue(item)
 			if !ok {
@@ -428,6 +427,7 @@ func dynamicJSONValue(data interface{}) (value.Value, bool) {
 			}
 			dataMap[key] = converted
 		}
+		mapObject.Replace(dataMap)
 		return mapping, true
 	default:
 		return value.Value{}, false

@@ -9,31 +9,35 @@ import (
 
 func (vm *VM) defineConcurrencyBuiltins() {
 	// Concurrency Primitives
-	vm.DefineNative("spawn", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("spawn", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) < 1 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		fnVal := args[0]
 		if fnVal.Type != value.VAL_FUNCTION {
 			// Only script functions are supported in spawn.
 			fmt.Println("Runtime Error: spawn expects a function")
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
 		threadArgs := args[1:]
 
 		// Create new VM thread sharing state
-		threadVM := NewWithShared(vm.shared, vm.Config)
+		threadVM := NewWithShared(machine.shared, machine.Config)
 
 		// Setup execution
 		var closure *value.ObjClosure
 		if cl, ok := fnVal.Obj.(*value.ObjClosure); ok {
 			closure = cl
 		} else if fn, ok := fnVal.Obj.(*value.ObjFunction); ok {
-			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}}
+			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}, Environment: fn.Environment}
 		} else {
 			fmt.Println("Runtime Error: spawn expects a function or closure")
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
 		fnObj := closure.Function
@@ -41,7 +45,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		// Check arity
 		if len(threadArgs) != fnObj.Arity {
 			fmt.Printf("Runtime Error: spawn expected %d args, got %d\n", fnObj.Arity, len(threadArgs))
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
 		// Push Function (Stack slot 0)
@@ -54,14 +58,11 @@ func (vm *VM) defineConcurrencyBuiltins() {
 
 		// Create Frame
 		frame := &CallFrame{
-			Closure: closure,
-			IP:      0,
-			Slots:   0,
-			Globals: nil,
+			Closure:     closure,
+			IP:          0,
+			Slots:       0,
+			Environment: closure.Environment,
 		}
-
-		// Inherit globals from the function/closure.
-		frame.Globals = fnObj.Globals
 
 		threadVM.frames[0] = frame
 		threadVM.frameCount = 1
@@ -80,7 +81,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			}
 		}()
 
-		return value.NewNull()
+		return value.NewNull(), nil
 	})
 
 	vm.DefineNative("make_chan", func(args []value.Value) value.Value {

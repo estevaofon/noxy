@@ -8,6 +8,18 @@ Noxy provides first-class support for concurrency through **Noxy Routines** and 
 2.  **Channels**: Typed conduits that allow Noxy routines to communicate with each other and synchronize their execution.
 3.  **Shared State**: While channels are preferred, Noxy routines share the same global variables and module state, allowing for shared-memory patterns (though message passing is recommended).
 
+### Runtime sharing guarantees
+
+Routines whose VMs share one runtime state see the same global bindings, module cache, and open file, network, SQLite database, and SQLite statement handles. A stateful builtin always uses the VM that is actively executing the call, so a handle created in one shared VM can be used from another.
+
+Individual global-binding and map operations are synchronized and do not crash the Go runtime when used concurrently. Concurrent module requests share one successful initialization, and individual resource registries and resource state are also synchronized.
+
+These guarantees do not make a sequence of operations atomic. For example, `counter = counter + 1` is still a separate read and write. Likewise, arrays, structs, and composite values nested inside a map or global binding are not recursively synchronized. Coordinate compound operations and mutation of nested composite values with channels (or another explicit single-owner protocol).
+
+Function arguments preserve Noxy's shallow-copy rules: the outer array, map, or struct is copied for an ordinary parameter, while nested composites remain shared. The synchronized runtime foundation does not turn that shallow copy into a deep copy.
+
+This foundation changes no public Noxy syntax, builtin signature, or result shape. Corrected `net_select` semantics and supervised `spawn`/task behavior are separate follow-up work.
+
 ---
 
 ## Spawning Routines

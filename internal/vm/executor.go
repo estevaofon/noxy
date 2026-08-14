@@ -9,40 +9,37 @@ import (
 )
 
 func (vm *VM) Interpret(c *chunk.Chunk) error {
-	// Pass nil to indicate using Shared State Globals
-	return vm.InterpretWithGlobals(c, nil)
+	return vm.InterpretWithEnvironment(c, vm.shared.Root)
 }
 
-func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) error {
-	scriptFn := &value.ObjFunction{
-		Name:    "script",
-		Arity:   0,
-		Chunk:   c,
-		Globals: globals,
+func (vm *VM) InterpretWithGlobals(c *chunk.Chunk, globals map[string]value.Value) (err error) {
+	if globals == nil {
+		return vm.InterpretWithEnvironment(c, vm.shared.Root)
 	}
+	environment := value.NewGlobalEnvironmentFrom(globals, vm.shared.Root)
+	defer func() {
+		for name := range globals {
+			delete(globals, name)
+		}
+		for name, item := range environment.LocalSnapshot() {
+			globals[name] = item
+		}
+	}()
+	return vm.InterpretWithEnvironment(c, environment)
+}
 
+func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.GlobalEnvironment) error {
+	if environment == nil {
+		return fmt.Errorf("interpret requires a global environment")
+	}
+	scriptFunction := &value.ObjFunction{Name: "script", Arity: 0, Chunk: c, Environment: environment}
+	scriptClosure := &value.ObjClosure{Function: scriptFunction, Upvalues: []*value.ObjUpvalue{}, Environment: environment}
 	vm.stackTop = 0
-	vm.push(value.NewFunction("script", 0, 0, nil, c, globals)) // Push script function to stack slot 0
-
-	// Call frame for script
-	scriptClosure := &value.ObjClosure{Function: scriptFn, Upvalues: []*value.ObjUpvalue{}, Globals: globals}
-	frame := &CallFrame{
-		Closure: scriptClosure,
-		IP:      0,
-		Slots:   1,   // Locals start at 1
-		Globals: nil, // Use nil to force fallback to Shared VM Globals (Locked)
-	}
-
-	if globals != nil && len(globals) > 0 {
-		frame.Globals = globals
-	} else {
-		frame.Globals = nil
-	}
-
+	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: scriptClosure})
+	frame := &CallFrame{Closure: scriptClosure, IP: 0, Slots: 1, Environment: environment}
 	vm.frames[0] = frame
 	vm.frameCount = 1
 	vm.currentFrame = frame
-
 	return vm.run(1)
 }
 
@@ -67,17 +64,17 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			constant := c.Constants[index]
 
-			// If it's a function, bind it to current globals (Module binding)
+			// If it's a function, bind it to the current environment.
 			if constant.Type == value.VAL_FUNCTION {
 				fn := constant.Obj.(*value.ObjFunction)
-				// Clone to bind globals
+				// Clone so compiler constants remain unbound and reusable.
 				boundFn := &value.ObjFunction{
 					Name:         fn.Name,
 					Arity:        fn.Arity,
 					UpvalueCount: fn.UpvalueCount,
 					Params:       fn.Params,
 					Chunk:        fn.Chunk,
-					Globals:      frame.Globals,
+					Environment:  frame.Environment,
 					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
@@ -98,7 +95,7 @@ func (vm *VM) run(minFrameCount int) error {
 					UpvalueCount: fn.UpvalueCount,
 					Params:       fn.Params,
 					Chunk:        fn.Chunk,
-					Globals:      frame.Globals,
+					Environment:  frame.Environment,
 					RuntimeType:  fn.RuntimeType,
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
@@ -179,14 +176,9 @@ func (vm *VM) run(minFrameCount int) error {
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
-			// Try frame globals (Module scope)
-			val, ok := frame.Globals[name]
+			val, ok := frame.Environment.Resolve(name)
 			if !ok {
-				// Try VM globals (Builtins / Shared)
-				val, ok = vm.GetGlobal(name)
-				if !ok {
-					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
-				}
+				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 			}
 			vm.push(val)
 
@@ -195,12 +187,7 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
-			// Set in frame globals (Module scope)
-			if frame.Globals != nil {
-				frame.Globals[name] = vm.peek(0)
-			} else {
-				vm.SetGlobal(name, vm.peek(0))
-			}
+			frame.Environment.SetLocal(name, vm.peek(0))
 
 		case chunk.OP_GET_LOCAL:
 			slot := c.Code[ip]
@@ -246,17 +233,9 @@ func (vm *VM) run(minFrameCount int) error {
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
-			var owner *map[string]value.Value
-			if frame.Globals != nil {
-				if _, ok := frame.Globals[name]; ok {
-					owner = &frame.Globals
-				}
-			}
-			if owner == nil {
-				if _, ok := vm.GetGlobal(name); !ok {
-					return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
-				}
-				owner = &vm.shared.Globals
+			owner, ok := frame.Environment.ResolveOwner(name)
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
@@ -372,7 +351,7 @@ func (vm *VM) run(minFrameCount int) error {
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
-				stored = mapObj.Data[key]
+				stored, _ = mapObj.Get(key)
 			} else {
 				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
 			}
@@ -582,7 +561,7 @@ func (vm *VM) run(minFrameCount int) error {
 				if arr, ok := val.Obj.(*value.ObjArray); ok {
 					vm.push(value.NewInt(int64(len(arr.Elements))))
 				} else if m, ok := val.Obj.(*value.ObjMap); ok {
-					vm.push(value.NewInt(int64(len(m.Data))))
+					vm.push(value.NewInt(int64(m.Len())))
 				} else if s, ok := val.Obj.(string); ok {
 					vm.push(value.NewInt(int64(utf8.RuneCountInString(s))))
 				} else {
@@ -883,11 +862,20 @@ func (vm *VM) run(minFrameCount int) error {
 			ip++
 			fnVal := c.Constants[idx]
 			fn := fnVal.Obj.(*value.ObjFunction)
+			boundFn := &value.ObjFunction{
+				Name:         fn.Name,
+				Arity:        fn.Arity,
+				UpvalueCount: fn.UpvalueCount,
+				Params:       fn.Params,
+				Chunk:        fn.Chunk,
+				Environment:  frame.Environment,
+				RuntimeType:  fn.RuntimeType,
+			}
 
 			closure := &value.ObjClosure{
-				Function: fn,
-				Upvalues: make([]*value.ObjUpvalue, fn.UpvalueCount),
-				Globals:  frame.Globals,
+				Function:    boundFn,
+				Upvalues:    make([]*value.ObjUpvalue, fn.UpvalueCount),
+				Environment: frame.Environment,
 			}
 
 			for i := 0; i < fn.UpvalueCount; i++ {
@@ -980,7 +968,7 @@ func (vm *VM) run(minFrameCount int) error {
 
 			// Map expects keys and values on stack: K1, V1, K2, V2...
 			mapObj := value.NewMap()
-			mapData := mapObj.Obj.(*value.ObjMap).Data
+			mapping := mapObj.Obj.(*value.ObjMap)
 
 			for i := 0; i < count; i++ {
 				val := vm.pop()
@@ -998,7 +986,7 @@ func (vm *VM) run(minFrameCount int) error {
 				} else {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
-				mapData[key] = val
+				mapping.Set(key, val)
 			}
 			vm.push(mapObj)
 
@@ -1011,17 +999,12 @@ func (vm *VM) run(minFrameCount int) error {
 			nameConstant := c.Constants[index]
 			moduleName := nameConstant.Obj.(string)
 
-			// Check cache
-			if mod, ok := vm.GetModule(moduleName); ok {
-				vm.push(mod)
-			} else {
-				mod, err := vm.loadModule(moduleName)
-				if err != nil {
-					return vm.runtimeError(c, ip, "failed to import module '%s': %v", moduleName, err)
-				}
-				vm.SetModule(moduleName, mod)
-				vm.push(mod)
+			mod, err := vm.loadModule(moduleName)
+			if err != nil {
+				context := vm.runtimeError(c, ip, "failed to import module '%s'", moduleName)
+				return fmt.Errorf("%v: %w", context, err)
 			}
+			vm.push(mod)
 
 			frame = vm.currentFrame
 
@@ -1029,13 +1012,9 @@ func (vm *VM) run(minFrameCount int) error {
 			modVal := vm.pop()
 			if modVal.Type == value.VAL_OBJ {
 				if modMap, ok := modVal.Obj.(*value.ObjMap); ok {
-					for k, v := range modMap.Data {
+					for k, v := range modMap.Snapshot() {
 						if keyStr, ok := k.(string); ok {
-							if frame.Globals != nil {
-								frame.Globals[keyStr] = v
-							} else {
-								vm.SetGlobal(keyStr, v)
-							}
+							frame.Environment.SetLocal(keyStr, v)
 						}
 					}
 				} else {
@@ -1074,7 +1053,7 @@ func (vm *VM) run(minFrameCount int) error {
 						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
 
-					val, ok := mapObj.Data[key]
+					val, ok := mapObj.Get(key)
 					if !ok {
 						vm.push(value.NewNull())
 					} else {
@@ -1140,7 +1119,7 @@ func (vm *VM) run(minFrameCount int) error {
 					} else {
 						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
-					mapObj.Data[key] = val
+					mapObj.Set(key, val)
 					vm.push(val)
 					continue
 				}
@@ -1176,7 +1155,7 @@ func (vm *VM) run(minFrameCount int) error {
 				vm.push(val)
 			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
 				// Allow accessing map keys as properties (for modules)
-				val, ok := mapObj.Data[name]
+				val, ok := mapObj.Get(name)
 				if !ok {
 					return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
 				}

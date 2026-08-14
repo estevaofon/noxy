@@ -25,7 +25,7 @@ func (vm *VM) defineCollectionBuiltins() {
 				return value.NewInt(int64(len(arr.Elements)))
 			}
 			if mp, ok := arg.Obj.(*value.ObjMap); ok {
-				return value.NewInt(int64(len(mp.Data)))
+				return value.NewInt(int64(mp.Len()))
 			}
 		}
 		return value.NewInt(0)
@@ -38,8 +38,9 @@ func (vm *VM) defineCollectionBuiltins() {
 		mapVal := args[0]
 		if mapVal.Type == value.VAL_OBJ {
 			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
-				keys := make([]value.Value, 0, len(m.Data))
-				for k := range m.Data {
+				values := m.Snapshot()
+				keys := make([]value.Value, 0, len(values))
+				for k := range values {
 					if kInt, ok := k.(int64); ok {
 						keys = append(keys, value.NewInt(kInt))
 					} else if kStr, ok := k.(string); ok {
@@ -60,13 +61,17 @@ func (vm *VM) defineCollectionBuiltins() {
 		},
 		ReturnType: "void",
 	}
-	vm.DefineNativeWithSignature("delete", deleteSignature, func(args []value.Value) value.Value {
-		if len(args) != 2 {
-			return value.NewNull()
+	vm.DefineContextualNativeWithSignature("delete", deleteSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
 		}
-		mapVal, err := vm.resolveReferenceValue(args[0])
+		if len(args) != 2 {
+			return value.NewNull(), nil
+		}
+		mapVal, err := machine.resolveReferenceValue(args[0])
 		if err != nil {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		keyVal := args[1]
 		if mapVal.Type == value.VAL_OBJ {
@@ -80,11 +85,11 @@ func (vm *VM) defineCollectionBuiltins() {
 					}
 				}
 				if key != nil {
-					delete(m.Data, key)
+					m.Delete(key)
 				}
 			}
 		}
-		return value.NewNull()
+		return value.NewNull(), nil
 	})
 	appendSignature := value.NativeSignature{
 		Arity: 2,
@@ -93,25 +98,29 @@ func (vm *VM) defineCollectionBuiltins() {
 		},
 		ReturnType: "void",
 	}
-	vm.DefineNativeWithSignature("append", appendSignature, func(args []value.Value) value.Value {
+	vm.DefineContextualNativeWithSignature("append", appendSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
+		}
 		if len(args) != 2 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		targetRef, _ := args[0].Obj.(*value.ObjRef)
-		arrVal, err := vm.resolveReferenceValue(args[0])
+		arrVal, err := machine.resolveReferenceValue(args[0])
 		if err != nil {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		item := args[1]
-		if !vm.appendItemCompatible(targetRef, item) {
-			return value.NewNull()
+		if !machine.appendItemCompatible(targetRef, item) {
+			return value.NewNull(), nil
 		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				arr.Elements = append(arr.Elements, item)
 			}
 		}
-		return value.NewNull()
+		return value.NewNull(), nil
 	})
 	popSignature := value.NativeSignature{
 		Arity: 1,
@@ -120,25 +129,29 @@ func (vm *VM) defineCollectionBuiltins() {
 		},
 		ReturnType: "any",
 	}
-	vm.DefineNativeWithSignature("pop", popSignature, func(args []value.Value) value.Value {
-		if len(args) != 1 {
-			return value.NewNull()
+	vm.DefineContextualNativeWithSignature("pop", popSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
 		}
-		arrVal, err := vm.resolveReferenceValue(args[0])
+		if len(args) != 1 {
+			return value.NewNull(), nil
+		}
+		arrVal, err := machine.resolveReferenceValue(args[0])
 		if err != nil {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				if len(arr.Elements) == 0 {
-					return value.NewNull()
+					return value.NewNull(), nil
 				}
 				val := arr.Elements[len(arr.Elements)-1]
 				arr.Elements = arr.Elements[:len(arr.Elements)-1]
-				return val
+				return val, nil
 			}
 		}
-		return value.NewNull()
+		return value.NewNull(), nil
 	})
 	vm.DefineNative("slice", func(args []value.Value) value.Value {
 		if len(args) < 3 {
@@ -231,7 +244,7 @@ func (vm *VM) defineCollectionBuiltins() {
 				} else {
 					return value.NewBool(false)
 				}
-				_, ok := mapObj.Data[key]
+				_, ok := mapObj.Get(key)
 				return value.NewBool(ok)
 			}
 		}

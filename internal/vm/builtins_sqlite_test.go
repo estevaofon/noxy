@@ -1,7 +1,9 @@
 package vm
 
 import (
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -37,21 +39,145 @@ func requireSQLiteExecResult(t *testing.T, got value.Value, definitions sqliteTe
 	return result
 }
 
+func cleanupSQLiteResources(t *testing.T, machine *VM) {
+	t.Helper()
+	t.Cleanup(func() {
+		for handle := range machine.shared.Statements.snapshot() {
+			resource, ok := machine.shared.Statements.remove(handle)
+			if !ok {
+				continue
+			}
+			resource.mu.Lock()
+			resource.closed = true
+			statement := resource.statement
+			resource.statement = nil
+			resource.parameters = nil
+			resource.mu.Unlock()
+			if statement != nil {
+				_ = statement.Close()
+			}
+		}
+		for handle := range machine.shared.Databases.snapshot() {
+			resource, ok := machine.shared.Databases.remove(handle)
+			if !ok {
+				continue
+			}
+			resource.stateMu.Lock()
+			resource.closed = true
+			database := resource.database
+			resource.stateMu.Unlock()
+			if database != nil {
+				_ = database.Close()
+			}
+		}
+	})
+}
+
+func TestSQLiteHandlesAreSharedAcrossVMs(t *testing.T) {
+	parent := New()
+	cleanupSQLiteResources(t, parent)
+	child := NewWithShared(parent.shared, parent.Config)
+	definitions := newSQLiteTestDefinitions()
+	database := callBuiltin(t, parent, "sqlite_open",
+		value.NewString(filepath.Join(t.TempDir(), "shared.sqlite")),
+		sqliteTemplate(definitions.database),
+	)
+	defer callBuiltin(t, parent, "sqlite_close", database)
+	databaseHandle := int(requireBuiltinInstance(t, database, definitions.database).Fields["handle"].AsInt)
+	if _, ok := parent.shared.Databases.get(databaseHandle); !ok {
+		t.Fatalf("database handle %d was not published to shared resources", databaseHandle)
+	}
+	requireSQLiteExecResult(t, callBuiltin(t, parent, "sqlite_exec",
+		database,
+		value.NewString("CREATE TABLE entries (id INTEGER, name TEXT)"),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+	statement := callBuiltin(t, parent, "sqlite_prepare",
+		database,
+		value.NewString("INSERT INTO entries VALUES (?, ?)"),
+		sqliteTemplate(definitions.statement),
+	)
+	defer callBuiltin(t, parent, "sqlite_finalize", statement)
+	statementHandle := int(requireBuiltinInstance(t, statement, definitions.statement).Fields["handle"].AsInt)
+	if _, ok := parent.shared.Statements.get(statementHandle); !ok {
+		t.Fatalf("statement handle %d was not published to shared resources", statementHandle)
+	}
+	callBuiltin(t, parent, "sqlite_bind_int", statement, value.NewInt(1), value.NewInt(1))
+	callBuiltin(t, child, "sqlite_bind_text", statement, value.NewInt(2), value.NewString("shared"))
+	requireSQLiteExecResult(t, callBuiltin(t, child, "sqlite_step_exec",
+		statement, sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	query := requireBuiltinInstance(t, callBuiltin(t, parent, "sqlite_query",
+		database,
+		value.NewString("SELECT id, name FROM entries"),
+		sqliteTemplate(definitions.queryResult),
+		sqliteTemplate(definitions.row),
+	), definitions.queryResult)
+	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(1))
+	rows := requireBuiltinArray(t, query.Fields["rows"])
+	row := requireBuiltinInstance(t, rows.Elements[0], definitions.row)
+	assertBuiltinArray(t, row.Fields["values"], []value.Value{value.NewInt(1), value.NewString("shared")})
+}
+
+func TestSQLiteStatementParametersConcurrent(t *testing.T) {
+	machine := New()
+	cleanupSQLiteResources(t, machine)
+	definitions := newSQLiteTestDefinitions()
+	database := callBuiltin(t, machine, "sqlite_open",
+		value.NewString(filepath.Join(t.TempDir(), "parameters.sqlite")),
+		sqliteTemplate(definitions.database),
+	)
+	defer callBuiltin(t, machine, "sqlite_close", database)
+	statement := callBuiltin(t, machine, "sqlite_prepare",
+		database,
+		value.NewString("SELECT ?, ?"),
+		sqliteTemplate(definitions.statement),
+	)
+	defer callBuiltin(t, machine, "sqlite_finalize", statement)
+	statementHandle := int(requireBuiltinInstance(t, statement, definitions.statement).Fields["handle"].AsInt)
+	if _, ok := machine.shared.Statements.get(statementHandle); !ok {
+		t.Fatalf("statement handle %d was not published to shared resources", statementHandle)
+	}
+
+	bindInt := requireBuiltin(t, machine, "sqlite_bind_int")
+	bindText := requireBuiltin(t, machine, "sqlite_bind_text")
+	start := make(chan struct{})
+	errors := make(chan error, 16)
+	var workers sync.WaitGroup
+	for worker := 0; worker < 16; worker++ {
+		workers.Add(1)
+		go func(index int) {
+			defer workers.Done()
+			<-start
+			for iteration := 0; iteration < 100; iteration++ {
+				var err error
+				if index%2 == 0 {
+					_, err = bindInt.Invoke(machine, []value.Value{statement, value.NewInt(1), value.NewInt(int64(index))})
+				} else {
+					_, err = bindText.Invoke(machine, []value.Value{statement, value.NewInt(2), value.NewString(fmt.Sprint(index))})
+				}
+				if err != nil {
+					errors <- err
+					return
+				}
+			}
+		}(worker)
+	}
+	close(start)
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatalf("concurrent bind: %v", err)
+	}
+	callBuiltin(t, machine, "sqlite_reset", statement)
+	callBuiltin(t, machine, "sqlite_finalize", statement)
+}
+
 func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	machine := New()
-	defer func() {
-		machine.shared.DbLock.Lock()
-		defer machine.shared.DbLock.Unlock()
-		for handle, statement := range machine.shared.StmtHandles {
-			_ = statement.Close()
-			delete(machine.shared.StmtHandles, handle)
-			delete(machine.shared.StmtParams, handle)
-		}
-		for handle, database := range machine.shared.DbHandles {
-			_ = database.Close()
-			delete(machine.shared.DbHandles, handle)
-		}
-	}()
+	cleanupSQLiteResources(t, machine)
 	definitions := newSQLiteTestDefinitions()
 	databasePath := filepath.Join(t.TempDir(), "stateful-builtins.sqlite")
 	databaseTemplate := sqliteTemplate(definitions.database)
@@ -59,7 +185,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	database := requireBuiltinInstance(t, databaseValue, definitions.database)
 	assertBuiltinValue(t, database.Fields["open"], value.NewBool(true))
 	databaseHandle := int(database.Fields["handle"].AsInt)
-	if _, ok := machine.shared.DbHandles[databaseHandle]; !ok {
+	if _, ok := machine.shared.Databases.get(databaseHandle); !ok {
 		t.Fatalf("database handle %d is not registered", databaseHandle)
 	}
 
@@ -85,7 +211,8 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	)
 	statement := requireBuiltinInstance(t, statementValue, definitions.statement)
 	statementHandle := int(statement.Fields["handle"].AsInt)
-	if _, ok := machine.shared.StmtHandles[statementHandle]; !ok {
+	statementResource, ok := machine.shared.Statements.get(statementHandle)
+	if !ok {
 		t.Fatalf("statement handle %d is not registered", statementHandle)
 	}
 
@@ -96,8 +223,11 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	assertBuiltinValue(t, stepResult.Fields["rows_affected"], value.NewInt(1))
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_reset", statementValue), value.NewNull())
-	if got := len(machine.shared.StmtParams[statementHandle]); got != 0 {
-		t.Fatalf("statement parameter count after reset = %d, want 0", got)
+	statementResource.mu.Lock()
+	parameterCount := len(statementResource.parameters)
+	statementResource.mu.Unlock()
+	if parameterCount != 0 {
+		t.Fatalf("statement parameter count after reset = %d, want 0", parameterCount)
 	}
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_bind_int", statementValue, value.NewInt(1), value.NewInt(3)), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_bind_text", statementValue, value.NewInt(2), value.NewString("gamma")), value.NewNull())
@@ -129,11 +259,8 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	}
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_finalize", statementValue), value.NewNull())
-	if _, ok := machine.shared.StmtHandles[statementHandle]; ok {
+	if _, ok := machine.shared.Statements.get(statementHandle); ok {
 		t.Fatalf("finalized statement handle %d remains registered", statementHandle)
-	}
-	if _, ok := machine.shared.StmtParams[statementHandle]; ok {
-		t.Fatalf("finalized statement parameters %d remain registered", statementHandle)
 	}
 	invalidStep := requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_step_exec", statementValue, sqliteTemplate(definitions.execResult)), definitions, false, "invalid statement handle")
 	assertBuiltinValue(t, invalidStep.Fields["rows_affected"], value.NewInt(0))
@@ -143,7 +270,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_close", databaseValue), value.NewNull())
 	assertBuiltinValue(t, database.Fields["open"], value.NewBool(false))
-	if _, ok := machine.shared.DbHandles[databaseHandle]; ok {
+	if _, ok := machine.shared.Databases.get(databaseHandle); ok {
 		t.Fatalf("closed database handle %d remains registered", databaseHandle)
 	}
 	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec", databaseValue, value.NewString("SELECT 1"), sqliteTemplate(definitions.execResult)), definitions, false, "invalid database handle")

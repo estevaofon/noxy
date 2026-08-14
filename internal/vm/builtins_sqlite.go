@@ -10,473 +10,444 @@ import (
 )
 
 func (vm *VM) defineSQLiteBuiltins() {
-	// SQLite Native Functions
-	vm.DefineNative("sqlite_open", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("sqlite_open", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) != 2 {
-			return value.NewNull()
-		} // path, wrapper struct
-		path := args[0].String()
+			return value.NewNull(), nil
+		}
 		structInst, ok := args[1].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		structDef := structInst.Struct
 
-		db, err := sql.Open("sqlite", path)
-		openVal := true
+		database, openErr := sql.Open("sqlite", args[0].String())
+		open := openErr == nil
+		if open {
+			open = database.Ping() == nil
+		}
+		handle := machine.shared.Databases.add(&DatabaseResource{
+			database: database,
+			closed:   database == nil,
+		})
+
+		instance := value.NewInstance(structInst.Struct).Obj.(*value.ObjInstance)
+		instance.Fields["handle"] = value.NewInt(int64(handle))
+		instance.Fields["open"] = value.NewBool(open)
+		return value.Value{Type: value.VAL_OBJ, Obj: instance}, nil
+	})
+
+	vm.DefineContextualNative("sqlite_close", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
 		if err != nil {
-			openVal = false
-		} else {
-			if err = db.Ping(); err != nil {
-				openVal = false
-			}
+			return value.NewNull(), err
 		}
-
-		vm.shared.DbLock.Lock()
-		id := vm.shared.NextDbID
-		vm.shared.NextDbID++
-		vm.shared.DbHandles[id] = db
-		vm.shared.DbLock.Unlock()
-
-		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["handle"] = value.NewInt(int64(id))
-		inst.Fields["open"] = value.NewBool(openVal)
-
-		return value.Value{Type: value.VAL_OBJ, Obj: inst}
-	})
-
-	vm.DefineNative("sqlite_close", func(args []value.Value) value.Value {
 		if len(args) != 1 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		databaseInstance, ok := args[0].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
-		handle := int(dbInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		defer vm.shared.DbLock.Unlock()
-
-		if db, ok := vm.shared.DbHandles[handle]; ok {
-			db.Close()
-			delete(vm.shared.DbHandles, handle)
-			dbInst.Fields["open"] = value.NewBool(false)
-		}
-		return value.NewNull()
-	})
-
-	vm.DefineNative("sqlite_exec", func(args []value.Value) value.Value {
-		if len(args) < 3 {
-			return value.NewNull()
-		}
-		dbInst, ok := args[0].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		sqlStr := args[1].String()
-
-		resTmplInst, ok := args[2].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		resStruct := resTmplInst.Struct
-
-		handle := int(dbInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		db, ok := vm.shared.DbHandles[handle]
-		vm.shared.DbLock.Unlock() // Unlock for Exec
-
-		if ok {
-			result, err := db.Exec(sqlStr)
-			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-			if err != nil {
-				resInst.Fields["ok"] = value.NewBool(false)
-				resInst.Fields["error"] = value.NewString(err.Error())
-				resInst.Fields["rows_affected"] = value.NewInt(0)
-				resInst.Fields["last_insert_id"] = value.NewInt(0)
-			} else {
-				rowsAffected, _ := result.RowsAffected()
-				lastId, _ := result.LastInsertId()
-				resInst.Fields["ok"] = value.NewBool(true)
-				resInst.Fields["error"] = value.NewString("")
-				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
-				resInst.Fields["last_insert_id"] = value.NewInt(lastId)
+		resource, exists := machine.shared.Databases.remove(int(databaseInstance.Fields["handle"].AsInt))
+		if exists {
+			resource.stateMu.Lock()
+			database := resource.database
+			resource.closed = true
+			resource.stateMu.Unlock()
+			if database != nil {
+				_ = database.Close()
 			}
-			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+			databaseInstance.Fields["open"] = value.NewBool(false)
 		}
-		// Invalid handle
-		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-		resInst.Fields["ok"] = value.NewBool(false)
-		resInst.Fields["error"] = value.NewString("invalid database handle")
-		resInst.Fields["rows_affected"] = value.NewInt(0)
-		resInst.Fields["last_insert_id"] = value.NewInt(0)
-		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+		return value.NewNull(), nil
 	})
 
-	vm.DefineNative("sqlite_exec_params", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("sqlite_exec", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 3 {
+			return value.NewNull(), nil
+		}
+		databaseInstance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resultTemplate, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+
+		database, valid := sqliteDatabase(machine, databaseInstance)
+		if !valid {
+			return sqliteExecError(resultTemplate.Struct, "invalid database handle"), nil
+		}
+		result, execErr := database.Exec(args[1].String())
+		return sqliteExecResult(resultTemplate.Struct, result, execErr), nil
+	})
+
+	vm.DefineContextualNative("sqlite_exec_params", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) < 4 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+		databaseInstance, ok := args[0].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		sqlStr := args[1].String()
-		paramsArray, ok := args[2].Obj.(*value.ObjArray)
+		parameters, ok := args[2].Obj.(*value.ObjArray)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-
-		resTmplInst, ok := args[3].Obj.(*value.ObjInstance)
+		resultTemplate, ok := args[3].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		resStruct := resTmplInst.Struct
 
-		handle := int(dbInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		db, ok := vm.shared.DbHandles[handle]
-		vm.shared.DbLock.Unlock()
-
-		if ok {
-			// Convert params
-			queryArgs := make([]interface{}, len(paramsArray.Elements))
-			for i, val := range paramsArray.Elements {
-				switch val.Type {
-				case value.VAL_INT:
-					queryArgs[i] = val.AsInt
-				case value.VAL_FLOAT:
-					queryArgs[i] = val.AsFloat
-				case value.VAL_BOOL:
-					queryArgs[i] = val.AsBool
-				case value.VAL_NULL:
-					queryArgs[i] = nil
-				case value.VAL_OBJ:
-					if b, ok := val.Obj.(string); ok {
-						queryArgs[i] = b
-					} else {
-						queryArgs[i] = val.String()
-					}
-				default:
-					queryArgs[i] = val.String()
-				}
-			}
-
-			result, err := db.Exec(sqlStr, queryArgs...)
-			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-			if err != nil {
-				resInst.Fields["ok"] = value.NewBool(false)
-				resInst.Fields["error"] = value.NewString(err.Error())
-				resInst.Fields["rows_affected"] = value.NewInt(0)
-				resInst.Fields["last_insert_id"] = value.NewInt(0)
-			} else {
-				rowsAffected, _ := result.RowsAffected()
-				lastId, _ := result.LastInsertId()
-				resInst.Fields["ok"] = value.NewBool(true)
-				resInst.Fields["error"] = value.NewString("")
-				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
-				resInst.Fields["last_insert_id"] = value.NewInt(lastId)
-			}
-			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+		database, valid := sqliteDatabase(machine, databaseInstance)
+		if !valid {
+			return sqliteExecError(resultTemplate.Struct, "invalid database handle"), nil
 		}
-		// Invalid handle
-		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-		resInst.Fields["ok"] = value.NewBool(false)
-		resInst.Fields["error"] = value.NewString("invalid database handle")
-		resInst.Fields["rows_affected"] = value.NewInt(0)
-		resInst.Fields["last_insert_id"] = value.NewInt(0)
-		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
+		queryArguments := make([]interface{}, len(parameters.Elements))
+		for index, parameter := range parameters.Elements {
+			queryArguments[index] = sqliteParameter(parameter)
+		}
+		result, execErr := database.Exec(args[1].String(), queryArguments...)
+		return sqliteExecResult(resultTemplate.Struct, result, execErr), nil
 	})
 
-	vm.DefineNative("sqlite_prepare", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("sqlite_prepare", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) < 3 {
-			return value.NewNull()
-		} // db, sql, stmt wrapper
-		dbInst, ok := args[0].Obj.(*value.ObjInstance)
+			return value.NewNull(), nil
+		}
+		databaseInstance, ok := args[0].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		sqlStr := args[1].String()
-		stmtInst, ok := args[2].Obj.(*value.ObjInstance)
+		statementTemplate, ok := args[2].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		stmtStructDef := stmtInst.Struct
 
-		handle := int(dbInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		db, ok := vm.shared.DbHandles[handle]
-		vm.shared.DbLock.Unlock()
-
-		if ok {
-			stmt, err := db.Prepare(sqlStr)
-			if err == nil {
-				vm.shared.DbLock.Lock()
-				id := vm.shared.NextStmtID
-				vm.shared.NextStmtID++
-				vm.shared.StmtHandles[id] = stmt
-				vm.shared.StmtParams[id] = make(map[int]interface{})
-				vm.shared.DbLock.Unlock()
-
-				inst := value.NewInstance(stmtStructDef).Obj.(*value.ObjInstance)
-				inst.Fields["handle"] = value.NewInt(int64(id))
-				return value.Value{Type: value.VAL_OBJ, Obj: inst}
-			}
+		database, valid := sqliteDatabase(machine, databaseInstance)
+		if !valid {
+			return value.NewNull(), nil
 		}
-		return value.NewNull()
+		statement, prepareErr := database.Prepare(args[1].String())
+		if prepareErr != nil {
+			return value.NewNull(), nil
+		}
+		handle := machine.shared.Statements.add(&StatementResource{
+			statement:  statement,
+			parameters: make(map[int]interface{}),
+		})
+		instance := value.NewInstance(statementTemplate.Struct).Obj.(*value.ObjInstance)
+		instance.Fields["handle"] = value.NewInt(int64(handle))
+		return value.Value{Type: value.VAL_OBJ, Obj: instance}, nil
 	})
 
-	bindFunc := func(args []value.Value, val interface{}) value.Value {
+	vm.DefineContextualNative("sqlite_bind_text", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) < 3 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
+		return bindSQLiteParameter(machine, args, args[2].String()), nil
+	})
+	vm.DefineContextualNative("sqlite_bind_float", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 3 {
+			return value.NewNull(), nil
+		}
+		return bindSQLiteParameter(machine, args, args[2].AsFloat), nil
+	})
+	vm.DefineContextualNative("sqlite_bind_int", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 3 {
+			return value.NewNull(), nil
+		}
+		return bindSQLiteParameter(machine, args, args[2].AsInt), nil
+	})
+
+	vm.DefineContextualNative("sqlite_step_exec", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 2 {
+			return value.NewNull(), nil
+		}
+		statementInstance, ok := args[0].Obj.(*value.ObjInstance)
 		if !ok {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
-		idx := int(args[1].AsInt)
+		resultTemplate, ok := args[1].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
 
-		handle := int(stmtInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		defer vm.shared.DbLock.Unlock()
-
-		if _, ok := vm.shared.StmtHandles[handle]; ok {
-			if vm.shared.StmtParams[handle] == nil {
-				vm.shared.StmtParams[handle] = make(map[int]interface{})
+		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+		if !exists {
+			return sqliteExecError(resultTemplate.Struct, "invalid statement handle"), nil
+		}
+		resource.mu.Lock()
+		if resource.closed || resource.statement == nil {
+			resource.mu.Unlock()
+			return sqliteExecError(resultTemplate.Struct, "invalid statement handle"), nil
+		}
+		statement := resource.statement
+		maxIndex := 0
+		for index := range resource.parameters {
+			if index > maxIndex {
+				maxIndex = index
 			}
-			vm.shared.StmtParams[handle][idx] = val
 		}
+		parameters := make([]interface{}, maxIndex)
+		for index := 1; index <= maxIndex; index++ {
+			parameters[index-1] = resource.parameters[index]
+		}
+		resource.parameters = make(map[int]interface{})
+		resource.mu.Unlock()
+
+		result, execErr := statement.Exec(parameters...)
+		return sqliteExecResult(resultTemplate.Struct, result, execErr), nil
+	})
+
+	vm.DefineContextualNative("sqlite_reset", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 1 {
+			return value.NewNull(), nil
+		}
+		statementInstance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+		if exists {
+			resource.mu.Lock()
+			if !resource.closed && resource.statement != nil {
+				resource.parameters = make(map[int]interface{})
+			}
+			resource.mu.Unlock()
+		}
+		return value.NewNull(), nil
+	})
+
+	vm.DefineContextualNative("sqlite_finalize", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 1 {
+			return value.NewNull(), nil
+		}
+		statementInstance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resource, exists := machine.shared.Statements.remove(int(statementInstance.Fields["handle"].AsInt))
+		if !exists {
+			return value.NewNull(), nil
+		}
+		resource.mu.Lock()
+		resource.closed = true
+		statement := resource.statement
+		resource.statement = nil
+		resource.parameters = nil
+		resource.mu.Unlock()
+		if statement != nil {
+			_ = statement.Close()
+		}
+		return value.NewNull(), nil
+	})
+
+	vm.DefineContextualNative("sqlite_query", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 4 {
+			return value.NewNull(), nil
+		}
+		databaseInstance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resultTemplate, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		rowTemplate, ok := args[3].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+
+		database, valid := sqliteDatabase(machine, databaseInstance)
+		if !valid {
+			return sqliteQueryError(resultTemplate.Struct, "invalid database handle"), nil
+		}
+		rows, queryErr := database.Query(args[1].String())
+		if queryErr != nil {
+			return sqliteQueryError(resultTemplate.Struct, queryErr.Error()), nil
+		}
+		defer rows.Close()
+
+		columns, _ := rows.Columns()
+		columnValues := make([]value.Value, len(columns))
+		for index, column := range columns {
+			columnValues[index] = value.NewString(column)
+		}
+		var rowValues []value.Value
+		for rows.Next() {
+			destination := make([]interface{}, len(columns))
+			destinationPointers := make([]interface{}, len(columns))
+			for index := range destination {
+				destinationPointers[index] = &destination[index]
+			}
+			_ = rows.Scan(destinationPointers...)
+
+			values := make([]value.Value, len(columns))
+			for index, item := range destination {
+				values[index] = sqliteValue(item)
+			}
+			row := value.NewInstance(rowTemplate.Struct).Obj.(*value.ObjInstance)
+			row.Fields["values"] = value.NewArray(values)
+			rowValues = append(rowValues, value.Value{Type: value.VAL_OBJ, Obj: row})
+		}
+
+		result := value.NewInstance(resultTemplate.Struct).Obj.(*value.ObjInstance)
+		result.Fields["columns"] = value.NewArray(columnValues)
+		result.Fields["rows"] = value.NewArray(rowValues)
+		result.Fields["row_count"] = value.NewInt(int64(len(rowValues)))
+		result.Fields["ok"] = value.NewBool(true)
+		result.Fields["error"] = value.NewString("")
+		return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
+	})
+}
+
+func sqliteDatabase(machine *VM, instance *value.ObjInstance) (*sql.DB, bool) {
+	resource, ok := machine.shared.Databases.get(int(instance.Fields["handle"].AsInt))
+	if !ok {
+		return nil, false
+	}
+	resource.stateMu.Lock()
+	defer resource.stateMu.Unlock()
+	if resource.closed || resource.database == nil {
+		return nil, false
+	}
+	return resource.database, true
+}
+
+func bindSQLiteParameter(machine *VM, args []value.Value, parameter interface{}) value.Value {
+	statementInstance, ok := args[0].Obj.(*value.ObjInstance)
+	if !ok {
 		return value.NewNull()
 	}
-
-	vm.DefineNative("sqlite_bind_text", func(args []value.Value) value.Value {
-		return bindFunc(args, args[2].String())
-	})
-	vm.DefineNative("sqlite_bind_float", func(args []value.Value) value.Value {
-		return bindFunc(args, args[2].AsFloat)
-	})
-	vm.DefineNative("sqlite_bind_int", func(args []value.Value) value.Value {
-		return bindFunc(args, args[2].AsInt)
-	})
-
-	vm.DefineNative("sqlite_step_exec", func(args []value.Value) value.Value {
-		if len(args) < 2 {
-			return value.NewNull()
-		}
-		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		resTmplInst, ok := args[1].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		resStruct := resTmplInst.Struct
-
-		handle := int(stmtInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		stmt, ok := vm.shared.StmtHandles[handle]
-		var params map[int]interface{}
-		if ok {
-			origParams := vm.shared.StmtParams[handle]
-			params = make(map[int]interface{})
-			for k, v := range origParams {
-				params[k] = v
-			}
-		}
-		vm.shared.DbLock.Unlock()
-
-		if ok {
-			// params := vm.stmtParams[handle] // Replaced by copy
-			var maxIdx int
-			for k := range params {
-				if k > maxIdx {
-					maxIdx = k
-				}
-			}
-			argsList := make([]interface{}, maxIdx)
-			for k, v := range params {
-				if k > 0 && k <= maxIdx {
-					argsList[k-1] = v
-				}
-			}
-			result, err := stmt.Exec(argsList...)
-
-			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-			if err != nil {
-				resInst.Fields["ok"] = value.NewBool(false)
-				resInst.Fields["error"] = value.NewString(err.Error())
-				resInst.Fields["rows_affected"] = value.NewInt(0)
-				resInst.Fields["last_insert_id"] = value.NewInt(0)
-			} else {
-				rowsAffected, _ := result.RowsAffected()
-				lastId, _ := result.LastInsertId()
-				resInst.Fields["ok"] = value.NewBool(true)
-				resInst.Fields["error"] = value.NewString("")
-				resInst.Fields["rows_affected"] = value.NewInt(rowsAffected)
-				resInst.Fields["last_insert_id"] = value.NewInt(lastId)
-			}
-			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
-		}
-
-		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-		resInst.Fields["ok"] = value.NewBool(false)
-		resInst.Fields["error"] = value.NewString("invalid statement handle")
-		resInst.Fields["rows_affected"] = value.NewInt(0)
-		resInst.Fields["last_insert_id"] = value.NewInt(0)
-		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
-	})
-
-	vm.DefineNative("sqlite_reset", func(args []value.Value) value.Value {
-		if len(args) < 1 {
-			return value.NewNull()
-		}
-		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		handle := int(stmtInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		defer vm.shared.DbLock.Unlock()
-
-		if _, ok := vm.shared.StmtHandles[handle]; ok {
-			vm.shared.StmtParams[handle] = make(map[int]interface{})
-		}
+	resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+	if !exists {
 		return value.NewNull()
-	})
-
-	vm.DefineNative("sqlite_finalize", func(args []value.Value) value.Value {
-		if len(args) < 1 {
-			return value.NewNull()
-		}
-		stmtInst, ok := args[0].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		handle := int(stmtInst.Fields["handle"].AsInt)
-
-		vm.shared.DbLock.Lock()
-		defer vm.shared.DbLock.Unlock()
-
-		if stmt, ok := vm.shared.StmtHandles[handle]; ok {
-			stmt.Close()
-			delete(vm.shared.StmtHandles, handle)
-			delete(vm.shared.StmtParams, handle)
-		}
+	}
+	resource.mu.Lock()
+	defer resource.mu.Unlock()
+	if resource.closed || resource.statement == nil {
 		return value.NewNull()
-	})
+	}
+	if resource.parameters == nil {
+		resource.parameters = make(map[int]interface{})
+	}
+	resource.parameters[int(args[1].AsInt)] = parameter
+	return value.NewNull()
+}
 
-	vm.DefineNative("sqlite_query", func(args []value.Value) value.Value {
-		if len(args) < 4 {
-			return value.NewNull()
-		} // db, sql, tmplQueryResult, tmplRow
-
-		dbInst, ok := args[0].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
+func sqliteParameter(parameter value.Value) interface{} {
+	switch parameter.Type {
+	case value.VAL_INT:
+		return parameter.AsInt
+	case value.VAL_FLOAT:
+		return parameter.AsFloat
+	case value.VAL_BOOL:
+		return parameter.AsBool
+	case value.VAL_NULL:
+		return nil
+	case value.VAL_OBJ:
+		if text, ok := parameter.Obj.(string); ok {
+			return text
 		}
-		sqlStr := args[1].String()
+		return parameter.String()
+	default:
+		return parameter.String()
+	}
+}
 
-		resTmplInst, ok := args[2].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		resStruct := resTmplInst.Struct
+func sqliteExecResult(definition *value.ObjStruct, result sql.Result, err error) value.Value {
+	if err != nil {
+		return sqliteExecError(definition, err.Error())
+	}
+	rowsAffected, _ := result.RowsAffected()
+	lastInsertID, _ := result.LastInsertId()
+	instance := value.NewInstance(definition).Obj.(*value.ObjInstance)
+	instance.Fields["ok"] = value.NewBool(true)
+	instance.Fields["error"] = value.NewString("")
+	instance.Fields["rows_affected"] = value.NewInt(rowsAffected)
+	instance.Fields["last_insert_id"] = value.NewInt(lastInsertID)
+	return value.Value{Type: value.VAL_OBJ, Obj: instance}
+}
 
-		rowTmplInst, ok := args[3].Obj.(*value.ObjInstance)
-		if !ok {
-			return value.NewNull()
-		}
-		rowStruct := rowTmplInst.Struct
+func sqliteExecError(definition *value.ObjStruct, errorText string) value.Value {
+	instance := value.NewInstance(definition).Obj.(*value.ObjInstance)
+	instance.Fields["ok"] = value.NewBool(false)
+	instance.Fields["error"] = value.NewString(errorText)
+	instance.Fields["rows_affected"] = value.NewInt(0)
+	instance.Fields["last_insert_id"] = value.NewInt(0)
+	return value.Value{Type: value.VAL_OBJ, Obj: instance}
+}
 
-		handle := int(dbInst.Fields["handle"].AsInt)
+func sqliteQueryError(definition *value.ObjStruct, errorText string) value.Value {
+	instance := value.NewInstance(definition).Obj.(*value.ObjInstance)
+	instance.Fields["columns"] = value.NewArray(nil)
+	instance.Fields["rows"] = value.NewArray(nil)
+	instance.Fields["row_count"] = value.NewInt(0)
+	instance.Fields["ok"] = value.NewBool(false)
+	instance.Fields["error"] = value.NewString(errorText)
+	return value.Value{Type: value.VAL_OBJ, Obj: instance}
+}
 
-		vm.shared.DbLock.Lock()
-		db, ok := vm.shared.DbHandles[handle]
-		vm.shared.DbLock.Unlock()
-
-		if ok {
-			rows, err := db.Query(sqlStr)
-			if err != nil {
-				// Return QueryResult with ok=false and error message
-				resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-				resInst.Fields["columns"] = value.NewArray(nil)
-				resInst.Fields["rows"] = value.NewArray(nil)
-				resInst.Fields["row_count"] = value.NewInt(0)
-				resInst.Fields["ok"] = value.NewBool(false)
-				resInst.Fields["error"] = value.NewString(err.Error())
-				return value.Value{Type: value.VAL_OBJ, Obj: resInst}
-			}
-			defer rows.Close()
-
-			cols, _ := rows.Columns()
-			colVals := make([]value.Value, len(cols))
-			for i, c := range cols {
-				colVals[i] = value.NewString(c)
-			}
-
-			var rowInsts []value.Value
-
-			for rows.Next() {
-				// Scan to interface{}
-				dest := make([]interface{}, len(cols))
-				destPtrs := make([]interface{}, len(cols))
-				for i := range dest {
-					destPtrs[i] = &dest[i]
-				}
-
-				rows.Scan(destPtrs...)
-
-				rowVals := make([]value.Value, len(cols))
-				for i, v := range dest {
-					// Convert Go type to Noxy value
-					switch tv := v.(type) {
-					case nil:
-						rowVals[i] = value.NewNull()
-					case int64:
-						rowVals[i] = value.NewInt(tv)
-					case float64:
-						rowVals[i] = value.NewFloat(tv)
-					case string:
-						rowVals[i] = value.NewString(tv)
-					case []byte:
-						rowVals[i] = value.NewString(string(tv))
-					default:
-						rowVals[i] = value.NewString(fmt.Sprintf("%v", tv))
-					}
-				}
-
-				// Create Row instance
-				rowInst := value.NewInstance(rowStruct).Obj.(*value.ObjInstance)
-				rowInst.Fields["values"] = value.NewArray(rowVals)
-				rowInsts = append(rowInsts, value.Value{Type: value.VAL_OBJ, Obj: rowInst})
-			}
-
-			// Create QueryResult instance with ok=true
-			resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-			resInst.Fields["columns"] = value.NewArray(colVals)
-			resInst.Fields["rows"] = value.NewArray(rowInsts)
-			resInst.Fields["row_count"] = value.NewInt(int64(len(rowInsts)))
-			resInst.Fields["ok"] = value.NewBool(true)
-			resInst.Fields["error"] = value.NewString("")
-
-			return value.Value{Type: value.VAL_OBJ, Obj: resInst}
-		}
-		// DB handle not found - return error result
-		resInst := value.NewInstance(resStruct).Obj.(*value.ObjInstance)
-		resInst.Fields["columns"] = value.NewArray(nil)
-		resInst.Fields["rows"] = value.NewArray(nil)
-		resInst.Fields["row_count"] = value.NewInt(0)
-		resInst.Fields["ok"] = value.NewBool(false)
-		resInst.Fields["error"] = value.NewString("invalid database handle")
-		return value.Value{Type: value.VAL_OBJ, Obj: resInst}
-	})
+func sqliteValue(item interface{}) value.Value {
+	switch typed := item.(type) {
+	case nil:
+		return value.NewNull()
+	case int64:
+		return value.NewInt(typed)
+	case float64:
+		return value.NewFloat(typed)
+	case string:
+		return value.NewString(typed)
+	case []byte:
+		return value.NewString(string(typed))
+	default:
+		return value.NewString(fmt.Sprintf("%v", typed))
+	}
 }
