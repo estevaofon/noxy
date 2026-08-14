@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"noxy-vm/internal/chunk"
 	"strings"
 	"testing"
 )
@@ -378,5 +379,24 @@ let mapping: map[any, int] = {"a": 1}
 delete(mapping, key)`)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCompileDeferBuiltinCallsEmitDeferredOpcode(t *testing.T) {
+	tests := []struct{ name, body string }{
+		{"append", "let items: int[] = [1]\ndefer append(ref items, 2)"},
+		{"pop", "let items: int[] = [1]\ndefer pop(ref items)"},
+		{"delete", "let items: map[string, int] = {\"x\": 1}\ndefer delete(ref items, \"x\")"},
+		{"json_loads", "let target: int = 0\ndefer json_loads(\"1\", ref target)"},
+		{"chan_send", "let ch: chan int = make_chan(1)\ndefer chan_send(ch, 1)"},
+		{"chan_recv", "let ch: chan int = make_chan(1)\ndefer chan_recv(ch)"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fn := compiledFunction(t, "func run() -> void\n"+test.body+"\nend\n", "run")
+			if !containsOpcode(fn.Chunk.(*chunk.Chunk).Code, chunk.OP_DEFER) {
+				t.Fatalf("%s omitted OP_DEFER", test.name)
+			}
+		})
 	}
 }

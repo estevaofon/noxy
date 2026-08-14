@@ -54,6 +54,13 @@ type Compiler struct {
 	moduleDiscovery     *moduleDiscoveryState
 }
 
+type callEmission uint8
+
+const (
+	emitImmediateCall callEmission = iota
+	emitDeferredCall
+)
+
 func New() *Compiler {
 	return NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), "")
 }
@@ -1567,189 +1574,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.endScope()
 		return c.currentChunk, nil, nil
 
+	case *ast.DeferStmt:
+		c.setLine(n.Token.Line)
+		return c.compileCallExpression(n.Call, emitDeferredCall)
+
 	case *ast.CallExpression:
-		if handled, resultType, err := c.compileBuiltinCall(n); handled {
-			return c.currentChunk, resultType, err
-		}
-
-		// Check for special functions: chan_send, chan_recv
-		if ident, ok := n.Function.(*ast.Identifier); ok {
-			if ident.Value == "chan_send" {
-				if len(n.Arguments) != 2 {
-					return nil, nil, fmt.Errorf("[line %d] chan_send expects 2 arguments", c.currentLine)
-				}
-				_, _, err := c.Compile(n.Function)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				// 2. Compile Arg 0 (Channel)
-				_, chType, err := c.Compile(n.Arguments[0])
-				if err != nil {
-					return nil, nil, err
-				}
-
-				// Verify it is a channel OR any
-				var isAnyChannel bool
-				chanType, ok := chType.(*ast.ChanType)
-				if !ok {
-					// Check if it is 'any'
-					if chType != nil && chType.String() == "any" {
-						isAnyChannel = true
-					} else {
-						typeStr := "unknown/nil"
-						if chType != nil {
-							typeStr = chType.String()
-						}
-						return nil, nil, fmt.Errorf("[line %d] first argument to chan_send must be a channel, got %s", c.currentLine, typeStr)
-					}
-				}
-
-				// 3. Compile Arg 1 (Value)
-				_, valType, err := c.Compile(n.Arguments[1])
-				if err != nil {
-					return nil, nil, err
-				}
-
-				// Verify Type Match (only if not any)
-				if !isAnyChannel {
-					if !c.areTypesCompatible(chanType.ElementType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] cannot send %s to %s", c.currentLine, valType.String(), chType.String())
-					}
-				}
-
-				// Emit Call
-				c.emitBytes(byte(chunk.OP_CALL), 2)
-				return c.currentChunk, valType, nil // send returns value sent
-			} else if ident.Value == "chan_recv" {
-				if len(n.Arguments) != 1 {
-					return nil, nil, fmt.Errorf("[line %d] chan_recv expects 1 argument", c.currentLine)
-				}
-				// 1. Compile Function
-				_, _, err := c.Compile(n.Function)
-				if err != nil {
-					return nil, nil, err
-				}
-
-				// 2. Compile Arg (Channel)
-				_, chType, err := c.Compile(n.Arguments[0])
-				if err != nil {
-					return nil, nil, err
-				}
-
-				var retType ast.NoxyType
-
-				chanType, ok := chType.(*ast.ChanType)
-				if !ok {
-					if chType.String() == "any" {
-						retType = &ast.PrimitiveType{Name: "any"}
-					} else {
-						return nil, nil, fmt.Errorf("[line %d] argument to chan_recv must be a channel, got %s", c.currentLine, chType.String())
-					}
-				} else {
-					retType = chanType.ElementType
-				}
-
-				// Emit Call
-				c.emitBytes(byte(chunk.OP_CALL), 1)
-				return c.currentChunk, retType, nil
-			} else if ident.Value == "addr" {
-				// addr(ref x) debug function
-				if len(n.Arguments) != 1 {
-					return nil, nil, fmt.Errorf("[line %d] addr expects 1 argument", c.currentLine)
-				}
-				// Compile Argument
-				// We expect a Reference on the stack (ObjRef).
-				// We do NOT want auto-dereference.
-				_, argType, err := c.Compile(n.Arguments[0])
-				if err != nil {
-					return nil, nil, err
-				}
-
-				if _, isRef := argType.(*ast.RefType); !isRef {
-					// Check if user passed `ref x` (PrefixExpression) which returns RefType
-					// Or a variable that is RefType.
-					// If they passed `x` which is int, argType is int.
-					return nil, nil, fmt.Errorf("[line %d] addr() requires a reference. Try 'addr(ref %s)'", c.currentLine, n.Arguments[0].String())
-				}
-
-				c.emitByte(byte(chunk.OP_ADDR))
-				return c.currentChunk, &ast.PrimitiveType{Name: "string"}, nil
-			}
-		}
-
-		// Normal Call
-		_, fnType, err := c.Compile(n.Function)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		funcType, isExact := fnType.(*ast.FunctionType)
-		if isExact && len(n.Arguments) != len(funcType.Params) {
-			return nil, nil, fmt.Errorf(
-				"[line %d] function '%s' expects %d arguments, got %d",
-				c.currentLine, callableName(n.Function), len(funcType.Params), len(n.Arguments),
-			)
-		}
-
-		for i, arg := range n.Arguments {
-			if isExact {
-				if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
-					actualElement, err := c.compileReferenceArgument(arg)
-					if err != nil {
-						return nil, nil, err
-					}
-					if _, isNull := arg.(*ast.NullLiteral); isNull {
-						continue
-					}
-					if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
-						actual := &ast.RefType{ElementType: actualElement}
-						return nil, nil, fmt.Errorf(
-							"[line %d] argument %d to '%s': expected %s, got %s",
-							c.currentLine, i+1, callableName(n.Function), expectedRef.String(), actual.String(),
-						)
-					}
-					if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
-						return nil, nil, err
-					}
-					continue
-				}
-			}
-
-			_, argType, err := c.Compile(arg)
-			if err != nil {
-				return nil, nil, err
-			}
-			explicitReference := false
-			if prefix, ok := arg.(*ast.PrefixExpression); ok {
-				explicitReference = prefix.Operator == "ref"
-			}
-			if ref, ok := argType.(*ast.RefType); ok && !explicitReference {
-				c.emitByte(byte(chunk.OP_DEREF))
-				argType = ref.ElementType
-			}
-			if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
-				return nil, nil, fmt.Errorf(
-					"[line %d] argument %d to '%s': expected %s, got %s",
-					c.currentLine, i+1, callableName(n.Function),
-					funcType.Params[i].String(), noxyTypeName(argType),
-				)
-			}
-			if isExact {
-				if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
-					return nil, nil, err
-				}
-			}
-		}
-
-		c.emitBytes(byte(chunk.OP_CALL), byte(len(n.Arguments)))
-		if isExact {
-			return c.currentChunk, funcType.Return, nil
-		}
-		if fnType == nil {
-			return c.currentChunk, nil, nil
-		}
-		return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil
+		return c.compileCallExpression(n, emitImmediateCall)
 
 	case nil:
 		// Skip
@@ -1757,6 +1587,192 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	default:
 		return nil, nil, fmt.Errorf("unsupported node type %T", n)
 	}
+}
+
+func (c *Compiler) emitCall(argCount int, emission callEmission) {
+	op := chunk.OP_CALL
+	if emission == emitDeferredCall {
+		op = chunk.OP_DEFER
+	}
+	c.emitBytes(byte(op), byte(argCount))
+}
+
+func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission callEmission) (*chunk.Chunk, ast.NoxyType, error) {
+	if handled, resultType, err := c.compileBuiltinCall(call, emission); handled {
+		return c.currentChunk, resultType, err
+	}
+
+	// Check for special functions: chan_send, chan_recv.
+	if ident, ok := call.Function.(*ast.Identifier); ok {
+		if ident.Value == "chan_send" {
+			if len(call.Arguments) != 2 {
+				return nil, nil, fmt.Errorf("[line %d] chan_send expects 2 arguments", c.currentLine)
+			}
+			_, _, err := c.Compile(call.Function)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			// Compile Arg 0 (Channel).
+			_, chType, err := c.Compile(call.Arguments[0])
+			if err != nil {
+				return nil, nil, err
+			}
+
+			// Verify it is a channel OR any.
+			var isAnyChannel bool
+			chanType, ok := chType.(*ast.ChanType)
+			if !ok {
+				if chType != nil && chType.String() == "any" {
+					isAnyChannel = true
+				} else {
+					typeStr := "unknown/nil"
+					if chType != nil {
+						typeStr = chType.String()
+					}
+					return nil, nil, fmt.Errorf("[line %d] first argument to chan_send must be a channel, got %s", c.currentLine, typeStr)
+				}
+			}
+
+			// Compile Arg 1 (Value).
+			_, valType, err := c.Compile(call.Arguments[1])
+			if err != nil {
+				return nil, nil, err
+			}
+
+			// Verify Type Match (only if not any).
+			if !isAnyChannel {
+				if !c.areTypesCompatible(chanType.ElementType, valType) {
+					return nil, nil, fmt.Errorf("[line %d] cannot send %s to %s", c.currentLine, valType.String(), chType.String())
+				}
+			}
+
+			c.emitCall(2, emission)
+			return c.currentChunk, valType, nil // send returns value sent
+		} else if ident.Value == "chan_recv" {
+			if len(call.Arguments) != 1 {
+				return nil, nil, fmt.Errorf("[line %d] chan_recv expects 1 argument", c.currentLine)
+			}
+			_, _, err := c.Compile(call.Function)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			_, chType, err := c.Compile(call.Arguments[0])
+			if err != nil {
+				return nil, nil, err
+			}
+
+			var retType ast.NoxyType
+
+			chanType, ok := chType.(*ast.ChanType)
+			if !ok {
+				if chType.String() == "any" {
+					retType = &ast.PrimitiveType{Name: "any"}
+				} else {
+					return nil, nil, fmt.Errorf("[line %d] argument to chan_recv must be a channel, got %s", c.currentLine, chType.String())
+				}
+			} else {
+				retType = chanType.ElementType
+			}
+
+			c.emitCall(1, emission)
+			return c.currentChunk, retType, nil
+		} else if ident.Value == "addr" {
+			if emission == emitDeferredCall {
+				return nil, nil, fmt.Errorf("[line %d] cannot defer addr: addr does not produce a callable", c.currentLine)
+			}
+			// addr(ref x) debug function.
+			if len(call.Arguments) != 1 {
+				return nil, nil, fmt.Errorf("[line %d] addr expects 1 argument", c.currentLine)
+			}
+			// We expect a Reference on the stack (ObjRef), without auto-dereference.
+			_, argType, err := c.Compile(call.Arguments[0])
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if _, isRef := argType.(*ast.RefType); !isRef {
+				return nil, nil, fmt.Errorf("[line %d] addr() requires a reference. Try 'addr(ref %s)'", c.currentLine, call.Arguments[0].String())
+			}
+
+			c.emitByte(byte(chunk.OP_ADDR))
+			return c.currentChunk, &ast.PrimitiveType{Name: "string"}, nil
+		}
+	}
+
+	// Normal call.
+	_, fnType, err := c.Compile(call.Function)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	funcType, isExact := fnType.(*ast.FunctionType)
+	if isExact && len(call.Arguments) != len(funcType.Params) {
+		return nil, nil, fmt.Errorf(
+			"[line %d] function '%s' expects %d arguments, got %d",
+			c.currentLine, callableName(call.Function), len(funcType.Params), len(call.Arguments),
+		)
+	}
+
+	for i, arg := range call.Arguments {
+		if isExact {
+			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
+				actualElement, err := c.compileReferenceArgument(arg)
+				if err != nil {
+					return nil, nil, err
+				}
+				if _, isNull := arg.(*ast.NullLiteral); isNull {
+					continue
+				}
+				if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
+					actual := &ast.RefType{ElementType: actualElement}
+					return nil, nil, fmt.Errorf(
+						"[line %d] argument %d to '%s': expected %s, got %s",
+						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), actual.String(),
+					)
+				}
+				if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+					return nil, nil, err
+				}
+				continue
+			}
+		}
+
+		_, argType, err := c.Compile(arg)
+		if err != nil {
+			return nil, nil, err
+		}
+		explicitReference := false
+		if prefix, ok := arg.(*ast.PrefixExpression); ok {
+			explicitReference = prefix.Operator == "ref"
+		}
+		if ref, ok := argType.(*ast.RefType); ok && !explicitReference {
+			c.emitByte(byte(chunk.OP_DEREF))
+			argType = ref.ElementType
+		}
+		if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
+			return nil, nil, fmt.Errorf(
+				"[line %d] argument %d to '%s': expected %s, got %s",
+				c.currentLine, i+1, callableName(call.Function),
+				funcType.Params[i].String(), noxyTypeName(argType),
+			)
+		}
+		if isExact {
+			if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	c.emitCall(len(call.Arguments), emission)
+	if isExact {
+		return c.currentChunk, funcType.Return, nil
+	}
+	if fnType == nil {
+		return c.currentChunk, nil, nil
+	}
+	return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil
 }
 
 func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
