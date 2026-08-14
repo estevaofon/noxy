@@ -169,16 +169,28 @@ func TestDeferredSQLiteResourceCleanupContinuesAfterFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "deferred-failure.sqlite")
 	var database *DatabaseResource
 	var statement *StatementResource
+	var observations []sqliteResourceObservation
 	recordDeferredSQLiteResources(machine, &database, &statement)
+	machine.DefineContextualNative("assert_statement_finalized", func(value.NativeContext, []value.Value) (value.Value, error) {
+		observations = append(observations, sqliteResourceObservation{
+			statements: len(machine.shared.Statements.snapshot()),
+			databases:  len(machine.shared.Databases.snapshot()),
+		})
+		return value.NewNull(), nil
+	})
 	sentinel := errors.New("sentinel cleanup failure")
 	defineCleanupFailureNative(machine, sentinel)
 	source := "use sqlite\nlet db: sqlite.Database = sqlite.open(" + strconv.Quote(path) + ")\n" +
 		"defer sqlite.close(db)\nlet stmt: sqlite.Statement = sqlite.prepare(db, \"SELECT 1\")\n" +
-		"defer sqlite.finalize(stmt)\nrecord_sqlite_resources(db, stmt)\ndefer cleanup_fail()"
+		"defer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\n" +
+		"record_sqlite_resources(db, stmt)\ndefer cleanup_fail()"
 
 	err := interpretVMSource(t, machine, source)
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("error=%v, want sentinel cleanup failure", err)
+	}
+	if len(observations) != 1 || observations[0] != (sqliteResourceObservation{statements: 0, databases: 1}) {
+		t.Fatalf("observations=%v, want [{statements:0 databases:1}]", observations)
 	}
 	requireDeferredSQLiteClosed(t, machine, database, statement, path)
 }
