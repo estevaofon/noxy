@@ -1,0 +1,39 @@
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("supervised tasks: FAIL - " + message)
+        exit(1)
+    end
+end
+
+func double(value: int) -> int
+    return value * 2
+end
+
+func fail() -> int
+    return 1 / 0
+end
+
+func delayed() -> string
+    time_sleep(25)
+    return "ready"
+end
+
+let success: any = spawn_task(double, 21)
+let first: any = task_await(success)
+let second: any = task_await(success)
+assert(first["status"] == "ok" && first["value"] == 42, "task success")
+assert(second["status"] == "ok" && second["value"] == 42, "task replay")
+
+let failed: any = task_await(spawn_task(fail))
+assert(failed["status"] == "error", "task failure")
+assert(failed["error"]["kind"] == "runtime", "runtime kind")
+
+let slow: any = spawn_task(delayed)
+let timeout: any = task_await(slow, 0)
+assert(timeout["status"] == "timeout", "non-terminal timeout")
+let completed: any = task_await(slow)
+assert(completed["status"] == "ok" && completed["value"] == "ready", "later wait")
+
+print("supervised tasks: ok")

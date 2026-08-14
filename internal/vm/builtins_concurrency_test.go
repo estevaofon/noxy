@@ -1,8 +1,11 @@
 package vm
 
 import (
+	"bufio"
+	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -256,5 +259,143 @@ end`); err != nil {
 		}
 	case <-time.After(statefulBuiltinTimeout):
 		t.Fatal("legacy spawn worker did not return its argument")
+	}
+}
+
+func TestSpawnRemainsDetachedAndReturnsNullImmediately(t *testing.T) {
+	machine := New()
+	spawn := requireBuiltin(t, machine, "spawn")
+
+	missingOutput := captureConcurrencyStdout(t, func() {
+		result, err := spawn.Invoke(machine, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertBuiltinValue(t, result, value.NewNull())
+	})
+	if missingOutput != "" {
+		t.Fatalf("missing callable stdout = %q, want empty", missingOutput)
+	}
+
+	if err := interpretVMSource(t, machine, `
+func worker(channel: any)
+    chan_send(channel, "finished")
+end`); err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := machine.GetGlobal("worker")
+	channel := value.NewChannel(1)
+	result, err := spawn.Invoke(machine, []value.Value{worker, channel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBuiltinValue(t, result, value.NewNull())
+	select {
+	case got := <-channel.Obj.(*value.ObjChannel).Chan:
+		assertBuiltinValue(t, got, value.NewString("finished"))
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("legacy spawn worker did not finish")
+	}
+}
+
+func TestSpawnRemainsDetachedOnWorkerFailure(t *testing.T) {
+	tests := []struct {
+		mode       string
+		diagnostic string
+	}{
+		{mode: "runtime-error", diagnostic: "Thread Error:"},
+		{mode: "panic", diagnostic: "Thread Panic:"},
+	}
+	for _, test := range tests {
+		t.Run(test.mode, func(t *testing.T) {
+			command := exec.Command(os.Args[0], "-test.run=^TestSpawnDetachedHelper$")
+			command.Env = append(os.Environ(), "NOXY_SPAWN_HELPER="+test.mode)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helper exit: %v\n%s", err, output)
+			}
+			if !bytes.Contains(output, []byte(test.diagnostic)) {
+				t.Fatalf("output = %q, want %q", output, test.diagnostic)
+			}
+		})
+	}
+}
+
+func TestSpawnDetachedHelper(t *testing.T) {
+	mode := os.Getenv("NOXY_SPAWN_HELPER")
+	if mode == "" {
+		return
+	}
+	if mode != "runtime-error" && mode != "panic" {
+		t.Fatalf("unknown helper mode %q", mode)
+	}
+
+	machine := New()
+	workerReady := make(chan struct{})
+	machine.DefineNative("test_spawn_ready", func([]value.Value) value.Value {
+		close(workerReady)
+		return value.NewNull()
+	})
+	if mode == "panic" {
+		machine.DefineNative("test_spawn_failure", func([]value.Value) value.Value {
+			panic("detached panic")
+		})
+	}
+
+	source := `
+func worker()
+    test_spawn_ready()
+    let zero: int = 0
+    let failed: int = 1 / zero
+end`
+	if mode == "panic" {
+		source = `
+func worker()
+    test_spawn_ready()
+    test_spawn_failure()
+end`
+	}
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatal(err)
+	}
+	worker, _ := machine.GetGlobal("worker")
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdout
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = previous
+		_ = writer.Close()
+		_ = reader.Close()
+	}()
+
+	result, err := requireBuiltin(t, machine, "spawn").Invoke(machine, []value.Value{worker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBuiltinValue(t, result, value.NewNull())
+	select {
+	case <-workerReady:
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("detached worker did not start")
+	}
+
+	diagnostic := make(chan string, 1)
+	go func() {
+		line, _ := bufio.NewReader(reader).ReadString('\n')
+		diagnostic <- line
+	}()
+	var line string
+	select {
+	case line = <-diagnostic:
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("detached worker did not emit a diagnostic")
+	}
+	os.Stdout = previous
+	if _, err := io.WriteString(previous, line); err != nil {
+		t.Fatal(err)
 	}
 }

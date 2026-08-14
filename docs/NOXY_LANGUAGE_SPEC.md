@@ -642,6 +642,30 @@ let hex: string = hex_encode(data)  // "48656c6c6f"
 let back: bytes = hex_decode(hex)   // b"Hello"
 ```
 
+### Concurrency and Supervised Tasks
+
+`spawn(function, ...arguments)` starts a detached Noxy routine and immediately returns `null`. It exposes no handle and does not propagate the worker's result, runtime error, or panic to its caller. Its existing validation and asynchronous diagnostics remain compatible.
+
+`spawn_task(function, ...arguments)` instead validates a Noxy function or closure, arity, and parameter modes synchronously, launches it in a shared child VM, and returns an opaque task handle. Handles may be stored as `any`, passed, printed, and compared by identity, but cannot be constructed or inspected by Noxy code.
+
+`task_await(handle)` waits indefinitely. `task_await(handle, timeout_ms)` accepts a non-negative integer number of milliseconds; zero performs an immediate poll. Invalid handles or timeouts are synchronous runtime errors in the caller.
+
+Each successful await returns a fresh `map[string, any]` envelope:
+
+| Status | `value` | `error` |
+|---|---|---|
+| `"ok"` | The task's return value, including `null` for a void return | `null` |
+| `"error"` | `null` | A structured failure map |
+| `"timeout"` | `null` | `null` |
+
+For `"error"`, the failure map contains string fields `kind`, `message`, and `stack`. `kind` is `"runtime"` for a Noxy runtime error or `"panic"` for a recovered Go panic. Runtime stacks are Noxy stacks captured at the failure point; panic stacks are Go stacks. The panic boundary covers the supervised task's main goroutine only, not independent goroutines started by native code.
+
+Task completion is published exactly once and can be awaited consistently by multiple sequential or concurrent waiters. Each envelope and failure map is a fresh container, but an `"ok"` composite value preserves its original identity. Consequently, replay means the same terminal outcome and returned-value identity, not independent deep snapshots.
+
+Timeout is local and non-terminal: it does not cancel the worker, consume the result, or mutate the task. Completion is preferred whenever it is observably available at the deadline. A wait that returns `"timeout"` may therefore be followed by a later wait that returns `"ok"` or `"error"`.
+
+Supervised tasks share globals, module state, runtime resources, closure environments, and the VM configuration. Ordinary composite arguments retain Noxy's top-level shallow-copy semantics and `ref` arguments retain reference identity. Shared references, nested composites, returned composite values, and closure upvalues require explicit concurrency coordination.
+
 ---
 
 ## 10. Module System

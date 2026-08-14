@@ -18,7 +18,7 @@ These guarantees do not make a sequence of operations atomic. For example, `coun
 
 Function arguments preserve Noxy's shallow-copy rules: the outer array, map, or struct is copied for an ordinary parameter, while nested composites remain shared. The synchronized runtime foundation does not turn that shallow copy into a deep copy.
 
-This foundation changes no public Noxy syntax, builtin signature, or result shape. Corrected `net_select` semantics and supervised `spawn`/task behavior are separate follow-up work.
+This foundation does not change the behavior of existing concurrency primitives. It also underpins supervised tasks, described below, without changing detached `spawn`.
 
 ---
 
@@ -46,7 +46,41 @@ end
 ### Key Characteristics
 - **Non-blocking**: `spawn` returns immediately.
 - **Concurrent**: The spawned function runs in parallel (on multi-core systems).
-- **Independent**: If a routine crashes (panics), it prints an error but (usually) doesn't kill the whole VM immediately (implementation details verify this).
+- **Detached**: `spawn` returns `null`, exposes no handle, and never propagates a worker result or failure to its caller. Existing validation and worker diagnostics remain on standard output as `Runtime Error:`, `Thread Error:`, or `Thread Panic:` messages.
+
+---
+
+## Supervised Tasks
+
+Use `spawn_task(function, ...arguments)` when the caller must observe a routine's result or failure. It validates the Noxy function or closure, its arity, and parameter modes before launch, then returns an opaque task handle. The handle can be stored behind `any`, passed around, printed, and compared by identity; its internal state is not directly accessible.
+
+```noxy
+let task: any = spawn_task(calculate, input)
+
+// Wait until the task finishes.
+let terminal: any = task_await(task)
+
+// Or wait for at most 500 milliseconds.
+let bounded: any = task_await(task, 500)
+```
+
+Invalid callables, arity, parameter modes, handles, and timeout values are synchronous runtime errors in the calling VM. The optional timeout is an integer number of milliseconds, must be non-negative, and may be zero for an immediate poll.
+
+Every `task_await` returns a new `map[string, any]` envelope with this contract:
+
+| Status | `value` | `error` |
+|---|---|---|
+| `"ok"` | The task's return value, including `null` for a void return | `null` |
+| `"error"` | `null` | A structured failure map |
+| `"timeout"` | `null` | `null` |
+
+An error map contains `kind`, `message`, and `stack`. `kind` is `"runtime"` for a Noxy runtime error and `"panic"` for a recovered internal Go panic. Runtime failures contain a Noxy call stack captured at the failure point; panic failures contain a Go stack. Panic recovery covers the task's main goroutine, not goroutines independently started by native code.
+
+A timeout is non-terminal: it never cancels the worker, consumes its outcome, or changes the task. If completion is observable at the deadline, completion wins over timeout. A later or repeated wait therefore observes the same terminal outcome. Envelopes and error maps are fresh on every wait so their mutation cannot alter the private outcome, while a successful composite `value` preserves its original identity rather than being deep-copied.
+
+Supervised tasks share global/module runtime state and use the normal parameter rules: ordinary composite parameters receive a top-level shallow copy, while `ref` parameters, nested composites, closure upvalues, and successful composite results can preserve shared identity. Coordinate concurrent access to shared references, arrays, maps, structs, and upvalues with channels or another explicit ownership protocol.
+
+The original `spawn` API remains detached for compatibility. Choose `spawn_task` only when the caller needs structured completion, replayable results, or failures it can inspect.
 
 ---
 
