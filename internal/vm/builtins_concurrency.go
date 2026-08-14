@@ -60,7 +60,8 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		frame := &CallFrame{
 			Closure:     closure,
 			IP:          0,
-			Slots:       0,
+			StackBase:   0,
+			LocalBase:   0,
 			Environment: closure.Environment,
 		}
 

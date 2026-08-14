@@ -17,7 +17,8 @@ func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interf
 type CallFrame struct {
 	Closure     *value.ObjClosure
 	IP          int
-	Slots       int // Offset in stack where this frame's locals start
+	StackBase   int // First stack slot owned by this frame
+	LocalBase   int // Offset in stack where this frame's locals start
 	Environment *value.GlobalEnvironment
 }
 

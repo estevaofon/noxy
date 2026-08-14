@@ -8,7 +8,6 @@ import (
 func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	if callee.Type == value.VAL_OBJ {
 		if structDef, ok := callee.Obj.(*value.ObjStruct); ok && structDef != nil {
-			// Instantiate
 			if argCount != len(structDef.Fields) {
 				return false, vm.runtimeError(c, ip, "expected %d arguments for struct %s but got %d", len(structDef.Fields), structDef.Name, argCount)
 			}
@@ -16,22 +15,7 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			if err := vm.validateStructConstructorArguments(structDef, args); err != nil {
 				return false, vm.runtimeError(c, ip, "%s", err)
 			}
-
-			instance := value.NewInstance(structDef)
-			instObj := instance.Obj.(*value.ObjInstance)
-
-			// Args are on stack.
-			for i := 0; i < argCount; i++ {
-				arg := vm.peek(argCount - 1 - i)
-				fieldName := structDef.Fields[i]
-				instObj.Fields[fieldName] = arg
-			}
-
-			// Pop args AND callee (struct def)
-			vm.stackTop -= argCount + 1
-			// Push instance
-			vm.push(instance)
-			return true, nil
+			return vm.callPreparedValue(callee, argCount, c, ip)
 		}
 	}
 	if callee.Type == value.VAL_FUNCTION {
@@ -41,49 +25,54 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 		native := callee.Obj.(*value.ObjNative)
 		args := vm.stack[vm.stackTop-argCount : vm.stackTop]
 		if native.Signature != nil {
-			sig := native.Signature
-			if !sig.Variadic && argCount != sig.Arity {
-				return false, vm.runtimeError(c, ip, "native '%s' expects %d arguments, got %d", native.Name, sig.Arity, argCount)
-			}
-			if sig.Variadic && argCount < sig.Arity {
-				return false, vm.runtimeError(c, ip, "native '%s' expects at least %d arguments, got %d", native.Name, sig.Arity, argCount)
-			}
-
-			params := sig.Params
-			if sig.Variadic && len(params) > 0 && argCount > len(params) {
-				expanded := make([]value.ParamInfo, argCount)
-				copy(expanded, params)
-				for i := len(params); i < argCount; i++ {
-					expanded[i] = params[len(params)-1]
-				}
-				params = expanded
+			params, err := nativeParameters(native, argCount)
+			if err != nil {
+				return false, vm.runtimeError(c, ip, "%s", err)
 			}
 			if err := validateParameterModes(native.Name, params, args); err != nil {
 				return false, vm.runtimeErrorCause(c, ip, err, "native '%s' failed", native.Name)
 			}
-
-			callArgs := make([]value.Value, len(args))
-			copy(callArgs, args)
-			for i, param := range params {
-				if i >= len(callArgs) {
-					break
-				}
-				if !param.IsRef {
-					callArgs[i] = vm.copyValue(callArgs[i])
-				}
-			}
+			callArgs := append([]value.Value(nil), args...)
+			vm.copyPreparedArguments(callArgs, params)
 			args = callArgs
 		}
-		// fmt.Printf("Calling native %s with args: %v\n", native.Name, args)
-		result, err := native.Invoke(vm, args)
-		if err != nil {
-			return false, vm.runtimeErrorCause(c, ip, err, "native '%s' failed", native.Name)
-		}
-		vm.stackTop -= argCount + 1
-		vm.push(result)
-		return true, nil
+		return vm.callNative(native, args, argCount, c, ip)
 	}
 	return false, vm.runtimeError(c, ip, "can only call functions and classes")
+}
+
+func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
+	if callee.Type == value.VAL_OBJ {
+		if structDef, ok := callee.Obj.(*value.ObjStruct); ok && structDef != nil {
+			instance := value.NewInstance(structDef)
+			instObj := instance.Obj.(*value.ObjInstance)
+			for i := 0; i < argCount; i++ {
+				instObj.Fields[structDef.Fields[i]] = vm.peek(argCount - 1 - i)
+			}
+			vm.stackTop -= argCount + 1
+			vm.push(instance)
+			return true, nil
+		}
+	}
+	if callee.Type == value.VAL_FUNCTION {
+		return vm.callPreparedClosure(callee.Obj.(*value.ObjClosure), argCount, c, ip)
+	}
+	if callee.Type == value.VAL_NATIVE {
+		native := callee.Obj.(*value.ObjNative)
+		args := vm.stack[vm.stackTop-argCount : vm.stackTop]
+		return vm.callNative(native, args, argCount, c, ip)
+	}
+	return false, vm.runtimeError(c, ip, "can only call functions and classes")
+}
+
+func (vm *VM) callNative(native *value.ObjNative, args []value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
+	result, err := native.Invoke(vm, args)
+	if err != nil {
+		return false, vm.runtimeErrorCause(c, ip, err, "native '%s' failed", native.Name)
+	}
+	vm.stackTop -= argCount + 1
+	vm.push(result)
+	return true, nil
 }
 
 func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip int) (bool, error) {
@@ -116,11 +105,19 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 			}
 		}
 	}
+	return vm.callPreparedClosure(closure, argCount, c, ip)
+}
+
+func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip int) (bool, error) {
+	if vm.frameCount == FramesMax {
+		return false, vm.runtimeError(c, ip, "stack overflow")
+	}
 
 	frame := &CallFrame{
 		Closure:     closure,
 		IP:          0,
-		Slots:       vm.stackTop - argCount - 1, // Start of locals window (fn + args)
+		StackBase:   vm.stackTop - argCount - 1,
+		LocalBase:   vm.stackTop - argCount - 1,
 		Environment: closure.Environment,
 	}
 	// Push new frame
