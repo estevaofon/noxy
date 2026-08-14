@@ -31,15 +31,16 @@ type CallFrame struct {
 }
 
 type SharedState struct {
-	Root       *value.GlobalEnvironment
-	Modules    *moduleCache
-	Files      *handleRegistry[*FileResource]
-	fileMetaMu sync.RWMutex
-	Listeners  *handleRegistry[*ListenerResource]
-	Sockets    *handleRegistry[*SocketResource]
-	Databases  *handleRegistry[*DatabaseResource]
-	Statements *handleRegistry[*StatementResource]
-	initOnce   sync.Once
+	Root         *value.GlobalEnvironment
+	Modules      *moduleCache
+	Files        *handleRegistry[*FileResource]
+	fileMetaMu   sync.RWMutex
+	Listeners    *handleRegistry[*ListenerResource]
+	Sockets      *handleRegistry[*SocketResource]
+	Databases    *handleRegistry[*DatabaseResource]
+	Statements   *handleRegistry[*StatementResource]
+	stateOnce    sync.Once
+	builtinsOnce sync.Once
 }
 
 type VM struct {
@@ -82,37 +83,17 @@ func New() *VM {
 }
 
 func NewWithConfig(cfg VMConfig) *VM {
-	shared := &SharedState{
-		Root:       value.NewGlobalEnvironment(nil),
-		Modules:    newModuleCache(),
-		Files:      newHandleRegistry[*FileResource](),
-		Listeners:  newSequencedHandleRegistry[*ListenerResource](1, 2),
-		Sockets:    newSequencedHandleRegistry[*SocketResource](2, 2),
-		Databases:  newHandleRegistry[*DatabaseResource](),
-		Statements: newHandleRegistry[*StatementResource](),
-	}
-	return NewWithShared(shared, cfg)
+	return NewWithShared(&SharedState{}, cfg)
 }
 
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
-	if shared.Root == nil {
-		shared.Root = value.NewGlobalEnvironment(nil)
-	}
-	if shared.Modules == nil {
-		shared.Modules = newModuleCache()
-	}
-	if shared.Listeners == nil {
-		shared.Listeners = newSequencedHandleRegistry[*ListenerResource](1, 2)
-	}
-	if shared.Sockets == nil {
-		shared.Sockets = newSequencedHandleRegistry[*SocketResource](2, 2)
-	}
+	shared.initializeState()
 	vm := &VM{
 		shared: shared,
 		Config: cfg,
 	}
 
-	vm.defineBuiltins()
+	shared.builtinsOnce.Do(vm.defineBuiltins)
 	return vm
 }
 

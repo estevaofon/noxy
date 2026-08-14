@@ -105,9 +105,13 @@ func (vm *VM) defineSystemBuiltins() {
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 
-	vm.DefineNative("sys_load_plugin", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("sys_load_plugin", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
+		}
 		if len(args) < 2 {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 		name := args[0].String()
 		cmdName := args[1].String()
@@ -179,18 +183,18 @@ func (vm *VM) defineSystemBuiltins() {
 
 		if !found {
 			fmt.Printf("Plugin Load Error: command not found: %s\n", cmdName)
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 
 		client, err := plugin.LoadPlugin(name, cmdPath)
 		if err != nil {
 			fmt.Printf("Plugin Load Error: failed to load plugin: %v\n", err)
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 
 		// Define Native dynamically
 		nativeName := name + "_request" // e.g. dynamodb_request
-		vm.DefineNative(nativeName, func(args []value.Value) value.Value {
+		machine.DefineNative(nativeName, func(args []value.Value) value.Value {
 			if len(args) < 1 {
 				return value.NewNull()
 			}
@@ -199,7 +203,7 @@ func (vm *VM) defineSystemBuiltins() {
 			return client.Call(method, params)
 		})
 
-		return value.NewBool(true)
+		return value.NewBool(true), nil
 	})
 
 	vm.DefineNative("sys_getenv", func(args []value.Value) value.Value {

@@ -9,21 +9,25 @@ import (
 
 func (vm *VM) defineConcurrencyBuiltins() {
 	// Concurrency Primitives
-	vm.DefineNative("spawn", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("spawn", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) < 1 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		fnVal := args[0]
 		if fnVal.Type != value.VAL_FUNCTION {
 			// Only script functions are supported in spawn.
 			fmt.Println("Runtime Error: spawn expects a function")
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
 		threadArgs := args[1:]
 
 		// Create new VM thread sharing state
-		threadVM := NewWithShared(vm.shared, vm.Config)
+		threadVM := NewWithShared(machine.shared, machine.Config)
 
 		// Setup execution
 		var closure *value.ObjClosure
@@ -33,7 +37,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}, Environment: fn.Environment}
 		} else {
 			fmt.Println("Runtime Error: spawn expects a function or closure")
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
 		fnObj := closure.Function
@@ -41,7 +45,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		// Check arity
 		if len(threadArgs) != fnObj.Arity {
 			fmt.Printf("Runtime Error: spawn expected %d args, got %d\n", fnObj.Arity, len(threadArgs))
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 
 		// Push Function (Stack slot 0)
@@ -77,7 +81,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			}
 		}()
 
-		return value.NewNull()
+		return value.NewNull(), nil
 	})
 
 	vm.DefineNative("make_chan", func(args []value.Value) value.Value {

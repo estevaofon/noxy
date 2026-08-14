@@ -279,7 +279,8 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 		t.Fatal("missing json_loads native")
 	}
 	jsonLoads := jsonLoadsValue.Obj.(*value.ObjNative)
-	if result := jsonLoads.Fn([]value.Value{value.NewString(`{"answer":42}`), target}); result.Type != value.VAL_BOOL || !result.AsBool {
+	result, err := jsonLoads.Invoke(machine, []value.Value{value.NewString(`{"answer":42}`), target})
+	if err != nil || result.Type != value.VAL_BOOL || !result.AsBool {
 		t.Fatal("module-frame global target was rejected")
 	}
 	moduleTarget, _ = moduleEnvironment.GetLocal("target")

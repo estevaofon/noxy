@@ -90,7 +90,10 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 				if !ok {
 					t.Fatalf("missing native %s", native.name)
 				}
-				result := nativeValue.Obj.(*value.ObjNative).Fn(native.args(target.value))
+				result, err := nativeValue.Obj.(*value.ObjNative).Invoke(machine, native.args(target.value))
+				if err != nil {
+					t.Fatal(err)
+				}
 				if result.Type != value.VAL_NULL {
 					t.Fatalf("result=%v, want null", result)
 				}

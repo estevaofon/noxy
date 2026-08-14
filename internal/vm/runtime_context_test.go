@@ -28,3 +28,25 @@ func TestDefineContextualNativeReplacesExistingGlobal(t *testing.T) {
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "replacement"), value.NewString("contextual"))
 }
+
+func TestSharedVMsReuseBuiltinValuesButInvokeActiveContext(t *testing.T) {
+	parent := NewWithConfig(VMConfig{RootPath: "parent"})
+	parentBuiltins := make(map[string]value.Value)
+	for _, name := range []string{"spawn", "io_open", "net_listen", "sqlite_open"} {
+		item, ok := parent.GetGlobal(name)
+		if !ok {
+			t.Fatalf("parent is missing %s", name)
+		}
+		parentBuiltins[name] = item
+	}
+	child := NewWithShared(parent.shared, VMConfig{RootPath: "child"})
+	for name, parentBuiltin := range parentBuiltins {
+		childBuiltin, ok := child.GetGlobal(name)
+		if !ok {
+			t.Fatalf("child is missing %s", name)
+		}
+		if parentBuiltin.Obj != childBuiltin.Obj {
+			t.Errorf("shared VM registered a second %s native", name)
+		}
+	}
+}

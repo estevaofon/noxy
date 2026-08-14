@@ -76,13 +76,17 @@ func (vm *VM) defineJSONBuiltins() {
 		},
 		ReturnType: "bool",
 	}
-	vm.DefineNativeWithSignature("json_loads", jsonLoadsSignature, func(args []value.Value) value.Value {
+	vm.DefineContextualNativeWithSignature("json_loads", jsonLoadsSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
+		}
 		if len(args) < 2 {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 		jsonStr := args[0].String()
 		if !utf8.ValidString(jsonStr) {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 		target := args[1]
 
@@ -90,18 +94,18 @@ func (vm *VM) defineJSONBuiltins() {
 		decoder := json.NewDecoder(strings.NewReader(jsonStr))
 		decoder.UseNumber()
 		if err := decoder.Decode(&result); err != nil {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 		var trailing interface{}
 		if err := decoder.Decode(&trailing); err != io.EOF {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 
 		// Try to populate target
-		if populateTarget(vm, target, result) {
-			return value.NewBool(true)
+		if populateTarget(machine, target, result) {
+			return value.NewBool(true), nil
 		}
-		return value.NewBool(false)
+		return value.NewBool(false), nil
 	})
 }
 
