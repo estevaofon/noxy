@@ -43,11 +43,19 @@ func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.Global
 	return vm.run(1)
 }
 
-func (vm *VM) run(minFrameCount int) error {
+func (vm *VM) run(minFrameCount int) (err error) {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
 	c := frame.Closure.Function.Chunk.(*chunk.Chunk)
 	ip := frame.IP
+	defer func() {
+		if vm.currentFrame == frame {
+			frame.IP = ip
+		}
+		if err != nil {
+			err = vm.unwindTo(minFrameCount-1, frameOutcome{Err: err}).Err
+		}
+	}()
 
 	for {
 		if ip >= len(c.Code) {
@@ -994,13 +1002,15 @@ func (vm *VM) run(minFrameCount int) error {
 			nameConstant := c.Constants[index]
 			moduleName := nameConstant.Obj.(string)
 
+			frame.IP = ip
 			mod, err := vm.loadModule(moduleName)
 			if err != nil {
 				return vm.runtimeErrorCause(c, ip, err, "failed to import module '%s'", moduleName)
 			}
-			vm.push(mod)
-
 			frame = vm.currentFrame
+			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			ip = frame.IP
+			vm.push(mod)
 
 		case chunk.OP_IMPORT_FROM_ALL:
 			modVal := vm.pop()

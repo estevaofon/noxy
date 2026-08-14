@@ -199,3 +199,30 @@ end`)
 		t.Fatalf("local=%v, want 42", got)
 	}
 }
+
+func TestVMReusableAfterDeferredRegistrationFailure(t *testing.T) {
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		captured = args[0]
+		return value.NewNull()
+	})
+
+	err := interpretVMSource(t, machine, `
+func one_arg(value: int) -> void
+end
+let dynamic: func = one_arg
+defer dynamic()`)
+	if err == nil {
+		t.Fatal("deferred registration accepted the wrong arity")
+	}
+	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.openUpvalues != nil {
+		t.Fatalf("dirty VM after error: frames=%d current=%p stack=%d open=%p", machine.frameCount, machine.currentFrame, machine.stackTop, machine.openUpvalues)
+	}
+	if err := interpretVMSource(t, machine, "test_report(42)\n"); err != nil {
+		t.Fatal(err)
+	}
+	if !valuesEqual(captured, value.NewInt(42)) {
+		t.Fatalf("reuse result=%v", captured)
+	}
+}

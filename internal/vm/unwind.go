@@ -8,6 +8,17 @@ type frameOutcome struct {
 }
 
 func (vm *VM) finishFrame(outcome frameOutcome) frameOutcome {
+	return vm.finalizeCurrentFrame(outcome)
+}
+
+func (vm *VM) unwindTo(targetFrameCount int, outcome frameOutcome) frameOutcome {
+	for vm.frameCount > targetFrameCount {
+		outcome = vm.finalizeCurrentFrame(outcome)
+	}
+	return outcome
+}
+
+func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 	frame := vm.currentFrame
 	if frame == nil || vm.frameCount == 0 {
 		return outcome
@@ -25,15 +36,6 @@ func (vm *VM) finishFrame(outcome frameOutcome) frameOutcome {
 				Cause:        err,
 			})
 		}
-	}
-
-	return vm.finalizeCurrentFrame(outcome)
-}
-
-func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
-	frame := vm.currentFrame
-	if frame == nil || vm.frameCount == 0 {
-		return outcome
 	}
 
 	ownedTop := vm.stackTop
