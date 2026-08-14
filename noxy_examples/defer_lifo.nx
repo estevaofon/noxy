@@ -1,0 +1,23 @@
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("defer example: FAIL - " + message)
+        exit(1)
+    end
+end
+
+let order: string = ""
+
+func record(label: string) -> void
+    order = order + label
+end
+
+func cleanup_demo() -> void
+    defer record("1")
+    defer record("2")
+end
+
+cleanup_demo()
+assert(order == "21", "defer must execute in LIFO order")
+print("defer LIFO: " + order)

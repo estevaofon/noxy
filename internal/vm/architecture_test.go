@@ -245,6 +245,153 @@ func sourceStructFields(t *testing.T, filename, structName string) map[string]st
 	return fields
 }
 
+func selectorNamed(expression ast.Expr, name string) bool {
+	for {
+		switch typed := expression.(type) {
+		case *ast.ParenExpr:
+			expression = typed.X
+		case *ast.SelectorExpr:
+			return typed.Sel.Name == name
+		default:
+			return false
+		}
+	}
+}
+
+func expressionContainsSelector(expression ast.Expr, name string) bool {
+	found := false
+	ast.Inspect(expression, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == name {
+			found = true
+			return false
+		}
+		return !found
+	})
+	return found
+}
+
+func indexesSelector(expression ast.Expr, name string) bool {
+	index, ok := expression.(*ast.IndexExpr)
+	return ok && selectorNamed(index.X, name)
+}
+
+func isNilExpression(expression ast.Expr) bool {
+	identifier, ok := expression.(*ast.Ident)
+	return ok && identifier.Name == "nil"
+}
+
+func isEmptyValueLiteral(expression ast.Expr) bool {
+	literal, ok := expression.(*ast.CompositeLit)
+	return ok && len(literal.Elts) == 0 && expressionTextForArchitecture(literal.Type) == "value.Value"
+}
+
+func expressionTextForArchitecture(expression ast.Expr) string {
+	var text strings.Builder
+	_ = printer.Fprint(&text, token.NewFileSet(), expression)
+	return text.String()
+}
+
+func forClearsStackFromStackBase(loop *ast.ForStmt) bool {
+	initialization, ok := loop.Init.(*ast.AssignStmt)
+	if !ok || len(initialization.Lhs) != len(initialization.Rhs) {
+		return false
+	}
+	loopIndexes := make(map[string]bool)
+	for index, left := range initialization.Lhs {
+		identifier, ok := left.(*ast.Ident)
+		if ok && expressionContainsSelector(initialization.Rhs[index], "StackBase") {
+			loopIndexes[identifier.Name] = true
+		}
+	}
+	if len(loopIndexes) == 0 {
+		return false
+	}
+
+	clears := false
+	ast.Inspect(loop.Body, func(node ast.Node) bool {
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok || len(assignment.Lhs) != len(assignment.Rhs) {
+			return !clears
+		}
+		for index, left := range assignment.Lhs {
+			stackIndex, ok := left.(*ast.IndexExpr)
+			if !ok {
+				continue
+			}
+			identifier, indexOK := stackIndex.Index.(*ast.Ident)
+			if indexOK && selectorNamed(stackIndex.X, "stack") && loopIndexes[identifier.Name] && isEmptyValueLiteral(assignment.Rhs[index]) {
+				clears = true
+				return false
+			}
+		}
+		return !clears
+	})
+	return clears
+}
+
+func unwindTerminalMutationMatches(t *testing.T, filename string, source []byte) []string {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, filename, source, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", filename, err)
+	}
+
+	var matches []string
+	record := func(node ast.Node, description string) {
+		matches = append(matches, description+" at line "+fileSet.Position(node.Pos()).String())
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.IncDecStmt:
+			if typed.Tok == token.DEC && selectorNamed(typed.X, "frameCount") {
+				record(typed, "decrements frameCount")
+			}
+		case *ast.AssignStmt:
+			for index, left := range typed.Lhs {
+				if selectorNamed(left, "frameCount") && typed.Tok == token.SUB_ASSIGN {
+					record(typed, "decrements frameCount")
+				}
+				if index >= len(typed.Rhs) {
+					continue
+				}
+				right := typed.Rhs[index]
+				if selectorNamed(left, "frameCount") && typed.Tok == token.ASSIGN {
+					binary, ok := right.(*ast.BinaryExpr)
+					if ok && binary.Op == token.SUB && expressionContainsSelector(binary.X, "frameCount") {
+						record(typed, "decrements frameCount")
+					}
+				}
+				if indexesSelector(left, "frames") && isNilExpression(right) {
+					record(typed, "removes a frame")
+				}
+				if selectorNamed(left, "currentFrame") && isNilExpression(right) {
+					record(typed, "clears currentFrame")
+				}
+				if selectorNamed(left, "stackTop") && expressionContainsSelector(right, "StackBase") {
+					record(typed, "resets stackTop to StackBase")
+				}
+			}
+		case *ast.CallExpr:
+			identifier, ok := typed.Fun.(*ast.Ident)
+			if !ok || identifier.Name != "clear" || len(typed.Args) != 1 {
+				break
+			}
+			slice, ok := typed.Args[0].(*ast.SliceExpr)
+			if ok && selectorNamed(slice.X, "stack") && slice.Low != nil && expressionContainsSelector(slice.Low, "StackBase") {
+				record(typed, "clears stack from StackBase")
+			}
+		case *ast.ForStmt:
+			if forClearsStackFromStackBase(typed) {
+				record(typed, "clears stack from StackBase")
+			}
+		}
+		return true
+	})
+	return matches
+}
+
 func runtimeTargetTypeName(expression ast.Expr, aliases map[string]string) string {
 	var name string
 	switch typed := expression.(type) {
@@ -587,6 +734,146 @@ func TestResourceRegistriesAndModuleCacheHaveSharedOwners(t *testing.T) {
 		}
 	}
 	requireSourceFunctions(t, "module_cache.go", "newModuleCache")
+}
+
+func TestUnwindArchitectureCentralizesTerminalFrameTeardown(t *testing.T) {
+	callFrame := sourceStructFields(t, "vm.go", "CallFrame")
+	want := map[string]string{
+		"StackBase": "int",
+		"LocalBase": "int",
+		"Deferred":  "[]PreparedCall",
+	}
+	for name, expectedType := range want {
+		if got := callFrame[name]; got != expectedType {
+			t.Errorf("CallFrame.%s=%q want %q", name, got, expectedType)
+		}
+	}
+
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, filename := range files {
+		if filename == "unwind.go" || strings.HasSuffix(filename, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range unwindTerminalMutationMatches(t, filename, source) {
+			t.Errorf("terminal frame teardown must remain in unwind.go: %s", match)
+		}
+	}
+}
+
+func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name: "decrement operator",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount-- }`,
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "subtract assignment",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount -= 2 }`,
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "explicit subtraction",
+			source: `package vm
+				type VM struct { frameCount int }
+				func teardown(vm *VM) { vm.frameCount = vm.frameCount - 1 }`,
+			want: []string{"decrements frameCount"},
+		},
+		{
+			name: "nil frame assignment",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { frames []*CallFrame }
+				func teardown(vm *VM, index int) { vm.frames[index] = nil }`,
+			want: []string{"removes a frame"},
+		},
+		{
+			name: "nil current frame assignment",
+			source: `package vm
+				type CallFrame struct{}
+				type VM struct { currentFrame *CallFrame }
+				func teardown(vm *VM) { vm.currentFrame = nil }`,
+			want: []string{"clears currentFrame"},
+		},
+		{
+			name: "stack clearing loop",
+			source: `package vm
+				import "noxy-vm/internal/value"
+				type CallFrame struct { StackBase int }
+				type VM struct { stack []value.Value }
+				func teardown(vm *VM, frame *CallFrame, top int) {
+					for index := frame.StackBase; index < top; index++ { vm.stack[index] = value.Value{} }
+				}`,
+			want: []string{"clears stack from StackBase"},
+		},
+		{
+			name: "stack clear builtin",
+			source: `package vm
+				type CallFrame struct { StackBase int }
+				type VM struct { stack []int }
+				func teardown(vm *VM, frame *CallFrame, top int) { clear(vm.stack[frame.StackBase:top]) }`,
+			want: []string{"clears stack from StackBase"},
+		},
+		{
+			name: "stack top reset",
+			source: `package vm
+				type CallFrame struct { StackBase int }
+				type VM struct { stackTop int }
+				func teardown(vm *VM, frame *CallFrame) { vm.stackTop = frame.StackBase }`,
+			want: []string{"resets stackTop to StackBase"},
+		},
+		{
+			name: "non-clearing stack window loop is allowed",
+			source: `package vm
+				type CallFrame struct { StackBase int }
+				func inspect(frame *CallFrame, top int) {
+					for index := frame.StackBase; index < top; index++ { current := index; _ = current }
+				}`,
+		},
+		{
+			name: "frame construction and similar text are allowed",
+			source: `package vm
+				type PreparedCall struct{}
+				type CallFrame struct { StackBase int; LocalBase int; Deferred []PreparedCall }
+				type VM struct { frames []*CallFrame; frameCount int }
+				var note = "vm.frameCount--; vm.frames[index] = nil"
+				func install(vm *VM) {
+					// clear(vm.stack[frame.StackBase:])
+					frame := &CallFrame{StackBase: 0, LocalBase: 1}
+					vm.frames[vm.frameCount] = frame
+					vm.frameCount++
+					_ = frame.StackBase
+				}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			matches := unwindTerminalMutationMatches(t, "architecture.go", []byte(test.source))
+			got := make([]string, len(matches))
+			for index, match := range matches {
+				got[index] = strings.SplitN(match, " at line ", 2)[0]
+			}
+			if strings.Join(got, "|") != strings.Join(test.want, "|") {
+				t.Fatalf("matches=%v want=%v", got, test.want)
+			}
+		})
+	}
 }
 
 func TestRuntimeForbiddenSourceMatchesExactSyntax(t *testing.T) {
