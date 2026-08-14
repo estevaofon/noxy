@@ -1,7 +1,7 @@
 # Runtime Context Foundation Design
 
-**Date:** 2026-08-13  
-**Status:** Approved design, awaiting written-spec review  
+**Date:** 2026-08-13
+**Status:** Approved design, awaiting written-spec review
 **Scope:** First subproject in the NoxyDB-driven runtime improvements
 
 ## 1. Purpose
