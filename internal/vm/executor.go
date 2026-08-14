@@ -40,10 +40,10 @@ func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.Global
 	vm.frames[0] = frame
 	vm.frameCount = 1
 	vm.currentFrame = frame
-	return vm.run(1)
+	return vm.run(1, nil)
 }
 
-func (vm *VM) run(minFrameCount int) error {
+func (vm *VM) run(minFrameCount int, terminalResult *value.Value) error {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
 	c := frame.Closure.Function.Chunk.(*chunk.Chunk)
@@ -913,6 +913,10 @@ func (vm *VM) run(minFrameCount int) error {
 			// 1. Pop result
 			result := vm.pop()
 			calleeFrame := vm.currentFrame
+			terminal := vm.frameCount-1 < minFrameCount
+			if terminal && terminalResult != nil {
+				*terminalResult = result
+			}
 
 			// 2. Clear the stack range used by the function (args + locals)
 			// This is CRITICAL for GC. We must nullify the references.
@@ -934,7 +938,7 @@ func (vm *VM) run(minFrameCount int) error {
 			}
 
 			// 5. Return from run() if we drop below call depth
-			if vm.frameCount < minFrameCount {
+			if terminal {
 				// We are exiting the run loop.
 				// We need to place result at the location expected by the caller.
 				// The caller expects the function and args to be consumed, and result pushed.
@@ -1002,7 +1006,7 @@ func (vm *VM) run(minFrameCount int) error {
 			mod, err := vm.loadModule(moduleName)
 			if err != nil {
 				context := vm.runtimeError(c, ip, "failed to import module '%s'", moduleName)
-				return fmt.Errorf("%v: %w", context, err)
+				return fmt.Errorf("%w: %w", context, err)
 			}
 			vm.push(mod)
 

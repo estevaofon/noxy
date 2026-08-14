@@ -17,51 +17,29 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		if len(args) < 1 {
 			return value.NewNull(), nil
 		}
-		fnVal := args[0]
-		if fnVal.Type != value.VAL_FUNCTION {
-			// Only script functions are supported in spawn.
-			fmt.Println("Runtime Error: spawn expects a function")
+		call, err := machine.prepareTaskCall(args[0], args[1:])
+		if err != nil {
+			fmt.Printf("Runtime Error: spawn %v\n", err)
 			return value.NewNull(), nil
 		}
-
-		threadArgs := args[1:]
 
 		// Create new VM thread sharing state
 		threadVM := NewWithShared(machine.shared, machine.Config)
 
-		// Setup execution
-		var closure *value.ObjClosure
-		if cl, ok := fnVal.Obj.(*value.ObjClosure); ok {
-			closure = cl
-		} else if fn, ok := fnVal.Obj.(*value.ObjFunction); ok {
-			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}, Environment: fn.Environment}
-		} else {
-			fmt.Println("Runtime Error: spawn expects a function or closure")
-			return value.NewNull(), nil
-		}
-
-		fnObj := closure.Function
-
-		// Check arity
-		if len(threadArgs) != fnObj.Arity {
-			fmt.Printf("Runtime Error: spawn expected %d args, got %d\n", fnObj.Arity, len(threadArgs))
-			return value.NewNull(), nil
-		}
-
 		// Push Function (Stack slot 0)
-		threadVM.push(fnVal)
+		threadVM.push(call.Callable)
 
 		// Push Args
-		for _, arg := range threadArgs {
+		for _, arg := range call.Arguments {
 			threadVM.push(arg)
 		}
 
 		// Create Frame
 		frame := &CallFrame{
-			Closure:     closure,
+			Closure:     call.Closure,
 			IP:          0,
 			Slots:       0,
-			Environment: closure.Environment,
+			Environment: call.Closure.Environment,
 		}
 
 		threadVM.frames[0] = frame
@@ -75,7 +53,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 					fmt.Printf("Thread Panic: %v\n%s", r, debug.Stack())
 				}
 			}()
-			err := threadVM.run(1) // Run until finished (frame 0 popped)
+			err := threadVM.run(1, nil) // Run until finished (frame 0 popped)
 			if err != nil {
 				fmt.Printf("Thread Error: %v\n", err)
 			}

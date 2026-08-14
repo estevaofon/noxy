@@ -11,16 +11,7 @@ const StackMax = 2048
 const FramesMax = 64
 
 func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interface{}) error {
-	line := 0
-	file := "?"
-	if c != nil {
-		file = c.FileName
-		if ip > 0 && ip <= len(c.Lines) {
-			line = c.Lines[ip-1]
-		}
-	}
-	msg := fmt.Sprintf(format, args...)
-	return fmt.Errorf("[%s:line %d] %s", file, line, msg)
+	return vm.newRuntimeError(c, ip, fmt.Sprintf(format, args...))
 }
 
 type CallFrame struct {

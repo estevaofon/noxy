@@ -202,7 +202,7 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 		return value.NewNull(), callErr
 	}
 	startFrameCount := vm.frameCount
-	if err := vm.run(startFrameCount); err != nil {
+	if err := vm.run(startFrameCount, nil); err != nil {
 		return value.NewNull(), err
 	}
 	vm.pop()
