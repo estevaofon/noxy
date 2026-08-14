@@ -123,6 +123,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseLetStatement()
 	case token.RETURN:
 		return p.parseReturnStatement()
+	case token.DEFER:
+		return p.parseDeferStatement()
 	case token.IF:
 		return p.parseIfStatement()
 	case token.WHILE:
@@ -322,6 +324,25 @@ func (p *Parser) parseReturnStatement() *ast.ReturnStmt {
 		p.nextToken()
 	}
 
+	return stmt
+}
+
+func (p *Parser) parseDeferStatement() ast.Statement {
+	stmt := &ast.DeferStmt{Token: p.curToken}
+	p.nextToken()
+	expression := p.parseExpression(LOWEST)
+	call, ok := expression.(*ast.CallExpression)
+	if !ok {
+		p.errors = append(p.errors, fmt.Sprintf(
+			"[%d:%d] SyntaxError: defer expects a call expression",
+			stmt.Token.Line, stmt.Token.Column,
+		))
+		return nil
+	}
+	stmt.Call = call
+	if p.peekTokenIs(token.NEWLINE) {
+		p.nextToken()
+	}
 	return stmt
 }
 

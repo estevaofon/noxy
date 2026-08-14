@@ -3,8 +3,29 @@ package parser
 import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
+	"strings"
 	"testing"
 )
+
+func TestParseDeferCallStatement(t *testing.T) {
+	p := New(lexer.New("defer cleanup(1)\n"))
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	stmt, ok := program.Statements[0].(*ast.DeferStmt)
+	if !ok || stmt.Call == nil || stmt.Call.Function.String() != "cleanup" || len(stmt.Call.Arguments) != 1 {
+		t.Fatalf("statement=%#v, want deferred cleanup call", program.Statements[0])
+	}
+}
+
+func TestParseDeferRejectsNonCallExpression(t *testing.T) {
+	for _, source := range []string{"defer value\n", "defer 1 + 2\n"} {
+		p := New(lexer.New(source))
+		_ = p.ParseProgram()
+		if len(p.Errors()) == 0 || !strings.Contains(strings.Join(p.Errors(), "\n"), "defer expects a call") {
+			t.Fatalf("source=%q errors=%v", source, p.Errors())
+		}
+	}
+}
 
 func TestLetStatements(t *testing.T) {
 	input := `

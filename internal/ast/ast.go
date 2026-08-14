@@ -187,6 +187,15 @@ func (rs *ReturnStmt) String() string {
 	return out
 }
 
+type DeferStmt struct {
+	Token token.Token
+	Call  *CallExpression
+}
+
+func (ds *DeferStmt) statementNode()       {}
+func (ds *DeferStmt) TokenLiteral() string { return ds.Token.Literal }
+func (ds *DeferStmt) String() string       { return "defer " + ds.Call.String() }
+
 type BreakStmt struct {
 	Token token.Token
 }
