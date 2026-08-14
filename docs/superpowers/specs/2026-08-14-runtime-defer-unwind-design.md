@@ -57,7 +57,7 @@ The only accepted form is a statement whose operand is a real call:
 
 ```noxy
 defer io.close(file)
-defer net.close(socket)
+defer net.socket_close(socket)
 defer sqlite.finalize(statement)
 ```
 
@@ -66,11 +66,14 @@ and functions executed by `spawn`. It is not a lexical-scope cleanup: a
 `defer` inside an `if` or loop belongs to the containing call frame. A loop
 registers one entry for every executed iteration.
 
-Arbitrary expressions and pseudo-calls that compile without `OP_CALL` are
-rejected. In particular, `defer value`, `defer 1 + 2`, and `defer addr(ref x)`
-produce compile errors. Compiler-special operations such as channel
-pseudo-calls are rejected unless they are later represented as ordinary
-callables and emit the standard call sequence.
+Arbitrary expressions and pseudo-calls that compile without an invocable
+callee are rejected. In particular, `defer value`, `defer 1 + 2`, and
+`defer addr(ref x)` produce compile errors. Specialized compiler paths remain
+eligible when they still prepare a real callable and end in ordinary call
+dispatch. This includes the current `append`, `pop`, `delete`, `json_loads`,
+`chan_send`, and `chan_recv` paths. Each eligible path must accept an emission
+mode that selects `OP_CALL` or `OP_DEFER`; `addr` remains ineligible because it
+produces `OP_ADDR` and no deferred callable.
 
 ### 4.2 Registration timing
 
@@ -114,9 +117,10 @@ The compiler factors the ordinary call pipeline into two stages:
    type-marker, and reference-mode checks used by an immediate call;
 2. emit either `OP_CALL <argCount>` or `OP_DEFER <argCount>`.
 
-Compiler-special builtins that directly emit collection, channel, reference,
-or other dedicated opcodes cannot use the second stage and are rejected in a
-defer statement with a targeted diagnostic.
+Compiler-special paths that still end in ordinary call dispatch reuse their
+existing operand preparation and select `OP_DEFER` as the final instruction.
+Paths that do not leave an invocable callee and arguments, currently `addr`,
+are rejected with a targeted diagnostic.
 
 `OP_DEFER <argCount>` consumes the callee and arguments from the operand stack,
 creates a prepared call, appends it to the current frame, and produces no
@@ -140,10 +144,40 @@ type PreparedCall struct {
 }
 
 type CallFrame struct {
-	// Existing closure, IP, slots, and environment fields.
+	// Existing closure, IP, and environment fields.
+	StackBase int
+	LocalBase int
 	Deferred []PreparedCall
 }
 ```
+
+`StackBase` is the callee/call slot and the first slot owned by the frame. It
+replaces the use of `Slots` as a cleanup boundary. `LocalBase` is a separate,
+mandatory offset used exclusively by `OP_GET_LOCAL`, `OP_SET_LOCAL`,
+`OP_REF_LOCAL`, and local-upvalue capture. The layouts are explicit:
+
+- main script: `StackBase = 0`, `LocalBase = 1`;
+- ordinary function: `StackBase = LocalBase = stackTop - argCount - 1`,
+  preserving compiler slot zero for the callee/function instance;
+- spawned function: `StackBase = LocalBase = 0` in its independent VM stack.
+
+Terminal cleanup always starts at `StackBase`; local access and capture always
+start at `LocalBase`. A successful ordinary return replaces the call slot with
+the result. Terminal script and spawned-frame completion clear that slot and
+leave no callee residual.
+
+Preparation is defined per callable kind:
+
+| Callable | Registration behavior |
+|----------|-----------------------|
+| Noxy closure | Validate arity and parameter modes; shallow-copy every non-`ref` parameter and retain explicit references. |
+| Signed native | Validate published arity and modes; shallow-copy every non-`ref` parameter and retain explicit references. |
+| Legacy unsigned native | Capture each evaluated `value.Value` exactly as current unsigned-native calls receive it; perform no unavailable mode validation or additional copy. |
+| Struct constructor | Validate field arity and runtime field types; capture evaluated field values directly, preserving the constructor's existing no-`copyValue` behavior. |
+
+Prepared invocation has a dedicated path and must not re-enter the normal
+argument-preparation code. Native handler errors and errors produced by the
+deferred Noxy body occur during invocation, not registration.
 
 The final names may follow existing package conventions, but these boundaries
 are mandatory:
@@ -160,31 +194,39 @@ unwind component. Frame construction can remain beside its current call sites.
 
 ## 7. Bounded Unwind Machine
 
-### 7.1 Boundary contract
+### 7.1 Return and error contracts
 
-Unwind is defined as `unwindFrames(targetFrameCount, outcome)`: remove frames
-until exactly `targetFrameCount` frames remain. Frames below that boundary are
-never touched by the operation.
+The machine exposes two distinct transitions:
 
-This single contract covers all execution contexts:
+- `finishFrame(returnOutcome)` finalizes only the current frame. It is used for
+  an explicit or implicit normal return, regardless of the active `run`
+  boundary.
+- `unwindTo(targetFrameCount, errorOutcome)` finalizes frames until exactly
+  `targetFrameCount` frames remain. It is used only after a runtime failure or
+  after a deferred failure converts a normal return into an error.
 
-- main interpretation unwinds to zero frames;
-- recursive module execution unwinds only the module frames and leaves the
-  importing frame intact;
-- a Noxy cleanup call unwinds only frames created by that cleanup and leaves
-  the frame that owns the remaining deferred entries intact;
-- detached spawn execution unwinds its independent VM to zero frames.
+This distinction is mandatory. During the main `run(1)`, a normal return from
+an inner function removes only that function and resumes the script. It never
+unwinds directly to zero. If one of that function's deferred calls fails,
+`finishFrame` completes all of that frame's cleanups, converts the return to an
+error outcome, and then `unwindTo` continues toward the active run boundary.
 
-The current recursive `run(minFrameCount)` behavior maps to a target of
-`minFrameCount - 1`. A module error is first unwound to its caller boundary and
-returned to `OP_IMPORT`; the outer run then treats it as its own runtime failure
-and unwinds its remaining frames. This sequencing ensures that cached
-`frame`, chunk, and instruction-pointer state never references a frame removed
-by an inner run.
+The active error boundary remains execution-context specific:
 
-### 7.2 Frame transition
+- main interpretation and detached spawn execution target zero frames;
+- recursive module execution targets the importing frame count;
+- a deferred Noxy call targets the count that retains its owner frame.
 
-For each frame being removed, the machine performs these steps in order:
+The current recursive `run(minFrameCount)` behavior maps error unwind to
+`minFrameCount - 1`. A module error first unwinds only module-created frames
+and returns to `OP_IMPORT`; the outer run wraps that structured cause and then
+unwinds toward its own boundary. A cleanup error similarly unwinds only frames
+created by the cleanup and returns to the still-live owner frame.
+
+### 7.2 Single-frame finalization
+
+Both transitions call the same single-frame finalizer. For each frame being
+removed, it performs these steps in order:
 
 1. preserve the pending return value or error outcome;
 2. remove the newest prepared call from the frame;
@@ -200,10 +242,16 @@ For each frame being removed, the machine performs these steps in order:
 10. either place a successful return value in the caller's call slot or
     propagate the error outcome to the next frame.
 
-The caller's IP is saved before every immediate or prepared call. A frame is
-never popped by `OP_RETURN` itself; that opcode only constructs a return
-outcome and transfers control to the unwind machine. Runtime instruction
-failures follow the same transfer path rather than performing separate cleanup.
+All cached execution state is persisted to its frame before control can enter
+another run loop or the unwind machine. In particular, `frame.IP` is saved
+before every immediate call, prepared call, recursive module `run`,
+`OP_RETURN`, and transfer of a runtime error. Restoring a surviving frame
+always reloads chunk and IP from that frame rather than from stale executor
+locals.
+
+A frame is never popped by `OP_RETURN` itself; that opcode constructs a return
+outcome and calls `finishFrame`. Runtime instruction failures call
+`unwindTo` rather than performing separate cleanup.
 
 If a deferred Noxy function fails, its own frames and deferred entries unwind
 to the owner boundary. The returned error is recorded against the owner's
@@ -213,9 +261,11 @@ entries.
 ### 7.3 Return-to-error conversion
 
 A normal return remains successful only if every deferred call succeeds. The
-first cleanup failure converts the outcome to an unwind error. That failure is
-then propagated through caller frames, so deferred calls in those frames also
-run. Explicit returns, implicit void returns, script completion, and module
+first cleanup failure converts the outcome to an unwind error. The current
+frame still executes all older entries and completes its single-frame
+finalization. The error is then propagated with `unwindTo` through caller
+frames up to the active boundary, so deferred calls in those frames also run.
+Explicit returns, implicit void returns, script completion, and module
 completion all follow this rule.
 
 ## 8. Structured Errors
@@ -241,10 +291,24 @@ type UnwindError struct {
 ```
 
 `RuntimeError.Unwrap` preserves an underlying native or module error when one
-exists. `UnwindError` preserves the primary error as its principal unwrap
-cause; when a normal return has no primary error, its first deferred failure is
-the unwrap cause. All deferred failures remain available through a typed
-accessor and in deterministic LIFO execution order.
+exists. `DeferredError.Unwrap` exposes its cause. `UnwindError.Unwrap() []error`
+returns the primary error first, when present, followed by the deferred errors
+in execution order. This keeps the original cause first while allowing
+`errors.Is` and `errors.As` to discover every structured cause. When a normal
+return has no primary error, the slice begins with the first deferred failure.
+
+Nested aggregates are preserved, not flattened. If a deferred Noxy call fails
+and its own deferred calls also fail, that entire inner `UnwindError` is the
+`Cause` of one outer `DeferredError` associated with the owner's registration
+site. An import failure is a `RuntimeError` whose `Cause` is the module's
+structured error. This preserves frame ownership and ordering at every level.
+Rendering recursively indents a nested cause under its single outer prefix; it
+does not copy inner entries into the outer slice or manufacture new source
+locations.
+
+Every path that adds context to an existing error uses an explicit constructor
+with `Cause` or `%w`. Runtime/native/module errors are never passed through
+`runtimeError(..., "%s", err)` or another formatter that destroys identity.
 
 The text representation is stable and non-duplicative:
 
@@ -267,6 +331,9 @@ Deferred resource cleanup uses existing public APIs and shared registries:
 let file: io.File = io.open(path, "w")
 defer io.close(file)
 
+let socket: net.Socket = net.connect(host, port)
+defer net.socket_close(socket)
+
 let db: sqlite.Database = sqlite.open(path)
 defer sqlite.close(db)
 let stmt: sqlite.Statement = sqlite.prepare(db, query)
@@ -278,21 +345,26 @@ statement finalization executes first. Socket and listener handles use the
 same explicit pattern.
 
 This version does not claim to aggregate operating-system close failures that
-existing builtins suppress. `io_close`, `net_close`, `sqlite_close`, and
-`sqlite_finalize` currently return success-compatible Noxy values while some
-underlying Go close errors are discarded. Changing those public behaviors or
-adding strict close APIs is separate work. Here, "cleanup failure" means a
-runtime error observable from the deferred call. Tests combine real resources
-with a controlled failing native to prove that such a failure never prevents
-the remaining resources from closing.
+existing underlying builtins suppress. `io_close`, `net_close`,
+`sqlite_close`, and `sqlite_finalize` currently return success-compatible Noxy
+values while some underlying Go close errors are discarded. Changing those
+public behaviors or adding strict close APIs is separate work. Here, "cleanup
+failure" means a runtime error observable from the deferred call. Tests
+combine real resources with a controlled failing native to prove that such a
+failure never prevents the remaining resources from closing.
+
+`io.close_result(...)` also returns an ordinary result value. When deferred,
+that value is discarded and does not become an unwind error.
 
 ## 10. Edge Cases
 
 - An argument-evaluation error does not register the incomplete defer.
 - A dynamic callee that is not callable fails at registration, after earlier
   deferred calls have already been retained.
-- A deferred constructor is allowed only if it uses the ordinary `OP_CALL`
-  path; its constructed value is discarded.
+- A deferred constructor uses existing constructor capture semantics: field
+  values are evaluated and retained directly without `copyValue`; its
+  constructed value is discarded. A composite mutated after registration
+  therefore follows the same identity behavior as an immediate constructor.
 - A cleanup may register more cleanup work in its own frame. That nested work
   finishes before the owner proceeds to its next entry.
 - There is no arbitrary fixed defer-count limit. Entries use heap-backed frame
@@ -315,6 +387,8 @@ All behavior is developed test-first.
 - reject non-call expressions and unsupported pseudo-calls;
 - verify ordinary call type, arity, and reference diagnostics still apply;
 - verify disassembly and exact `OP_DEFER` operands;
+- verify specialized `append`, `pop`, `delete`, `json_loads`, `chan_send`, and
+  `chan_recv` paths can select deferred emission while `addr` is rejected;
 - verify argument evaluation order and failure before registration.
 
 ### 11.2 Runtime semantics
@@ -325,6 +399,9 @@ All behavior is developed test-first.
   loop registrations, and a spawned function;
 - prove deferred results are discarded;
 - prove deferred closures can read captured locals and upvalues;
+- prove script locals address from `LocalBase = 1` while teardown clears from
+  `StackBase = 0`;
+- prove the preparation matrix for signed/unsigned natives and constructors;
 - prove a cleanup can register and execute its own deferred calls.
 
 ### 11.3 Error and boundary behavior
@@ -336,6 +413,9 @@ All behavior is developed test-first.
 - retain registration and execution locations without duplicate formatting;
 - keep an importing frame alive while an inner module run unwinds;
 - keep an owner frame alive while a failing Noxy cleanup unwinds;
+- preserve a nested cleanup aggregate as one outer deferred cause;
+- wrap a failing module without flattening or duplicating its error locations;
+- persist and restore IP across a recursive import and a prepared Noxy call;
 - restore stack base after pre-call validation failure, native failure, and
   Noxy cleanup failure.
 
@@ -343,13 +423,20 @@ All behavior is developed test-first.
 
 - assert `frameCount`, `currentFrame`, frame-array entries, `stackTop`, cached
   IP, and `openUpvalues` after normal and error exits;
+- assert main-frame completion leaves `stackTop == 0`, `frames[0] == nil`, and
+  no closure residual in `stack[0]`;
 - interpret another program successfully on the same VM after a failure;
-- close and remove a real temporary file on normal return and runtime error;
+- close a real temporary file on normal return and runtime error, verify its
+  registry entry and closed state, and then remove it as a secondary check;
 - close real sockets and listeners and verify registry removal;
 - finalize a real SQLite statement before closing its database and verify both
   registries are empty;
 - place a controlled failing native between resource cleanups and prove all
-  remaining resources still close in LIFO order.
+  remaining resources still close in LIFO order;
+- execute a nested import whose module defer fails while the importer owns
+  multiple deferred calls;
+- defer a struct constructor with a composite argument mutated after
+  registration and verify the documented direct-capture behavior.
 
 ### 11.5 Project validation
 
@@ -384,8 +471,8 @@ The subproject is complete when:
 
 1. every exiting frame executes its registered calls exactly once in LIFO
    order;
-2. normal return and every surfaced runtime-error path use bounded central
-   unwind;
+2. normal return finalizes exactly one frame, while every surfaced runtime
+   error unwinds only to the active boundary;
 3. cleanup failure never skips older deferred calls;
 4. original and cleanup errors retain structured identity and source context;
 5. frame, stack, IP, and upvalue invariants remain valid and the VM is reusable;
