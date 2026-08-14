@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/compiler"
@@ -9,6 +10,7 @@ import (
 	"noxy-vm/internal/value"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -158,6 +160,57 @@ func compileModuleProgram(t *testing.T, root, source string) *chunk.Chunk {
 		t.Fatal(err)
 	}
 	return code
+}
+
+func TestNestedModuleDeferBoundary(t *testing.T) {
+	root := t.TempDir()
+	moduleSource := `
+defer module_record("module-old")
+defer module_fail()
+let zero: int = 0
+print(1 / zero)
+`
+	if err := os.WriteFile(filepath.Join(root, "broken.nx"), []byte(moduleSource), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := compileModuleProgram(t, root, `
+defer module_record("importer-old")
+defer module_record("importer-new")
+use broken
+`)
+
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	sentinel := errors.New("module cleanup failed")
+	var order []string
+	machine.DefineNative("module_record", func(args []value.Value) value.Value {
+		order = append(order, args[0].Obj.(string))
+		return value.NewNull()
+	})
+	machine.DefineContextualNative("module_fail", func(value.NativeContext, []value.Value) (value.Value, error) {
+		return value.NewNull(), sentinel
+	})
+
+	err := machine.Interpret(code)
+	if !slices.Equal(order, []string{"module-old", "importer-new", "importer-old"}) {
+		t.Fatalf("cleanup order=%v, want [module-old importer-new importer-old]", order)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error=%v, want module cleanup sentinel", err)
+	}
+	importError, ok := err.(*RuntimeError)
+	if !ok {
+		t.Fatalf("error=%T %v, want outer *RuntimeError", err, err)
+	}
+	if importError.Message != "failed to import module 'broken'" {
+		t.Fatalf("outer runtime message=%q, want structured import context", importError.Message)
+	}
+	moduleUnwind, ok := importError.Cause.(*UnwindError)
+	if !ok {
+		t.Fatalf("import cause=%T %v, want module *UnwindError", importError.Cause, importError.Cause)
+	}
+	if !errors.Is(moduleUnwind, sentinel) {
+		t.Fatalf("module unwind=%v, want cleanup sentinel", moduleUnwind)
+	}
 }
 
 func TestRuntimeModuleCacheSharesIdentityAcrossImportsAndChildVM(t *testing.T) {

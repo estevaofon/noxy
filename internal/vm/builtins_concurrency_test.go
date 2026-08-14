@@ -147,3 +147,45 @@ test_report(chan_recv(channel))
 	}
 	assertBuiltinValue(t, captured, value.NewString("child"))
 }
+
+func TestSpawnRunsDeferredCleanup(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "normal return"},
+		{name: "runtime error", body: `
+    let zero: int = 0
+    print(1 / zero)`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			machine := New()
+			completed := make(chan int64, 1)
+			machine.DefineNative("spawned_record", func(args []value.Value) value.Value {
+				completed <- args[0].AsInt
+				return value.NewNull()
+			})
+
+			code := compileVMSource(t, `
+func worker() -> void
+    defer spawned_record(1)`+test.body+`
+end
+spawn(worker)
+`)
+			if err := machine.Interpret(code); err != nil {
+				t.Fatalf("parent error: %v", err)
+			}
+
+			select {
+			case got := <-completed:
+				if got != 1 {
+					t.Fatalf("cleanup=%d, want 1", got)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("spawned defer did not execute")
+			}
+		})
+	}
+}
