@@ -3,6 +3,7 @@ package vm
 import (
 	"bytes"
 	"go/ast"
+	"go/build"
 	"go/constant"
 	"go/importer"
 	"go/parser"
@@ -11,6 +12,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -197,6 +199,13 @@ func productionGoFiles(t *testing.T) []string {
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+		matches, err := build.Default.MatchFile(filepath.Dir(path), filepath.Base(path))
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return nil
+		}
 		files = append(files, path)
 		return nil
 	})
@@ -204,6 +213,37 @@ func productionGoFiles(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	return files
+}
+
+func TestReadArchitectureSourcesRespectsActivePlatform(t *testing.T) {
+	directory := t.TempDir()
+	otherPlatform := "linux"
+	if runtime.GOOS == "linux" {
+		otherPlatform = "windows"
+	}
+	sources := map[string]string{
+		"common.go":                         "package fixture\n",
+		"active_" + runtime.GOOS + ".go":    "package fixture\n",
+		"inactive_" + otherPlatform + ".go": "package fixture\n",
+	}
+	for filename, source := range sources {
+		if err := os.WriteFile(filepath.Join(directory, filename), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := readArchitectureSources(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var basenames []string
+	for _, source := range got {
+		basenames = append(basenames, filepath.Base(source.filename))
+	}
+	want := []string{"active_" + runtime.GOOS + ".go", "common.go"}
+	if strings.Join(basenames, ",") != strings.Join(want, ",") {
+		t.Fatalf("sources=%v, want %v", basenames, want)
+	}
 }
 
 func expressionText(t *testing.T, expression ast.Expr) string {
@@ -319,6 +359,13 @@ func readArchitectureSources(directory string) ([]architectureSource, error) {
 	var sources []architectureSource
 	for _, filename := range filenames {
 		if strings.HasSuffix(filename, "_test.go") {
+			continue
+		}
+		matches, err := build.Default.MatchFile(directory, filepath.Base(filename))
+		if err != nil {
+			return nil, err
+		}
+		if !matches {
 			continue
 		}
 		source, err := os.ReadFile(filename)
