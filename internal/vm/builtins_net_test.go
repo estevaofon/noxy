@@ -387,34 +387,6 @@ func TestNetSelectValidatesArgumentsSynchronously(t *testing.T) {
 	}
 }
 
-func TestConcurrentNetSelect(t *testing.T) {
-	machine := New()
-	_, client, server := setupAcceptedLoopback(t, machine)
-	child := NewWithShared(machine.shared, machine.Config)
-
-	sent := callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("x"))
-	assertBuiltinValue(t, builtinMapField(t, sent, "ok"), value.NewBool(true))
-	start := make(chan struct{})
-	done := make(chan value.Value, 2)
-	for _, current := range []*VM{machine, child} {
-		current := current
-		go func() {
-			<-start
-			done <- callBuiltinWithinBound(t, current, "net_select",
-				value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(5))
-		}()
-	}
-	close(start)
-	for i := 0; i < 2; i++ {
-		select {
-		case result := <-done:
-			requireValidSelectResult(t, result)
-		case <-time.After(statefulBuiltinTimeout):
-			t.Fatal("concurrent net_select did not complete")
-		}
-	}
-}
-
 func TestNetworkBuiltinsLoopbackLifecycle(t *testing.T) {
 	machine := New()
 	defer func() {

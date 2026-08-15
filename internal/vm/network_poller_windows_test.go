@@ -9,7 +9,6 @@ import (
 	"sync"
 	"syscall"
 	"testing"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -374,7 +373,7 @@ func TestWindowsWakeTreatsWouldBlockAsAlreadySignaled(t *testing.T) {
 	}
 }
 
-func TestWSAPollLoopbackResetPreservesPendingSocketError(t *testing.T) {
+func TestNetworkPollIntegrationWSAPollResetCopiesTerminalEventAndPreservesPendingError(t *testing.T) {
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 
@@ -396,32 +395,22 @@ func TestWSAPollLoopbackResetPreservesPendingSocketError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	poller := networkPoller{platform: systemNetworkPlatform(), now: time.Now, sleep: time.Sleep}
-	sets := [3]*value.ObjArray{
-		{Elements: []value.Value{server}},
-		{Elements: []value.Value{server}},
-		{Elements: []value.Value{server}},
-	}
-	type pollResult struct {
-		value value.Value
-		err   error
-	}
-	result := make(chan pollResult, 1)
-	go func() {
-		selected, err := poller.Poll(machine.shared, sets, time.Second)
-		result <- pollResult{value: selected, err: err}
-	}()
-	var selected value.Value
-	select {
-	case outcome := <-result:
-		if outcome.err != nil {
-			t.Fatal(outcome.err)
-		}
-		selected = outcome.value
-	case <-time.After(time.Second):
-		t.Fatal("WSAPoll did not report loopback RST within one second")
-	}
-	assertBuiltinValue(t, builtinMapField(t, selected, "error_count"), value.NewInt(1))
+	selected := callBuiltinWithinBound(t, machine, "net_select",
+		value.NewArray([]value.Value{server}),
+		value.NewArray(nil),
+		value.NewArray([]value.Value{server}),
+		value.NewInt(1000))
+	requireNetworkPollIntegrationSet(t, selected, "read", server)
+	requireNetworkPollIntegrationSet(t, selected, "error", server)
+
+	selected = callBuiltinWithinBound(t, machine, "net_select",
+		value.NewArray([]value.Value{server}),
+		value.NewArray([]value.Value{server}),
+		value.NewArray([]value.Value{server}),
+		value.NewInt(0))
+	requireNetworkPollIntegrationSet(t, selected, "read", server)
+	requireNetworkPollIntegrationSet(t, selected, "write", server)
+	requireNetworkPollIntegrationSet(t, selected, "error", server)
 
 	received := callBuiltinWithinBound(t, machine, "net_recv", server, value.NewInt(1))
 	assertBuiltinValue(t, builtinMapField(t, received, "ok"), value.NewBool(false))
