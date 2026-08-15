@@ -37,8 +37,15 @@ if reverse("abc") == "cba" then pass("reverse") else fail("reverse") end
 if repeat("ab", 2) == "abab" then pass("repeat") else fail("repeat") end
 
 // 3. Manip
-// substring
-if substring("Hello", 0, 2) == "He" then pass("substring") else fail("substring") end
+// substring (end_idx is exclusive, rune-based)
+if substring("Hello", 0, 2) == "He" then pass("substring basic") else fail("substring basic") end
+if substring("Hello", 1, 4) == "ell" then pass("substring mid") else fail("substring mid") end
+if substring("Hello", 3, 100) == "lo" then pass("substring clamp") else fail("substring clamp") end
+if substring("Hello", 2, 2) == "" then pass("substring start==end") else fail("substring start==end") end
+// negative indices (Python-style: count from end)
+if substring("Hello", -2, 5) == "lo" then pass("substring neg start") else fail("substring neg start") end
+if substring("Hello", 0, -1) == "Hell" then pass("substring neg end") else fail("substring neg end") end
+if substring("Hello", -3, -1) == "ll" then pass("substring both neg") else fail("substring both neg") end
 // replace
 if replace("aaa", "a", "b") == "bbb" then pass("replace") else fail("replace") end
 // replace_first

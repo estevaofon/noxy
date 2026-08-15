@@ -174,25 +174,39 @@ func (vm *VM) defineStringBuiltins() {
 		return value.NewString(strings.ReplaceAll(s, old, new))
 	})
 	vm.DefineNative("strings_substring", func(args []value.Value) value.Value {
-		// args: string, start, length
+		// args: string, start, end_idx (exclusive, rune-based)
+		// Returns runes in [start, end_idx). Indices are clamped to [0, len].
 		if len(args) < 3 {
 			return value.NewString("")
 		}
 		s := args[0].String()
 		runes := []rune(s)
+		n := len(runes)
 		start := int(args[1].AsInt)
-		length := int(args[2].AsInt)
+		end := int(args[2].AsInt)
 
+		// Negative indices count from the end (Python-style)
+		if start < 0 {
+			start = n + start
+		}
+		if end < 0 {
+			end = n + end
+		}
+		// Clamp to valid range [0, n]
 		if start < 0 {
 			start = 0
 		}
-		if start >= len(runes) {
-			return value.NewString("")
+		if end < 0 {
+			end = 0
 		}
-
-		end := start + length
-		if end > len(runes) {
-			end = len(runes)
+		if start > n {
+			start = n
+		}
+		if end > n {
+			end = n
+		}
+		if start >= end {
+			return value.NewString("")
 		}
 
 		return value.NewString(string(runes[start:end]))
