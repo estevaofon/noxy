@@ -224,8 +224,10 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 
 	pollRegistrations := make([]*networkRegistration, 0, len(registrations))
 	attachedCount := 0
+	concurrentAttachClose := false
 	for _, registration := range registrations {
 		if !attachNetworkRegistration(shared, registration, wake) {
+			concurrentAttachClose = true
 			continue
 		}
 		attachedCount++
@@ -241,7 +243,7 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 		}
 		pollRegistrations = append(pollRegistrations, registration)
 	}
-	if attachedCount == 0 {
+	if concurrentAttachClose || attachedCount == 0 {
 		return selectResult(nil, nil, nil), nil
 	}
 

@@ -542,6 +542,101 @@ func TestNetworkPollerCloseDuringWakeSetupReturnsPromptlyWithoutSleeping(t *test
 	}
 }
 
+func TestNetworkPollerOneConcurrentAttachCloseReturnsBeforeWaitingOnSurvivor(t *testing.T) {
+	machine := New()
+	survivorResource, survivorSocket := addPollTestSocket(t, machine, 20)
+	closingResource, closingSocket := addPollTestSocket(t, machine, 10)
+	survivorConnection := survivorResource.connection.(*syscallTestConn)
+	survivorAttached := false
+	survivorConnection.syscallFn = func() (syscall.RawConn, error) {
+		survivorResource.stateMu.Lock()
+		survivorAttached = len(survivorResource.pollWaiters) == 1
+		survivorResource.stateMu.Unlock()
+		return survivorConnection.raw, nil
+	}
+
+	platformWake := &fakePlatformWake{}
+	newWakeCalls := 0
+	waitCalls := 0
+	platform := networkPlatform{
+		newWake: func() (platformNetworkWake, error) {
+			newWakeCalls++
+			closeSocket(closingResource)
+			return platformWake, nil
+		},
+		wait: func([]networkPollFD, uintptr, int32) (networkPollBatch, error) {
+			waitCalls++
+			return networkPollBatch{}, nil
+		},
+	}
+	start := time.Unix(100, 0)
+	times := []time.Time{start, start, start.Add(3 * time.Second)}
+	now := func() time.Time {
+		current := times[0]
+		if len(times) > 1 {
+			times = times[1:]
+		}
+		return current
+	}
+	var slept []time.Duration
+	poller := networkPoller{
+		platform: platform,
+		now:      now,
+		sleep:    func(duration time.Duration) { slept = append(slept, duration) },
+	}
+
+	result, err := poller.Poll(machine.shared, pollSets([]value.Value{survivorSocket, closingSocket}, nil, nil), 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !survivorAttached {
+		t.Fatal("surviving registration never observed its installed poll waiter")
+	}
+	if newWakeCalls != 1 || waitCalls != 0 || len(slept) != 0 {
+		t.Fatalf("newWake=%d wait=%d slept=%v, want prompt return before native wait", newWakeCalls, waitCalls, slept)
+	}
+	if len(resultSet(t, result, "read")) != 0 {
+		t.Fatalf("concurrent close returned a partial result: %v", result)
+	}
+	survivorResource.stateMu.Lock()
+	waiters := len(survivorResource.pollWaiters)
+	survivorResource.stateMu.Unlock()
+	platformWake.mu.Lock()
+	wakeCloses := platformWake.closes
+	platformWake.mu.Unlock()
+	if waiters != 0 || wakeCloses != 1 {
+		t.Fatalf("survivor waiters=%d wake closes=%d, want complete cleanup", waiters, wakeCloses)
+	}
+}
+
+func TestNetworkPollerConcurrentAttachCloseDoesNotMaskOpenAcquisitionFailure(t *testing.T) {
+	machine := New()
+	closingResource, closingSocket := addPollTestSocket(t, machine, 10)
+	brokenResource, brokenSocket := addPollTestSocket(t, machine, 20)
+	brokenConnection := brokenResource.connection.(*syscallTestConn)
+	acquisitionFailure := errors.New("open survivor syscall failure")
+	brokenConnection.syscallFn = func() (syscall.RawConn, error) {
+		return nil, acquisitionFailure
+	}
+	platformWake := &fakePlatformWake{}
+	platform := networkPlatform{
+		newWake: func() (platformNetworkWake, error) {
+			closeSocket(closingResource)
+			return platformWake, nil
+		},
+		wait: func([]networkPollFD, uintptr, int32) (networkPollBatch, error) {
+			t.Fatal("native wait called after acquisition failure")
+			return networkPollBatch{}, nil
+		},
+	}
+	poller := networkPoller{platform: platform, now: time.Now, sleep: time.Sleep}
+
+	result, err := poller.Poll(machine.shared, pollSets([]value.Value{closingSocket, brokenSocket}, nil, nil), time.Second)
+	if !errors.Is(err, acquisitionFailure) || result.Type != value.VAL_NULL {
+		t.Fatalf("result=%v error=%v, want attributed open-resource acquisition failure", result, err)
+	}
+}
+
 func TestNetworkPollerIgnoresPoisonClosedCandidateBesideLiveCandidate(t *testing.T) {
 	machine := New()
 	closedResource, closedSocket := addPollTestSocket(t, machine, 10)
