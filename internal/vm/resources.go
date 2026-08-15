@@ -2,6 +2,7 @@ package vm
 
 import (
 	"database/sql"
+	"errors"
 	"net"
 	"os"
 	"sync"
@@ -109,6 +110,7 @@ type ListenerResource struct {
 	lastAcceptDeadline  time.Time
 	deadlineGeneration  uint64
 	closed              bool
+	pollWaiters         map[*networkWake]struct{}
 }
 
 type SocketResource struct {
@@ -124,6 +126,96 @@ type SocketResource struct {
 	lastWriteDeadline  time.Time
 	deadlineGeneration uint64
 	closed             bool
+	pollWaiters        map[*networkWake]struct{}
+}
+
+type detachedSocket struct {
+	connection net.Conn
+	waiters    []*networkWake
+}
+
+type detachedListener struct {
+	listener deadlineListener
+	buffered net.Conn
+	waiters  []*networkWake
+}
+
+func takeNetworkWaiters(waiters map[*networkWake]struct{}) []*networkWake {
+	result := make([]*networkWake, 0, len(waiters))
+	for waiter := range waiters {
+		result = append(result, waiter)
+	}
+	return result
+}
+
+func detachSocketLocked(resource *SocketResource) (detachedSocket, bool) {
+	if resource.closed {
+		return detachedSocket{}, false
+	}
+	resource.closed = true
+	resource.deadlineGeneration++
+	detached := detachedSocket{
+		connection: resource.connection,
+		waiters:    takeNetworkWaiters(resource.pollWaiters),
+	}
+	resource.connection = nil
+	resource.bufferedRead = nil
+	resource.readProbeDeadline = time.Time{}
+	resource.pollWaiters = nil
+	return detached, true
+}
+
+func detachListenerLocked(resource *ListenerResource) (detachedListener, bool) {
+	if resource.closed {
+		return detachedListener{}, false
+	}
+	resource.closed = true
+	resource.deadlineGeneration++
+	detached := detachedListener{
+		listener: resource.listener,
+		buffered: resource.bufferedAccept,
+		waiters:  takeNetworkWaiters(resource.pollWaiters),
+	}
+	resource.listener = nil
+	resource.bufferedAccept = nil
+	resource.acceptProbeDeadline = time.Time{}
+	resource.pollWaiters = nil
+	return detached, true
+}
+
+func finishSocketDetach(detached detachedSocket) error {
+	errs := make([]error, 0, len(detached.waiters)+1)
+	for _, waiter := range detached.waiters {
+		if err := waiter.Signal(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if detached.connection != nil {
+		if err := detached.connection.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func finishListenerDetach(detached detachedListener) error {
+	errs := make([]error, 0, len(detached.waiters)+2)
+	for _, waiter := range detached.waiters {
+		if err := waiter.Signal(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if detached.listener != nil {
+		if err := detached.listener.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if detached.buffered != nil {
+		if err := detached.buffered.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 type DatabaseResource struct {

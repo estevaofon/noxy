@@ -28,6 +28,7 @@ type controlledDeadlineConn struct {
 	setDeadlineFn  func(time.Time) error
 	setReadFn      func(time.Time) error
 	setWriteFn     func(time.Time) error
+	closeFn        func() error
 }
 
 type controlledDeadlineListener struct {
@@ -37,6 +38,7 @@ type controlledDeadlineListener struct {
 	closeCount int
 	acceptFn   func() (net.Conn, error)
 	setFn      func(time.Time) error
+	closeFn    func() error
 }
 
 func (listener *controlledDeadlineListener) Accept() (net.Conn, error) {
@@ -60,6 +62,9 @@ func (listener *controlledDeadlineListener) Close() error {
 	listener.mu.Lock()
 	listener.closeCount++
 	listener.mu.Unlock()
+	if listener.closeFn != nil {
+		return listener.closeFn()
+	}
 	return listener.Listener.Close()
 }
 
@@ -123,6 +128,9 @@ func (connection *controlledDeadlineConn) Close() error {
 	connection.mu.Lock()
 	connection.closeCount++
 	connection.mu.Unlock()
+	if connection.closeFn != nil {
+		return connection.closeFn()
+	}
 	return connection.Conn.Close()
 }
 
@@ -130,6 +138,240 @@ func (connection *controlledDeadlineConn) closes() int {
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
 	return connection.closeCount
+}
+
+func requireWakeSignals(t *testing.T, wakes ...*fakePlatformWake) {
+	t.Helper()
+	for index, wake := range wakes {
+		wake.mu.Lock()
+		signals := wake.signals
+		wake.mu.Unlock()
+		if signals != 1 {
+			t.Fatalf("wake %d signals=%d, want 1 before close", index, signals)
+		}
+	}
+}
+
+func TestSocketDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
+	connection, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	controlled := &controlledDeadlineConn{Conn: connection}
+	firstRaw := &fakePlatformWake{}
+	secondRaw := &fakePlatformWake{}
+	first := newNetworkWake(firstRaw)
+	second := newNetworkWake(secondRaw)
+	resource := &SocketResource{
+		connection:  controlled,
+		pollWaiters: map[*networkWake]struct{}{first: {}, second: {}},
+	}
+
+	closeSocket(resource)
+	closeSocket(resource)
+
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closed := resource.closed
+	connectionAfterClose := resource.connection
+	waiters := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closed || connectionAfterClose != nil || waiters != nil {
+		t.Fatalf("closed=%v connection=%v waiters=%v", closed, connectionAfterClose, waiters)
+	}
+	if controlled.closes() != 1 {
+		t.Fatalf("close calls=%d, want 1", controlled.closes())
+	}
+}
+
+func TestListenerDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
+	underlying, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlled := &controlledDeadlineListener{Listener: underlying}
+	accepted, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	controlledAccepted := &controlledDeadlineConn{Conn: accepted}
+	firstRaw := &fakePlatformWake{}
+	secondRaw := &fakePlatformWake{}
+	first := newNetworkWake(firstRaw)
+	second := newNetworkWake(secondRaw)
+	resource := &ListenerResource{
+		listener:       controlled,
+		bufferedAccept: controlledAccepted,
+		pollWaiters:    map[*networkWake]struct{}{first: {}, second: {}},
+	}
+
+	closeListener(resource)
+	closeListener(resource)
+
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closed := resource.closed
+	listenerAfterClose := resource.listener
+	bufferedAfterClose := resource.bufferedAccept
+	waiters := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closed || listenerAfterClose != nil || bufferedAfterClose != nil || waiters != nil {
+		t.Fatalf("closed=%v listener=%v buffered=%v waiters=%v", closed, listenerAfterClose, bufferedAfterClose, waiters)
+	}
+	if controlled.closes() != 1 || controlledAccepted.closes() != 1 {
+		t.Fatalf("close calls: listener=%d accepted=%d, want 1 each", controlled.closes(), controlledAccepted.closes())
+	}
+}
+
+func TestSocketReadRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
+	connection, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	applicationFailure := errors.New("read deadline failed")
+	rollbackFailure := errors.New("read rollback failed")
+	signalFailure := errors.New("wake signal failed")
+	closeFailure := errors.New("socket close failed")
+	firstRaw := &fakePlatformWake{signalErr: signalFailure}
+	secondRaw := &fakePlatformWake{}
+	readCalls := 0
+	controlled := &controlledDeadlineConn{
+		Conn: connection,
+		setReadFn: func(time.Time) error {
+			readCalls++
+			if readCalls == 1 {
+				return applicationFailure
+			}
+			return rollbackFailure
+		},
+		closeFn: func() error {
+			requireWakeSignals(t, firstRaw, secondRaw)
+			_ = connection.Close()
+			return closeFailure
+		},
+	}
+	resource := &SocketResource{
+		connection: controlled,
+		pollWaiters: map[*networkWake]struct{}{
+			newNetworkWake(firstRaw):  {},
+			newNetworkWake(secondRaw): {},
+		},
+	}
+
+	err := configureSocketTimeout(resource, time.Second)
+	for _, want := range []error{applicationFailure, rollbackFailure, signalFailure, closeFailure} {
+		if !errors.Is(err, want) {
+			t.Fatalf("configuration error=%v, want joined %v", err, want)
+		}
+	}
+	resource.stateMu.Lock()
+	waiters := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if waiters != nil || controlled.closes() != 1 {
+		t.Fatalf("waiters=%v close calls=%d, want nil and 1", waiters, controlled.closes())
+	}
+}
+
+func TestSocketWriteRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
+	connection, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	applicationFailure := errors.New("write deadline failed")
+	rollbackFailure := errors.New("read rollback failed")
+	signalFailure := errors.New("wake signal failed")
+	closeFailure := errors.New("socket close failed")
+	firstRaw := &fakePlatformWake{signalErr: signalFailure}
+	secondRaw := &fakePlatformWake{}
+	readCalls := 0
+	writeCalls := 0
+	controlled := &controlledDeadlineConn{
+		Conn: connection,
+		setReadFn: func(time.Time) error {
+			readCalls++
+			if readCalls == 2 {
+				return rollbackFailure
+			}
+			return nil
+		},
+		setWriteFn: func(time.Time) error {
+			writeCalls++
+			if writeCalls == 1 {
+				return applicationFailure
+			}
+			return nil
+		},
+		closeFn: func() error {
+			requireWakeSignals(t, firstRaw, secondRaw)
+			_ = connection.Close()
+			return closeFailure
+		},
+	}
+	resource := &SocketResource{
+		connection: controlled,
+		pollWaiters: map[*networkWake]struct{}{
+			newNetworkWake(firstRaw):  {},
+			newNetworkWake(secondRaw): {},
+		},
+	}
+
+	err := configureSocketTimeout(resource, time.Second)
+	for _, want := range []error{applicationFailure, rollbackFailure, signalFailure, closeFailure} {
+		if !errors.Is(err, want) {
+			t.Fatalf("configuration error=%v, want joined %v", err, want)
+		}
+	}
+	resource.stateMu.Lock()
+	waiters := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if waiters != nil || controlled.closes() != 1 {
+		t.Fatalf("waiters=%v close calls=%d, want nil and 1", waiters, controlled.closes())
+	}
+}
+
+func TestListenerRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
+	underlying, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	applicationFailure := errors.New("accept deadline failed")
+	rollbackFailure := errors.New("accept rollback failed")
+	signalFailure := errors.New("wake signal failed")
+	closeFailure := errors.New("listener close failed")
+	firstRaw := &fakePlatformWake{signalErr: signalFailure}
+	secondRaw := &fakePlatformWake{}
+	setterCalls := 0
+	controlled := &controlledDeadlineListener{
+		Listener: underlying,
+		setFn: func(time.Time) error {
+			setterCalls++
+			if setterCalls == 1 {
+				return applicationFailure
+			}
+			return rollbackFailure
+		},
+		closeFn: func() error {
+			requireWakeSignals(t, firstRaw, secondRaw)
+			_ = underlying.Close()
+			return closeFailure
+		},
+	}
+	accepted, peer := net.Pipe()
+	t.Cleanup(func() { _ = peer.Close() })
+	controlledAccepted := &controlledDeadlineConn{Conn: accepted}
+	resource := &ListenerResource{
+		listener:       controlled,
+		bufferedAccept: controlledAccepted,
+		pollWaiters: map[*networkWake]struct{}{
+			newNetworkWake(firstRaw):  {},
+			newNetworkWake(secondRaw): {},
+		},
+	}
+
+	err = configureListenerTimeout(resource, time.Second)
+	for _, want := range []error{applicationFailure, rollbackFailure, signalFailure, closeFailure} {
+		if !errors.Is(err, want) {
+			t.Fatalf("configuration error=%v, want joined %v", err, want)
+		}
+	}
+	resource.stateMu.Lock()
+	waiters := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if waiters != nil || controlled.closes() != 1 || controlledAccepted.closes() != 1 {
+		t.Fatalf("waiters=%v close calls: listener=%d accepted=%d, want nil and 1 each", waiters, controlled.closes(), controlledAccepted.closes())
+	}
 }
 
 func invokeBuiltin(t *testing.T, machine *VM, name string, args ...value.Value) (value.Value, error) {

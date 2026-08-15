@@ -3,10 +3,58 @@ package vm
 import (
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"noxy-vm/internal/value"
 )
+
+type platformNetworkWake interface {
+	descriptor() uintptr
+	signal() error
+	close() error
+}
+
+type networkWakeState uint8
+
+const (
+	networkWakeOpen networkWakeState = iota
+	networkWakeSignaled
+	networkWakeClosed
+)
+
+type networkWake struct {
+	mu       sync.Mutex
+	state    networkWakeState
+	platform platformNetworkWake
+}
+
+func newNetworkWake(platform platformNetworkWake) *networkWake {
+	return &networkWake{platform: platform}
+}
+
+func (wake *networkWake) Signal() error {
+	wake.mu.Lock()
+	defer wake.mu.Unlock()
+	if wake.state != networkWakeOpen {
+		return nil
+	}
+	if err := wake.platform.signal(); err != nil {
+		return err
+	}
+	wake.state = networkWakeSignaled
+	return nil
+}
+
+func (wake *networkWake) Close() error {
+	wake.mu.Lock()
+	defer wake.mu.Unlock()
+	if wake.state == networkWakeClosed {
+		return nil
+	}
+	wake.state = networkWakeClosed
+	return wake.platform.close()
+}
 
 const networkSetCapacity = 64
 

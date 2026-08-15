@@ -1,12 +1,101 @@
 package vm
 
 import (
+	"errors"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
 	"noxy-vm/internal/value"
 )
+
+type fakePlatformWake struct {
+	mu         sync.Mutex
+	signals    int
+	closes     int
+	closed     bool
+	afterClose bool
+	signalErr  error
+}
+
+func (*fakePlatformWake) descriptor() uintptr { return 99 }
+
+func (wake *fakePlatformWake) signal() error {
+	wake.mu.Lock()
+	defer wake.mu.Unlock()
+	if wake.closed {
+		wake.afterClose = true
+	}
+	wake.signals++
+	return wake.signalErr
+}
+
+func (wake *fakePlatformWake) close() error {
+	wake.mu.Lock()
+	defer wake.mu.Unlock()
+	wake.closed = true
+	wake.closes++
+	return nil
+}
+
+func TestNetworkWakeSerializesSignalAndClose(t *testing.T) {
+	raw := &fakePlatformWake{}
+	wake := newNetworkWake(raw)
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_ = wake.Signal()
+		}()
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		<-start
+		_ = wake.Close()
+	}()
+	close(start)
+	workers.Wait()
+	_ = wake.Signal()
+	raw.mu.Lock()
+	defer raw.mu.Unlock()
+	if raw.afterClose {
+		t.Fatal("platform signal ran after platform close")
+	}
+	if raw.signals > 1 || raw.closes != 1 {
+		t.Fatalf("signals=%d closes=%d", raw.signals, raw.closes)
+	}
+}
+
+func TestNetworkWakeSignalFailureRemainsClosable(t *testing.T) {
+	signalFailure := errors.New("wake signal failed")
+	raw := &fakePlatformWake{signalErr: signalFailure}
+	wake := newNetworkWake(raw)
+	if err := wake.Signal(); !errors.Is(err, signalFailure) {
+		t.Fatalf("signal error=%v, want %v", err, signalFailure)
+	}
+	if err := wake.Close(); err != nil {
+		t.Fatalf("close error=%v", err)
+	}
+	if err := wake.Close(); err != nil {
+		t.Fatalf("second close error=%v", err)
+	}
+	if err := wake.Signal(); err != nil {
+		t.Fatalf("signal after close error=%v", err)
+	}
+	raw.mu.Lock()
+	defer raw.mu.Unlock()
+	if raw.afterClose {
+		t.Fatal("platform signal ran after platform close")
+	}
+	if raw.signals != 1 || raw.closes != 1 {
+		t.Fatalf("signals=%d closes=%d, want 1 each", raw.signals, raw.closes)
+	}
+}
 
 func TestValidateNetworkPollArguments(t *testing.T) {
 	empty := value.NewArray(nil)

@@ -119,15 +119,11 @@ func configureSocketTimeout(resource *SocketResource, timeout time.Duration) err
 			resource.deadlineMu.Unlock()
 			return readErr
 		}
-		resource.closed = true
-		resource.deadlineGeneration++
-		resource.connection = nil
-		resource.bufferedRead = nil
-		resource.readProbeDeadline = time.Time{}
+		detached, _ := detachSocketLocked(resource)
 		resource.stateMu.Unlock()
 		resource.deadlineMu.Unlock()
-		closeErr := connection.Close()
-		return errors.Join(readErr, rollbackErr, closeErr)
+		detachErr := finishSocketDetach(detached)
+		return errors.Join(readErr, rollbackErr, detachErr)
 	}
 
 	writeErr := connection.SetWriteDeadline(writeDeadline)
@@ -167,15 +163,11 @@ func configureSocketTimeout(resource *SocketResource, timeout time.Duration) err
 		resource.deadlineMu.Unlock()
 		return writeErr
 	}
-	resource.closed = true
-	resource.deadlineGeneration++
-	resource.connection = nil
-	resource.bufferedRead = nil
-	resource.readProbeDeadline = time.Time{}
+	detached, _ := detachSocketLocked(resource)
 	resource.stateMu.Unlock()
 	resource.deadlineMu.Unlock()
-	closeErr := connection.Close()
-	return errors.Join(writeErr, readRollbackErr, writeRollbackErr, closeErr)
+	detachErr := finishSocketDetach(detached)
+	return errors.Join(writeErr, readRollbackErr, writeRollbackErr, detachErr)
 }
 
 func configureListenerTimeout(resource *ListenerResource, timeout time.Duration) error {
@@ -223,20 +215,11 @@ func configureListenerTimeout(resource *ListenerResource, timeout time.Duration)
 		resource.deadlineMu.Unlock()
 		return applicationErr
 	}
-	resource.closed = true
-	resource.deadlineGeneration++
-	resource.listener = nil
-	buffered := resource.bufferedAccept
-	resource.bufferedAccept = nil
-	resource.acceptProbeDeadline = time.Time{}
+	detached, _ := detachListenerLocked(resource)
 	resource.stateMu.Unlock()
 	resource.deadlineMu.Unlock()
-	listenerCloseErr := listener.Close()
-	var bufferedCloseErr error
-	if buffered != nil {
-		bufferedCloseErr = buffered.Close()
-	}
-	return errors.Join(applicationErr, rollbackErr, listenerCloseErr, bufferedCloseErr)
+	detachErr := finishListenerDetach(detached)
+	return errors.Join(applicationErr, rollbackErr, detachErr)
 }
 
 func configureNetworkTimeout(machine *VM, socket value.Value, timeout time.Duration) error {
@@ -699,41 +682,19 @@ func selectSocket(resource *SocketResource, timeout time.Duration) (bool, error)
 
 func closeListener(resource *ListenerResource) {
 	resource.stateMu.Lock()
-	if resource.closed {
-		resource.stateMu.Unlock()
-		return
-	}
-	resource.closed = true
-	resource.deadlineGeneration++
-	listener := resource.listener
-	resource.listener = nil
-	resource.acceptProbeDeadline = time.Time{}
-	buffered := resource.bufferedAccept
-	resource.bufferedAccept = nil
+	detached, ok := detachListenerLocked(resource)
 	resource.stateMu.Unlock()
-	if listener != nil {
-		_ = listener.Close()
-	}
-	if buffered != nil {
-		_ = buffered.Close()
+	if ok {
+		_ = finishListenerDetach(detached)
 	}
 }
 
 func closeSocket(resource *SocketResource) {
 	resource.stateMu.Lock()
-	if resource.closed {
-		resource.stateMu.Unlock()
-		return
-	}
-	resource.closed = true
-	resource.deadlineGeneration++
-	connection := resource.connection
-	resource.connection = nil
-	resource.readProbeDeadline = time.Time{}
-	resource.bufferedRead = nil
+	detached, ok := detachSocketLocked(resource)
 	resource.stateMu.Unlock()
-	if connection != nil {
-		_ = connection.Close()
+	if ok {
+		_ = finishSocketDetach(detached)
 	}
 }
 
