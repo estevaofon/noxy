@@ -1,9 +1,12 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sync"
+	"syscall"
 	"time"
 
 	"noxy-vm/internal/value"
@@ -73,6 +76,436 @@ const (
 	networkWriteReady
 	networkErrorReady
 )
+
+type networkPollFD struct {
+	descriptor uintptr
+	interests  networkInterest
+	listener   bool
+}
+
+type networkPollBatch struct {
+	events      []networkEvent
+	woke        bool
+	interrupted bool
+}
+
+type networkPlatform struct {
+	newWake func() (platformNetworkWake, error)
+	wait    func([]networkPollFD, uintptr, int32) (networkPollBatch, error)
+}
+
+type networkPoller struct {
+	platform networkPlatform
+	now      func() time.Time
+	sleep    func(time.Duration)
+}
+
+type networkRegistration struct {
+	handle          int
+	requested       networkInterest
+	nativeInterests networkInterest
+	pollable        bool
+	listener        *ListenerResource
+	socket          *SocketResource
+	attached        any
+	raw             syscall.RawConn
+}
+
+type networkOccurrence struct {
+	candidate    value.Value
+	registration *networkRegistration
+}
+
+type networkAcquisitionStage uint8
+
+const (
+	networkAcquireSyscallConn networkAcquisitionStage = iota
+	networkAcquireControl
+)
+
+type networkAcquisitionError struct {
+	registration    *networkRegistration
+	stage           networkAcquisitionStage
+	callbackEntered bool
+	err             error
+}
+
+func (failure *networkAcquisitionError) Error() string { return failure.err.Error() }
+func (failure *networkAcquisitionError) Unwrap() error { return failure.err }
+
+func networkPollMilliseconds(remaining time.Duration) int32 {
+	if remaining <= 0 {
+		return 0
+	}
+	if remaining > time.Second {
+		remaining = time.Second
+	}
+	milliseconds := remaining / time.Millisecond
+	if remaining%time.Millisecond != 0 {
+		milliseconds++
+	}
+	return int32(milliseconds)
+}
+
+func withNetworkDescriptors(
+	registrations []*networkRegistration,
+	pollfds []networkPollFD,
+	index int,
+	wait func([]networkPollFD) (networkPollBatch, error),
+) (batch networkPollBatch, failure *networkAcquisitionError, err error) {
+	if index == len(registrations) {
+		batch, err = wait(pollfds)
+		return batch, nil, err
+	}
+	registration := registrations[index]
+	callbackEntered := false
+	controlErr := registration.raw.Control(func(fd uintptr) {
+		callbackEntered = true
+		pollfds[index] = networkPollFD{
+			descriptor: fd,
+			interests:  registration.nativeInterests,
+			listener:   registration.listener != nil,
+		}
+		batch, failure, err = withNetworkDescriptors(registrations, pollfds, index+1, wait)
+	})
+	if failure != nil || err != nil {
+		return batch, failure, err
+	}
+	if controlErr != nil {
+		return batch, &networkAcquisitionError{
+			registration:    registration,
+			stage:           networkAcquireControl,
+			callbackEntered: callbackEntered,
+			err:             controlErr,
+		}, nil
+	}
+	return batch, nil, nil
+}
+
+func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, timeout time.Duration) (result value.Value, err error) {
+	result = value.NewNull()
+	registrations, occurrences := collectNetworkRegistrations(shared, sets)
+	if len(registrations) == 0 {
+		if timeout > 0 {
+			poller.networkSleep()(timeout)
+		}
+		return selectResult(nil, nil, nil), nil
+	}
+
+	operationStart := poller.networkNow()()
+	deadline := operationStart.Add(timeout)
+	if poller.platform.newWake == nil || poller.platform.wait == nil {
+		return result, fmt.Errorf("network poll platform is unavailable")
+	}
+	platformWake, wakeErr := poller.platform.newWake()
+	if wakeErr != nil {
+		return result, wakeErr
+	}
+	if platformWake == nil {
+		return result, fmt.Errorf("network poll wake is unavailable")
+	}
+	wake := newNetworkWake(platformWake)
+	defer func() {
+		for _, registration := range registrations {
+			unregisterNetworkWake(registration, wake)
+		}
+		err = errors.Join(err, wake.Close())
+		if err != nil {
+			result = value.NewNull()
+		}
+	}()
+
+	pollRegistrations := make([]*networkRegistration, 0, len(registrations))
+	attachedCount := 0
+	for _, registration := range registrations {
+		if !attachNetworkRegistration(shared, registration, wake) {
+			continue
+		}
+		attachedCount++
+		if !registration.pollable {
+			continue
+		}
+		failure := acquireNetworkRawConn(registration)
+		if failure != nil {
+			if !networkRegistrationCurrent(shared, failure.registration) {
+				return selectResult(nil, nil, nil), nil
+			}
+			return result, failure
+		}
+		pollRegistrations = append(pollRegistrations, registration)
+	}
+	if attachedCount == 0 {
+		return selectResult(nil, nil, nil), nil
+	}
+
+	ready := make(map[*networkRegistration]networkInterest, len(pollRegistrations))
+	pollfds := make([]networkPollFD, len(pollRegistrations))
+	waitOnce := func(milliseconds int32) (networkPollBatch, *networkAcquisitionError, error) {
+		return withNetworkDescriptors(pollRegistrations, pollfds, 0, func(descriptors []networkPollFD) (networkPollBatch, error) {
+			return poller.platform.wait(descriptors, platformWake.descriptor(), milliseconds)
+		})
+	}
+
+	if timeout == 0 {
+		batch, failure, waitErr := waitOnce(0)
+		if failure != nil {
+			if !networkRegistrationCurrent(shared, failure.registration) {
+				return selectResult(nil, nil, nil), nil
+			}
+			return result, failure
+		}
+		if waitErr != nil {
+			return result, waitErr
+		}
+		applyNetworkEvents(pollRegistrations, batch.events, ready)
+		return reconstructNetworkResult(shared, occurrences, ready), nil
+	}
+
+	for {
+		remaining := deadline.Sub(poller.networkNow()())
+		if remaining <= 0 {
+			break
+		}
+		batch, failure, waitErr := waitOnce(networkPollMilliseconds(remaining))
+		if failure != nil {
+			if !networkRegistrationCurrent(shared, failure.registration) {
+				return reconstructNetworkResult(shared, occurrences, ready), nil
+			}
+			return result, failure
+		}
+		if waitErr != nil {
+			return result, waitErr
+		}
+		applyNetworkEvents(pollRegistrations, batch.events, ready)
+		if len(ready) != 0 {
+			break
+		}
+		if batch.woke && anyNetworkRegistrationClosed(shared, registrations) {
+			break
+		}
+	}
+	return reconstructNetworkResult(shared, occurrences, ready), nil
+}
+
+func (poller *networkPoller) networkNow() func() time.Time {
+	if poller.now != nil {
+		return poller.now
+	}
+	return time.Now
+}
+
+func (poller *networkPoller) networkSleep() func(time.Duration) {
+	if poller.sleep != nil {
+		return poller.sleep
+	}
+	return time.Sleep
+}
+
+func collectNetworkRegistrations(shared *SharedState, sets [3]*value.ObjArray) ([]*networkRegistration, [3][]networkOccurrence) {
+	var occurrences [3][]networkOccurrence
+	registrations := make([]*networkRegistration, 0)
+	byHandle := make(map[int]*networkRegistration)
+	interests := [3]networkInterest{networkReadable, networkWritable, networkErrorInterest}
+	for setIndex, set := range sets {
+		if set == nil {
+			continue
+		}
+		for _, candidate := range boundedNetworkCandidates(set) {
+			handle, extractionErr := networkSocketDescriptor(candidate)
+			if extractionErr != nil {
+				continue
+			}
+			registration, exists := byHandle[handle]
+			if !exists {
+				registration = lookupNetworkRegistration(shared, handle)
+				if registration == nil {
+					continue
+				}
+				byHandle[handle] = registration
+				registrations = append(registrations, registration)
+			}
+			registration.requested |= interests[setIndex]
+			occurrences[setIndex] = append(occurrences[setIndex], networkOccurrence{
+				candidate:    candidate,
+				registration: registration,
+			})
+		}
+	}
+	for _, registration := range registrations {
+		registration.nativeInterests = registration.requested
+		if registration.listener != nil {
+			registration.nativeInterests &^= networkWritable
+			registration.pollable = registration.nativeInterests&(networkReadable|networkErrorInterest) != 0
+		} else {
+			registration.pollable = true
+		}
+	}
+	return registrations, occurrences
+}
+
+func lookupNetworkRegistration(shared *SharedState, handle int) *networkRegistration {
+	if shared == nil {
+		return nil
+	}
+	if listener, exists := shared.Listeners.get(handle); exists {
+		return &networkRegistration{handle: handle, listener: listener}
+	}
+	if socket, exists := shared.Sockets.get(handle); exists {
+		return &networkRegistration{handle: handle, socket: socket}
+	}
+	return nil
+}
+
+func attachNetworkRegistration(shared *SharedState, registration *networkRegistration, wake *networkWake) bool {
+	if registration.listener != nil {
+		resource := registration.listener
+		resource.stateMu.Lock()
+		defer resource.stateMu.Unlock()
+		current, exists := shared.Listeners.get(registration.handle)
+		if !exists || current != resource || resource.closed || resource.listener == nil {
+			return false
+		}
+		if resource.pollWaiters == nil {
+			resource.pollWaiters = make(map[*networkWake]struct{})
+		}
+		resource.pollWaiters[wake] = struct{}{}
+		registration.attached = resource.listener
+		return true
+	}
+	resource := registration.socket
+	resource.stateMu.Lock()
+	defer resource.stateMu.Unlock()
+	current, exists := shared.Sockets.get(registration.handle)
+	if !exists || current != resource || resource.closed || resource.connection == nil {
+		return false
+	}
+	if resource.pollWaiters == nil {
+		resource.pollWaiters = make(map[*networkWake]struct{})
+	}
+	resource.pollWaiters[wake] = struct{}{}
+	registration.attached = resource.connection
+	return true
+}
+
+func acquireNetworkRawConn(registration *networkRegistration) *networkAcquisitionError {
+	connection, ok := registration.attached.(syscall.Conn)
+	if !ok {
+		return &networkAcquisitionError{
+			registration: registration,
+			stage:        networkAcquireSyscallConn,
+			err:          fmt.Errorf("network resource does not expose SyscallConn"),
+		}
+	}
+	raw, err := connection.SyscallConn()
+	if err != nil {
+		return &networkAcquisitionError{
+			registration: registration,
+			stage:        networkAcquireSyscallConn,
+			err:          err,
+		}
+	}
+	registration.raw = raw
+	return nil
+}
+
+func unregisterNetworkWake(registration *networkRegistration, wake *networkWake) {
+	if registration.listener != nil {
+		registration.listener.stateMu.Lock()
+		delete(registration.listener.pollWaiters, wake)
+		registration.listener.stateMu.Unlock()
+		return
+	}
+	registration.socket.stateMu.Lock()
+	delete(registration.socket.pollWaiters, wake)
+	registration.socket.stateMu.Unlock()
+}
+
+func networkRegistrationCurrent(shared *SharedState, registration *networkRegistration) bool {
+	if registration.attached == nil {
+		return false
+	}
+	if registration.listener != nil {
+		resource := registration.listener
+		resource.stateMu.Lock()
+		defer resource.stateMu.Unlock()
+		current, exists := shared.Listeners.get(registration.handle)
+		return exists && current == resource && !resource.closed && sameNetworkAttachment(resource.listener, registration.attached)
+	}
+	resource := registration.socket
+	resource.stateMu.Lock()
+	defer resource.stateMu.Unlock()
+	current, exists := shared.Sockets.get(registration.handle)
+	return exists && current == resource && !resource.closed && sameNetworkAttachment(resource.connection, registration.attached)
+}
+
+func sameNetworkAttachment(current, attached any) bool {
+	if current == nil || attached == nil || reflect.TypeOf(current) != reflect.TypeOf(attached) {
+		return false
+	}
+	if !reflect.TypeOf(current).Comparable() {
+		return false
+	}
+	return current == attached
+}
+
+func anyNetworkRegistrationClosed(shared *SharedState, registrations []*networkRegistration) bool {
+	for _, registration := range registrations {
+		if registration.attached != nil && !networkRegistrationCurrent(shared, registration) {
+			return true
+		}
+	}
+	return false
+}
+
+func applyNetworkEvents(registrations []*networkRegistration, events []networkEvent, ready map[*networkRegistration]networkInterest) {
+	for index, registration := range registrations {
+		if index >= len(events) {
+			break
+		}
+		event := events[index]
+		var interests networkInterest
+		if event&networkErrorReady != 0 {
+			interests = registration.requested
+			if registration.listener != nil {
+				interests &^= networkWritable
+			}
+		} else {
+			if event&networkReadReady != 0 {
+				interests |= registration.requested & networkReadable
+			}
+			if event&networkWriteReady != 0 && registration.listener == nil {
+				interests |= registration.requested & networkWritable
+			}
+		}
+		if interests != 0 {
+			ready[registration] |= interests
+		}
+	}
+}
+
+func reconstructNetworkResult(shared *SharedState, occurrences [3][]networkOccurrence, ready map[*networkRegistration]networkInterest) value.Value {
+	interests := [3]networkInterest{networkReadable, networkWritable, networkErrorInterest}
+	sets := [3][]value.Value{}
+	valid := make(map[*networkRegistration]bool)
+	checked := make(map[*networkRegistration]bool)
+	for setIndex, candidates := range occurrences {
+		for _, occurrence := range candidates {
+			registration := occurrence.registration
+			if !checked[registration] {
+				checked[registration] = true
+				valid[registration] = networkRegistrationCurrent(shared, registration)
+			}
+			interest := interests[setIndex]
+			if registration.listener != nil && interest == networkWritable {
+				continue
+			}
+			if valid[registration] && ready[registration]&interest != 0 {
+				sets[setIndex] = append(sets[setIndex], occurrence.candidate)
+			}
+		}
+	}
+	return selectResult(sets[0], sets[1], sets[2])
+}
 
 func validateNetworkPollArguments(args []value.Value) ([3]*value.ObjArray, time.Duration, error) {
 	var sets [3]*value.ObjArray
