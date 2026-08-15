@@ -18,6 +18,9 @@
 - Keep `net.setblocking(sock, false)` as a deprecated no-op.
 - Keep `deadlineGeneration` exclusive to deadline transitions; do not add `lifetimeGeneration`.
 - Preserve the lock order `deadlineMu -> stateMu`; signal poll waiters and close OS resources outside both locks.
+- Attribute every `SyscallConn`/`RawConn.Control` failure to the exact registration and acquisition stage before deciding whether concurrent local close suppresses it.
+- Keep listener write-only registrations subscribed to local-close wake-up without placing their descriptors in the native poll set.
+- Cap each native blocking chunk at one second so a failed wake signal cannot hold `RawConn.Control` references—and therefore resource close—for an unbounded interval.
 - Treat Windows and Linux as runtime-verified. Treat AIX, Darwin, DragonFly BSD, FreeBSD, NetBSD, OpenBSD, and Solaris as compile-supported until their integration tests run on those systems.
 - Use strict red-green-refactor for each behavior and leave unrelated worktree changes untouched.
 
@@ -31,6 +34,7 @@
 - `internal/vm/network_poller_test.go` — platform-independent contract, ordering, timeout, descriptor-lifetime, close-classification, and fake-backend tests.
 - `internal/vm/network_poller_windows.go` — Winsock wake sockets, `WSAPoll` ABI, and Windows event normalization.
 - `internal/vm/network_poller_windows_test.go` — Windows ABI, wake, immediate, listener, and error-path tests.
+- `internal/vm/network_poller_linux_test.go` — Linux `POLLRDHUP`, reset/pending-error, and half-close integration tests.
 - `internal/vm/network_poller_unix.go` — Unix socketpair wake and `unix.Poll` backend.
 - `internal/vm/network_poller_unix_test.go` — Unix wake, immediate, descriptor, and event tests.
 - `internal/vm/network_poller_rdhup.go` — Linux/FreeBSD `POLLRDHUP` terminal mask.
@@ -250,13 +254,14 @@ type fakePlatformWake struct {
 	closes int
 	closed bool
 	afterClose bool
+	signalErr error
 }
 func (*fakePlatformWake) descriptor() uintptr { return 99 }
 func (wake *fakePlatformWake) signal() error {
 	wake.mu.Lock(); defer wake.mu.Unlock()
 	if wake.closed { wake.afterClose = true }
 	wake.signals++
-	return nil
+	return wake.signalErr
 }
 func (wake *fakePlatformWake) close() error {
 	wake.mu.Lock(); defer wake.mu.Unlock()
@@ -285,9 +290,19 @@ func TestNetworkWakeSerializesSignalAndClose(t *testing.T) {
 }
 ```
 
+Add `TestNetworkWakeSignalFailureRemainsClosable`: make `signalErr` non-nil, require `Signal` to return it without transitioning to `signaled`, then require `Close` to close the platform exactly once and every later `Signal` to be a no-op. Platform-specific tasks add retry behavior for interruptible writes; the common state machine must not hide a real signaling failure.
+
 - [ ] **Step 2: Write failing resource broadcast/detach tests**
 
-Register two distinct wake objects in one `SocketResource`, call `closeSocket`, and require both to be signaled, the connection to be closed, the waiter map cleared, and a second close to do nothing. Repeat for `ListenerResource`. Add a rollback-failure test that reaches the existing fail-closed branch and requires the registered wake to be signaled before the controlled connection's `Close` method begins.
+Register two distinct wake objects in one `SocketResource`, call `closeSocket`, and require both to be signaled, the connection to be closed, the waiter map cleared, and a second close to do nothing. Repeat for `ListenerResource`.
+
+Cover the three existing fail-closed transitions independently:
+
+1. initial socket `SetReadDeadline` failure plus failed read rollback (`builtins_net.go:122` before refactoring);
+2. socket `SetWriteDeadline` failure plus at least one failed read/write rollback (`builtins_net.go:170`);
+3. listener `SetDeadline` failure plus failed rollback (`builtins_net.go:226`).
+
+For each, require detach, broadcast to every waiter before the controlled `Close` begins, exactly one underlying close, cleared waiter ownership, and `errors.Join` containing application, rollback, signal, and close failures that were injected for that case.
 
 Run RED:
 
@@ -366,7 +381,7 @@ Implement finish functions that call every `Signal`, then close detached resourc
 
 - [ ] **Step 5: Route normal close and every poison branch through detach**
 
-Replace direct `closed = true` transitions in both rollback-failure branches and in `closeSocket`/`closeListener`. For a poison path already holding `deadlineMu` and `stateMu`:
+Replace direct `closed = true` transitions in all three rollback-failure branches and in `closeSocket`/`closeListener`. For a poison path already holding `deadlineMu` and `stateMu`:
 
 ```go
 detached, _ := detachSocketLocked(resource)
@@ -376,12 +391,12 @@ detachErr := finishSocketDetach(detached)
 return errors.Join(applicationErr, rollbackErr, detachErr)
 ```
 
-Use the listener equivalent and preserve buffered accepted-connection cleanup until Task 6 removes that field. Normal close ignores the returned finish error, matching current public behavior.
+Use the listener equivalent and preserve buffered accepted-connection cleanup until Task 6 removes that field. Normal close ignores the returned finish error, matching current public behavior. The poller itself must surface its operation-local wake cleanup error synchronously and return no partial `SelectResult`; Task 3 tests that rule.
 
 - [ ] **Step 6: Run focused GREEN and race tests**
 
 ```powershell
-go test ./internal/vm -run 'TestNetworkWake|Test(Socket|Listener)DetachWakes|Test(Socket|Listener)Rollback|TestCloseDoes' -count=20
+go test ./internal/vm -run 'TestNetworkWake|Test(Socket|Listener)DetachWakes|Test(SocketRead|SocketWrite|Listener)RollbackPoison|TestCloseDoes' -count=20
 go test -race ./internal/vm -run 'TestNetworkWake|Test(Socket|Listener)DetachWakes|TestCloseDoes' -count=1
 ```
 
@@ -419,9 +434,13 @@ Define a fake platform that records one descriptor array and scripted wait outco
 - backend failure returns an error instead of a partial result;
 - no valid candidates call the injected sleeper for positive timeout and return immediately for zero;
 - timeout zero calls `wait` once with zero;
-- positive timeouts use one absolute deadline, ceil a sub-millisecond remainder, and clamp chunks to `math.MaxInt32`;
+- positive timeouts use one absolute deadline, ceil a sub-millisecond remainder, and cap every native chunk at one second;
 - scripted Unix-style interruption retries only a positive timeout;
-- a signaled local-close wake returns promptly with the closed resource omitted.
+- a signaled local-close wake returns promptly with the closed resource omitted;
+- a listener requested only for write is registered for wake-up but contributes no native descriptor, waits for the positive timeout, and remains absent from write output;
+- a listener requested for error contributes a native descriptor with zero normal event flags so terminal flags remain observable;
+- closing unrelated registration A cannot suppress a `SyscallConn` or `Control` error attributed to still-open registration B;
+- operation-local wake close failure returns a synchronous error and no partial `SelectResult`.
 
 The fake returns events indexed to registrations, not candidates:
 
@@ -445,7 +464,7 @@ type fakeNetworkPlatform struct {
 
 Wrap two real loopback TCP connections with a `syscall.Conn` wrapper whose `RawConn.Control` increments an atomic active count only for the callback duration. In the fake platform's `wait`, require `active == 2`. This test must fail if descriptor numbers are copied before entering all callbacks.
 
-Also script close at `SyscallConn` acquisition and at each nested `Control` boundary. Revalidation must classify a detached resource as local close; the same error on an unchanged open resource must be returned synchronously.
+Also script close at `SyscallConn` acquisition and at each nested `Control` boundary. Revalidation must classify a detached resource as local close only when it is the registration attributed by the acquisition error; the same error on an unchanged open resource must be returned synchronously. Add the adversarial case where A closes while B's `Control` returns an invariant error: B's error must win and no result is returned.
 
 Run RED:
 
@@ -483,7 +502,9 @@ type networkPoller struct {
 
 type networkRegistration struct {
 	handle int
-	interests networkInterest
+	requested networkInterest
+	nativeInterests networkInterest
+	pollable bool
 	listener *ListenerResource
 	socket *SocketResource
 	attached any
@@ -494,28 +515,61 @@ type networkOccurrence struct {
 	candidate value.Value
 	registration *networkRegistration
 }
+
+type networkAcquisitionStage uint8
+const (
+	networkAcquireSyscallConn networkAcquisitionStage = iota
+	networkAcquireControl
+)
+
+type networkAcquisitionError struct {
+	registration *networkRegistration
+	stage networkAcquisitionStage
+	callbackEntered bool
+	err error
+}
+
+func (failure *networkAcquisitionError) Error() string { return failure.err.Error() }
+func (failure *networkAcquisitionError) Unwrap() error { return failure.err }
 ```
 
-Use three occurrence slices plus an ordered unique-registration slice. Group by authoritative integer handle after listener-first lookup. Invalid candidate extraction is skipped. Attach one wake to each unique open resource under its `stateMu`, capture the exact connection/listener, then obtain `SyscallConn` from the captured value.
+Use three occurrence slices plus an ordered unique-registration slice. Group by authoritative integer handle after listener-first lookup. Invalid candidate extraction is skipped. Attach one wake to each unique open resource under its `stateMu`, capture the exact connection/listener, then obtain `SyscallConn` from the captured value. Wrap each `SyscallConn` failure immediately in `networkAcquisitionError` with that registration and stage.
+
+For sockets, `nativeInterests` equals the union of requested interests and `pollable=true`, including error-only sockets. For listeners, remove writable from `nativeInterests`; set `pollable=true` only when read or error was requested. Thus a write-only listener stays in the waiter set but never enters `poll`/`WSAPoll`, while an error-only listener remains pollable with zero requested normal-event bits.
 
 - [ ] **Step 4: Retain every descriptor inside nested callbacks**
 
-Implement recursion with the native wait only at the innermost callback:
+Build a separate `pollRegistrations` slice containing only `pollable` registrations. Implement recursion over that slice, with the native wait only at the innermost callback:
 
 ```go
-func withNetworkDescriptors(registrations []*networkRegistration, pollfds []networkPollFD, index int, wait func([]networkPollFD) (networkPollBatch, error)) (batch networkPollBatch, err error) {
-	if index == len(registrations) { return wait(pollfds) }
+func withNetworkDescriptors(registrations []*networkRegistration, pollfds []networkPollFD, index int, wait func([]networkPollFD) (networkPollBatch, error)) (batch networkPollBatch, failure *networkAcquisitionError, err error) {
+	if index == len(registrations) {
+		batch, err = wait(pollfds)
+		return batch, nil, err
+	}
 	registration := registrations[index]
+	callbackEntered := false
 	controlErr := registration.raw.Control(func(fd uintptr) {
-		pollfds[index] = networkPollFD{descriptor: fd, interests: registration.interests, listener: registration.listener != nil}
-		batch, err = withNetworkDescriptors(registrations, pollfds, index+1, wait)
+		callbackEntered = true
+		pollfds[index] = networkPollFD{descriptor: fd, interests: registration.nativeInterests, listener: registration.listener != nil}
+		batch, failure, err = withNetworkDescriptors(registrations, pollfds, index+1, wait)
 	})
-	if err == nil && controlErr != nil { err = controlErr }
-	return batch, err
+	if failure != nil || err != nil { return batch, failure, err }
+	if controlErr != nil {
+		return batch, &networkAcquisitionError{
+			registration: registration,
+			stage: networkAcquireControl,
+			callbackEntered: callbackEntered,
+			err: controlErr,
+		}, nil
+	}
+	return batch, nil, nil
 }
 ```
 
-Do not execute another native wait after any local-close wake or acquisition failure. Always unregister from every resource, then call synchronized `wake.Close`, before returning.
+Never replace a deeper failure with an outer `Control` error. On `networkAcquisitionError`, revalidate only `failure.registration`: suppress it as local close only if that exact registry identity/attachment is detached or closed; otherwise return the wrapped error synchronously even if some unrelated registration changed concurrently.
+
+Do not execute another native wait after any local-close wake or acquisition failure. Always unregister from every resource, then call synchronized `wake.Close`, before returning. Join backend/acquisition/cleanup errors and return no `SelectResult` whenever any non-local operation or wake-close error remains.
 
 - [ ] **Step 5: Implement remaining-time calculation**
 
@@ -524,20 +578,20 @@ Use one deadline from `poller.now()` and this conversion:
 ```go
 func networkPollMilliseconds(remaining time.Duration) int32 {
 	if remaining <= 0 { return 0 }
+	if remaining > time.Second { remaining = time.Second }
 	milliseconds := remaining / time.Millisecond
 	if remaining%time.Millisecond != 0 { milliseconds++ }
-	if milliseconds > time.Duration(math.MaxInt32) { return math.MaxInt32 }
 	return int32(milliseconds)
 }
 ```
 
-Using quotient and remainder avoids overflowing `time.Duration` while rounding a near-maximum positive duration upward.
+Using quotient and remainder avoids overflowing `time.Duration` while rounding a near-maximum positive duration upward. The one-second safety chunk is below the signed 32-bit platform limit and guarantees that a failed wake signal releases nested `RawConn.Control` references within a bounded interval; it does not restart or extend the absolute operation deadline.
 
-For timeout zero with valid registrations, invoke the backend exactly once. For positive timeout, repeat only for an interrupted result, a completed `MaxInt32` chunk, or a non-local spurious wake while `poller.now().Before(deadline)`. Empty inputs call the injected sleeper only for a positive duration.
+For timeout zero with pollable registrations, invoke the backend exactly once. For positive timeout, repeat only for an interrupted result, a completed safety chunk, or a non-local spurious wake while `poller.now().Before(deadline)`. Empty inputs with no registered resources call the injected sleeper only for a positive duration. A write-only listener is not an empty input: wait on the operation wake descriptor so local close remains observable, but never pass the listener descriptor to the backend.
 
 - [ ] **Step 6: Revalidate and reconstruct public outputs**
 
-Under the relevant `stateMu`, require registry identity, `!closed`, and the exact captured attachment. Drop a locally closed registration. Apply listener filtering (`write` always removed; terminal/error keeps read and error) and scan each occurrence list in input order to call `selectResult`.
+Under the relevant `stateMu`, require registry identity, `!closed`, and the exact captured attachment. Drop a locally closed registration. As a defensive invariant, remove listener write again during reconstruction; terminal/error keeps listener read and error. Scan each occurrence list in input order to call `selectResult`.
 
 - [ ] **Step 7: Run GREEN, stress, and race checks**
 
@@ -601,7 +655,9 @@ Add a table for `POLLRDNORM`, `POLLWRNORM`, `POLLHUP`, `POLLERR`, and `POLLNVAL`
 
 - [ ] **Step 2: Write failing wake lifecycle integration tests**
 
-Create the real platform wake, assert its descriptor is accepted by a zero-time `WSAPoll`, signal it twice through the common `networkWake`, and require the wait to return `woke=true`. Race `Signal` and `Close` 100 times and require no Winsock call after handle close, panic, or leaked handle.
+Create the real platform wake, assert its descriptor is accepted by a zero-time `WSAPoll`, signal it twice through the common `networkWake`, and require the wait to return `woke=true`. Race `Signal` and `Close` 100 times and require no Winsock call after handle close or panic.
+
+Put socket creation and close behind a `windowsNetworkOps` value owned by the backend. In a deterministic fake, count every successfully created handle and every close, inject failure after each setup stage, and require exact balance. Keep the real race test for behavior, but do not use process-wide handle counts as a leak oracle.
 
 Add an injectable `callWSAPoll`/`callWSAGetLastError` pair and require a scripted `SOCKET_ERROR` to return the exact WSA error rather than the `LazyProc.Call` last-error value.
 
@@ -657,7 +713,20 @@ Wrap both procedure calls in package variables for deterministic error-path test
 
 - [ ] **Step 4: Implement operation-local non-blocking UDP wake sockets**
 
-Create a reader with `windows.Socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)`, bind to `127.0.0.1:0`, obtain its `*windows.SockaddrInet4` through `windows.Getsockname`, and create a writer socket. Convert both handles to `syscall.Handle` and call `syscall.SetNonblock(handle, true)`. On any setup failure, close every handle already created with `windows.Closesocket` and return `errors.Join`.
+Define the exact injectable operation boundary:
+
+```go
+type windowsNetworkOps struct {
+	socket func(int, int, int) (windows.Handle, error)
+	bind func(windows.Handle, windows.Sockaddr) error
+	getsockname func(windows.Handle) (windows.Sockaddr, error)
+	setNonblock func(windows.Handle, bool) error
+	sendto func(windows.Handle, []byte, int, windows.Sockaddr) error
+	closeSocket func(windows.Handle) error
+}
+```
+
+The production `setNonblock` wrapper converts `windows.Handle` to `syscall.Handle` and calls `syscall.SetNonblock`. Create a reader with `windows.Socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)`, bind to `127.0.0.1:0`, obtain its `*windows.SockaddrInet4` through `windows.Getsockname`, and create a writer socket. Set both handles non-blocking. On any setup failure, close every handle already created through the injected operation and return `errors.Join`.
 
 Implement the platform wake:
 
@@ -666,16 +735,17 @@ type windowsNetworkWake struct {
 	reader windows.Handle
 	writer windows.Handle
 	address *windows.SockaddrInet4
+	ops windowsNetworkOps
 }
 
 func (wake *windowsNetworkWake) descriptor() uintptr { return uintptr(wake.reader) }
 func (wake *windowsNetworkWake) signal() error {
-	err := windows.Sendto(wake.writer, []byte{1}, 0, wake.address)
+	err := wake.ops.sendto(wake.writer, []byte{1}, 0, wake.address)
 	if errors.Is(err, windows.WSAEWOULDBLOCK) { return nil }
 	return err
 }
 func (wake *windowsNetworkWake) close() error {
-	return errors.Join(windows.Closesocket(wake.writer), windows.Closesocket(wake.reader))
+	return errors.Join(wake.ops.closeSocket(wake.writer), wake.ops.closeSocket(wake.reader))
 }
 ```
 
@@ -683,16 +753,18 @@ The common `networkWake` guarantees at most one successful signal and serializes
 
 - [ ] **Step 5: Implement one `WSAPoll` call and normalize events**
 
-Prepend the wake reader with `pollRDNORM`, convert every common descriptor without narrowing, request only `pollRDNORM` and/or `pollWRNORM`, and allow zero requested flags for error-only interests. After the call:
+Prepend the wake reader with `pollRDNORM`, convert every common descriptor without narrowing, request only `pollRDNORM` and/or `pollWRNORM`, and allow zero requested flags for error-only interests. The common layer has already excluded listener write-only registrations; assert that such a listener never reaches this function with `pollWRNORM`. After the call:
 
 - wake `pollRDNORM|pollHUP|pollERR|pollNVAL` sets `batch.woke=true`;
 - `pollRDNORM` maps to read;
 - `pollWRNORM` maps to write;
 - `pollHUP|pollERR|pollNVAL` maps to read, write, and error;
-- listener write filtering remains common-layer responsibility;
+- listener write filtering remains a defensive common-layer invariant before and after the backend;
 - result event order remains aligned with the input descriptors after removing the prepended wake entry.
 
 Return `systemNetworkPlatform()` with `interrupted=false` for every Windows result; do not invent a `WSAEINTR` retry.
+
+Add a Windows loopback reset test: obtain the peer `*net.TCPConn`, call `SetLinger(0)`, close it to generate RST, and poll the other socket in read/write/error with a one-second global timeout. Require prompt readiness including `error_count == 1`, then call `net_recv` and require a non-timeout connection error. This proves `WSAPoll` observation did not consume or clear the pending error.
 
 - [ ] **Step 6: Promote `x/sys` and run Windows GREEN/race tests**
 
@@ -720,6 +792,7 @@ git commit -m "feat(net): add Windows WSAPoll backend"
 **Files:**
 - Create: `internal/vm/network_poller_unix.go`
 - Create: `internal/vm/network_poller_unix_test.go`
+- Create: `internal/vm/network_poller_linux_test.go`
 - Create: `internal/vm/network_poller_rdhup.go`
 - Create: `internal/vm/network_poller_no_rdhup.go`
 - Create: `internal/vm/network_poller_unsupported.go`
@@ -737,9 +810,9 @@ Create tests under the exact supported tag:
 //go:build aix || darwin || dragonfly || freebsd || linux || netbsd || openbsd || solaris
 ```
 
-Test literal normalization for `POLLIN`, `POLLOUT`, `POLLHUP`, `POLLERR`, and `POLLNVAL`; verify that requested interests never include `POLLPRI`. On Linux/FreeBSD, a separate tagged test requires `POLLRDHUP` to normalize as read, write, and error. On other Unix targets, require the extension mask to be zero.
+Test literal normalization for `POLLIN`, `POLLOUT`, `POLLHUP`, `POLLERR`, and `POLLNVAL`; verify that requested interests never include `POLLPRI`. On Linux/FreeBSD, a separate tagged test requires `POLLRDHUP` both in the requested native mask for every pollable socket—including error-only—and normalized as read, write, and error. It must not be requested for listeners. On other Unix targets, require the extension mask to be zero.
 
-Use the real socketpair wake to prove a zero-time wait is empty before signal and `woke=true` after signal. Race common `Signal`/`Close` and assert idempotent cleanup.
+Use the real socketpair wake to prove a zero-time wait is empty before signal and `woke=true` after signal. Race common `Signal`/`Close` and assert idempotent cleanup. Put `Socketpair`, `Write`, and `Close` behind a `unixNetworkOps` value owned by the backend; inject failure at every setup stage and require the number of successfully created descriptors to equal the number closed, rather than using a noisy process-wide FD count.
 
 Run RED on Linux CI or an available Linux environment:
 
@@ -751,18 +824,31 @@ Expected: build failure because the Unix backend does not exist.
 
 - [ ] **Step 2: Implement the non-blocking Unix socketpair wake**
 
-In `network_poller_unix.go`, create `unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)`, call `unix.SetNonblock` on both descriptors, and close both on partial failure. Implement:
+In `network_poller_unix.go`, define injected operations and create `unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)`, call `unix.SetNonblock` on both descriptors, and close both on partial failure:
 
 ```go
-type unixNetworkWake struct { reader, writer int }
+type unixNetworkOps struct {
+	socketpair func(int, int, int) ([2]int, error)
+	setNonblock func(int, bool) error
+	write func(int, []byte) (int, error)
+	close func(int) error
+}
+
+type unixNetworkWake struct {
+	reader, writer int
+	ops unixNetworkOps
+}
 func (wake *unixNetworkWake) descriptor() uintptr { return uintptr(wake.reader) }
 func (wake *unixNetworkWake) signal() error {
-	_, err := unix.Write(wake.writer, []byte{1})
-	if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) { return nil }
-	return err
+	for {
+		_, err := wake.ops.write(wake.writer, []byte{1})
+		if errors.Is(err, unix.EINTR) { continue }
+		if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) { return nil }
+		return err
+	}
 }
 func (wake *unixNetworkWake) close() error {
-	return errors.Join(unix.Close(wake.writer), unix.Close(wake.reader))
+	return errors.Join(wake.ops.close(wake.writer), wake.ops.close(wake.reader))
 }
 ```
 
@@ -770,7 +856,7 @@ The common lifecycle ensures the same numeric descriptor is never signaled after
 
 - [ ] **Step 3: Implement `unix.Poll` with exact descriptor checks**
 
-Reject a raw descriptor that cannot round-trip through `int32` before building `unix.PollFd`. Prepend the wake reader with `POLLIN`. Map interests to `POLLIN` and `POLLOUT`; error-only registrations use zero requested events because `POLLERR`, `POLLHUP`, and `POLLNVAL` are returned independently.
+Reject a raw descriptor that cannot round-trip through `int32` before building `unix.PollFd`. Prepend the wake reader with `POLLIN`. Map interests to `POLLIN` and `POLLOUT`; error-only registrations use zero normal requested events because `POLLERR`, `POLLHUP`, and `POLLNVAL` are returned independently. For every non-listener pollable socket, OR `networkPollReadHangup` into `PollFd.Events`, including error-only sockets; `POLLRDHUP` is not one of the unconditional result flags and must be explicitly requested on Linux/FreeBSD.
 
 On `errors.Is(err, unix.EINTR)`, return `networkPollBatch{interrupted:true}` with no error. Normalize:
 
@@ -805,6 +891,8 @@ const networkPollReadHangup int16 = 0
 
 Do not reference `POLLRDHUP` from the common Unix file, because it is not defined uniformly.
 
+In `network_poller_linux_test.go`, add two real TCP tests. First, call `CloseWrite` on one peer and require the other endpoint's raw poll result to include `POLLRDHUP`, with public read/error outputs populated when requested. Second, call `SetLinger(0)` and close a peer to generate RST; require public read/write/error readiness within one second, followed by `net_recv` returning a non-timeout connection error. The receive assertion proves poll did not clear the pending socket error.
+
 - [ ] **Step 5: Add the unsupported backend**
 
 Use the complement build tag:
@@ -820,8 +908,8 @@ Return a platform whose wake factory and wait both return `fmt.Errorf("network p
 On Linux:
 
 ```bash
-go test ./internal/vm -run 'TestUnixPoll|TestUnixWake|TestUnixReadHangup' -count=20
-go test -race ./internal/vm -run 'TestUnixPoll|TestUnixWake|TestUnixReadHangup' -count=1
+go test ./internal/vm -run 'TestUnixPoll|TestUnixWake|TestUnixReadHangup|TestLinuxNetworkPoll' -count=20
+go test -race ./internal/vm -run 'TestUnixPoll|TestUnixWake|TestUnixReadHangup|TestLinuxNetworkPoll' -count=1
 ```
 
 From PowerShell or CI, compile production code for the full matrix:
@@ -833,12 +921,21 @@ $targets = @(
   @{OS='netbsd'; Arch='amd64'}, @{OS='openbsd'; Arch='amd64'},
   @{OS='solaris'; Arch='amd64'}, @{OS='aix'; Arch='ppc64'}
 )
-foreach ($target in $targets) {
-  $env:GOOS=$target.OS; $env:GOARCH=$target.Arch; go build ./...
-  if ($LASTEXITCODE -ne 0) { throw "cross-build failed for $($target.OS)/$($target.Arch)" }
+$crossBuildFailure = $null
+try {
+  foreach ($target in $targets) {
+    $env:GOOS=$target.OS; $env:GOARCH=$target.Arch; go build ./...
+    if ($LASTEXITCODE -ne 0) { throw "cross-build failed for $($target.OS)/$($target.Arch)" }
+  }
+} catch {
+  $crossBuildFailure = $_
+} finally {
+  Remove-Item Env:GOOS -ErrorAction SilentlyContinue
+  Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+  go build ./...
+  if ($LASTEXITCODE -ne 0) { throw "native build failed after cross-build matrix" }
 }
-Remove-Item Env:GOOS -ErrorAction SilentlyContinue
-Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+if ($null -ne $crossBuildFailure) { throw $crossBuildFailure }
 ```
 
 Expected: all builds succeed. Runtime claims remain limited to Windows/Linux.
@@ -846,7 +943,7 @@ Expected: all builds succeed. Runtime claims remain limited to Windows/Linux.
 - [ ] **Step 7: Commit the Unix and fallback backends**
 
 ```powershell
-git add internal/vm/network_poller_unix.go internal/vm/network_poller_unix_test.go internal/vm/network_poller_rdhup.go internal/vm/network_poller_no_rdhup.go internal/vm/network_poller_unsupported.go
+git add internal/vm/network_poller_unix.go internal/vm/network_poller_unix_test.go internal/vm/network_poller_linux_test.go internal/vm/network_poller_rdhup.go internal/vm/network_poller_no_rdhup.go internal/vm/network_poller_unsupported.go
 git commit -m "feat(net): add Unix poll backend"
 ```
 
@@ -881,7 +978,8 @@ In `builtins_net_deadlines_test.go`:
 
 - snapshot a controlled socket's last read/write deadlines, call `net_select`, and require no setter invocation and no deadline change;
 - start a positive-timeout poll on one socket and one listener, close each from another goroutine, and require prompt completion without reporting the locally closed handle;
-- force both existing rollback-poison paths and require an already blocked poll to wake before the controlled connection/listener `Close` returns;
+- force each of the three existing rollback-poison paths—initial socket read application/rollback failure, socket write application/rollback failure, and listener application/rollback failure—and require an already blocked poll to wake before the controlled connection/listener `Close` returns;
+- inject a permanent wake signal failure while a poll holds nested `RawConn.Control` references; require the close path to finish within two safety chunks, proving the one-second native chunk cap provides bounded fallback progress;
 - replace `TestReceiveSocketFullyBufferedSkipsDeadlineSetter` with `TestReceiveSocketZeroSizeSkipsDeadlineSetter`.
 
 Run RED:
@@ -1023,6 +1121,8 @@ Add named tests with explicit assertions:
 - ordinary readable data alone never populates the error set.
 
 Do not make a cross-platform integration assertion that graceful EOF must appear in the error set: that depends on an explicit `HUP`/`RDHUP` indication, while EOF-as-readable is the portable guarantee.
+
+The Windows test from Task 4 and Linux test from Task 5 provide deterministic pending-error coverage with TCP RST. Both must require the socket in the public error output and then observe the still-pending connection error through `net_recv`; this is not satisfied by merely injecting a fake `POLLERR` mask. Other compile-supported Unix targets keep the portable EOF assertions until they have runtime runners.
 
 - [ ] **Step 4: Exercise concurrent close and concurrent polls**
 
