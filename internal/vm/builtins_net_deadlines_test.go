@@ -161,24 +161,40 @@ func TestSocketDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
 	first := newNetworkWake(firstRaw)
 	second := newNetworkWake(secondRaw)
 	resource := &SocketResource{
-		connection:  controlled,
-		pollWaiters: map[*networkWake]struct{}{first: {}, second: {}},
+		connection:         controlled,
+		deadlineGeneration: 7,
+		pollWaiters:        map[*networkWake]struct{}{first: {}, second: {}},
 	}
 
 	closeSocket(resource)
-	closeSocket(resource)
-
 	requireWakeSignals(t, firstRaw, secondRaw)
 	resource.stateMu.Lock()
-	closed := resource.closed
-	connectionAfterClose := resource.connection
-	waiters := resource.pollWaiters
+	closedAfterFirst := resource.closed
+	generationAfterFirst := resource.deadlineGeneration
+	connectionAfterFirst := resource.connection
+	waitersAfterFirst := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if !closed || connectionAfterClose != nil || waiters != nil {
-		t.Fatalf("closed=%v connection=%v waiters=%v", closed, connectionAfterClose, waiters)
+	closesAfterFirst := controlled.closes()
+	if !closedAfterFirst || generationAfterFirst != 8 || connectionAfterFirst != nil || waitersAfterFirst != nil {
+		t.Fatalf("first close: closed=%v generation=%d connection=%v waiters=%v", closedAfterFirst, generationAfterFirst, connectionAfterFirst, waitersAfterFirst)
 	}
-	if controlled.closes() != 1 {
-		t.Fatalf("close calls=%d, want 1", controlled.closes())
+	if closesAfterFirst != 1 {
+		t.Fatalf("first close calls=%d, want 1", closesAfterFirst)
+	}
+
+	closeSocket(resource)
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closedAfterSecond := resource.closed
+	generationAfterSecond := resource.deadlineGeneration
+	connectionAfterSecond := resource.connection
+	waitersAfterSecond := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closedAfterSecond || generationAfterSecond != generationAfterFirst || connectionAfterSecond != nil || waitersAfterSecond != nil {
+		t.Fatalf("second close: closed=%v generation=%d connection=%v waiters=%v", closedAfterSecond, generationAfterSecond, connectionAfterSecond, waitersAfterSecond)
+	}
+	if controlled.closes() != closesAfterFirst {
+		t.Fatalf("second close calls=%d, want unchanged %d", controlled.closes(), closesAfterFirst)
 	}
 }
 
@@ -196,26 +212,44 @@ func TestListenerDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
 	first := newNetworkWake(firstRaw)
 	second := newNetworkWake(secondRaw)
 	resource := &ListenerResource{
-		listener:       controlled,
-		bufferedAccept: controlledAccepted,
-		pollWaiters:    map[*networkWake]struct{}{first: {}, second: {}},
+		listener:           controlled,
+		bufferedAccept:     controlledAccepted,
+		deadlineGeneration: 11,
+		pollWaiters:        map[*networkWake]struct{}{first: {}, second: {}},
 	}
 
 	closeListener(resource)
-	closeListener(resource)
-
 	requireWakeSignals(t, firstRaw, secondRaw)
 	resource.stateMu.Lock()
-	closed := resource.closed
-	listenerAfterClose := resource.listener
-	bufferedAfterClose := resource.bufferedAccept
-	waiters := resource.pollWaiters
+	closedAfterFirst := resource.closed
+	generationAfterFirst := resource.deadlineGeneration
+	listenerAfterFirst := resource.listener
+	bufferedAfterFirst := resource.bufferedAccept
+	waitersAfterFirst := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if !closed || listenerAfterClose != nil || bufferedAfterClose != nil || waiters != nil {
-		t.Fatalf("closed=%v listener=%v buffered=%v waiters=%v", closed, listenerAfterClose, bufferedAfterClose, waiters)
+	listenerClosesAfterFirst := controlled.closes()
+	bufferedClosesAfterFirst := controlledAccepted.closes()
+	if !closedAfterFirst || generationAfterFirst != 12 || listenerAfterFirst != nil || bufferedAfterFirst != nil || waitersAfterFirst != nil {
+		t.Fatalf("first close: closed=%v generation=%d listener=%v buffered=%v waiters=%v", closedAfterFirst, generationAfterFirst, listenerAfterFirst, bufferedAfterFirst, waitersAfterFirst)
 	}
-	if controlled.closes() != 1 || controlledAccepted.closes() != 1 {
-		t.Fatalf("close calls: listener=%d accepted=%d, want 1 each", controlled.closes(), controlledAccepted.closes())
+	if listenerClosesAfterFirst != 1 || bufferedClosesAfterFirst != 1 {
+		t.Fatalf("first close calls: listener=%d accepted=%d, want 1 each", listenerClosesAfterFirst, bufferedClosesAfterFirst)
+	}
+
+	closeListener(resource)
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closedAfterSecond := resource.closed
+	generationAfterSecond := resource.deadlineGeneration
+	listenerAfterSecond := resource.listener
+	bufferedAfterSecond := resource.bufferedAccept
+	waitersAfterSecond := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closedAfterSecond || generationAfterSecond != generationAfterFirst || listenerAfterSecond != nil || bufferedAfterSecond != nil || waitersAfterSecond != nil {
+		t.Fatalf("second close: closed=%v generation=%d listener=%v buffered=%v waiters=%v", closedAfterSecond, generationAfterSecond, listenerAfterSecond, bufferedAfterSecond, waitersAfterSecond)
+	}
+	if controlled.closes() != listenerClosesAfterFirst || controlledAccepted.closes() != bufferedClosesAfterFirst {
+		t.Fatalf("second close calls: listener=%d accepted=%d, want unchanged %d and %d", controlled.closes(), controlledAccepted.closes(), listenerClosesAfterFirst, bufferedClosesAfterFirst)
 	}
 }
 
@@ -259,10 +293,28 @@ func TestSocketReadRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
 		}
 	}
 	resource.stateMu.Lock()
-	waiters := resource.pollWaiters
+	closedAfterPoison := resource.closed
+	generationAfterPoison := resource.deadlineGeneration
+	connectionAfterPoison := resource.connection
+	waitersAfterPoison := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if waiters != nil || controlled.closes() != 1 {
-		t.Fatalf("waiters=%v close calls=%d, want nil and 1", waiters, controlled.closes())
+	closesAfterPoison := controlled.closes()
+	closeSocket(resource)
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closedAfterClose := resource.closed
+	generationAfterClose := resource.deadlineGeneration
+	connectionAfterClose := resource.connection
+	waitersAfterClose := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closedAfterPoison || !closedAfterClose || connectionAfterPoison != nil || connectionAfterClose != nil || waitersAfterPoison != nil || waitersAfterClose != nil {
+		t.Fatalf("closed before/after=%v/%v connection before/after=%v/%v waiters before/after=%v/%v", closedAfterPoison, closedAfterClose, connectionAfterPoison, connectionAfterClose, waitersAfterPoison, waitersAfterClose)
+	}
+	if generationAfterClose != generationAfterPoison {
+		t.Fatalf("generation after close=%d, want unchanged %d", generationAfterClose, generationAfterPoison)
+	}
+	if closesAfterPoison != 1 || controlled.closes() != closesAfterPoison {
+		t.Fatalf("close calls before/after=%d/%d, want 1/1", closesAfterPoison, controlled.closes())
 	}
 }
 
@@ -314,10 +366,28 @@ func TestSocketWriteRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
 		}
 	}
 	resource.stateMu.Lock()
-	waiters := resource.pollWaiters
+	closedAfterPoison := resource.closed
+	generationAfterPoison := resource.deadlineGeneration
+	connectionAfterPoison := resource.connection
+	waitersAfterPoison := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if waiters != nil || controlled.closes() != 1 {
-		t.Fatalf("waiters=%v close calls=%d, want nil and 1", waiters, controlled.closes())
+	closesAfterPoison := controlled.closes()
+	closeSocket(resource)
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closedAfterClose := resource.closed
+	generationAfterClose := resource.deadlineGeneration
+	connectionAfterClose := resource.connection
+	waitersAfterClose := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closedAfterPoison || !closedAfterClose || connectionAfterPoison != nil || connectionAfterClose != nil || waitersAfterPoison != nil || waitersAfterClose != nil {
+		t.Fatalf("closed before/after=%v/%v connection before/after=%v/%v waiters before/after=%v/%v", closedAfterPoison, closedAfterClose, connectionAfterPoison, connectionAfterClose, waitersAfterPoison, waitersAfterClose)
+	}
+	if generationAfterClose != generationAfterPoison {
+		t.Fatalf("generation after close=%d, want unchanged %d", generationAfterClose, generationAfterPoison)
+	}
+	if closesAfterPoison != 1 || controlled.closes() != closesAfterPoison {
+		t.Fatalf("close calls before/after=%d/%d, want 1/1", closesAfterPoison, controlled.closes())
 	}
 }
 
@@ -367,10 +437,31 @@ func TestListenerRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
 		}
 	}
 	resource.stateMu.Lock()
-	waiters := resource.pollWaiters
+	closedAfterPoison := resource.closed
+	generationAfterPoison := resource.deadlineGeneration
+	listenerAfterPoison := resource.listener
+	bufferedAfterPoison := resource.bufferedAccept
+	waitersAfterPoison := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if waiters != nil || controlled.closes() != 1 || controlledAccepted.closes() != 1 {
-		t.Fatalf("waiters=%v close calls: listener=%d accepted=%d, want nil and 1 each", waiters, controlled.closes(), controlledAccepted.closes())
+	listenerClosesAfterPoison := controlled.closes()
+	bufferedClosesAfterPoison := controlledAccepted.closes()
+	closeListener(resource)
+	requireWakeSignals(t, firstRaw, secondRaw)
+	resource.stateMu.Lock()
+	closedAfterClose := resource.closed
+	generationAfterClose := resource.deadlineGeneration
+	listenerAfterClose := resource.listener
+	bufferedAfterClose := resource.bufferedAccept
+	waitersAfterClose := resource.pollWaiters
+	resource.stateMu.Unlock()
+	if !closedAfterPoison || !closedAfterClose || listenerAfterPoison != nil || listenerAfterClose != nil || bufferedAfterPoison != nil || bufferedAfterClose != nil || waitersAfterPoison != nil || waitersAfterClose != nil {
+		t.Fatalf("closed before/after=%v/%v listener before/after=%v/%v buffered before/after=%v/%v waiters before/after=%v/%v", closedAfterPoison, closedAfterClose, listenerAfterPoison, listenerAfterClose, bufferedAfterPoison, bufferedAfterClose, waitersAfterPoison, waitersAfterClose)
+	}
+	if generationAfterClose != generationAfterPoison {
+		t.Fatalf("generation after close=%d, want unchanged %d", generationAfterClose, generationAfterPoison)
+	}
+	if listenerClosesAfterPoison != 1 || bufferedClosesAfterPoison != 1 || controlled.closes() != listenerClosesAfterPoison || controlledAccepted.closes() != bufferedClosesAfterPoison {
+		t.Fatalf("close calls before/after: listener=%d/%d accepted=%d/%d, want 1/1 each", listenerClosesAfterPoison, controlled.closes(), bufferedClosesAfterPoison, controlledAccepted.closes())
 	}
 }
 
