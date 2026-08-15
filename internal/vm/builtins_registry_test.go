@@ -35,7 +35,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"strings_starts_with", "strings_substring", "strings_to_lower",
 		"strings_to_upper", "strings_trim", "sys_argv", "sys_exec",
 		"sys_exec_output", "sys_exit", "sys_getcwd", "sys_getenv",
-		"sys_load_plugin", "sys_os", "sys_setenv", "sys_sleep", "task_await",
+		"sys_load_plugin", "sys_os", "sys_setenv", "sys_signal_notify", "sys_signal_stop", "sys_sleep", "task_await",
 		"time_add_days", "time_add_seconds", "time_after", "time_before",
 		"time_days_in_month", "time_diff", "time_diff_duration", "time_format",
 		"time_format_custom", "time_format_date", "time_format_time",

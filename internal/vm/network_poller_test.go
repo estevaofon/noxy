@@ -701,11 +701,12 @@ func TestNetworkPollerDeadlineStartsBeforeRegistryLookup(t *testing.T) {
 	poller := networkPoller{
 		platform: platform.boundary(),
 		now: func() time.Time {
+			val := start.Add(time.Duration(elapsed.Load()))
 			select {
 			case firstClockRead <- struct{}{}:
 			default:
 			}
-			return start.Add(time.Duration(elapsed.Load()))
+			return val
 		},
 		sleep: time.Sleep,
 	}
