@@ -22,7 +22,7 @@ func TestUnixReadHangupMatchesLinuxPOLLRDHUP(t *testing.T) {
 	}
 }
 
-func TestLinuxNetworkPollCloseWriteReportsReadHangup(t *testing.T) {
+func TestLinuxNetworkPollDataAndReadHangupCoexistWithoutConsumption(t *testing.T) {
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 
@@ -37,6 +37,8 @@ func TestLinuxNetworkPollCloseWriteReportsReadHangup(t *testing.T) {
 	if !ok {
 		t.Fatalf("peer connection=%T, want *net.TCPConn", clientResource.connection)
 	}
+	sent := callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("tail"))
+	assertBuiltinValue(t, builtinMapField(t, sent, "count"), value.NewInt(4))
 	if err := peer.CloseWrite(); err != nil {
 		t.Fatal(err)
 	}
@@ -55,8 +57,18 @@ func TestLinuxNetworkPollCloseWriteReportsReadHangup(t *testing.T) {
 	}
 	var revents int16
 	if err := raw.Control(func(descriptor uintptr) {
-		pollfds := []unix.PollFd{{Fd: int32(descriptor), Events: unix.POLLIN | unix.POLLRDHUP}}
+		pollfds := []unix.PollFd{{Fd: int32(descriptor), Events: unix.POLLRDHUP}}
 		if _, pollErr := unix.Poll(pollfds, 1000); pollErr != nil {
+			err = pollErr
+			return
+		}
+		if pollfds[0].Revents&unix.POLLRDHUP == 0 {
+			revents = pollfds[0].Revents
+			return
+		}
+		pollfds[0].Events = unix.POLLIN | unix.POLLRDHUP
+		pollfds[0].Revents = 0
+		if _, pollErr := unix.Poll(pollfds, 0); pollErr != nil {
 			err = pollErr
 			return
 		}
@@ -67,14 +79,18 @@ func TestLinuxNetworkPollCloseWriteReportsReadHangup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if revents&unix.POLLRDHUP == 0 {
-		t.Fatalf("raw poll revents=%#x, want POLLRDHUP", revents)
+	if revents&(unix.POLLIN|unix.POLLRDHUP) != unix.POLLIN|unix.POLLRDHUP {
+		t.Fatalf("raw poll revents=%#x, want coexisting POLLIN|POLLRDHUP", revents)
 	}
 
 	selected := callBuiltinWithinBound(t, machine, "net_select",
 		value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray([]value.Value{server}), value.NewInt(1000))
 	assertBuiltinValue(t, builtinMapField(t, selected, "read_count"), value.NewInt(1))
 	assertBuiltinValue(t, builtinMapField(t, selected, "error_count"), value.NewInt(1))
+	received := callBuiltinWithinBound(t, machine, "net_recv", server, value.NewInt(4))
+	assertBuiltinValue(t, builtinMapField(t, received, "ok"), value.NewBool(true))
+	assertBuiltinValue(t, builtinMapField(t, received, "count"), value.NewInt(4))
+	assertBuiltinValue(t, builtinMapField(t, received, "data"), value.NewBytes("tail"))
 }
 
 func TestNetworkPollIntegrationLinuxResetCopiesTerminalEventAndPreservesPendingError(t *testing.T) {

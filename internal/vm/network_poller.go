@@ -241,6 +241,12 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 		pollRegistrations = append(pollRegistrations, registration)
 	}
 	if attachedCount == 0 {
+		if timeout > 0 {
+			remaining := deadline.Sub(now())
+			if remaining > 0 {
+				poller.networkSleep()(remaining)
+			}
+		}
 		return selectResult(nil, nil, nil), nil
 	}
 
@@ -286,7 +292,7 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 		if len(ready) != 0 {
 			break
 		}
-		if batch.woke && anyNetworkRegistrationClosed(shared, registrations) {
+		if anyNetworkRegistrationClosed(shared, registrations) {
 			break
 		}
 	}

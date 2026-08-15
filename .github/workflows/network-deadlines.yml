@@ -22,9 +22,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - run: go test ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=120s
+      - run: go test ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=120s
       # The Go race detector supports the hosted linux/amd64 and windows/amd64 toolchains.
-      - run: go test -race ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=180s
+      - run: go test -race ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=180s
       - run: go test ./internal/... -count=1
 
   cross-build:

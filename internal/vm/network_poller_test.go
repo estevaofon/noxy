@@ -460,6 +460,40 @@ func TestNetworkPollerEmptyCandidatesUseInjectedSleeperOnlyForPositiveTimeout(t 
 	}
 }
 
+func TestNetworkPollerPoisonClosedCandidateSleepsRemainingPositiveTimeout(t *testing.T) {
+	machine := New()
+	resource, socket := addPollTestSocket(t, machine, 10)
+	closeSocket(resource)
+
+	start := time.Unix(100, 0)
+	times := []time.Time{start, start.Add(7 * time.Millisecond)}
+	now := func() time.Time {
+		current := times[0]
+		if len(times) > 1 {
+			times = times[1:]
+		}
+		return current
+	}
+	var slept []time.Duration
+	platform := &fakeNetworkPlatform{}
+	poller := networkPoller{
+		platform: platform.boundary(),
+		now:      now,
+		sleep:    func(duration time.Duration) { slept = append(slept, duration) },
+	}
+
+	result, err := poller.Poll(machine.shared, pollSets([]value.Value{socket}, nil, nil), 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 1 || slept[0] != 3*time.Millisecond {
+		t.Fatalf("slept=%v, want literal remaining budget [3ms]", slept)
+	}
+	if len(platform.timeouts) != 0 || len(resultSet(t, result, "read")) != 0 {
+		t.Fatalf("waits=%v result=%v, want empty result without native wait", platform.timeouts, result)
+	}
+}
+
 func TestNetworkPollerZeroTimeoutCallsWaitExactlyOnce(t *testing.T) {
 	machine := New()
 	_, socket := addPollTestSocket(t, machine, 10)
@@ -673,6 +707,47 @@ func TestNetworkPollerWriteOnlyListenerWaitsWithoutNativeDescriptor(t *testing.T
 	resource.stateMu.Unlock()
 	if waiters != 0 {
 		t.Fatalf("waiters=%d, want 0", waiters)
+	}
+}
+
+func TestNetworkPollerPermanentWakeFailureStillDetectsClosedWriteOnlyListenerAfterOneChunk(t *testing.T) {
+	machine := New()
+	resource, listener := addPollTestListener(t, machine, 30)
+	start := time.Unix(100, 0)
+	times := []time.Time{start, start, start.Add(time.Second), start.Add(3 * time.Second)}
+	now := func() time.Time {
+		current := times[0]
+		if len(times) > 1 {
+			times = times[1:]
+		}
+		return current
+	}
+	wakeFailure := errors.New("permanent wake signal failure")
+	platform := &fakeNetworkPlatform{wake: &fakePlatformWake{signalErr: wakeFailure}}
+	platform.waitFn = func(descriptors []networkPollFD, _ uintptr, _ int32) (networkPollBatch, error) {
+		if len(descriptors) != 0 {
+			t.Fatalf("write-only listener descriptors=%v, want wake descriptor only", descriptors)
+		}
+		closeListener(resource)
+		return networkPollBatch{}, nil
+	}
+	poller := networkPoller{platform: platform.boundary(), now: now, sleep: time.Sleep}
+
+	result, err := poller.Poll(machine.shared, pollSets(nil, []value.Value{listener}, nil), 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(platform.timeouts) != 1 || platform.timeouts[0] != 1000 {
+		t.Fatalf("native timeouts=%v, want one safety chunk [1000]", platform.timeouts)
+	}
+	platform.wake.mu.Lock()
+	signals := platform.wake.signals
+	platform.wake.mu.Unlock()
+	if signals != 1 {
+		t.Fatalf("wake signal attempts=%d, want one permanent failure", signals)
+	}
+	if len(resultSet(t, result, "write")) != 0 {
+		t.Fatalf("closed write-only listener unexpectedly ready: %v", result)
 	}
 }
 
