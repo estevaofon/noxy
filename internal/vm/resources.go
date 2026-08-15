@@ -100,17 +100,15 @@ func (resource *FileResource) close() error {
 }
 
 type ListenerResource struct {
-	stateMu             sync.Mutex
-	deadlineMu          sync.Mutex
-	acceptMu            sync.Mutex
-	listener            deadlineListener
-	bufferedAccept      net.Conn
-	ioTimeout           time.Duration
-	acceptProbeDeadline time.Time
-	lastAcceptDeadline  time.Time
-	deadlineGeneration  uint64
-	closed              bool
-	pollWaiters         map[*networkWake]struct{}
+	stateMu            sync.Mutex
+	deadlineMu         sync.Mutex
+	acceptMu           sync.Mutex
+	listener           deadlineListener
+	ioTimeout          time.Duration
+	lastAcceptDeadline time.Time
+	deadlineGeneration uint64
+	closed             bool
+	pollWaiters        map[*networkWake]struct{}
 }
 
 type SocketResource struct {
@@ -119,9 +117,7 @@ type SocketResource struct {
 	readMu             sync.Mutex
 	writeMu            sync.Mutex
 	connection         net.Conn
-	bufferedRead       []byte
 	ioTimeout          time.Duration
-	readProbeDeadline  time.Time
 	lastReadDeadline   time.Time
 	lastWriteDeadline  time.Time
 	deadlineGeneration uint64
@@ -136,7 +132,6 @@ type detachedSocket struct {
 
 type detachedListener struct {
 	listener deadlineListener
-	buffered net.Conn
 	waiters  []*networkWake
 }
 
@@ -159,8 +154,6 @@ func detachSocketLocked(resource *SocketResource) (detachedSocket, bool) {
 		waiters:    takeNetworkWaiters(resource.pollWaiters),
 	}
 	resource.connection = nil
-	resource.bufferedRead = nil
-	resource.readProbeDeadline = time.Time{}
 	resource.pollWaiters = nil
 	return detached, true
 }
@@ -173,12 +166,9 @@ func detachListenerLocked(resource *ListenerResource) (detachedListener, bool) {
 	resource.deadlineGeneration++
 	detached := detachedListener{
 		listener: resource.listener,
-		buffered: resource.bufferedAccept,
 		waiters:  takeNetworkWaiters(resource.pollWaiters),
 	}
 	resource.listener = nil
-	resource.bufferedAccept = nil
-	resource.acceptProbeDeadline = time.Time{}
 	resource.pollWaiters = nil
 	return detached, true
 }
@@ -199,7 +189,7 @@ func finishSocketDetach(detached detachedSocket) error {
 }
 
 func finishListenerDetach(detached detachedListener) error {
-	errs := make([]error, 0, len(detached.waiters)+2)
+	errs := make([]error, 0, len(detached.waiters)+1)
 	for _, waiter := range detached.waiters {
 		if err := waiter.Signal(); err != nil {
 			errs = append(errs, err)
@@ -207,11 +197,6 @@ func finishListenerDetach(detached detachedListener) error {
 	}
 	if detached.listener != nil {
 		if err := detached.listener.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	if detached.buffered != nil {
-		if err := detached.buffered.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

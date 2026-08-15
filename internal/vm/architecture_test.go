@@ -451,6 +451,109 @@ func readArchitectureSources(directory string) ([]architectureSource, error) {
 	return sources, nil
 }
 
+func networkConsumingProbeMatches(t *testing.T, sources []architectureSource) []string {
+	t.Helper()
+	forbiddenFields := map[string]map[string]bool{
+		"ListenerResource": {"bufferedAccept": true, "acceptProbeDeadline": true},
+		"SocketResource":   {"bufferedRead": true, "readProbeDeadline": true},
+	}
+	forbiddenFunctions := map[string]bool{
+		"beginListenerProbe":  true,
+		"finishListenerProbe": true,
+		"selectListener":      true,
+		"beginSocketProbe":    true,
+		"finishSocketProbe":   true,
+		"selectSocket":        true,
+	}
+	found := make(map[string]bool)
+	for _, source := range sources {
+		file, err := parser.ParseFile(token.NewFileSet(), source.filename, source.source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", source.filename, err)
+		}
+		for _, declaration := range file.Decls {
+			switch typed := declaration.(type) {
+			case *ast.FuncDecl:
+				if forbiddenFunctions[typed.Name.Name] {
+					found[typed.Name.Name] = true
+				}
+			case *ast.GenDecl:
+				for _, specification := range typed.Specs {
+					typeSpec, ok := specification.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					fields := forbiddenFields[typeSpec.Name.Name]
+					structure, ok := typeSpec.Type.(*ast.StructType)
+					if len(fields) == 0 || !ok {
+						continue
+					}
+					for _, field := range structure.Fields.List {
+						for _, name := range field.Names {
+							if fields[name.Name] {
+								found[typeSpec.Name.Name+"."+name.Name] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	matches := make([]string, 0, len(found))
+	for match := range found {
+		matches = append(matches, match)
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+func TestNetworkArchitectureExcludesConsumingProbes(t *testing.T) {
+	sources, err := readArchitectureSources(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range networkConsumingProbeMatches(t, sources) {
+		t.Errorf("obsolete consuming network probe structure: %s", match)
+	}
+}
+
+func TestNetworkArchitectureGuardMatchesExactSyntax(t *testing.T) {
+	source := `package guarded
+type ListenerResource struct {
+	bufferedAccept int
+	acceptProbeDeadline int
+}
+type SocketResource struct {
+	bufferedRead, readProbeDeadline int
+}
+type Unrelated struct { bufferedRead int }
+func beginListenerProbe() {}
+func finishListenerProbe() {}
+func selectListener() {}
+func beginSocketProbe() {}
+func finishSocketProbe() {}
+func selectSocket() {}
+var _ = "func beginSocketProbe; bufferedAccept"
+// func selectListener() {}
+`
+	got := networkConsumingProbeMatches(t, []architectureSource{{filename: "guarded.go", source: source}})
+	want := []string{
+		"ListenerResource.acceptProbeDeadline",
+		"ListenerResource.bufferedAccept",
+		"SocketResource.bufferedRead",
+		"SocketResource.readProbeDeadline",
+		"beginListenerProbe",
+		"beginSocketProbe",
+		"finishListenerProbe",
+		"finishSocketProbe",
+		"selectListener",
+		"selectSocket",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("matches=%v, want %v", got, want)
+	}
+}
+
 func checkArchitecturePackage(packagePath string, sources []architectureSource, loader types.Importer, ignoreBodies bool) *architecturePackage {
 	fileSet := token.NewFileSet()
 	files := make([]*ast.File, 0, len(sources))

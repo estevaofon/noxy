@@ -19,6 +19,12 @@ type deadlineListener interface {
 
 var networkDialTimeout = net.DialTimeout
 
+var defaultNetworkPoller = networkPoller{
+	platform: systemNetworkPlatform(),
+	now:      time.Now,
+	sleep:    time.Sleep,
+}
+
 func validateNetworkTimeout(milliseconds int64) (time.Duration, error) {
 	if milliseconds <= 0 {
 		return 0, fmt.Errorf("network timeout must be positive")
@@ -60,19 +66,11 @@ func networkSocketDescriptor(socket value.Value) (int, error) {
 	return handle, nil
 }
 
-func effectiveNetworkDeadline(now time.Time, timeout time.Duration, probeBound time.Time) time.Time {
-	deadline := time.Time{}
+func effectiveNetworkDeadline(now time.Time, timeout time.Duration) time.Time {
 	if timeout > 0 {
-		deadline = now.Add(timeout)
+		return now.Add(timeout)
 	}
-	if !probeBound.IsZero() && (deadline.IsZero() || probeBound.Before(deadline)) {
-		return probeBound
-	}
-	return deadline
-}
-
-func networkProbeDeadline(started time.Time, selectTimeout time.Duration, ioTimeout time.Duration) time.Time {
-	return effectiveNetworkDeadline(started, ioTimeout, started.Add(selectTimeout))
+	return time.Time{}
 }
 
 func configureSocketTimeout(resource *SocketResource, timeout time.Duration) error {
@@ -90,8 +88,8 @@ func configureSocketTimeout(resource *SocketResource, timeout time.Duration) err
 	oldReadDeadline := resource.lastReadDeadline
 	oldWriteDeadline := resource.lastWriteDeadline
 	now := time.Now()
-	readDeadline := effectiveNetworkDeadline(now, timeout, resource.readProbeDeadline)
-	writeDeadline := effectiveNetworkDeadline(now, timeout, time.Time{})
+	readDeadline := effectiveNetworkDeadline(now, timeout)
+	writeDeadline := effectiveNetworkDeadline(now, timeout)
 	resource.stateMu.Unlock()
 
 	readErr := connection.SetReadDeadline(readDeadline)
@@ -183,7 +181,7 @@ func configureListenerTimeout(resource *ListenerResource, timeout time.Duration)
 	generation := resource.deadlineGeneration
 	listener := resource.listener
 	oldDeadline := resource.lastAcceptDeadline
-	deadline := effectiveNetworkDeadline(time.Now(), timeout, resource.acceptProbeDeadline)
+	deadline := effectiveNetworkDeadline(time.Now(), timeout)
 	resource.stateMu.Unlock()
 
 	applicationErr := listener.SetDeadline(deadline)
@@ -255,7 +253,7 @@ func prepareSocketRead(resource *SocketResource) (net.Conn, error) {
 	resource.deadlineGeneration++
 	generation := resource.deadlineGeneration
 	connection := resource.connection
-	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout, resource.readProbeDeadline)
+	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout)
 	resource.stateMu.Unlock()
 
 	if err := connection.SetReadDeadline(deadline); err != nil {
@@ -282,7 +280,7 @@ func prepareSocketWrite(resource *SocketResource) (net.Conn, error) {
 	resource.deadlineGeneration++
 	generation := resource.deadlineGeneration
 	connection := resource.connection
-	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout, time.Time{})
+	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout)
 	resource.stateMu.Unlock()
 
 	if err := connection.SetWriteDeadline(deadline); err != nil {
@@ -309,7 +307,7 @@ func prepareListenerAccept(resource *ListenerResource) (deadlineListener, error)
 	resource.deadlineGeneration++
 	generation := resource.deadlineGeneration
 	listener := resource.listener
-	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout, resource.acceptProbeDeadline)
+	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout)
 	resource.stateMu.Unlock()
 
 	if err := listener.SetDeadline(deadline); err != nil {
@@ -351,24 +349,6 @@ func acceptConnection(resource *ListenerResource) (net.Conn, error) {
 		resource.stateMu.Unlock()
 		return nil, net.ErrClosed
 	}
-	if resource.bufferedAccept != nil {
-		connection := resource.bufferedAccept
-		resource.stateMu.Unlock()
-		clearErr := connection.SetDeadline(time.Time{})
-
-		resource.stateMu.Lock()
-		if resource.closed || resource.bufferedAccept != connection {
-			resource.stateMu.Unlock()
-			return nil, net.ErrClosed
-		}
-		resource.bufferedAccept = nil
-		resource.stateMu.Unlock()
-		if clearErr != nil {
-			_ = connection.Close()
-			return nil, clearErr
-		}
-		return connection, nil
-	}
 	resource.stateMu.Unlock()
 
 	listener, err := prepareListenerAccept(resource)
@@ -406,23 +386,10 @@ func receiveSocket(resource *SocketResource, size int) value.Value {
 		resource.stateMu.Unlock()
 		return netResult(true, "", 0, "")
 	}
-	if len(resource.bufferedRead) >= size {
-		data := append([]byte(nil), resource.bufferedRead[:size]...)
-		resource.bufferedRead = resource.bufferedRead[size:]
-		resource.stateMu.Unlock()
-		return netResult(true, string(data), len(data), "")
-	}
 	resource.stateMu.Unlock()
 
 	connection, deadlineErr := prepareSocketRead(resource)
 	if deadlineErr != nil {
-		resource.stateMu.Lock()
-		buffered := append([]byte(nil), resource.bufferedRead...)
-		resource.bufferedRead = nil
-		resource.stateMu.Unlock()
-		if len(buffered) != 0 {
-			return netResult(true, string(buffered), len(buffered), "")
-		}
 		return netResult(false, "", 0, networkErrorMessage(deadlineErr))
 	}
 
@@ -431,27 +398,15 @@ func receiveSocket(resource *SocketResource, size int) value.Value {
 		resource.stateMu.Unlock()
 		return netResult(false, "", 0, "invalid socket")
 	}
-	buffered := append([]byte(nil), resource.bufferedRead...)
-	resource.bufferedRead = nil
 	resource.stateMu.Unlock()
 
 	buffer := make([]byte, size)
-	read := 0
-	if len(buffered) != 0 {
-		copy(buffer, buffered)
-		read = len(buffered)
-	}
-	if read < size {
-		additional, readErr := connection.Read(buffer[read:])
-		if additional > 0 {
-			read += additional
+	read, readErr := connection.Read(buffer)
+	if readErr != nil && read == 0 {
+		if readErr == io.EOF {
+			return netResult(true, "", 0, "")
 		}
-		if readErr != nil && read == 0 {
-			if readErr == io.EOF {
-				return netResult(true, "", 0, "")
-			}
-			return netResult(false, "", 0, networkErrorMessage(readErr))
-		}
+		return netResult(false, "", 0, networkErrorMessage(readErr))
 	}
 	return netResult(true, string(buffer[:read]), read, "")
 }
@@ -470,214 +425,6 @@ func sendSocket(resource *SocketResource, data string) value.Value {
 		return netResult(false, "", written, networkErrorMessage(writeErr))
 	}
 	return netResult(true, "", written, "")
-}
-
-func beginListenerProbe(resource *ListenerResource, timeout time.Duration) (deadlineListener, bool, error) {
-	resource.deadlineMu.Lock()
-	defer resource.deadlineMu.Unlock()
-
-	resource.stateMu.Lock()
-	if resource.closed || resource.listener == nil {
-		resource.stateMu.Unlock()
-		return nil, true, nil
-	}
-	resource.deadlineGeneration++
-	generation := resource.deadlineGeneration
-	listener := resource.listener
-	started := time.Now()
-	probeBound := started.Add(timeout)
-	resource.acceptProbeDeadline = probeBound
-	deadline := networkProbeDeadline(started, timeout, resource.ioTimeout)
-	resource.stateMu.Unlock()
-
-	setterErr := listener.SetDeadline(deadline)
-	resource.stateMu.Lock()
-	defer resource.stateMu.Unlock()
-	if resource.closed || resource.deadlineGeneration != generation {
-		return nil, true, nil
-	}
-	if setterErr != nil {
-		resource.acceptProbeDeadline = time.Time{}
-		return nil, false, setterErr
-	}
-	resource.lastAcceptDeadline = deadline
-	return listener, false, nil
-}
-
-func finishListenerProbe(resource *ListenerResource, listener deadlineListener, connection net.Conn) (bool, error) {
-	resource.deadlineMu.Lock()
-	defer resource.deadlineMu.Unlock()
-
-	resource.stateMu.Lock()
-	if resource.closed || resource.listener != listener {
-		resource.stateMu.Unlock()
-		if connection != nil {
-			_ = connection.Close()
-		}
-		return true, nil
-	}
-	if connection != nil {
-		resource.bufferedAccept = connection
-	}
-	resource.acceptProbeDeadline = time.Time{}
-	resource.deadlineGeneration++
-	generation := resource.deadlineGeneration
-	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout, time.Time{})
-	resource.stateMu.Unlock()
-
-	setterErr := listener.SetDeadline(deadline)
-	resource.stateMu.Lock()
-	defer resource.stateMu.Unlock()
-	if resource.closed || resource.deadlineGeneration != generation {
-		return true, nil
-	}
-	if setterErr != nil {
-		return false, setterErr
-	}
-	resource.lastAcceptDeadline = deadline
-	return false, nil
-}
-
-func selectListener(resource *ListenerResource, timeout time.Duration) (bool, error) {
-	resource.acceptMu.Lock()
-	defer resource.acceptMu.Unlock()
-
-	resource.stateMu.Lock()
-	if resource.closed || resource.listener == nil {
-		resource.stateMu.Unlock()
-		return false, nil
-	}
-	if resource.bufferedAccept != nil {
-		resource.stateMu.Unlock()
-		return true, nil
-	}
-	resource.stateMu.Unlock()
-
-	listener, closed, err := beginListenerProbe(resource, timeout)
-	if err != nil {
-		return false, err
-	}
-	if closed {
-		return false, nil
-	}
-	connection, acceptErr := listener.Accept()
-	ordinarySuccess := acceptErr == nil && connection != nil
-	closed, restoreErr := finishListenerProbe(resource, listener, func() net.Conn {
-		if ordinarySuccess {
-			return connection
-		}
-		return nil
-	}())
-	if restoreErr != nil {
-		return false, restoreErr
-	}
-	if closed || !ordinarySuccess {
-		return false, nil
-	}
-	return true, nil
-}
-
-func beginSocketProbe(resource *SocketResource, timeout time.Duration) (net.Conn, bool, error) {
-	resource.deadlineMu.Lock()
-	defer resource.deadlineMu.Unlock()
-
-	resource.stateMu.Lock()
-	if resource.closed || resource.connection == nil {
-		resource.stateMu.Unlock()
-		return nil, true, nil
-	}
-	resource.deadlineGeneration++
-	generation := resource.deadlineGeneration
-	connection := resource.connection
-	started := time.Now()
-	probeBound := started.Add(timeout)
-	resource.readProbeDeadline = probeBound
-	deadline := networkProbeDeadline(started, timeout, resource.ioTimeout)
-	resource.stateMu.Unlock()
-
-	setterErr := connection.SetReadDeadline(deadline)
-	resource.stateMu.Lock()
-	defer resource.stateMu.Unlock()
-	if resource.closed || resource.deadlineGeneration != generation {
-		return nil, true, nil
-	}
-	if setterErr != nil {
-		resource.readProbeDeadline = time.Time{}
-		return nil, false, setterErr
-	}
-	resource.lastReadDeadline = deadline
-	return connection, false, nil
-}
-
-func finishSocketProbe(resource *SocketResource, connection net.Conn, ready []byte) (bool, error) {
-	resource.deadlineMu.Lock()
-	defer resource.deadlineMu.Unlock()
-
-	resource.stateMu.Lock()
-	if resource.closed || resource.connection != connection {
-		resource.stateMu.Unlock()
-		return true, nil
-	}
-	if len(ready) != 0 {
-		resource.bufferedRead = append(resource.bufferedRead, ready...)
-	}
-	resource.readProbeDeadline = time.Time{}
-	resource.deadlineGeneration++
-	generation := resource.deadlineGeneration
-	deadline := effectiveNetworkDeadline(time.Now(), resource.ioTimeout, time.Time{})
-	resource.stateMu.Unlock()
-
-	setterErr := connection.SetReadDeadline(deadline)
-	resource.stateMu.Lock()
-	defer resource.stateMu.Unlock()
-	if resource.closed || resource.deadlineGeneration != generation {
-		return true, nil
-	}
-	if setterErr != nil {
-		return false, setterErr
-	}
-	resource.lastReadDeadline = deadline
-	return false, nil
-}
-
-func selectSocket(resource *SocketResource, timeout time.Duration) (bool, error) {
-	resource.readMu.Lock()
-	defer resource.readMu.Unlock()
-
-	resource.stateMu.Lock()
-	if resource.closed || resource.connection == nil {
-		resource.stateMu.Unlock()
-		return false, nil
-	}
-	if len(resource.bufferedRead) != 0 {
-		resource.stateMu.Unlock()
-		return true, nil
-	}
-	resource.stateMu.Unlock()
-
-	connection, closed, err := beginSocketProbe(resource, timeout)
-	if err != nil {
-		return false, err
-	}
-	if closed {
-		return false, nil
-	}
-	buffer := make([]byte, 1)
-	read, readErr := connection.Read(buffer)
-	ordinarySuccess := readErr == nil && read > 0
-	closed, restoreErr := finishSocketProbe(resource, connection, func() []byte {
-		if ordinarySuccess {
-			return buffer[:read]
-		}
-		return nil
-	}())
-	if restoreErr != nil {
-		return false, restoreErr
-	}
-	if closed || !ordinarySuccess {
-		return false, nil
-	}
-	return true, nil
 }
 
 func closeListener(resource *ListenerResource) {
@@ -887,48 +634,10 @@ func (vm *VM) defineNetworkBuiltins() {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) < 4 {
-			return value.NewNull(), nil
+		sets, timeout, err := validateNetworkPollArguments(args)
+		if err != nil {
+			return value.NewNull(), err
 		}
-		timeoutMilliseconds := int(args[3].AsInt)
-		if timeoutMilliseconds < 1 {
-			timeoutMilliseconds = 1
-		}
-		timeout := time.Millisecond * time.Duration(timeoutMilliseconds)
-		readyRead := make([]value.Value, 0)
-		if array, ok := args[0].Obj.(*value.ObjArray); args[0].Type == value.VAL_OBJ && ok {
-			for _, candidate := range array.Elements {
-				if candidate.Type != value.VAL_OBJ {
-					continue
-				}
-				handle := int64(-1)
-				if socket, ok := candidate.Obj.(*value.ObjMap); ok {
-					if fdValue, exists := socket.Get("fd"); exists {
-						handle = fdValue.AsInt
-					}
-				} else if instance, ok := candidate.Obj.(*value.ObjInstance); ok {
-					if fdValue, exists := instance.Fields["fd"]; exists {
-						handle = fdValue.AsInt
-					}
-				}
-				if handle == -1 {
-					continue
-				}
-				ready := false
-				var probeErr error
-				if listener, exists := machine.shared.Listeners.get(int(handle)); exists {
-					ready, probeErr = selectListener(listener, timeout)
-				} else if socket, exists := machine.shared.Sockets.get(int(handle)); exists {
-					ready, probeErr = selectSocket(socket, timeout)
-				}
-				if probeErr != nil {
-					return value.NewNull(), probeErr
-				}
-				if ready {
-					readyRead = append(readyRead, candidate)
-				}
-			}
-		}
-		return selectResult(readyRead, nil, nil), nil
+		return defaultNetworkPoller.Poll(machine.shared, sets, timeout)
 	})
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -40,6 +41,49 @@ type controlledDeadlineListener struct {
 	setFn      func(time.Time) error
 	closeFn    func() error
 }
+
+type nestedControlTracker struct {
+	mu       sync.Mutex
+	active   int
+	released chan struct{}
+}
+
+type closeAwareRawConn struct {
+	descriptor uintptr
+	resource   *SocketResource
+	tracker    *nestedControlTracker
+}
+
+type networkInvocationResult struct {
+	value value.Value
+	err   error
+}
+
+func (raw *closeAwareRawConn) Control(callback func(uintptr)) error {
+	raw.resource.stateMu.Lock()
+	closed := raw.resource.closed
+	raw.resource.stateMu.Unlock()
+	if closed {
+		return net.ErrClosed
+	}
+	raw.tracker.mu.Lock()
+	raw.tracker.active++
+	raw.tracker.mu.Unlock()
+	callback(raw.descriptor)
+	raw.tracker.mu.Lock()
+	raw.tracker.active--
+	if raw.tracker.active == 0 {
+		select {
+		case raw.tracker.released <- struct{}{}:
+		default:
+		}
+	}
+	raw.tracker.mu.Unlock()
+	return nil
+}
+
+func (*closeAwareRawConn) Read(func(uintptr) bool) error  { return nil }
+func (*closeAwareRawConn) Write(func(uintptr) bool) error { return nil }
 
 func (listener *controlledDeadlineListener) Accept() (net.Conn, error) {
 	if listener.acceptFn != nil {
@@ -140,6 +184,408 @@ func (connection *controlledDeadlineConn) closes() int {
 	return connection.closeCount
 }
 
+func (connection *controlledDeadlineConn) SyscallConn() (syscall.RawConn, error) {
+	syscallConnection, ok := connection.Conn.(syscall.Conn)
+	if !ok {
+		return nil, fmt.Errorf("controlled connection does not expose SyscallConn")
+	}
+	return syscallConnection.SyscallConn()
+}
+
+func (listener *controlledDeadlineListener) SyscallConn() (syscall.RawConn, error) {
+	syscallListener, ok := listener.Listener.(syscall.Conn)
+	if !ok {
+		return nil, fmt.Errorf("controlled listener does not expose SyscallConn")
+	}
+	return syscallListener.SyscallConn()
+}
+
+func waitForNetworkPollWaiter(t *testing.T, waiters func() int) {
+	t.Helper()
+	deadline := time.After(statefulBuiltinTimeout)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if waiters() != 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("net_select did not register its close waiter")
+		case <-ticker.C:
+		}
+	}
+}
+
+func requirePromptNetworkCloseAndPoll(t *testing.T, machine *VM, candidate value.Value, poll <-chan networkInvocationResult) {
+	t.Helper()
+	closeNative := requireBuiltin(t, machine, "net_close")
+	closed := make(chan error, 1)
+	go func() {
+		_, err := closeNative.Invoke(machine, []value.Value{candidate})
+		closed <- err
+	}()
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	for poll != nil || closed != nil {
+		select {
+		case invocation := <-poll:
+			if invocation.err != nil {
+				t.Fatal(invocation.err)
+			}
+			assertBuiltinValue(t, builtinMapField(t, invocation.value, "read_count"), value.NewInt(0))
+			poll = nil
+		case err := <-closed:
+			if err != nil {
+				t.Fatal(err)
+			}
+			closed = nil
+		case <-timer.C:
+			t.Fatal("net_select and local close did not both complete before the one-second fallback chunk")
+		}
+	}
+}
+
+func TestNetSelectDoesNotMutateDeadlines(t *testing.T) {
+	machine := New()
+	_, _, server := setupAcceptedLoopback(t, machine)
+	_, resource := requireSocketResource(t, machine, server)
+	resource.stateMu.Lock()
+	original := resource.connection
+	controlled := &controlledDeadlineConn{Conn: original}
+	readDeadline := time.Unix(100, 0)
+	writeDeadline := time.Unix(200, 0)
+	resource.connection = controlled
+	resource.lastReadDeadline = readDeadline
+	resource.lastWriteDeadline = writeDeadline
+	resource.stateMu.Unlock()
+
+	selected := callBuiltinWithinBound(t, machine, "net_select",
+		value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(0))
+	assertBuiltinValue(t, builtinMapField(t, selected, "read_count"), value.NewInt(0))
+	controlled.mu.Lock()
+	readSetterCalls := len(controlled.readDeadlines)
+	writeSetterCalls := len(controlled.writeDeadlines)
+	combinedSetterCalls := len(controlled.deadlines)
+	controlled.mu.Unlock()
+	resource.stateMu.Lock()
+	gotReadDeadline := resource.lastReadDeadline
+	gotWriteDeadline := resource.lastWriteDeadline
+	resource.stateMu.Unlock()
+	if readSetterCalls != 0 || writeSetterCalls != 0 || combinedSetterCalls != 0 {
+		t.Fatalf("deadline setter calls read/write/combined=%d/%d/%d, want 0/0/0", readSetterCalls, writeSetterCalls, combinedSetterCalls)
+	}
+	if !gotReadDeadline.Equal(readDeadline) || !gotWriteDeadline.Equal(writeDeadline) {
+		t.Fatalf("deadlines read/write=%v/%v, want %v/%v", gotReadDeadline, gotWriteDeadline, readDeadline, writeDeadline)
+	}
+}
+
+func TestNetSelectCloseWakesAndOmitsLocalResource(t *testing.T) {
+	t.Run("socket", func(t *testing.T) {
+		machine := New()
+		_, _, server := setupAcceptedLoopback(t, machine)
+		_, resource := requireSocketResource(t, machine, server)
+		native := requireBuiltin(t, machine, "net_select")
+		result := make(chan networkInvocationResult, 1)
+		go func() {
+			selected, err := native.Invoke(machine, []value.Value{
+				value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(5000),
+			})
+			result <- networkInvocationResult{selected, err}
+		}()
+		waitForNetworkPollWaiter(t, func() int {
+			resource.stateMu.Lock()
+			defer resource.stateMu.Unlock()
+			return len(resource.pollWaiters)
+		})
+		requirePromptNetworkCloseAndPoll(t, machine, server, result)
+	})
+
+	t.Run("listener", func(t *testing.T) {
+		machine := New()
+		cleanupNetworkResources(t, machine)
+		listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
+		handle := int(builtinMapField(t, listener, "fd").AsInt)
+		resource, exists := machine.shared.Listeners.get(handle)
+		if !exists {
+			t.Fatalf("listener descriptor %d is not registered", handle)
+		}
+		native := requireBuiltin(t, machine, "net_select")
+		result := make(chan networkInvocationResult, 1)
+		go func() {
+			selected, err := native.Invoke(machine, []value.Value{
+				value.NewArray([]value.Value{listener}), value.NewArray(nil), value.NewArray(nil), value.NewInt(5000),
+			})
+			result <- networkInvocationResult{selected, err}
+		}()
+		waitForNetworkPollWaiter(t, func() int {
+			resource.stateMu.Lock()
+			defer resource.stateMu.Unlock()
+			return len(resource.pollWaiters)
+		})
+		requirePromptNetworkCloseAndPoll(t, machine, listener, result)
+	})
+}
+
+func TestNetSelectRollbackPoisonWakesBeforeResourceClose(t *testing.T) {
+	runSocket := func(t *testing.T, configureControlled func(*controlledDeadlineConn) []error) {
+		machine := New()
+		_, _, server := setupAcceptedLoopback(t, machine)
+		_, resource := requireSocketResource(t, machine, server)
+		resource.stateMu.Lock()
+		underlying := resource.connection
+		controlled := &controlledDeadlineConn{Conn: underlying}
+		resource.connection = controlled
+		resource.stateMu.Unlock()
+		wantErrors := configureControlled(controlled)
+
+		native := requireBuiltin(t, machine, "net_select")
+		pollReturned := make(chan struct{})
+		pollResult := make(chan struct {
+			value value.Value
+			err   error
+		}, 1)
+		go func() {
+			selected, err := native.Invoke(machine, []value.Value{
+				value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(5000),
+			})
+			pollResult <- struct {
+				value value.Value
+				err   error
+			}{selected, err}
+			close(pollReturned)
+		}()
+		waitForNetworkPollWaiter(t, func() int {
+			resource.stateMu.Lock()
+			defer resource.stateMu.Unlock()
+			return len(resource.pollWaiters)
+		})
+		closeBeforePoll := errors.New("resource close ran before blocked poll returned")
+		controlled.closeFn = func() error {
+			select {
+			case <-pollReturned:
+			case <-time.After(statefulBuiltinTimeout):
+				return closeBeforePoll
+			}
+			return underlying.Close()
+		}
+
+		err := configureSocketTimeout(resource, time.Second)
+		for _, want := range wantErrors {
+			if !errors.Is(err, want) {
+				t.Fatalf("configuration error=%v, want joined %v", err, want)
+			}
+		}
+		if errors.Is(err, closeBeforePoll) {
+			t.Fatal(closeBeforePoll)
+		}
+		invocation := <-pollResult
+		if invocation.err != nil {
+			t.Fatal(invocation.err)
+		}
+		assertBuiltinValue(t, builtinMapField(t, invocation.value, "read_count"), value.NewInt(0))
+	}
+
+	t.Run("socket read application and rollback", func(t *testing.T) {
+		applicationFailure := errors.New("read deadline failed")
+		rollbackFailure := errors.New("read rollback failed")
+		runSocket(t, func(controlled *controlledDeadlineConn) []error {
+			calls := 0
+			controlled.setReadFn = func(time.Time) error {
+				calls++
+				if calls == 1 {
+					return applicationFailure
+				}
+				return rollbackFailure
+			}
+			return []error{applicationFailure, rollbackFailure}
+		})
+	})
+
+	t.Run("socket write application and read rollback", func(t *testing.T) {
+		applicationFailure := errors.New("write deadline failed")
+		rollbackFailure := errors.New("read rollback failed")
+		runSocket(t, func(controlled *controlledDeadlineConn) []error {
+			readCalls := 0
+			controlled.setReadFn = func(time.Time) error {
+				readCalls++
+				if readCalls == 2 {
+					return rollbackFailure
+				}
+				return nil
+			}
+			controlled.setWriteFn = func(time.Time) error { return applicationFailure }
+			return []error{applicationFailure, rollbackFailure}
+		})
+	})
+
+	t.Run("listener application and rollback", func(t *testing.T) {
+		machine := New()
+		cleanupNetworkResources(t, machine)
+		listenerValue := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
+		handle := int(builtinMapField(t, listenerValue, "fd").AsInt)
+		resource, exists := machine.shared.Listeners.get(handle)
+		if !exists {
+			t.Fatalf("listener descriptor %d is not registered", handle)
+		}
+		resource.stateMu.Lock()
+		underlying := resource.listener
+		controlled := &controlledDeadlineListener{Listener: underlying}
+		resource.listener = controlled
+		resource.stateMu.Unlock()
+		applicationFailure := errors.New("listener deadline failed")
+		rollbackFailure := errors.New("listener rollback failed")
+		setterCalls := 0
+		controlled.setFn = func(time.Time) error {
+			setterCalls++
+			if setterCalls == 1 {
+				return applicationFailure
+			}
+			return rollbackFailure
+		}
+
+		native := requireBuiltin(t, machine, "net_select")
+		pollReturned := make(chan struct{})
+		pollResult := make(chan struct {
+			value value.Value
+			err   error
+		}, 1)
+		go func() {
+			selected, err := native.Invoke(machine, []value.Value{
+				value.NewArray([]value.Value{listenerValue}), value.NewArray(nil), value.NewArray(nil), value.NewInt(5000),
+			})
+			pollResult <- struct {
+				value value.Value
+				err   error
+			}{selected, err}
+			close(pollReturned)
+		}()
+		waitForNetworkPollWaiter(t, func() int {
+			resource.stateMu.Lock()
+			defer resource.stateMu.Unlock()
+			return len(resource.pollWaiters)
+		})
+		closeBeforePoll := errors.New("listener close ran before blocked poll returned")
+		controlled.closeFn = func() error {
+			select {
+			case <-pollReturned:
+			case <-time.After(statefulBuiltinTimeout):
+				return closeBeforePoll
+			}
+			return underlying.Close()
+		}
+
+		err := configureListenerTimeout(resource, time.Second)
+		for _, want := range []error{applicationFailure, rollbackFailure} {
+			if !errors.Is(err, want) {
+				t.Fatalf("configuration error=%v, want joined %v", err, want)
+			}
+		}
+		if errors.Is(err, closeBeforePoll) {
+			t.Fatal(closeBeforePoll)
+		}
+		invocation := <-pollResult
+		if invocation.err != nil {
+			t.Fatal(invocation.err)
+		}
+		assertBuiltinValue(t, builtinMapField(t, invocation.value, "read_count"), value.NewInt(0))
+	})
+}
+
+func TestNetSelectPermanentWakeFailureFallsBackWithinTwoNativeChunks(t *testing.T) {
+	machine := New()
+	tracker := &nestedControlTracker{released: make(chan struct{}, 1)}
+	closeEntered := make(chan struct{})
+	resources := make([]*SocketResource, 2)
+	values := make([]value.Value, 2)
+	for index := range resources {
+		connection, peer := net.Pipe()
+		t.Cleanup(func() { _ = peer.Close() })
+		resource := &SocketResource{}
+		raw := &closeAwareRawConn{descriptor: uintptr(index + 10), resource: resource, tracker: tracker}
+		controlled := &controlledDeadlineConn{Conn: &syscallTestConn{Conn: connection, raw: raw}}
+		if index == 0 {
+			controlled.closeFn = func() error {
+				close(closeEntered)
+				for {
+					tracker.mu.Lock()
+					active := tracker.active
+					tracker.mu.Unlock()
+					if active == 0 {
+						return connection.Close()
+					}
+					<-tracker.released
+				}
+			}
+		}
+		resource.connection = controlled
+		resources[index] = resource
+		handle := machine.shared.Sockets.add(resource)
+		values[index] = socketValue(handle, "nested", 0, true)
+		t.Cleanup(func() {
+			machine.shared.Sockets.remove(handle)
+			closeSocket(resource)
+		})
+	}
+
+	wakeFailure := errors.New("permanent wake signal failure")
+	chunkEntered := make(chan int32, 2)
+	releaseChunk := make(chan struct{}, 2)
+	platform := &fakeNetworkPlatform{wake: &fakePlatformWake{signalErr: wakeFailure}}
+	platform.waitFn = func(_ []networkPollFD, _ uintptr, milliseconds int32) (networkPollBatch, error) {
+		chunkEntered <- milliseconds
+		<-releaseChunk
+		return networkPollBatch{}, nil
+	}
+	poller := networkPoller{platform: platform.boundary(), now: time.Now, sleep: time.Sleep}
+	pollResult := make(chan error, 1)
+	go func() {
+		_, err := poller.Poll(machine.shared, pollSets(values, nil, nil), 3*time.Second)
+		pollResult <- err
+	}()
+	firstChunk := <-chunkEntered
+	if firstChunk != 1000 {
+		t.Fatalf("first native chunk=%dms, want one-second cap", firstChunk)
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		closeSocket(resources[0])
+		close(closed)
+	}()
+	select {
+	case <-closeEntered:
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("close did not reach the controlled connection")
+	}
+	select {
+	case <-closed:
+		t.Fatal("close completed while nested RawConn.Control references were still held")
+	default:
+	}
+	releaseChunk <- struct{}{}
+
+	chunks := 1
+	for chunks <= 2 {
+		select {
+		case <-closed:
+			if err := <-pollResult; err != nil {
+				t.Fatalf("poll after local close: %v", err)
+			}
+			return
+		case next := <-chunkEntered:
+			chunks++
+			if next > 1000 {
+				t.Fatalf("native chunk=%dms, want at most 1000ms", next)
+			}
+			releaseChunk <- struct{}{}
+		case <-time.After(statefulBuiltinTimeout):
+			t.Fatal("close did not make fallback progress within safety chunk")
+		}
+	}
+	t.Fatal("close required more than two one-second native chunks")
+}
+
 func requireWakeSignals(t *testing.T, wakes ...*fakePlatformWake) {
 	t.Helper()
 	for index, wake := range wakes {
@@ -204,16 +650,12 @@ func TestListenerDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	controlled := &controlledDeadlineListener{Listener: underlying}
-	accepted, peer := net.Pipe()
-	t.Cleanup(func() { _ = peer.Close() })
-	controlledAccepted := &controlledDeadlineConn{Conn: accepted}
 	firstRaw := &fakePlatformWake{}
 	secondRaw := &fakePlatformWake{}
 	first := newNetworkWake(firstRaw)
 	second := newNetworkWake(secondRaw)
 	resource := &ListenerResource{
 		listener:           controlled,
-		bufferedAccept:     controlledAccepted,
 		deadlineGeneration: 11,
 		pollWaiters:        map[*networkWake]struct{}{first: {}, second: {}},
 	}
@@ -224,16 +666,14 @@ func TestListenerDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
 	closedAfterFirst := resource.closed
 	generationAfterFirst := resource.deadlineGeneration
 	listenerAfterFirst := resource.listener
-	bufferedAfterFirst := resource.bufferedAccept
 	waitersAfterFirst := resource.pollWaiters
 	resource.stateMu.Unlock()
 	listenerClosesAfterFirst := controlled.closes()
-	bufferedClosesAfterFirst := controlledAccepted.closes()
-	if !closedAfterFirst || generationAfterFirst != 12 || listenerAfterFirst != nil || bufferedAfterFirst != nil || waitersAfterFirst != nil {
-		t.Fatalf("first close: closed=%v generation=%d listener=%v buffered=%v waiters=%v", closedAfterFirst, generationAfterFirst, listenerAfterFirst, bufferedAfterFirst, waitersAfterFirst)
+	if !closedAfterFirst || generationAfterFirst != 12 || listenerAfterFirst != nil || waitersAfterFirst != nil {
+		t.Fatalf("first close: closed=%v generation=%d listener=%v waiters=%v", closedAfterFirst, generationAfterFirst, listenerAfterFirst, waitersAfterFirst)
 	}
-	if listenerClosesAfterFirst != 1 || bufferedClosesAfterFirst != 1 {
-		t.Fatalf("first close calls: listener=%d accepted=%d, want 1 each", listenerClosesAfterFirst, bufferedClosesAfterFirst)
+	if listenerClosesAfterFirst != 1 {
+		t.Fatalf("first close calls=%d, want 1", listenerClosesAfterFirst)
 	}
 
 	closeListener(resource)
@@ -242,14 +682,13 @@ func TestListenerDetachWakesAllWaitersAndClosesOnce(t *testing.T) {
 	closedAfterSecond := resource.closed
 	generationAfterSecond := resource.deadlineGeneration
 	listenerAfterSecond := resource.listener
-	bufferedAfterSecond := resource.bufferedAccept
 	waitersAfterSecond := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if !closedAfterSecond || generationAfterSecond != generationAfterFirst || listenerAfterSecond != nil || bufferedAfterSecond != nil || waitersAfterSecond != nil {
-		t.Fatalf("second close: closed=%v generation=%d listener=%v buffered=%v waiters=%v", closedAfterSecond, generationAfterSecond, listenerAfterSecond, bufferedAfterSecond, waitersAfterSecond)
+	if !closedAfterSecond || generationAfterSecond != generationAfterFirst || listenerAfterSecond != nil || waitersAfterSecond != nil {
+		t.Fatalf("second close: closed=%v generation=%d listener=%v waiters=%v", closedAfterSecond, generationAfterSecond, listenerAfterSecond, waitersAfterSecond)
 	}
-	if controlled.closes() != listenerClosesAfterFirst || controlledAccepted.closes() != bufferedClosesAfterFirst {
-		t.Fatalf("second close calls: listener=%d accepted=%d, want unchanged %d and %d", controlled.closes(), controlledAccepted.closes(), listenerClosesAfterFirst, bufferedClosesAfterFirst)
+	if controlled.closes() != listenerClosesAfterFirst {
+		t.Fatalf("second close calls=%d, want unchanged %d", controlled.closes(), listenerClosesAfterFirst)
 	}
 }
 
@@ -418,12 +857,8 @@ func TestListenerRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
 			return closeFailure
 		},
 	}
-	accepted, peer := net.Pipe()
-	t.Cleanup(func() { _ = peer.Close() })
-	controlledAccepted := &controlledDeadlineConn{Conn: accepted}
 	resource := &ListenerResource{
-		listener:       controlled,
-		bufferedAccept: controlledAccepted,
+		listener: controlled,
 		pollWaiters: map[*networkWake]struct{}{
 			newNetworkWake(firstRaw):  {},
 			newNetworkWake(secondRaw): {},
@@ -440,28 +875,25 @@ func TestListenerRollbackPoisonWakesBeforeCloseAndJoinsErrors(t *testing.T) {
 	closedAfterPoison := resource.closed
 	generationAfterPoison := resource.deadlineGeneration
 	listenerAfterPoison := resource.listener
-	bufferedAfterPoison := resource.bufferedAccept
 	waitersAfterPoison := resource.pollWaiters
 	resource.stateMu.Unlock()
 	listenerClosesAfterPoison := controlled.closes()
-	bufferedClosesAfterPoison := controlledAccepted.closes()
 	closeListener(resource)
 	requireWakeSignals(t, firstRaw, secondRaw)
 	resource.stateMu.Lock()
 	closedAfterClose := resource.closed
 	generationAfterClose := resource.deadlineGeneration
 	listenerAfterClose := resource.listener
-	bufferedAfterClose := resource.bufferedAccept
 	waitersAfterClose := resource.pollWaiters
 	resource.stateMu.Unlock()
-	if !closedAfterPoison || !closedAfterClose || listenerAfterPoison != nil || listenerAfterClose != nil || bufferedAfterPoison != nil || bufferedAfterClose != nil || waitersAfterPoison != nil || waitersAfterClose != nil {
-		t.Fatalf("closed before/after=%v/%v listener before/after=%v/%v buffered before/after=%v/%v waiters before/after=%v/%v", closedAfterPoison, closedAfterClose, listenerAfterPoison, listenerAfterClose, bufferedAfterPoison, bufferedAfterClose, waitersAfterPoison, waitersAfterClose)
+	if !closedAfterPoison || !closedAfterClose || listenerAfterPoison != nil || listenerAfterClose != nil || waitersAfterPoison != nil || waitersAfterClose != nil {
+		t.Fatalf("closed before/after=%v/%v listener before/after=%v/%v waiters before/after=%v/%v", closedAfterPoison, closedAfterClose, listenerAfterPoison, listenerAfterClose, waitersAfterPoison, waitersAfterClose)
 	}
 	if generationAfterClose != generationAfterPoison {
 		t.Fatalf("generation after close=%d, want unchanged %d", generationAfterClose, generationAfterPoison)
 	}
-	if listenerClosesAfterPoison != 1 || bufferedClosesAfterPoison != 1 || controlled.closes() != listenerClosesAfterPoison || controlledAccepted.closes() != bufferedClosesAfterPoison {
-		t.Fatalf("close calls before/after: listener=%d/%d accepted=%d/%d, want 1/1 each", listenerClosesAfterPoison, controlled.closes(), bufferedClosesAfterPoison, controlledAccepted.closes())
+	if listenerClosesAfterPoison != 1 || controlled.closes() != listenerClosesAfterPoison {
+		t.Fatalf("close calls before/after=%d/%d, want 1/1", listenerClosesAfterPoison, controlled.closes())
 	}
 }
 
@@ -627,12 +1059,14 @@ func TestReceiveSocketInstallsDeadlineBeforeRead(t *testing.T) {
 	result := receiveSocket(resource, 1)
 
 	assertBuiltinValue(t, builtinMapField(t, result, "ok"), value.NewBool(true))
+	assertBuiltinValue(t, builtinMapField(t, result, "count"), value.NewInt(0))
+	assertBuiltinValue(t, builtinMapField(t, result, "data"), value.NewBytes(""))
 	if controlled.readDeadlineCount() != 1 {
 		t.Fatalf("read deadline calls=%d, want 1", controlled.readDeadlineCount())
 	}
 }
 
-func TestReceiveSocketFullyBufferedSkipsDeadlineSetter(t *testing.T) {
+func TestReceiveSocketZeroSizeSkipsDeadlineSetter(t *testing.T) {
 	connection, peer := net.Pipe()
 	t.Cleanup(func() {
 		_ = connection.Close()
@@ -645,14 +1079,14 @@ func TestReceiveSocketFullyBufferedSkipsDeadlineSetter(t *testing.T) {
 		},
 	}
 	resource := &SocketResource{
-		connection:   controlled,
-		bufferedRead: []byte("x"),
-		ioTimeout:    50 * time.Millisecond,
+		connection: controlled,
+		ioTimeout:  50 * time.Millisecond,
 	}
-	result := receiveSocket(resource, 1)
+	result := receiveSocket(resource, 0)
 
 	assertBuiltinValue(t, builtinMapField(t, result, "ok"), value.NewBool(true))
-	assertBuiltinValue(t, builtinMapField(t, result, "data"), value.NewBytes("x"))
+	assertBuiltinValue(t, builtinMapField(t, result, "count"), value.NewInt(0))
+	assertBuiltinValue(t, builtinMapField(t, result, "data"), value.NewBytes(""))
 	if controlled.readDeadlineCount() != 0 {
 		t.Fatalf("read deadline calls=%d, want 0", controlled.readDeadlineCount())
 	}
@@ -753,147 +1187,6 @@ func TestCloseDoesNotWaitForBlockedDeadlineSetter(t *testing.T) {
 	}
 }
 
-func TestBufferedAcceptCloseWinsDuringDeadlineClear(t *testing.T) {
-	for _, setterError := range []error{nil, errors.New("clear failed")} {
-		name := "setter success"
-		if setterError != nil {
-			name = "setter failure"
-		}
-		t.Run(name, func(t *testing.T) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			deadlineCapable := listener.(deadlineListener)
-			connection, peer := net.Pipe()
-			t.Cleanup(func() { _ = peer.Close() })
-			setterEntered := make(chan struct{})
-			releaseSetter := make(chan struct{})
-			controlled := &controlledDeadlineConn{
-				Conn: connection,
-				setDeadlineFn: func(time.Time) error {
-					close(setterEntered)
-					<-releaseSetter
-					return setterError
-				},
-			}
-			resource := &ListenerResource{listener: deadlineCapable, bufferedAccept: controlled}
-			t.Cleanup(func() {
-				_ = listener.Close()
-				_ = connection.Close()
-			})
-			accepted := make(chan struct {
-				connection net.Conn
-				err        error
-			}, 1)
-			go func() {
-				connection, err := acceptConnection(resource)
-				accepted <- struct {
-					connection net.Conn
-					err        error
-				}{connection: connection, err: err}
-			}()
-			select {
-			case <-setterEntered:
-			case <-time.After(time.Second):
-				t.Fatal("accepted connection deadline clear was not entered")
-			}
-
-			closeListener(resource)
-			if controlled.closes() != 1 {
-				t.Fatalf("close calls=%d, want listener close ownership", controlled.closes())
-			}
-			close(releaseSetter)
-			select {
-			case result := <-accepted:
-				if result.connection != nil || result.err == nil {
-					t.Fatalf("accept=(%v, %v), want nil connection and error", result.connection, result.err)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("accept did not finish")
-			}
-			if controlled.closes() != 1 {
-				t.Fatalf("close calls after accept=%d, want 1", controlled.closes())
-			}
-		})
-	}
-}
-
-func TestNetSelectRestoresPersistentSocketDeadline(t *testing.T) {
-	connection, peer := net.Pipe()
-	t.Cleanup(func() {
-		_ = connection.Close()
-		_ = peer.Close()
-	})
-	controlled := &controlledDeadlineConn{
-		Conn: connection,
-		readFn: func(buffer []byte) (int, error) {
-			buffer[0] = 'x'
-			return 1, nil
-		},
-	}
-	resource := &SocketResource{connection: controlled, ioTimeout: 100 * time.Millisecond}
-	started := time.Now()
-	ready, err := selectSocket(resource, 10*time.Millisecond)
-	if err != nil || !ready {
-		t.Fatalf("selectSocket=(%v, %v), want ready", ready, err)
-	}
-
-	controlled.mu.Lock()
-	deadlines := append([]time.Time(nil), controlled.readDeadlines...)
-	controlled.mu.Unlock()
-	if len(deadlines) != 2 {
-		t.Fatalf("read deadline calls=%d, want probe and restoration", len(deadlines))
-	}
-	if deadlines[0].Before(started.Add(5*time.Millisecond)) || deadlines[0].After(started.Add(50*time.Millisecond)) {
-		t.Fatalf("probe deadline=%v, want select bound", deadlines[0])
-	}
-	if deadlines[1].IsZero() || !deadlines[1].After(deadlines[0]) {
-		t.Fatalf("restored deadline=%v, want fresh persistent deadline after %v", deadlines[1], deadlines[0])
-	}
-	resource.stateMu.Lock()
-	buffered := string(resource.bufferedRead)
-	resource.stateMu.Unlock()
-	if buffered != "x" {
-		t.Fatalf("buffered read=%q, want x", buffered)
-	}
-}
-
-func TestNetSelectRestorationFailureKeepsReadyByte(t *testing.T) {
-	connection, peer := net.Pipe()
-	t.Cleanup(func() {
-		_ = connection.Close()
-		_ = peer.Close()
-	})
-	restoreFailure := errors.New("restore failed")
-	setterCalls := 0
-	controlled := &controlledDeadlineConn{
-		Conn: connection,
-		readFn: func(buffer []byte) (int, error) {
-			buffer[0] = 'x'
-			return 1, nil
-		},
-		setReadFn: func(time.Time) error {
-			setterCalls++
-			if setterCalls == 2 {
-				return restoreFailure
-			}
-			return nil
-		},
-	}
-	resource := &SocketResource{connection: controlled, ioTimeout: 100 * time.Millisecond}
-	ready, err := selectSocket(resource, 10*time.Millisecond)
-	if ready || !errors.Is(err, restoreFailure) {
-		t.Fatalf("selectSocket=(%v, %v), want restoration failure", ready, err)
-	}
-	resource.stateMu.Lock()
-	buffered := string(resource.bufferedRead)
-	resource.stateMu.Unlock()
-	if buffered != "x" {
-		t.Fatalf("buffered read=%q, want x after restoration failure", buffered)
-	}
-}
-
 func TestSocketConfigurationRollsBackExactDeadlines(t *testing.T) {
 	connection, peer := net.Pipe()
 	t.Cleanup(func() {
@@ -972,7 +1265,6 @@ func TestSocketRollbackFailurePoisonsAndCloses(t *testing.T) {
 		ioTimeout:         10 * time.Second,
 		lastReadDeadline:  time.Now().Add(2 * time.Second),
 		lastWriteDeadline: time.Now().Add(3 * time.Second),
-		bufferedRead:      []byte("x"),
 	}
 	err := configureSocketTimeout(resource, 5*time.Second)
 	if !errors.Is(err, applicationFailure) || !errors.Is(err, rollbackFailure) {
@@ -981,10 +1273,9 @@ func TestSocketRollbackFailurePoisonsAndCloses(t *testing.T) {
 	resource.stateMu.Lock()
 	closed := resource.closed
 	underlying := resource.connection
-	buffered := len(resource.bufferedRead)
 	resource.stateMu.Unlock()
-	if !closed || underlying != nil || buffered != 0 {
-		t.Fatalf("poisoned state: closed=%v connection=%v buffered=%d", closed, underlying, buffered)
+	if !closed || underlying != nil {
+		t.Fatalf("poisoned state: closed=%v connection=%v", closed, underlying)
 	}
 	if controlled.closes() != 1 {
 		t.Fatalf("close calls=%d, want 1", controlled.closes())
@@ -1045,12 +1336,8 @@ func TestListenerRollbackFailurePoisonsOwnedResources(t *testing.T) {
 			return rollbackFailure
 		},
 	}
-	accepted, peer := net.Pipe()
-	t.Cleanup(func() { _ = peer.Close() })
-	controlledAccepted := &controlledDeadlineConn{Conn: accepted}
 	resource := &ListenerResource{
 		listener:           controlledListener,
-		bufferedAccept:     controlledAccepted,
 		ioTimeout:          10 * time.Second,
 		lastAcceptDeadline: time.Now().Add(2 * time.Second),
 	}
@@ -1061,13 +1348,12 @@ func TestListenerRollbackFailurePoisonsOwnedResources(t *testing.T) {
 	resource.stateMu.Lock()
 	closed := resource.closed
 	listener := resource.listener
-	buffered := resource.bufferedAccept
 	resource.stateMu.Unlock()
-	if !closed || listener != nil || buffered != nil {
-		t.Fatalf("poisoned listener: closed=%v listener=%v buffered=%v", closed, listener, buffered)
+	if !closed || listener != nil {
+		t.Fatalf("poisoned listener: closed=%v listener=%v", closed, listener)
 	}
-	if controlledListener.closes() != 1 || controlledAccepted.closes() != 1 {
-		t.Fatalf("close calls: listener=%d accepted=%d, want 1 each", controlledListener.closes(), controlledAccepted.closes())
+	if controlledListener.closes() != 1 {
+		t.Fatalf("listener close calls=%d, want 1", controlledListener.closes())
 	}
 }
 
@@ -1246,27 +1532,6 @@ func TestNetSetTimeoutAcceptsTypedSocketAndRejectsTypedNil(t *testing.T) {
 	}
 }
 
-func TestNetworkProbeDeadlineUsesOneStartInstant(t *testing.T) {
-	started := time.Date(2026, time.August, 14, 12, 0, 0, 0, time.UTC)
-	tests := []struct {
-		name          string
-		selectTimeout time.Duration
-		ioTimeout     time.Duration
-		want          time.Time
-	}{
-		{name: "persistent shorter", selectTimeout: 10 * time.Millisecond, ioTimeout: 9 * time.Millisecond, want: started.Add(9 * time.Millisecond)},
-		{name: "select shorter", selectTimeout: 9 * time.Millisecond, ioTimeout: 10 * time.Millisecond, want: started.Add(9 * time.Millisecond)},
-		{name: "blocking mode", selectTimeout: 9 * time.Millisecond, ioTimeout: 0, want: started.Add(9 * time.Millisecond)},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := networkProbeDeadline(started, test.selectTimeout, test.ioTimeout); !got.Equal(test.want) {
-				t.Fatalf("deadline=%v, want %v", got, test.want)
-			}
-		})
-	}
-}
-
 func TestSocketRollbackStopsWhenCloseInvalidatesGeneration(t *testing.T) {
 	connection, peer := net.Pipe()
 	t.Cleanup(func() { _ = peer.Close() })
@@ -1441,25 +1706,6 @@ func TestAcceptedSocketDoesNotInheritListenerTimeout(t *testing.T) {
 	}
 }
 
-func TestPartialBufferedReadSurvivesDeadlineInstallationFailure(t *testing.T) {
-	connection, peer := net.Pipe()
-	t.Cleanup(func() {
-		_ = connection.Close()
-		_ = peer.Close()
-	})
-	controlled := &controlledDeadlineConn{
-		Conn: connection,
-		setReadFn: func(time.Time) error {
-			return errors.New("deadline install failed")
-		},
-	}
-	resource := &SocketResource{connection: controlled, bufferedRead: []byte("x"), ioTimeout: 20 * time.Millisecond}
-	result := receiveSocket(resource, 2)
-	assertBuiltinValue(t, builtinMapField(t, result, "ok"), value.NewBool(true))
-	assertBuiltinValue(t, builtinMapField(t, result, "data"), value.NewBytes("x"))
-	assertBuiltinValue(t, builtinMapField(t, result, "count"), value.NewInt(1))
-}
-
 func TestConcurrentTimeoutConfigurationsCommitInDeadlineOrder(t *testing.T) {
 	connection, peer := net.Pipe()
 	t.Cleanup(func() {
@@ -1502,85 +1748,6 @@ func TestConcurrentTimeoutConfigurationsCommitInDeadlineOrder(t *testing.T) {
 	resource.stateMu.Unlock()
 	if timeout != 20*time.Millisecond {
 		t.Fatalf("ioTimeout=%v, want second configuration 20ms", timeout)
-	}
-}
-
-func TestListenerSelectRestorationFailureKeepsAcceptedConnection(t *testing.T) {
-	underlying, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	accepted, peer := net.Pipe()
-	t.Cleanup(func() { _ = peer.Close() })
-	restoreFailure := errors.New("listener restore failed")
-	setterCalls := 0
-	controlled := &controlledDeadlineListener{
-		Listener: underlying,
-		acceptFn: func() (net.Conn, error) {
-			return accepted, nil
-		},
-		setFn: func(time.Time) error {
-			setterCalls++
-			if setterCalls == 2 {
-				return restoreFailure
-			}
-			return nil
-		},
-	}
-	resource := &ListenerResource{listener: controlled, ioTimeout: 100 * time.Millisecond}
-	t.Cleanup(func() { closeListener(resource) })
-	ready, err := selectListener(resource, 10*time.Millisecond)
-	if ready || !errors.Is(err, restoreFailure) {
-		t.Fatalf("selectListener=(%v, %v), want restoration failure", ready, err)
-	}
-	resource.stateMu.Lock()
-	buffered := resource.bufferedAccept
-	resource.stateMu.Unlock()
-	if buffered != accepted {
-		t.Fatalf("buffered accept=%v, want accepted connection", buffered)
-	}
-}
-
-func TestNetSelectManagementFailureStopsLaterCandidatesAndKeepsEarlierBuffer(t *testing.T) {
-	machine := New()
-	makeControlled := func(readFn func([]byte) (int, error), setReadFn func(time.Time) error) (*SocketResource, value.Value, *controlledDeadlineConn) {
-		connection, peer := net.Pipe()
-		t.Cleanup(func() {
-			_ = connection.Close()
-			_ = peer.Close()
-		})
-		controlled := &controlledDeadlineConn{Conn: connection, readFn: readFn, setReadFn: setReadFn}
-		resource := &SocketResource{connection: controlled}
-		handle := machine.shared.Sockets.add(resource)
-		t.Cleanup(func() { machine.shared.Sockets.remove(handle) })
-		return resource, socketValue(handle, "pipe", 0, true), controlled
-	}
-	first, firstValue, _ := makeControlled(func(buffer []byte) (int, error) {
-		buffer[0] = 'a'
-		return 1, nil
-	}, nil)
-	managementFailure := errors.New("probe install failed")
-	_, secondValue, _ := makeControlled(nil, func(time.Time) error { return managementFailure })
-	thirdReads := 0
-	_, thirdValue, _ := makeControlled(func([]byte) (int, error) {
-		thirdReads++
-		return 0, io.EOF
-	}, nil)
-
-	_, err := invokeBuiltin(t, machine, "net_select",
-		value.NewArray([]value.Value{firstValue, secondValue, thirdValue}),
-		value.NewArray(nil), value.NewArray(nil), value.NewInt(10))
-	if !errors.Is(err, managementFailure) {
-		t.Fatalf("net_select error=%v, want management failure", err)
-	}
-	first.stateMu.Lock()
-	buffered := string(first.bufferedRead)
-	first.stateMu.Unlock()
-	if buffered != "a" {
-		t.Fatalf("earlier buffer=%q, want a", buffered)
-	}
-	if thirdReads != 0 {
-		t.Fatalf("later candidate reads=%d, want 0", thirdReads)
 	}
 }
 
@@ -1708,84 +1875,5 @@ func TestCloseDoesNotWaitForBlockedListenerDeadlineSetter(t *testing.T) {
 	}
 	if controlled.closes() != 1 {
 		t.Fatalf("close calls=%d, want 1", controlled.closes())
-	}
-}
-
-func TestActiveSocketProbeBoundsConcurrentConfiguration(t *testing.T) {
-	tests := []struct {
-		name              string
-		configuredTimeout time.Duration
-		wantAgainstProbe  string
-		wantRestoredZero  bool
-	}{
-		{name: "longer timeout cannot extend", configuredTimeout: 200 * time.Millisecond, wantAgainstProbe: "equal"},
-		{name: "shorter timeout may shorten", configuredTimeout: 20 * time.Millisecond, wantAgainstProbe: "before"},
-		{name: "blocking cannot remove", configuredTimeout: 0, wantAgainstProbe: "equal", wantRestoredZero: true},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			connection, peer := net.Pipe()
-			t.Cleanup(func() {
-				_ = connection.Close()
-				_ = peer.Close()
-			})
-			readEntered := make(chan struct{})
-			releaseRead := make(chan struct{})
-			controlled := &controlledDeadlineConn{
-				Conn: connection,
-				readFn: func(buffer []byte) (int, error) {
-					close(readEntered)
-					<-releaseRead
-					buffer[0] = 'x'
-					return 1, nil
-				},
-			}
-			resource := &SocketResource{connection: controlled}
-			selected := make(chan error, 1)
-			go func() {
-				ready, err := selectSocket(resource, 100*time.Millisecond)
-				if err == nil && !ready {
-					err = errors.New("probe was not ready")
-				}
-				selected <- err
-			}()
-			select {
-			case <-readEntered:
-			case <-time.After(time.Second):
-				t.Fatal("probe read did not start")
-			}
-			if err := configureSocketTimeout(resource, test.configuredTimeout); err != nil {
-				t.Fatalf("concurrent configuration: %v", err)
-			}
-			controlled.mu.Lock()
-			installed := append([]time.Time(nil), controlled.readDeadlines...)
-			controlled.mu.Unlock()
-			if len(installed) != 2 {
-				t.Fatalf("deadlines before cleanup=%v, want probe and configuration", installed)
-			}
-			switch test.wantAgainstProbe {
-			case "equal":
-				if !installed[1].Equal(installed[0]) {
-					t.Fatalf("configured deadline=%v, want probe bound %v", installed[1], installed[0])
-				}
-			case "before":
-				if !installed[1].Before(installed[0]) {
-					t.Fatalf("configured deadline=%v, want before probe bound %v", installed[1], installed[0])
-				}
-			}
-			close(releaseRead)
-			if err := <-selected; err != nil {
-				t.Fatalf("selectSocket: %v", err)
-			}
-			controlled.mu.Lock()
-			restored := controlled.readDeadlines[len(controlled.readDeadlines)-1]
-			controlled.mu.Unlock()
-			if restored.IsZero() != test.wantRestoredZero {
-				t.Fatalf("restored deadline=%v, want zero=%v", restored, test.wantRestoredZero)
-			}
-			if !test.wantRestoredZero && restored.Before(installed[1]) {
-				t.Fatalf("restored deadline=%v, want no earlier than %v", restored, installed[1])
-			}
-		})
 	}
 }
