@@ -27,11 +27,11 @@ func fail_all(listener: net.Socket, client: net.Socket, server: net.Socket, mess
 end
 
 func main() -> void
-    // Use an unprivileged dynamic-range port on loopback to reduce collisions.
+    // Let the OS choose an available loopback port and use the bound port returned by net.listen.
     let host: string = "127.0.0.1"
-    let port: int = 49197
-    let listener: net.Socket = net.listen(host, port)
+    let listener: net.Socket = net.listen(host, 0)
     assert(listener.open, "listener must open")
+    assert(listener.port > 0, "listener must report its assigned port")
     net.settimeout(listener, 500)
 
     let listener_read: net.Socket[64] = net.socket_set()
@@ -44,7 +44,7 @@ func main() -> void
         fail_listener(listener, "listener must not be readable before connect")
     end
 
-    let client: net.Socket = net.connect(host, port)
+    let client: net.Socket = net.connect(host, listener.port)
     if !client.open then
         fail_listener(listener, "client must connect")
     end

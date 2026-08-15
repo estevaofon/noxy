@@ -12,6 +12,7 @@
 - Normal returns and runtime failures now share safe frame unwinding, preserving primary errors while collecting observable cleanup failures.
 - `net.setblocking(sock, true)` now restores indefinite blocking, while the deprecated `false` branch remains a compatibility no-op.
 - `net.poll`/`net_select` now reports non-consuming readiness through independent 64-entry read, write, and error sets, with immediate zero-time polls, one global positive timeout, portable EOF/hangup projection, and concurrent-close wakeups that omit detached resources.
+- `net.listen(host, 0)` now returns the operating-system-assigned port in `Socket.port`, allowing collision-free loopback listeners.
 
 ## [0.2.0] - 2026-08-13
 

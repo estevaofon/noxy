@@ -475,9 +475,20 @@ func TestNetworkPollerPoisonClosedCandidateSleepsRemainingPositiveTimeout(t *tes
 		return current
 	}
 	var slept []time.Duration
-	platform := &fakeNetworkPlatform{}
+	newWakeCalls := 0
+	wakeFailure := errors.New("new wake must not be called")
+	platform := networkPlatform{
+		newWake: func() (platformNetworkWake, error) {
+			newWakeCalls++
+			return nil, wakeFailure
+		},
+		wait: func([]networkPollFD, uintptr, int32) (networkPollBatch, error) {
+			t.Fatal("native wait called for poison-closed-only input")
+			return networkPollBatch{}, nil
+		},
+	}
 	poller := networkPoller{
-		platform: platform.boundary(),
+		platform: platform,
 		now:      now,
 		sleep:    func(duration time.Duration) { slept = append(slept, duration) },
 	}
@@ -489,9 +500,64 @@ func TestNetworkPollerPoisonClosedCandidateSleepsRemainingPositiveTimeout(t *tes
 	if len(slept) != 1 || slept[0] != 3*time.Millisecond {
 		t.Fatalf("slept=%v, want literal remaining budget [3ms]", slept)
 	}
-	if len(platform.timeouts) != 0 || len(resultSet(t, result, "read")) != 0 {
-		t.Fatalf("waits=%v result=%v, want empty result without native wait", platform.timeouts, result)
+	if newWakeCalls != 0 || len(resultSet(t, result, "read")) != 0 {
+		t.Fatalf("newWake calls=%d result=%v, want empty result without wake setup", newWakeCalls, result)
 	}
+}
+
+func TestNetworkPollerCloseDuringWakeSetupReturnsPromptlyWithoutSleeping(t *testing.T) {
+	machine := New()
+	resource, socket := addPollTestSocket(t, machine, 10)
+	platformWake := &fakePlatformWake{}
+	newWakeCalls := 0
+	waitCalls := 0
+	platform := networkPlatform{
+		newWake: func() (platformNetworkWake, error) {
+			newWakeCalls++
+			closeSocket(resource)
+			return platformWake, nil
+		},
+		wait: func([]networkPollFD, uintptr, int32) (networkPollBatch, error) {
+			waitCalls++
+			return networkPollBatch{}, nil
+		},
+	}
+	var slept []time.Duration
+	start := time.Unix(100, 0)
+	poller := networkPoller{
+		platform: platform,
+		now:      func() time.Time { return start },
+		sleep:    func(duration time.Duration) { slept = append(slept, duration) },
+	}
+
+	result, err := poller.Poll(machine.shared, pollSets([]value.Value{socket}, nil, nil), 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newWakeCalls != 1 || waitCalls != 0 || len(slept) != 0 {
+		t.Fatalf("newWake=%d wait=%d slept=%v, want one wake setup and prompt return", newWakeCalls, waitCalls, slept)
+	}
+	if len(resultSet(t, result, "read")) != 0 {
+		t.Fatalf("concurrently closed socket unexpectedly ready: %v", result)
+	}
+}
+
+func TestNetworkPollerIgnoresPoisonClosedCandidateBesideLiveCandidate(t *testing.T) {
+	machine := New()
+	closedResource, closedSocket := addPollTestSocket(t, machine, 10)
+	closeSocket(closedResource)
+	_, liveSocket := addPollTestSocket(t, machine, 20)
+	platform := &fakeNetworkPlatform{waits: []networkPollBatch{{events: []networkEvent{networkReadReady}}}}
+	poller := networkPoller{platform: platform.boundary(), now: time.Now, sleep: time.Sleep}
+
+	result, err := poller.Poll(machine.shared, pollSets([]value.Value{closedSocket, liveSocket}, nil, nil), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(platform.descriptors) != 1 || len(platform.descriptors[0]) != 1 || platform.descriptors[0][0].descriptor != 20 {
+		t.Fatalf("native descriptors=%v, want only live descriptor 20", platform.descriptors)
+	}
+	requireCandidateOrder(t, resultSet(t, result, "read"), []value.Value{liveSocket})
 }
 
 func TestNetworkPollerZeroTimeoutCallsWaitExactlyOnce(t *testing.T) {

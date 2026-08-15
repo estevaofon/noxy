@@ -294,6 +294,22 @@ func setupAcceptedLoopback(t *testing.T, machine *VM) (value.Value, value.Value,
 	return listener, client, server
 }
 
+func TestNetListenZeroReturnsAssignedPort(t *testing.T) {
+	machine := New()
+	cleanupNetworkResources(t, machine)
+	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
+	assertBuiltinValue(t, builtinMapField(t, listener, "open"), value.NewBool(true))
+	assignedPort := builtinMapField(t, listener, "port").AsInt
+	if assignedPort <= 0 {
+		t.Fatalf("net_listen port=%d, want OS-assigned positive port", assignedPort)
+	}
+
+	client := callBuiltinWithinBound(t, machine, "net_connect", value.NewString("127.0.0.1"), value.NewInt(assignedPort))
+	assertBuiltinValue(t, builtinMapField(t, client, "open"), value.NewBool(true))
+	accepted := callBuiltinWithinBound(t, machine, "net_accept", listener)
+	assertBuiltinValue(t, builtinMapField(t, accepted, "open"), value.NewBool(true))
+}
+
 func requireValidSelectResult(t *testing.T, result value.Value) {
 	t.Helper()
 	mapping := requireBuiltinMap(t, result)

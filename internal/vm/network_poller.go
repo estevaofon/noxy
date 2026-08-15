@@ -190,6 +190,7 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 		deadline = now().Add(timeout)
 	}
 	registrations, occurrences := collectNetworkRegistrations(shared, sets)
+	registrations = initiallyOpenNetworkRegistrations(shared, registrations)
 	if len(registrations) == 0 {
 		if timeout > 0 {
 			remaining := deadline.Sub(now())
@@ -241,12 +242,6 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 		pollRegistrations = append(pollRegistrations, registration)
 	}
 	if attachedCount == 0 {
-		if timeout > 0 {
-			remaining := deadline.Sub(now())
-			if remaining > 0 {
-				poller.networkSleep()(remaining)
-			}
-		}
 		return selectResult(nil, nil, nil), nil
 	}
 
@@ -366,6 +361,37 @@ func lookupNetworkRegistration(shared *SharedState, handle int) *networkRegistra
 		return &networkRegistration{handle: handle, socket: socket}
 	}
 	return nil
+}
+
+func initiallyOpenNetworkRegistrations(shared *SharedState, registrations []*networkRegistration) []*networkRegistration {
+	open := make([]*networkRegistration, 0, len(registrations))
+	for _, registration := range registrations {
+		if networkRegistrationOpen(shared, registration) {
+			open = append(open, registration)
+		}
+	}
+	return open
+}
+
+func networkRegistrationOpen(shared *SharedState, registration *networkRegistration) bool {
+	if shared == nil || registration == nil {
+		return false
+	}
+	if registration.listener != nil {
+		resource := registration.listener
+		resource.stateMu.Lock()
+		defer resource.stateMu.Unlock()
+		current, exists := shared.Listeners.get(registration.handle)
+		return exists && current == resource && !resource.closed && resource.listener != nil
+	}
+	if registration.socket == nil {
+		return false
+	}
+	resource := registration.socket
+	resource.stateMu.Lock()
+	defer resource.stateMu.Unlock()
+	current, exists := shared.Sockets.get(registration.handle)
+	return exists && current == resource && !resource.closed && resource.connection != nil
 }
 
 func attachNetworkRegistration(shared *SharedState, registration *networkRegistration, wake *networkWake) bool {

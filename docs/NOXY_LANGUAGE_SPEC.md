@@ -758,6 +758,10 @@ Noxy comes with a comprehensive standard library. Available modules include:
 
 ### Network sockets
 
+`net.listen(host, 0)` asks the operating system to choose an available port.
+On success, the returned `Socket.port` is that assigned non-zero port, so it
+can be passed directly to `net.connect` without inspecting native resources.
+
 #### Persistent I/O deadlines
 
 The `net` module supports portable blocking sockets with optional positive

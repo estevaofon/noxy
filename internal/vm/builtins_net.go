@@ -465,8 +465,12 @@ func (vm *VM) defineNetworkBuiltins() {
 			_ = listener.Close()
 			return socketValue(-1, host, port, false), nil
 		}
+		boundPort := port
+		if address, addressOK := listener.Addr().(*net.TCPAddr); addressOK {
+			boundPort = address.Port
+		}
 		handle := machine.shared.Listeners.add(&ListenerResource{listener: configuredListener})
-		return socketValue(handle, host, port, true), nil
+		return socketValue(handle, host, boundPort, true), nil
 	})
 
 	vm.DefineContextualNative("net_accept", func(context value.NativeContext, args []value.Value) (value.Value, error) {
