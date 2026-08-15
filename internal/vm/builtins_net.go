@@ -629,6 +629,10 @@ func (vm *VM) defineNetworkBuiltins() {
 		return value.NewNull(), nil
 	})
 
+	vm.DefineNative("net_socket_set", func([]value.Value) value.Value {
+		return fixedNetworkSet(nil)
+	})
+
 	vm.DefineContextualNative("net_select", func(context value.NativeContext, args []value.Value) (value.Value, error) {
 		machine, err := nativeVM(context)
 		if err != nil {

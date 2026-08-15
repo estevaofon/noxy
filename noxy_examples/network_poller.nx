@@ -1,0 +1,102 @@
+use net
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("network poller: FAIL - " + message)
+        exit(1)
+    end
+end
+
+func fail_listener(listener: net.Socket, message: string) -> void
+    net.socket_close(listener)
+    assert(false, message)
+end
+
+func fail_pair(listener: net.Socket, client: net.Socket, message: string) -> void
+    net.socket_close(client)
+    net.socket_close(listener)
+    assert(false, message)
+end
+
+func fail_all(listener: net.Socket, client: net.Socket, server: net.Socket, message: string) -> void
+    net.socket_close(server)
+    net.socket_close(client)
+    net.socket_close(listener)
+    assert(false, message)
+end
+
+func main() -> void
+    // Use an unprivileged dynamic-range port on loopback to reduce collisions.
+    let host: string = "127.0.0.1"
+    let port: int = 49197
+    let listener: net.Socket = net.listen(host, port)
+    assert(listener.open, "listener must open")
+    net.settimeout(listener, 500)
+
+    let listener_read: net.Socket[64] = net.socket_set()
+    let empty_write: net.Socket[64] = net.socket_set()
+    let empty_error: net.Socket[64] = net.socket_set()
+    listener_read[0] = listener
+
+    let before_connect: net.SelectResult = net.poll(listener_read, empty_write, empty_error, 0)
+    if before_connect.read_count != 0 then
+        fail_listener(listener, "listener must not be readable before connect")
+    end
+
+    let client: net.Socket = net.connect(host, port)
+    if !client.open then
+        fail_listener(listener, "client must connect")
+    end
+    net.settimeout(client, 500)
+
+    let after_connect: net.SelectResult = net.poll(listener_read, empty_write, empty_error, 0)
+    if after_connect.read_count != 1 || after_connect.read[0].fd != listener.fd then
+        fail_pair(listener, client, "listener must be immediately readable after connect")
+    end
+
+    let server: net.Socket = net.accept(listener)
+    if !server.open then
+        fail_pair(listener, client, "listener must accept the pending connection")
+    end
+    net.settimeout(server, 500)
+
+    let empty_read: net.Socket[64] = net.socket_set()
+    let client_write: net.Socket[64] = net.socket_set()
+    client_write[0] = client
+    let writable: net.SelectResult = net.poll(empty_read, client_write, empty_error, 250)
+    if writable.write_count != 1 || writable.write[0].fd != client.fd then
+        fail_all(listener, client, server, "connected client must become writable")
+    end
+
+    let payload: bytes = to_bytes("poll-data")
+    let sent: net.NetResult = net.socket_send(client, payload)
+    if !sent.ok || sent.count != 9 then
+        fail_all(listener, client, server, "client must send all poll-data bytes")
+    end
+
+    let server_read: net.Socket[64] = net.socket_set()
+    server_read[0] = server
+    let first_read: net.SelectResult = net.poll(server_read, empty_write, empty_error, 250)
+    if first_read.read_count != 1 || first_read.read[0].fd != server.fd then
+        fail_all(listener, client, server, "server must report the pending data")
+    end
+
+    // Polling is non-consuming: the unread bytes remain ready on the next call.
+    let second_read: net.SelectResult = net.poll(server_read, empty_write, empty_error, 250)
+    if second_read.read_count != 1 || second_read.read[0].fd != server.fd then
+        fail_all(listener, client, server, "repeated poll must preserve unread data")
+    end
+
+    let received: net.NetResult = net.socket_recv(server, 64)
+    if !received.ok || received.count != 9 || received.data != payload then
+        fail_all(listener, client, server, "server must receive exactly poll-data")
+    end
+
+    net.socket_close(server)
+    net.socket_close(client)
+    net.socket_close(listener)
+    print("network poller: PASS")
+end
+
+main()

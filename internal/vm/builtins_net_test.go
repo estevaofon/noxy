@@ -50,6 +50,34 @@ func interpretVMSourceWithinBound(t *testing.T, machine *VM, source string) erro
 	}
 }
 
+func TestNetSelectPublicWrappersAreExecutable(t *testing.T) {
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+
+	err := interpretVMSourceWithinBound(t, machine, `use net
+let read: net.Socket[64] = net.socket_set()
+let write: net.Socket[64] = net.socket_set()
+let errors: net.Socket[64] = net.socket_set()
+let selected: net.SelectResult = net.poll(read, write, errors, 0)
+test_report(selected.read)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, ok := captured.Obj.(*value.ObjArray)
+	if captured.Type != value.VAL_OBJ || !ok {
+		t.Fatalf("net.socket_set() = %#v, want array", captured)
+	}
+	if len(set.Elements) != networkSetCapacity {
+		t.Fatalf("net.socket_set() length = %d, want %d", len(set.Elements), networkSetCapacity)
+	}
+}
+
 func recordDeferredListenerResource(machine *VM, captured **ListenerResource) {
 	machine.DefineNative("record_listener_resource", func(args []value.Value) value.Value {
 		if len(args) != 1 {
