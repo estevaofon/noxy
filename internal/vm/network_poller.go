@@ -184,16 +184,22 @@ func withNetworkDescriptors(
 
 func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, timeout time.Duration) (result value.Value, err error) {
 	result = value.NewNull()
+	now := poller.networkNow()
+	deadline := time.Time{}
+	if timeout > 0 {
+		deadline = now().Add(timeout)
+	}
 	registrations, occurrences := collectNetworkRegistrations(shared, sets)
 	if len(registrations) == 0 {
 		if timeout > 0 {
-			poller.networkSleep()(timeout)
+			remaining := deadline.Sub(now())
+			if remaining > 0 {
+				poller.networkSleep()(remaining)
+			}
 		}
 		return selectResult(nil, nil, nil), nil
 	}
 
-	operationStart := poller.networkNow()()
-	deadline := operationStart.Add(timeout)
 	if poller.platform.newWake == nil || poller.platform.wait == nil {
 		return result, fmt.Errorf("network poll platform is unavailable")
 	}
@@ -262,7 +268,7 @@ func (poller *networkPoller) Poll(shared *SharedState, sets [3]*value.ObjArray, 
 	}
 
 	for {
-		remaining := deadline.Sub(poller.networkNow()())
+		remaining := deadline.Sub(now())
 		if remaining <= 0 {
 			break
 		}

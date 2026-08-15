@@ -118,9 +118,11 @@ type trackingRawConn struct {
 }
 
 func (raw *trackingRawConn) Control(callback func(uintptr)) error {
-	raw.active.Add(1)
-	defer raw.active.Add(-1)
-	return raw.raw.Control(callback)
+	return raw.raw.Control(func(descriptor uintptr) {
+		raw.active.Add(1)
+		defer raw.active.Add(-1)
+		callback(descriptor)
+	})
 }
 
 func (raw *trackingRawConn) Read(callback func(uintptr) bool) error {
@@ -129,6 +131,24 @@ func (raw *trackingRawConn) Read(callback func(uintptr) bool) error {
 
 func (raw *trackingRawConn) Write(callback func(uintptr) bool) error {
 	return raw.raw.Write(callback)
+}
+
+func TestTrackingRawConnCountsOnlyControlCallbackLifetime(t *testing.T) {
+	active := &atomic.Int32{}
+	var before, inside, after int32
+	underlying := &fakeRawConn{controlFn: func(callback func(uintptr)) error {
+		before = active.Load()
+		callback(10)
+		after = active.Load()
+		return nil
+	}}
+	tracked := &trackingRawConn{raw: underlying, active: active}
+	if err := tracked.Control(func(uintptr) { inside = active.Load() }); err != nil {
+		t.Fatal(err)
+	}
+	if before != 0 || inside != 1 || after != 0 || active.Load() != 0 {
+		t.Fatalf("active before=%d inside=%d after=%d final=%d, want 0,1,0,0", before, inside, after, active.Load())
+	}
 }
 
 func (listener *syscallTestListener) SyscallConn() (syscall.RawConn, error) {
@@ -424,7 +444,8 @@ func TestNetworkPollerBackendFailureReturnsNoPartialResult(t *testing.T) {
 func TestNetworkPollerEmptyCandidatesUseInjectedSleeperOnlyForPositiveTimeout(t *testing.T) {
 	platform := &fakeNetworkPlatform{}
 	var slept []time.Duration
-	poller := networkPoller{platform: platform.boundary(), now: time.Now, sleep: func(duration time.Duration) { slept = append(slept, duration) }}
+	start := time.Unix(100, 0)
+	poller := networkPoller{platform: platform.boundary(), now: func() time.Time { return start }, sleep: func(duration time.Duration) { slept = append(slept, duration) }}
 	machine := New()
 	invalid := value.NewString("not a socket")
 
@@ -472,6 +493,74 @@ func TestNetworkPollerPositiveTimeoutUsesAbsoluteDeadlineCeilingAndOneSecondChun
 	}
 	if len(platform.timeouts) != 2 || platform.timeouts[0] != 1000 || platform.timeouts[1] != 1 {
 		t.Fatalf("timeouts=%v, want [1000 1]", platform.timeouts)
+	}
+}
+
+func TestNetworkPollerDeadlineStartsBeforeRegistryLookup(t *testing.T) {
+	machine := New()
+	_, socket := addPollTestSocket(t, machine, 10)
+	start := time.Unix(100, 0)
+	var elapsed atomic.Int64
+	firstClockRead := make(chan struct{}, 1)
+	platform := &fakeNetworkPlatform{waits: []networkPollBatch{{events: []networkEvent{networkReadReady}}}}
+	poller := networkPoller{
+		platform: platform.boundary(),
+		now: func() time.Time {
+			select {
+			case firstClockRead <- struct{}{}:
+			default:
+			}
+			return start.Add(time.Duration(elapsed.Load()))
+		},
+		sleep: time.Sleep,
+	}
+
+	machine.shared.Listeners.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := poller.Poll(machine.shared, pollSets([]value.Value{socket}, nil, nil), 10*time.Millisecond)
+		done <- err
+	}()
+	clockReadBeforeLookup := false
+	select {
+	case <-firstClockRead:
+		clockReadBeforeLookup = true
+	case <-time.After(time.Second):
+	}
+	elapsed.Store(int64(7 * time.Millisecond))
+	machine.shared.Listeners.mu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !clockReadBeforeLookup {
+		t.Fatal("operation clock was not read before the contended registry lookup")
+	}
+	if len(platform.timeouts) != 1 || platform.timeouts[0] != 3 {
+		t.Fatalf("timeouts=%v, want literal remaining budget [3]", platform.timeouts)
+	}
+}
+
+func TestNetworkPollerEmptyInputSleepsOnlyRemainingBudget(t *testing.T) {
+	start := time.Unix(100, 0)
+	times := []time.Time{start, start.Add(7 * time.Millisecond)}
+	now := func() time.Time {
+		current := times[0]
+		if len(times) > 1 {
+			times = times[1:]
+		}
+		return current
+	}
+	var slept []time.Duration
+	poller := networkPoller{
+		platform: (&fakeNetworkPlatform{}).boundary(),
+		now:      now,
+		sleep:    func(duration time.Duration) { slept = append(slept, duration) },
+	}
+	if _, err := poller.Poll(New().shared, pollSets(nil, nil, nil), 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if len(slept) != 1 || slept[0] != 3*time.Millisecond {
+		t.Fatalf("slept=%v, want literal remaining budget [3ms]", slept)
 	}
 }
 
@@ -776,18 +865,24 @@ func TestNetworkControlCloseClassification(t *testing.T) {
 		machine := New()
 		first, firstValue := addPollTestSocket(t, machine, 10)
 		second, secondValue := addPollTestSocket(t, machine, 20)
-		invariantFailure := errors.New("second control invariant failure")
+		outerFailure := errors.New("first outer control failure")
+		deeperFailure := errors.New("second deeper control failure")
+		firstRaw := first.connection.(*syscallTestConn).raw.(*fakeRawConn)
+		firstRaw.controlErr = outerFailure
 		secondRaw := second.connection.(*syscallTestConn).raw.(*fakeRawConn)
 		secondRaw.controlFn = func(func(uintptr)) error {
 			firstHandle, _ := networkSocketDescriptor(firstValue)
 			machine.shared.Sockets.remove(firstHandle)
 			closeSocket(first)
-			return invariantFailure
+			return deeperFailure
 		}
 		platform := &fakeNetworkPlatform{}
 		poller := networkPoller{platform: platform.boundary(), now: time.Now, sleep: time.Sleep}
 		result, err := poller.Poll(machine.shared, pollSets([]value.Value{firstValue, secondValue}, nil, nil), time.Second)
-		if !errors.Is(err, invariantFailure) || result.Type != value.VAL_NULL || len(platform.timeouts) != 0 {
+		var acquisitionFailure *networkAcquisitionError
+		if !errors.Is(err, deeperFailure) || errors.Is(err, outerFailure) || !errors.As(err, &acquisitionFailure) ||
+			acquisitionFailure.registration.socket != second || acquisitionFailure.stage != networkAcquireControl ||
+			result.Type != value.VAL_NULL || len(platform.timeouts) != 0 {
 			t.Fatalf("result=%v error=%v waits=%v", result, err, platform.timeouts)
 		}
 	})
