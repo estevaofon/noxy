@@ -756,6 +756,32 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
 
+### Strings
+
+The `strings` module provides text manipulation functions. All index-based
+string operations work on **Unicode rune (code point) positions**, not raw
+bytes.
+
+#### `substring(s, start, end_idx) -> string`
+
+Returns the sub-string of `s` from rune index `start` (inclusive) to
+`end_idx` (exclusive). Negative indices count from the end of the string
+(Python-style: `-1` is the last rune, `-2` the second-to-last, etc.).
+After resolving negatives, both indices are clamped to `[0, len]` where
+`len` is the rune count of `s`. When `start >= end_idx` after resolution,
+an empty string is returned.
+
+```noxy
+use strings
+strings.substring("Hello", 1, 4)    // "ell"
+strings.substring("Hello", 0, 2)    // "He"
+strings.substring("Hello", 3, 100)  // "lo"   (end clamped to length)
+strings.substring("Hello", -2, 5)   // "lo"   (-2 → index 3)
+strings.substring("Hello", 0, -1)   // "Hell" (-1 → index 4)
+strings.substring("Hello", -3, -1)  // "ll"   (-3 → 2, -1 → 4)
+strings.substring("aé🙂z", 1, 3)   // "é🙂"  (rune-based, not byte-based)
+```
+
 ### Network sockets
 
 `net.listen(host, 0)` asks the operating system to choose an available port.
