@@ -1,0 +1,38 @@
+// signal_demo.nx
+use sys select *
+use time
+
+func main()
+    print("=== Noxy Graceful Shutdown Demo ===")
+    print("Pressione Ctrl+C (SIGINT) para iniciar o graceful shutdown...")
+    
+    let sig_chan: any = make_chan(1)
+    
+    let ok: bool = signal_notify(sig_chan)
+    if !ok then
+        print("Falha ao registrar listener de sinais.")
+        exit(1)
+    end
+    
+    // Bloqueia esperando o sinal do SO
+    let sig: any = chan_recv(sig_chan)
+    
+    print(fmt("\nSinal recebido: %d", to_int(sig)))
+    print("Iniciando graceful shutdown...")
+    
+    // Limpeza de recursos, parar workers, fechar bancos, etc...
+    print("Fechando conexoes de rede...")
+    time.sleep(500)
+    
+    print("Aguardando workers finalizarem...")
+    time.sleep(500)
+    
+    let stopped: bool = signal_stop()
+    if stopped then
+        print("Inscricao de sinais cancelada com sucesso.")
+    end
+    
+    print("Shutdown completo. Adeus!")
+end
+
+main()

@@ -41,6 +41,14 @@ func sleep(ms: int) -> void
     sys_sleep(ms)
 end
 
+func signal_notify(ch: any) -> bool
+    return sys_signal_notify(ch)
+end
+
+func signal_stop() -> bool
+    return sys_signal_stop()
+end
+
 // Helper alias often expected
 func strlen(s: string) -> int
     return length(s)

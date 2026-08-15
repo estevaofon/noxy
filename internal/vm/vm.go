@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
+	"os"
 	"sync"
 )
 
@@ -34,6 +35,9 @@ type SharedState struct {
 	Statements   *handleRegistry[*StatementResource]
 	stateOnce    sync.Once
 	builtinsOnce sync.Once
+
+	SignalSubMu      sync.Mutex
+	ActiveSignalChan chan os.Signal
 }
 
 type VM struct {

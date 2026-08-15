@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"noxy-vm/internal/plugin"
@@ -14,6 +16,60 @@ import (
 )
 
 func (vm *VM) defineSystemBuiltins() {
+	vm.DefineNative("sys_signal_notify", func(args []value.Value) value.Value {
+		if len(args) < 1 || args[0].Type != value.VAL_CHANNEL {
+			return value.NewBool(false)
+		}
+		chObj := args[0].Obj.(*value.ObjChannel)
+
+		vm.shared.SignalSubMu.Lock()
+		defer vm.shared.SignalSubMu.Unlock()
+
+		if vm.shared.ActiveSignalChan != nil {
+			signal.Stop(vm.shared.ActiveSignalChan)
+			close(vm.shared.ActiveSignalChan)
+			vm.shared.ActiveSignalChan = nil
+		}
+
+		goChan := make(chan os.Signal, 1)
+		signal.Notify(goChan, os.Interrupt, syscall.SIGTERM)
+		vm.shared.ActiveSignalChan = goChan
+
+		go func(goCh chan os.Signal, nxChan *value.ObjChannel) {
+			for sig := range goCh {
+				func() {
+					defer func() {
+						recover() // handle send on closed channel gracefully
+					}()
+
+					sigVal := int64(0)
+					if sig == os.Interrupt {
+						sigVal = 2 // SIGINT
+					} else if sig == syscall.SIGTERM {
+						sigVal = 15 // SIGTERM
+					}
+
+					nxChan.Chan <- value.NewInt(sigVal)
+				}()
+			}
+		}(goChan, chObj)
+
+		return value.NewBool(true)
+	})
+
+	vm.DefineNative("sys_signal_stop", func(args []value.Value) value.Value {
+		vm.shared.SignalSubMu.Lock()
+		defer vm.shared.SignalSubMu.Unlock()
+
+		if vm.shared.ActiveSignalChan != nil {
+			signal.Stop(vm.shared.ActiveSignalChan)
+			close(vm.shared.ActiveSignalChan)
+			vm.shared.ActiveSignalChan = nil
+			return value.NewBool(true)
+		}
+		return value.NewBool(false)
+	})
+
 	// Sys Module
 	vm.DefineNative("sys_os", func(args []value.Value) value.Value {
 		return value.NewString(runtime.GOOS)
