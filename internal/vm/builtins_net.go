@@ -359,29 +359,6 @@ func netResult(ok bool, data string, count int, message string) value.Value {
 	})
 }
 
-func selectResult(readyRead []value.Value) value.Value {
-	read := make([]value.Value, 64)
-	for index := range read {
-		if index < len(readyRead) {
-			read[index] = readyRead[index]
-		} else {
-			read[index] = value.NewNull()
-		}
-	}
-	empty := make([]value.Value, 64)
-	for index := range empty {
-		empty[index] = value.NewNull()
-	}
-	return value.NewMapWithData(map[string]value.Value{
-		"read":        value.NewArray(read),
-		"read_count":  value.NewInt(int64(len(readyRead))),
-		"write":       value.NewArray(empty),
-		"write_count": value.NewInt(0),
-		"error":       value.NewArray(empty),
-		"error_count": value.NewInt(0),
-	})
-}
-
 func acceptConnection(resource *ListenerResource) (net.Conn, error) {
 	resource.acceptMu.Lock()
 	defer resource.acceptMu.Unlock()
@@ -991,6 +968,6 @@ func (vm *VM) defineNetworkBuiltins() {
 				}
 			}
 		}
-		return selectResult(readyRead), nil
+		return selectResult(readyRead, nil, nil), nil
 	})
 }
