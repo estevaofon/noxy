@@ -1,4 +1,4 @@
-name: Network deadlines
+name: Network semantics
 
 on:
   pull_request:
@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  network-deadlines:
+  network-semantics:
+    name: Runtime semantics (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -21,5 +22,36 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-      - run: go test ./internal/vm -run 'Test(ValidateNetworkTimeout|Network|NetSet|NetSelect|Socket|Listener|ReceiveSocket|SendSocket|CloseDoes|BufferedAccept|ConnectedSocket|ConcurrentNetSelect)' -count=1 -timeout=120s
+      - run: go test ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=120s
+      # The Go race detector supports the hosted linux/amd64 and windows/amd64 toolchains.
+      - run: go test -race ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=180s
       - run: go test ./internal/... -count=1
+
+  cross-build:
+    name: Production cross-build (${{ matrix.goos }}/${{ matrix.goarch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: freebsd
+            goarch: amd64
+    runs-on: ubuntu-latest
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: 0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # Poller sources also compile for dragonfly/amd64, netbsd/amd64,
+      # openbsd/amd64, solaris/amd64, and aix/ppc64. Full-repository builds
+      # for those targets currently fail earlier in modernc SQLite/libc, so
+      # they must not be presented as green production cross-build gates.
+      - run: go build ./...

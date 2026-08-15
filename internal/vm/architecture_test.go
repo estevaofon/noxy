@@ -2,15 +2,22 @@ package vm
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"go/ast"
+	"go/build"
 	"go/constant"
 	"go/importer"
 	"go/parser"
 	"go/printer"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -197,6 +204,13 @@ func productionGoFiles(t *testing.T) []string {
 		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
+		matches, err := build.Default.MatchFile(filepath.Dir(path), filepath.Base(path))
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return nil
+		}
 		files = append(files, path)
 		return nil
 	})
@@ -204,6 +218,37 @@ func productionGoFiles(t *testing.T) []string {
 		t.Fatal(err)
 	}
 	return files
+}
+
+func TestReadArchitectureSourcesRespectsActivePlatform(t *testing.T) {
+	directory := t.TempDir()
+	otherPlatform := "linux"
+	if runtime.GOOS == "linux" {
+		otherPlatform = "windows"
+	}
+	sources := map[string]string{
+		"common.go":                         "package fixture\n",
+		"active_" + runtime.GOOS + ".go":    "package fixture\n",
+		"inactive_" + otherPlatform + ".go": "package fixture\n",
+	}
+	for filename, source := range sources {
+		if err := os.WriteFile(filepath.Join(directory, filename), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := readArchitectureSources(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var basenames []string
+	for _, source := range got {
+		basenames = append(basenames, filepath.Base(source.filename))
+	}
+	want := []string{"active_" + runtime.GOOS + ".go", "common.go"}
+	if strings.Join(basenames, ",") != strings.Join(want, ",") {
+		t.Fatalf("sources=%v, want %v", basenames, want)
+	}
 }
 
 func expressionText(t *testing.T, expression ast.Expr) string {
@@ -263,10 +308,12 @@ type architecturePackage struct {
 }
 
 type architectureImporter struct {
-	moduleRoot string
-	packages   map[string]*types.Package
-	loading    map[string]bool
-	fallback   types.Importer
+	moduleRoot    string
+	packages      map[string]*types.Package
+	loading       map[string]bool
+	fallback      types.Importer
+	exportFiles   map[string]string
+	moduleImports types.Importer
 }
 
 func newArchitectureImporter(t *testing.T) *architectureImporter {
@@ -275,12 +322,15 @@ func newArchitectureImporter(t *testing.T) *architectureImporter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &architectureImporter{
-		moduleRoot: moduleRoot,
-		packages:   make(map[string]*types.Package),
-		loading:    make(map[string]bool),
-		fallback:   importer.Default(),
+	loader := &architectureImporter{
+		moduleRoot:  moduleRoot,
+		packages:    make(map[string]*types.Package),
+		loading:     make(map[string]bool),
+		fallback:    importer.Default(),
+		exportFiles: make(map[string]string),
 	}
+	loader.moduleImports = importer.ForCompiler(token.NewFileSet(), "gc", loader.openExportData)
+	return loader
 }
 
 func (loader *architectureImporter) Import(importPath string) (*types.Package, error) {
@@ -300,15 +350,78 @@ func (loader *architectureImporter) Import(importPath string) (*types.Package, e
 			}
 		}
 	}
-	if loaded, err := loader.fallback.Import(importPath); err == nil {
+	loaded, fallbackErr := loader.fallback.Import(importPath)
+	if fallbackErr == nil {
 		loader.packages[importPath] = loaded
 		return loaded, nil
 	}
-	name := importPath[strings.LastIndex(importPath, "/")+1:]
-	stub := types.NewPackage(importPath, name)
-	stub.MarkComplete()
-	loader.packages[importPath] = stub
-	return stub, nil
+	loaded, moduleErr := loader.importModuleExportData(importPath)
+	if moduleErr != nil {
+		return nil, errors.Join(
+			fmt.Errorf("default importer for %q: %w", importPath, fallbackErr),
+			fmt.Errorf("module-aware importer for %q: %w", importPath, moduleErr),
+		)
+	}
+	loader.packages[importPath] = loaded
+	return loaded, nil
+}
+
+type architectureListedPackage struct {
+	ImportPath string
+	Export     string
+	Error      *struct {
+		Err string
+	}
+}
+
+func (loader *architectureImporter) importModuleExportData(importPath string) (*types.Package, error) {
+	if loader.exportFiles[importPath] == "" {
+		command := exec.Command("go", "list", "-deps", "-export", "-json", importPath)
+		command.Dir = loader.moduleRoot
+		output, err := command.Output()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && len(exitErr.Stderr) != 0 {
+				return nil, fmt.Errorf("go list: %s: %w", strings.TrimSpace(string(exitErr.Stderr)), err)
+			}
+			return nil, fmt.Errorf("go list: %w", err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(output))
+		for {
+			var listed architectureListedPackage
+			if err := decoder.Decode(&listed); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				return nil, fmt.Errorf("decode go list output: %w", err)
+			}
+			if listed.Error != nil {
+				return nil, fmt.Errorf("go list package %q: %s", listed.ImportPath, listed.Error.Err)
+			}
+			if listed.Export != "" {
+				loader.exportFiles[listed.ImportPath] = listed.Export
+			}
+		}
+	}
+	if loader.exportFiles[importPath] == "" {
+		return nil, fmt.Errorf("go list returned no export data")
+	}
+	loaded, err := loader.moduleImports.Import(importPath)
+	if err != nil {
+		return nil, fmt.Errorf("read export data: %w", err)
+	}
+	return loaded, nil
+}
+
+func (loader *architectureImporter) openExportData(importPath string) (io.ReadCloser, error) {
+	filename := loader.exportFiles[importPath]
+	if filename == "" {
+		return nil, fmt.Errorf("no export data for %q", importPath)
+	}
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("open export data for %q: %w", importPath, err)
+	}
+	return file, nil
 }
 
 func readArchitectureSources(directory string) ([]architectureSource, error) {
@@ -321,6 +434,13 @@ func readArchitectureSources(directory string) ([]architectureSource, error) {
 		if strings.HasSuffix(filename, "_test.go") {
 			continue
 		}
+		matches, err := build.Default.MatchFile(directory, filepath.Base(filename))
+		if err != nil {
+			return nil, err
+		}
+		if !matches {
+			continue
+		}
 		source, err := os.ReadFile(filename)
 		if err != nil {
 			return nil, err
@@ -329,6 +449,109 @@ func readArchitectureSources(directory string) ([]architectureSource, error) {
 	}
 	sort.Slice(sources, func(left, right int) bool { return sources[left].filename < sources[right].filename })
 	return sources, nil
+}
+
+func networkConsumingProbeMatches(t *testing.T, sources []architectureSource) []string {
+	t.Helper()
+	forbiddenFields := map[string]map[string]bool{
+		"ListenerResource": {"bufferedAccept": true, "acceptProbeDeadline": true},
+		"SocketResource":   {"bufferedRead": true, "readProbeDeadline": true},
+	}
+	forbiddenFunctions := map[string]bool{
+		"beginListenerProbe":  true,
+		"finishListenerProbe": true,
+		"selectListener":      true,
+		"beginSocketProbe":    true,
+		"finishSocketProbe":   true,
+		"selectSocket":        true,
+	}
+	found := make(map[string]bool)
+	for _, source := range sources {
+		file, err := parser.ParseFile(token.NewFileSet(), source.filename, source.source, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", source.filename, err)
+		}
+		for _, declaration := range file.Decls {
+			switch typed := declaration.(type) {
+			case *ast.FuncDecl:
+				if forbiddenFunctions[typed.Name.Name] {
+					found[typed.Name.Name] = true
+				}
+			case *ast.GenDecl:
+				for _, specification := range typed.Specs {
+					typeSpec, ok := specification.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+					fields := forbiddenFields[typeSpec.Name.Name]
+					structure, ok := typeSpec.Type.(*ast.StructType)
+					if len(fields) == 0 || !ok {
+						continue
+					}
+					for _, field := range structure.Fields.List {
+						for _, name := range field.Names {
+							if fields[name.Name] {
+								found[typeSpec.Name.Name+"."+name.Name] = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	matches := make([]string, 0, len(found))
+	for match := range found {
+		matches = append(matches, match)
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+func TestNetworkArchitectureExcludesConsumingProbes(t *testing.T) {
+	sources, err := readArchitectureSources(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, match := range networkConsumingProbeMatches(t, sources) {
+		t.Errorf("obsolete consuming network probe structure: %s", match)
+	}
+}
+
+func TestNetworkArchitectureGuardMatchesExactSyntax(t *testing.T) {
+	source := `package guarded
+type ListenerResource struct {
+	bufferedAccept int
+	acceptProbeDeadline int
+}
+type SocketResource struct {
+	bufferedRead, readProbeDeadline int
+}
+type Unrelated struct { bufferedRead int }
+func beginListenerProbe() {}
+func finishListenerProbe() {}
+func selectListener() {}
+func beginSocketProbe() {}
+func finishSocketProbe() {}
+func selectSocket() {}
+var _ = "func beginSocketProbe; bufferedAccept"
+// func selectListener() {}
+`
+	got := networkConsumingProbeMatches(t, []architectureSource{{filename: "guarded.go", source: source}})
+	want := []string{
+		"ListenerResource.acceptProbeDeadline",
+		"ListenerResource.bufferedAccept",
+		"SocketResource.bufferedRead",
+		"SocketResource.readProbeDeadline",
+		"beginListenerProbe",
+		"beginSocketProbe",
+		"finishListenerProbe",
+		"finishSocketProbe",
+		"selectListener",
+		"selectSocket",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("matches=%v, want %v", got, want)
+	}
 }
 
 func checkArchitecturePackage(packagePath string, sources []architectureSource, loader types.Importer, ignoreBodies bool) *architecturePackage {

@@ -21,7 +21,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"io_remove", "io_stat", "io_write", "io_write_result", "iprint", "json_dumps",
 		"json_dumps_result", "json_loads", "json_parse", "keys", "length", "make_chan",
 		"make_wg", "net_accept", "net_close", "net_connect", "net_listen",
-		"net_recv", "net_select", "net_send", "net_setblocking", "net_settimeout", "ord",
+		"net_recv", "net_select", "net_send", "net_setblocking", "net_settimeout", "net_socket_set", "ord",
 		"pop", "print", "slice", "spawn", "spawn_task", "sqlite_bind_float",
 		"sqlite_bind_int", "sqlite_bind_text", "sqlite_close", "sqlite_exec",
 		"sqlite_exec_params", "sqlite_finalize", "sqlite_open",

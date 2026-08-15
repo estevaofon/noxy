@@ -756,7 +756,13 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
 
-### Network deadlines
+### Network sockets
+
+`net.listen(host, 0)` asks the operating system to choose an available port.
+On success, the returned `Socket.port` is that assigned non-zero port, so it
+can be passed directly to `net.connect` without inspecting native resources.
+
+#### Persistent I/O deadlines
 
 The `net` module supports portable blocking sockets with optional positive
 deadlines:
@@ -775,9 +781,9 @@ consume the operation's timeout.
 `setblocking(sock, true)` clears the persistent timeout and restores
 indefinite blocking, including I/O that is already pending. The compatibility
 call `setblocking(sock, false)` is deprecated and remains an unconditional
-no-op until true portable non-blocking I/O is implemented by the network
-poller. It does not inspect the socket and does not alter an existing timeout.
-An expired deadline is never used to simulate non-blocking behavior.
+no-op. Poll readiness does not depend on this compatibility call. It does not
+inspect the socket or alter an existing timeout, and an expired deadline is
+never used to simulate non-blocking behavior.
 
 The latest successfully completed `settimeout` or `setblocking(..., true)`
 call determines the persistent mode. A rejected call leaves that mode
@@ -794,25 +800,59 @@ descriptor, lookup, then open state. `setblocking` retains its compatibility
 behavior for malformed arity/type; only the exact `true` branch performs
 socket validation.
 
-`net.poll`/`net_select` retains its call-local timeout. While a read or accept
-probe is active, its absolute deadline is an upper bound: blocking mode or a
-longer persistent timeout cannot extend it, while a shorter persistent timeout
-may shorten it. Cleanup restores the latest persistent mode. A failure to
-install or restore a deadline is synchronous and produces no partial
-`SelectResult`; ordinary read/accept errors remain not-ready candidates.
-Read bytes or accepted connections consumed successfully are published before
-deadline restoration, so a restoration failure does not discard readiness.
-For one probe start instant `t`, the effective deadline is exactly:
+#### Non-consuming readiness polling
 
-```text
-probe_bound = t + select_timeout
-effective = min(probe_bound, t + io_timeout), when io_timeout > 0
-effective = probe_bound, otherwise
-```
+`net.poll(read, write, error, timeout_ms)` (the public wrapper for
+`net_select`) observes readiness without performing I/O. The three input sets
+are independent fixed arrays with 64 entries each. For each set, only entries
+0 through 63 are considered. The corresponding output is another 64-entry
+array in stable input order; unused output entries are null. Duplicate socket
+occurrences are retained as separate output occurrences. `read_count`,
+`write_count`, and `error_count` are the exact numbers of values copied to
+their respective outputs, not the number of distinct resources.
 
-The preservation guarantee above is specific to deadline-management failure.
-The existing ordinary `Read(n > 0, err != nil)` probe behavior remains
-unchanged and is reserved for the later network-poller work.
+`timeout_ms` must be an `int` representable as Go `time.Duration`
+milliseconds. A negative value is an error. Zero performs one immediate poll.
+A positive value supplies one global wall-clock bound for the whole operation,
+including every candidate in all three sets; it is not a per-socket or
+per-set timeout. Poll may return earlier when readiness or a local concurrent
+close is observed. With no live candidates, a positive poll waits for the same
+global bound and returns empty sets.
+
+Poll is strictly observational. It does not call `Read` or `Accept`, peek at
+payload bytes, query or clear `SO_ERROR`, or install, clear, or restore a
+socket deadline. It therefore neither consumes bytes nor accepts a pending
+connection, and it does not mutate the persistent mode established by
+`settimeout` or `setblocking(..., true)`.
+
+For a connected socket, ordinary payload data is read readiness only. An
+orderly EOF is always readable. Explicit native hangup, error, or invalid
+descriptor events satisfy every set in which that connected socket was
+requested. Payload data may coexist with EOF, hangup, or error readiness; poll
+must not discard it, and a later `socket_recv` can still consume the pending
+bytes. Out-of-band or urgent data is outside the `net.poll` API and has no
+separate readiness category.
+
+A listening socket with a pending connection has normal read readiness only.
+A listener terminal event satisfies requested read and error sets, but a
+listener is never returned in the write set. Poll never calls `Accept`, so a
+pending connection remains available to a later explicit `net.accept`.
+
+Closing a requested socket or listener concurrently in the same runtime wakes
+a blocked positive poll. The detached resource is revalidated and omitted
+from every output set; stale descriptor reuse cannot make the old resource
+ready.
+
+Windows and Linux receive runtime verification. The poller backend has compile
+support for Windows and for `aix`, `darwin`, `dragonfly`, `freebsd`, `linux`,
+`netbsd`, `openbsd`, and `solaris`; this is compile support, not a claim of
+runtime verification on those Unix targets. Full-repository cross-build gates
+currently cover `linux/amd64`, `darwin/amd64`, and `freebsd/amd64`; existing
+SQLite dependencies prevent full-repository builds for the other listed Unix
+targets even though the poller backend itself compiles there. On any platform
+outside the Windows/Unix build-tag list, polling a live resource fails with
+`network polling is not supported on this platform`; no consuming fallback is
+used.
 
 Accepted and connected sockets explicitly clear prior deadlines before being
 registered and start in indefinite blocking mode; a listener timeout is not

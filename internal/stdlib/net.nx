@@ -62,5 +62,29 @@ func socket_set() -> Socket[64]
 end
 
 func poll(read: Socket[64], write: Socket[64], err: Socket[64], timeout: int) -> SelectResult
-    return net_select(read, write, err, timeout)
+    let raw: any = net_select(read, write, err, timeout)
+    let ready_read: Socket[64] = socket_set()
+    let ready_write: Socket[64] = socket_set()
+    let ready_error: Socket[64] = socket_set()
+
+    let i: int = 0
+    while i < raw.read_count do
+        let sock: any = raw.read[i]
+        ready_read[i] = Socket(sock.fd, sock.addr, sock.port, sock.open)
+        i = i + 1
+    end
+    i = 0
+    while i < raw.write_count do
+        let sock: any = raw.write[i]
+        ready_write[i] = Socket(sock.fd, sock.addr, sock.port, sock.open)
+        i = i + 1
+    end
+    i = 0
+    while i < raw.error_count do
+        let sock: any = raw.error[i]
+        ready_error[i] = Socket(sock.fd, sock.addr, sock.port, sock.open)
+        i = i + 1
+    end
+
+    return SelectResult(ready_read, raw.read_count, ready_write, raw.write_count, ready_error, raw.error_count)
 end

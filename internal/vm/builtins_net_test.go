@@ -2,6 +2,7 @@ package vm
 
 import (
 	"errors"
+	"math"
 	"net"
 	"testing"
 	"time"
@@ -46,6 +47,34 @@ func interpretVMSourceWithinBound(t *testing.T, machine *VM, source string) erro
 	case <-time.After(statefulBuiltinTimeout):
 		t.Fatalf("network program did not complete within %s", statefulBuiltinTimeout)
 		return nil
+	}
+}
+
+func TestNetSelectPublicWrappersAreExecutable(t *testing.T) {
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+
+	err := interpretVMSourceWithinBound(t, machine, `use net
+let read: net.Socket[64] = net.socket_set()
+let write: net.Socket[64] = net.socket_set()
+let errors: net.Socket[64] = net.socket_set()
+let selected: net.SelectResult = net.poll(read, write, errors, 0)
+test_report(selected.read)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, ok := captured.Obj.(*value.ObjArray)
+	if captured.Type != value.VAL_OBJ || !ok {
+		t.Fatalf("net.socket_set() = %#v, want array", captured)
+	}
+	if len(set.Elements) != networkSetCapacity {
+		t.Fatalf("net.socket_set() length = %d, want %d", len(set.Elements), networkSetCapacity)
 	}
 }
 
@@ -265,6 +294,22 @@ func setupAcceptedLoopback(t *testing.T, machine *VM) (value.Value, value.Value,
 	return listener, client, server
 }
 
+func TestNetListenZeroReturnsAssignedPort(t *testing.T) {
+	machine := New()
+	cleanupNetworkResources(t, machine)
+	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
+	assertBuiltinValue(t, builtinMapField(t, listener, "open"), value.NewBool(true))
+	assignedPort := builtinMapField(t, listener, "port").AsInt
+	if assignedPort <= 0 {
+		t.Fatalf("net_listen port=%d, want OS-assigned positive port", assignedPort)
+	}
+
+	client := callBuiltinWithinBound(t, machine, "net_connect", value.NewString("127.0.0.1"), value.NewInt(assignedPort))
+	assertBuiltinValue(t, builtinMapField(t, client, "open"), value.NewBool(true))
+	accepted := callBuiltinWithinBound(t, machine, "net_accept", listener)
+	assertBuiltinValue(t, builtinMapField(t, accepted, "open"), value.NewBool(true))
+}
+
 func requireValidSelectResult(t *testing.T, result value.Value) {
 	t.Helper()
 	mapping := requireBuiltinMap(t, result)
@@ -282,47 +327,107 @@ func requireValidSelectResult(t *testing.T, result value.Value) {
 	}
 }
 
-func TestNetSelectBufferIsSharedAcrossVMs(t *testing.T) {
+func TestNetSelectDoesNotConsumeSocketData(t *testing.T) {
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 	child := NewWithShared(machine.shared, machine.Config)
+	_, resource := requireSocketResource(t, machine, server)
+	resource.stateMu.Lock()
+	underlying := resource.connection
+	readCalls := 0
+	resource.connection = &controlledDeadlineConn{
+		Conn: underlying,
+		readFn: func(buffer []byte) (int, error) {
+			readCalls++
+			return underlying.Read(buffer)
+		},
+	}
+	resource.stateMu.Unlock()
 
-	sent := callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("x"))
+	sent := callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("xy"))
 	assertBuiltinValue(t, builtinMapField(t, sent, "ok"), value.NewBool(true))
-	selected := callBuiltinWithinBound(t, machine, "net_select",
-		value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(250))
-	assertBuiltinValue(t, builtinMapField(t, selected, "read_count"), value.NewInt(1))
-	received := callBuiltinWithinBound(t, child, "net_recv", server, value.NewInt(1))
+	for attempt := 0; attempt < 2; attempt++ {
+		selected := callBuiltinWithinBound(t, machine, "net_select",
+			value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(0))
+		assertBuiltinValue(t, builtinMapField(t, selected, "read_count"), value.NewInt(1))
+	}
+	if readCalls != 0 {
+		t.Fatalf("socket reads during net_select=%d, want 0", readCalls)
+	}
+	received := callBuiltinWithinBound(t, child, "net_recv", server, value.NewInt(2))
 	assertBuiltinValue(t, builtinMapField(t, received, "ok"), value.NewBool(true))
-	assertBuiltinValue(t, builtinMapField(t, received, "count"), value.NewInt(1))
-	assertBuiltinValue(t, builtinMapField(t, received, "data"), value.NewBytes("x"))
+	assertBuiltinValue(t, builtinMapField(t, received, "count"), value.NewInt(2))
+	assertBuiltinValue(t, builtinMapField(t, received, "data"), value.NewBytes("xy"))
 }
 
-func TestConcurrentNetSelect(t *testing.T) {
+func TestNetSelectDoesNotAcceptPendingConnection(t *testing.T) {
 	machine := New()
-	_, client, server := setupAcceptedLoopback(t, machine)
-	child := NewWithShared(machine.shared, machine.Config)
-
-	sent := callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("x"))
-	assertBuiltinValue(t, builtinMapField(t, sent, "ok"), value.NewBool(true))
-	start := make(chan struct{})
-	done := make(chan value.Value, 2)
-	for _, current := range []*VM{machine, child} {
-		current := current
-		go func() {
-			<-start
-			done <- callBuiltinWithinBound(t, current, "net_select",
-				value.NewArray([]value.Value{server}), value.NewArray(nil), value.NewArray(nil), value.NewInt(5))
-		}()
+	cleanupNetworkResources(t, machine)
+	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
+	listenerFD := int(builtinMapField(t, listener, "fd").AsInt)
+	listenerResource, exists := machine.shared.Listeners.get(listenerFD)
+	if !exists {
+		t.Fatalf("listener descriptor %d is not registered", listenerFD)
 	}
-	close(start)
-	for i := 0; i < 2; i++ {
-		select {
-		case result := <-done:
-			requireValidSelectResult(t, result)
-		case <-time.After(statefulBuiltinTimeout):
-			t.Fatal("concurrent net_select did not complete")
-		}
+	listenerResource.stateMu.Lock()
+	underlying := listenerResource.listener
+	acceptCalls := 0
+	listenerResource.listener = &controlledDeadlineListener{
+		Listener: underlying,
+		acceptFn: func() (net.Conn, error) {
+			acceptCalls++
+			return underlying.Accept()
+		},
+	}
+	address := underlying.Addr().(*net.TCPAddr)
+	listenerResource.stateMu.Unlock()
+	client := callBuiltinWithinBound(t, machine, "net_connect", value.NewString("127.0.0.1"), value.NewInt(int64(address.Port)))
+
+	for attempt := 0; attempt < 2; attempt++ {
+		selected := callBuiltinWithinBound(t, machine, "net_select",
+			value.NewArray([]value.Value{listener}), value.NewArray(nil), value.NewArray(nil), value.NewInt(0))
+		assertBuiltinValue(t, builtinMapField(t, selected, "read_count"), value.NewInt(1))
+	}
+	if acceptCalls != 0 {
+		t.Fatalf("listener accepts during net_select=%d, want 0", acceptCalls)
+	}
+	accepted := callBuiltinWithinBound(t, machine, "net_accept", listener)
+	assertBuiltinValue(t, builtinMapField(t, accepted, "open"), value.NewBool(true))
+	if acceptCalls != 1 {
+		t.Fatalf("listener accepts after net_accept=%d, want exactly 1", acceptCalls)
+	}
+	sent := callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("ok"))
+	assertBuiltinValue(t, builtinMapField(t, sent, "count"), value.NewInt(2))
+	received := callBuiltinWithinBound(t, machine, "net_recv", accepted, value.NewInt(2))
+	assertBuiltinValue(t, builtinMapField(t, received, "data"), value.NewBytes("ok"))
+}
+
+func TestNetSelectValidatesArgumentsSynchronously(t *testing.T) {
+	machine := New()
+	empty := value.NewArray(nil)
+	maximum := int64(math.MaxInt64) / int64(time.Millisecond)
+	tests := []struct {
+		name string
+		args []value.Value
+	}{
+		{"wrong arity", []value.Value{empty}},
+		{"wrong read set", []value.Value{value.NewNull(), empty, empty, value.NewInt(0)}},
+		{"wrong write set", []value.Value{empty, value.NewNull(), empty, value.NewInt(0)}},
+		{"wrong error set", []value.Value{empty, empty, value.NewNull(), value.NewInt(0)}},
+		{"wrong timeout type", []value.Value{empty, empty, empty, value.NewString("0")}},
+		{"negative timeout", []value.Value{empty, empty, empty, value.NewInt(-1)}},
+		{"overflow timeout", []value.Value{empty, empty, empty, value.NewInt(maximum + 1)}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := invokeBuiltin(t, machine, "net_select", test.args...)
+			if err == nil {
+				t.Fatalf("net_select result=%v, want synchronous error", result)
+			}
+			if result.Type != value.VAL_NULL {
+				t.Fatalf("net_select result=%v, want null on error", result)
+			}
+		})
 	}
 }
 
