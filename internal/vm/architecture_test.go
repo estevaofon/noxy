@@ -2,6 +2,9 @@ package vm
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"go/ast"
 	"go/build"
 	"go/constant"
@@ -10,7 +13,9 @@ import (
 	"go/printer"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -303,10 +308,12 @@ type architecturePackage struct {
 }
 
 type architectureImporter struct {
-	moduleRoot string
-	packages   map[string]*types.Package
-	loading    map[string]bool
-	fallback   types.Importer
+	moduleRoot    string
+	packages      map[string]*types.Package
+	loading       map[string]bool
+	fallback      types.Importer
+	exportFiles   map[string]string
+	moduleImports types.Importer
 }
 
 func newArchitectureImporter(t *testing.T) *architectureImporter {
@@ -315,12 +322,15 @@ func newArchitectureImporter(t *testing.T) *architectureImporter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &architectureImporter{
-		moduleRoot: moduleRoot,
-		packages:   make(map[string]*types.Package),
-		loading:    make(map[string]bool),
-		fallback:   importer.Default(),
+	loader := &architectureImporter{
+		moduleRoot:  moduleRoot,
+		packages:    make(map[string]*types.Package),
+		loading:     make(map[string]bool),
+		fallback:    importer.Default(),
+		exportFiles: make(map[string]string),
 	}
+	loader.moduleImports = importer.ForCompiler(token.NewFileSet(), "gc", loader.openExportData)
+	return loader
 }
 
 func (loader *architectureImporter) Import(importPath string) (*types.Package, error) {
@@ -340,15 +350,78 @@ func (loader *architectureImporter) Import(importPath string) (*types.Package, e
 			}
 		}
 	}
-	if loaded, err := loader.fallback.Import(importPath); err == nil {
+	loaded, fallbackErr := loader.fallback.Import(importPath)
+	if fallbackErr == nil {
 		loader.packages[importPath] = loaded
 		return loaded, nil
 	}
-	name := importPath[strings.LastIndex(importPath, "/")+1:]
-	stub := types.NewPackage(importPath, name)
-	stub.MarkComplete()
-	loader.packages[importPath] = stub
-	return stub, nil
+	loaded, moduleErr := loader.importModuleExportData(importPath)
+	if moduleErr != nil {
+		return nil, errors.Join(
+			fmt.Errorf("default importer for %q: %w", importPath, fallbackErr),
+			fmt.Errorf("module-aware importer for %q: %w", importPath, moduleErr),
+		)
+	}
+	loader.packages[importPath] = loaded
+	return loaded, nil
+}
+
+type architectureListedPackage struct {
+	ImportPath string
+	Export     string
+	Error      *struct {
+		Err string
+	}
+}
+
+func (loader *architectureImporter) importModuleExportData(importPath string) (*types.Package, error) {
+	if loader.exportFiles[importPath] == "" {
+		command := exec.Command("go", "list", "-deps", "-export", "-json", importPath)
+		command.Dir = loader.moduleRoot
+		output, err := command.Output()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && len(exitErr.Stderr) != 0 {
+				return nil, fmt.Errorf("go list: %s: %w", strings.TrimSpace(string(exitErr.Stderr)), err)
+			}
+			return nil, fmt.Errorf("go list: %w", err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(output))
+		for {
+			var listed architectureListedPackage
+			if err := decoder.Decode(&listed); errors.Is(err, io.EOF) {
+				break
+			} else if err != nil {
+				return nil, fmt.Errorf("decode go list output: %w", err)
+			}
+			if listed.Error != nil {
+				return nil, fmt.Errorf("go list package %q: %s", listed.ImportPath, listed.Error.Err)
+			}
+			if listed.Export != "" {
+				loader.exportFiles[listed.ImportPath] = listed.Export
+			}
+		}
+	}
+	if loader.exportFiles[importPath] == "" {
+		return nil, fmt.Errorf("go list returned no export data")
+	}
+	loaded, err := loader.moduleImports.Import(importPath)
+	if err != nil {
+		return nil, fmt.Errorf("read export data: %w", err)
+	}
+	return loaded, nil
+}
+
+func (loader *architectureImporter) openExportData(importPath string) (io.ReadCloser, error) {
+	filename := loader.exportFiles[importPath]
+	if filename == "" {
+		return nil, fmt.Errorf("no export data for %q", importPath)
+	}
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("open export data for %q: %w", importPath, err)
+	}
+	return file, nil
 }
 
 func readArchitectureSources(directory string) ([]architectureSource, error) {
