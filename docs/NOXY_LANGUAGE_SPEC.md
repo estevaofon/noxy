@@ -22,7 +22,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 
 | Category | Keywords |
 |----------|----------|
-| Declarations | `let`, `global`, `func`, `struct` |
+| Declarations | `let`, `func`, `struct` |
 | Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer` |
 | Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
@@ -340,7 +340,6 @@ end
 
 ```noxy
 let name: type = value
-global name: type = value
 ```
 
 Variables can be reassigned, but the new value **MUST** be of the same type as declared.

@@ -41,7 +41,7 @@ use pkg select * as alias
 struct Point
   x: int
 end
-global g = 1
+let g = 1
 zeros(10)
 ref x
 map[string, int]
@@ -176,7 +176,7 @@ map[string, int]
 		{token.NEWLINE, "\n"},
 		{token.END, "end"},
 		{token.NEWLINE, "\n"},
-		{token.GLOBAL, "global"},
+		{token.LET, "let"},
 		{token.IDENTIFIER, "g"},
 		{token.ASSIGN, "="},
 		{token.INT, "1"},
