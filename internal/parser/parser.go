@@ -1158,7 +1158,6 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	}
 
 	// Return type
-	// fmt.Printf("DEBUG: parseFuncStmt: cur=%s peek=%s\n", p.curToken.Type, p.peekToken.Type)
 	if p.peekTokenIs(token.ARROW) {
 		p.nextToken() // eat )
 		p.nextToken() // eat ->

@@ -1,17 +1,22 @@
 package vm
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"noxy-vm/internal/stdlib"
+	"noxy-vm/internal/value"
 )
 
 var nativeRegistrationHelpers = map[string]bool{
@@ -146,5 +151,60 @@ func TestEmbeddedStdlibSourcesAreValidUTF8(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no embedded .nx sources were checked; the walk is broken")
+	}
+}
+
+func TestHTTPClientDoesNotPrintOnRequest(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		buffer := make([]byte, 4096)
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		_, _ = conn.Read(buffer)
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"))
+	}()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	source := fmt.Sprintf(`use http_client select *
+let r: ClientResponse = get("http://127.0.0.1:%d/")
+test_report(r.ok)`, port)
+
+	original := os.Stdout
+	read, write, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
+	os.Stdout = write
+
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	interpretErr := interpretVMSource(t, machine, source)
+
+	_ = write.Close()
+	os.Stdout = original
+	printed, _ := io.ReadAll(read)
+
+	if interpretErr != nil {
+		t.Fatal(interpretErr)
+	}
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("client request = %#v, want ok", captured)
+	}
+	if len(printed) != 0 {
+		t.Fatalf("http client printed %q, want nothing", string(printed))
 	}
 }
