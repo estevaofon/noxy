@@ -153,16 +153,19 @@ func (vm *VM) defineSystemBuiltins() {
 			okVal = false
 		} else {
 			okVal = true
-			// The process completed, but its output is an external byte
-			// source labelled as text: it must be valid UTF-8 before it is
-			// handed back as a Noxy string. This does not collide with the
-			// "process completed" meaning of ok above — a process that ran
-			// and produced binary output is still reported as a distinct,
-			// diagnosable case via ok=false plus a UTF-8 error message.
-			if verifyErr := requireValidUTF8("sys.exec_output", outputStr); verifyErr != nil {
-				okVal = false
-				errMsg = verifyErr.Error()
-			}
+		}
+
+		// The process's output is an external byte source labelled as
+		// text: it must be valid UTF-8 before it is handed back as a Noxy
+		// string, regardless of exit code — a crashing command's partial
+		// output is just as untrusted as a clean one's. This does not
+		// collide with the "process completed" meaning of ok above — a
+		// process that ran and produced binary output is still reported
+		// as a distinct, diagnosable case via ok=false plus a UTF-8 error
+		// message.
+		if verifyErr := requireValidUTF8("sys.exec_output", outputStr); verifyErr != nil {
+			okVal = false
+			errMsg = verifyErr.Error()
 		}
 
 		outputField := ""

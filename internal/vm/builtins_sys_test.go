@@ -110,14 +110,94 @@ func TestSysExecOutputAcceptsValidAccentedOutput(t *testing.T) {
 	}
 }
 
+// TestSysExecOutputRejectsInvalidUTF8OnNonZeroExit proves the UTF-8 check
+// runs regardless of exit code. Before the fix, requireValidUTF8 was only
+// called on the ok-exit branch, so a command that exits non-zero (an
+// entirely ordinary case: a crashing script, a tool that writes partial or
+// binary output before failing) bypassed validation entirely and its raw,
+// unfiltered invalid bytes flowed straight into r.output with ok=false and
+// an EMPTY error — indistinguishable from any other ordinary failure.
+func TestSysExecOutputRejectsInvalidUTF8OnNonZeroExit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty-nonzero.bin")
+	if err := os.WriteFile(path, []byte("hel\xffo world"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var failingCommand string
+	if runtime.GOOS == "windows" {
+		failingCommand = sysCatCommand(path) + " & exit 1"
+	} else {
+		failingCommand = sysCatCommand(path) + "; exit 1"
+	}
+	source := "use sys\n" +
+		"let r: sys.SysResult = sys.exec_output(" + strconv.Quote(failingCommand) + ")\n" +
+		"test_report(to_str(!r.ok) + \"|\" + r.error + \"|\" + to_str(r.output == \"\"))"
+	captured := captureVMSource(t, source)
+	report, ok := captured.Obj.(string)
+	if !ok {
+		t.Fatalf("test_report value = %#v, want string", captured)
+	}
+	if !strings.HasPrefix(report, "true|") {
+		t.Fatalf("sys.exec_output on non-zero exit with invalid UTF-8 reported %q, want ok=false", report)
+	}
+	if !strings.Contains(report, "UTF-8") {
+		t.Fatalf("error = %q, want it to mention UTF-8", report)
+	}
+	if !strings.HasSuffix(report, "|true") {
+		t.Fatalf("sys.exec_output on non-zero exit with invalid UTF-8 reported %q, want the raw invalid bytes cleared from output (not silently wrapped)", report)
+	}
+}
+
+// TestSysExecOutputNonZeroExitWithValidOutputReportsEmptyError proves the
+// fix above does not regress the ordinary non-zero-exit case: a command
+// that exits non-zero but produces valid (non-garbage) output must still
+// report ok=false with an EMPTY error, and the output must still be
+// preserved rather than blanked out.
+func TestSysExecOutputNonZeroExitWithValidOutputReportsEmptyError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clean-nonzero.txt")
+	content := "acentuação e emoji \U0001F600"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var failingCommand string
+	if runtime.GOOS == "windows" {
+		failingCommand = sysCatCommand(path) + " & exit 1"
+	} else {
+		failingCommand = sysCatCommand(path) + "; exit 1"
+	}
+	source := "use sys\n" +
+		"let r: sys.SysResult = sys.exec_output(" + strconv.Quote(failingCommand) + ")\n" +
+		"test_report(to_str(r.ok) + \"|\" + r.output + \"|\" + r.error)"
+	captured := captureVMSource(t, source)
+	report, ok := captured.Obj.(string)
+	if !ok {
+		t.Fatalf("test_report value = %#v, want string", captured)
+	}
+	want := "false|" + content + "|"
+	if report != want {
+		t.Fatalf("sys.exec_output on non-zero exit with valid output reported %q, want %q", report, want)
+	}
+}
+
 func TestSysExecOutputPreservesFailureToStartShape(t *testing.T) {
 	// A command that cannot be resolved inside the shell is the portable
 	// stand-in here for "the process did not complete": simulating the
 	// shell binary itself being unavailable is not reliable across
 	// platforms, but this exercises the same pre-existing err != nil path
 	// (see the comment on sys_exec_output) and must leave error empty.
+	// Stderr is redirected to the null device: the shell's own "command
+	// not found" diagnostic text is locale-dependent (confirmed on a
+	// non-English Windows install, cmd.exe emits it in the console's OEM
+	// code page rather than UTF-8, which the new unconditional validation
+	// correctly flags — that is the separate, expected behavior covered by
+	// the invalid-UTF-8 tests above, not what this test exercises). This
+	// test wants the "process produced no meaningful output" shape with
+	// guaranteed-valid (here, empty) output on every locale.
+	unresolvedCommand := "noxy_nonexistent_command_xyz_12345 2>/dev/null"
+	if runtime.GOOS == "windows" {
+		unresolvedCommand = "noxy_nonexistent_command_xyz_12345 2>nul"
+	}
 	source := "use sys\n" +
-		"let r: sys.SysResult = sys.exec_output(\"noxy_nonexistent_command_xyz_12345\")\n" +
+		"let r: sys.SysResult = sys.exec_output(" + strconv.Quote(unresolvedCommand) + ")\n" +
 		"test_report(to_str(r.ok) + \"|\" + r.error)"
 	captured := captureVMSource(t, source)
 	report, ok := captured.Obj.(string)
