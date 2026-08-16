@@ -2,14 +2,15 @@
 
 ## Goal and Scope
 
-Five defects share one shape: an API that fails without saying so. A
+Seven defects share one shape: an API that fails without saying so. A
 conversion that cannot succeed returns a plausible number. An index function
 returns an offset measured in a unit the functions that consume it do not use.
 A text function silently accepts a value it cannot interpret and operates on
 its debug representation. Diagnostic output ships to end users. Source comments
-carry characters destroyed by a lossy encoding pass.
+carry characters destroyed by a lossy encoding pass. Two natives are registered
+twice, so one definition silently wins. A character-code function reads a byte.
 
-This subproject fixes all five. It is not a feature: every change either makes
+This subproject fixes all seven. It is not a feature: every change either makes
 a silent failure loud or removes output that should never have shipped.
 
 Excluded by decision: the `net_settimeout` error style, which the network
@@ -276,7 +277,7 @@ established rather than new.
 
 ### The defect
 
-Twenty-one comment lines across three embedded standard library sources lost
+Twenty-three comment lines across three embedded standard library sources lost
 their accented characters to a lossy encoding conversion, leaving a literal
 `?` in place of each one: `M?dulo`, `usu?rio`, `Verifica??o`, `Convers?o`,
 `Divis?o`, `s?bado`, `Diferen?a`, `Aritm?tica`, `padr?o`, `m?s`, and others.
@@ -285,7 +286,7 @@ their accented characters to a lossy encoding conversion, leaving a literal
 |---|---|
 | `internal/stdlib/http.nx` | 2 |
 | `internal/stdlib/strings.nx` | 6 |
-| `internal/stdlib/time.nx` | 13 |
+| `internal/stdlib/time.nx` | 15 |
 
 ### The fix
 
@@ -298,14 +299,71 @@ detect the historical `?` substitution, which is indistinguishable from an
 intentional question mark, but it does prevent the next lossy conversion from
 landing silently.
 
+## 6. One Registration per Native
+
+### The defect
+
+Two natives are registered twice in the same function:
+
+| Native | First registration | Second registration |
+|---|---|---|
+| `strings_contains` | `builtins_strings.go:11` | `builtins_strings.go:159` |
+| `strings_replace` | `builtins_strings.go:77` | `builtins_strings.go:167` |
+
+`DefineNative` overwrites, so the second definition always wins and the first
+is unreachable. The bodies are currently equivalent, so nothing misbehaves
+today. The hazard is maintenance: a correction applied to the first copy is
+silently discarded, and a reader has no signal that the code being read is
+dead.
+
+### The fix
+
+The unreachable first registration of each native is deleted. The surviving
+definition is the later one, so behavior is unchanged by construction.
+
+A guard test asserts that no native name is registered more than once across
+the whole builtin surface. It collects registrations by instrumenting a VM
+built for the test rather than by scanning source text, so it also covers
+duplicates introduced across different builtin files.
+
+## 7. `ord` Reads a Character, Not a Byte
+
+### The defect
+
+`ord` returns `int64(s[0])` — the first **byte** of the UTF-8 encoding. Its
+inverse, `from_char_code`, is code-point based (`string(rune(code))`). The two
+do not round-trip:
+
+```noxy
+from_char_code(233)   // "é"
+ord("é")              // 195, the first UTF-8 byte, not 233
+```
+
+This is the defect of item 2 in the opposite direction, in a function whose
+entire purpose is to name a character.
+
+### The fix
+
+`ord(s)` returns the Unicode code point of a single-character string. It
+requires exactly one character and raises a synchronous runtime error for an
+empty string or a longer one, matching Python's contract and the strictness
+established in item 1. `ord` also rejects `bytes` under the item 3 rule; an
+octet is read through element access on the `bytes` value itself.
+
+`ord` is currently a global native that `strings.nx` does not export and that
+no `.nx` source in the repository calls, so the change cannot break existing
+code. To complete the pair, `strings.nx` exports it as `char_code(s)` alongside
+the existing `from_char_code(code)`, and the two are documented as inverses:
+`char_code(from_char_code(n)) == n` for every valid code point.
+
 ## Migration
 
 Item 1 is a breaking change. It is the point of the change: an additive
 `to_int_result` alone would leave every existing `to_int` call carrying the
 original defect, and almost none of them would ever be revisited.
 
-The blast radius is small and enumerable — 27 call sites in Noxy sources, of
-which 2 are in the standard library:
+The blast radius is small and enumerable — 20 call sites in Noxy sources, 12
+of `to_int` and 8 of `to_float`, of which 2 are in the standard library:
 
 - `http_parser.nx:132`, `parse_url`, parses a URL port. A port that is absent,
   empty, or non-numeric currently becomes `0`. It moves to `to_int_result` and
@@ -317,11 +375,14 @@ which 2 are in the standard library:
   rather than an accident. `0` is chosen over leaving the constructor default
   of `200` because a malformed response must not read as a success.
 
-The remaining 25 call sites live in `noxy_examples/` and `noxy_libs/`. Each is
-audited individually: a call on a value that is always numeric keeps `to_int`,
-and a call on parsed or external input moves to `to_int_result` with an
-explicit branch. The 160-example suite is the regression gate for the
-migration.
+The remaining 18 call sites live in `noxy_examples/`. Each is audited
+individually: a call on a value that is always numeric keeps `to_int`, and a
+call on parsed or external input moves to `to_int_result` with an explicit
+branch. Four are known to read untrusted input and are expected to move:
+`form_app.nx:123` and `todo_app.nx:196` parse a port from the environment,
+`password_manager/server.nx:203` parses an identifier from a request path, and
+`web_app.nx:148` parses an age from decoded JSON. The 160-example suite is the
+regression gate for the migration.
 
 `CHANGELOG.md` records item 1 as breaking and states the migration recipe:
 a `to_int` or `to_float` call that may receive non-numeric input becomes the
@@ -355,6 +416,12 @@ is updated accordingly before it is executed.
   is meaningless.
 - Removing the debug statements changes program output, which is the intent.
 - Comment repair changes no behavior.
+- Deleting the unreachable duplicate registrations changes nothing observable;
+  the surviving definition is the one that already won.
+- `ord` changes behavior for non-ASCII input and now raises for an empty or
+  multi-character argument. It has no caller in the repository and is not
+  exported by any module, so no existing code is affected.
+- `char_code` is new and requires `use strings`.
 - No syntax, keyword, or type-system change.
 
 ## Testing
@@ -393,7 +460,16 @@ The matrix proves:
 - every source embedded by `internal/stdlib/embed.go` is valid UTF-8 with no
   U+FFFD;
 - the HTTP client performs a request without writing anything to standard
-  output beyond what the caller printed.
+  output beyond what the caller printed;
+- no native name is registered more than once across the whole builtin
+  surface, and `strings_contains` and `strings_replace` keep their current
+  behavior after the duplicates are removed;
+- `ord` returns the code point of a single-character string, including
+  multi-byte characters, and round-trips with `from_char_code` across the ASCII
+  range, the Latin-1 supplement, and an emoji;
+- `ord` raises for an empty string, for a multi-character string, and for a
+  `bytes` argument;
+- `char_code` is exported by `strings` and agrees with `ord`.
 
 Project validation:
 
