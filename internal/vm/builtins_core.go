@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"noxy-vm/internal/value"
@@ -41,49 +40,6 @@ func (vm *VM) defineCoreBuiltins() {
 			return value.NewString(args[0].Obj.(string))
 		}
 		return value.NewString(args[0].String())
-	})
-	vm.DefineNative("to_int", func(args []value.Value) value.Value {
-		if len(args) != 1 {
-			return value.NewInt(0)
-		}
-		v := args[0]
-		if v.Type == value.VAL_INT {
-			return value.NewInt(v.AsInt)
-		}
-		if v.Type == value.VAL_FLOAT {
-			return value.NewInt(int64(v.AsFloat))
-		}
-		if v.Type == value.VAL_OBJ {
-			if s, ok := v.Obj.(string); ok {
-				if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-					return value.NewInt(i)
-				}
-				if f, err := strconv.ParseFloat(s, 64); err == nil {
-					return value.NewInt(int64(f))
-				}
-			}
-		}
-		return value.NewInt(0)
-	})
-	vm.DefineNative("to_float", func(args []value.Value) value.Value {
-		if len(args) != 1 {
-			return value.NewFloat(0.0)
-		}
-		v := args[0]
-		if v.Type == value.VAL_FLOAT {
-			return value.NewFloat(v.AsFloat)
-		}
-		if v.Type == value.VAL_INT {
-			return value.NewFloat(float64(v.AsInt))
-		}
-		if v.Type == value.VAL_OBJ {
-			if s, ok := v.Obj.(string); ok {
-				if f, err := strconv.ParseFloat(s, 64); err == nil {
-					return value.NewFloat(f)
-				}
-			}
-		}
-		return value.NewFloat(0.0)
 	})
 	vm.DefineNative("hex", func(args []value.Value) value.Value {
 		if len(args) != 1 {

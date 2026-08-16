@@ -129,4 +129,26 @@ func (vm *VM) defineConvertBuiltins() {
 		}
 		return conversionResult(true, value.NewFloat(converted), "")
 	})
+
+	vm.DefineContextualNative("to_int", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("to_int: expects exactly 1 argument, got %d", len(args))
+		}
+		converted, convertErr := convertValueToInt(args[0])
+		if convertErr != nil {
+			return value.NewNull(), fmt.Errorf("to_int: %w; use to_int_result to handle failure", convertErr)
+		}
+		return value.NewInt(converted), nil
+	})
+
+	vm.DefineContextualNative("to_float", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("to_float: expects exactly 1 argument, got %d", len(args))
+		}
+		converted, convertErr := convertValueToFloat(args[0])
+		if convertErr != nil {
+			return value.NewNull(), fmt.Errorf("to_float: %w; use to_float_result to handle failure", convertErr)
+		}
+		return value.NewFloat(converted), nil
+	})
 }

@@ -247,3 +247,100 @@ test_report(r.status_code)`
 		t.Fatalf("parse_response status_code = %#v, want 0", captured)
 	}
 }
+
+func requireStrictConversionError(t *testing.T, machine *VM, native string, args ...value.Value) string {
+	t.Helper()
+	_, err := requireBuiltin(t, machine, native).Invoke(machine, args)
+	if err == nil {
+		t.Fatalf("%s did not fail", native)
+	}
+	return err.Error()
+}
+
+func TestToIntRaisesOnUnconvertibleInput(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input value.Value
+	}{
+		{name: "letters", input: value.NewString("abc")},
+		{name: "empty string", input: value.NewString("")},
+		{name: "decimal point", input: value.NewString("5.5")},
+		{name: "overflow", input: value.NewString("9999999999999999999")},
+		{name: "not a number", input: value.NewFloat(math.NaN())},
+		{name: "infinity", input: value.NewFloat(math.Inf(1))},
+		{name: "bool", input: value.NewBool(true)},
+		{name: "null", input: value.NewNull()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			message := requireStrictConversionError(t, machine, "to_int", test.input)
+			if !strings.HasPrefix(message, "to_int: ") {
+				t.Fatalf("message = %q, want it to name the function", message)
+			}
+			if !strings.Contains(message, "use to_int_result to handle failure") {
+				t.Fatalf("message = %q, want the recoverable alternative", message)
+			}
+		})
+	}
+}
+
+func TestToIntConvertsAcceptedInput(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input value.Value
+		want  int64
+	}{
+		{name: "int", input: value.NewInt(42), want: 42},
+		{name: "positive float truncates", input: value.NewFloat(5.9), want: 5},
+		{name: "negative float truncates", input: value.NewFloat(-5.9), want: -5},
+		{name: "decimal string", input: value.NewString("-42"), want: -42},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "to_int", test.input)
+			if got.Type != value.VAL_INT || got.AsInt != test.want {
+				t.Fatalf("to_int = %#v, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestToFloatRaisesOnUnconvertibleInput(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input value.Value
+	}{
+		{name: "letters", input: value.NewString("abc")},
+		{name: "empty string", input: value.NewString("")},
+		{name: "trailing text", input: value.NewString("2.5kg")},
+		{name: "bool", input: value.NewBool(false)},
+		{name: "null", input: value.NewNull()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			message := requireStrictConversionError(t, machine, "to_float", test.input)
+			if !strings.Contains(message, "use to_float_result to handle failure") {
+				t.Fatalf("message = %q, want the recoverable alternative", message)
+			}
+		})
+	}
+}
+
+func TestStrictConversionRaisesOnBadArity(t *testing.T) {
+	machine := New()
+	for _, native := range []string{"to_int", "to_float"} {
+		t.Run(native, func(t *testing.T) {
+			if message := requireStrictConversionError(t, machine, native); !strings.Contains(message, "exactly 1 argument") {
+				t.Fatalf("message = %q, want an arity complaint", message)
+			}
+		})
+	}
+}
+
+func TestStrictConversionMessageNamesValueAndType(t *testing.T) {
+	machine := New()
+	message := requireStrictConversionError(t, machine, "to_int", value.NewString("abc"))
+	if !strings.Contains(message, `string "abc"`) {
+		t.Fatalf("message = %q, want the rejected type and value", message)
+	}
+}
