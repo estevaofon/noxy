@@ -2733,6 +2733,128 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 13b: `sqliteParameter` corrupts `bytes` values it binds
+
+Found while verifying Task 13, independently reproduced and root-caused before this task was written. Same defect family as Part One's Task 5 (`strings_*` reading a `bytes` value through `Value.String()` and silently operating on its `b"..."` display form) — this is the identical mistake in a different subsystem.
+
+**The defect.** `sqliteParameter` in `internal/vm/builtins_sqlite.go` switches on `parameter.Type` and has no `case value.VAL_BYTES`. A `bytes` value therefore falls to `default: return parameter.String()`, and `Value.String()` for `VAL_BYTES` returns `fmt.Sprintf("b\"%s\"", v.Obj.(string))`. Every `bytes` value bound as a SQL parameter today is silently corrupted with a `b"` prefix and a trailing `"` appended, rather than passed through as its raw content. Verified directly: binding `io.read_bytes` output of an 11-byte file and reading it back reported a UTF-8 error at byte offset 7, not 5 — exactly `5 + len("b\"")`, proving the wrapper is really there.
+
+This is independent of UTF-8 validity: even a `bytes` value that is valid UTF-8 gets the same four extra bytes glued onto it on the way into the database.
+
+**Files:**
+- Modify: `internal/vm/builtins_sqlite.go`
+- Test: `internal/vm/builtins_sqlite_test.go`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `sqliteParameter` passes a `VAL_BYTES` value's raw content through unchanged.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/vm/builtins_sqlite_test.go`, following the same pattern as `TestSQLiteQueryRejectsInvalidUTF8`:
+
+```go
+func TestSQLiteBindsBytesParameterWithoutCorruption(t *testing.T) {
+	machine := New()
+	cleanupSQLiteResources(t, machine)
+	definitions := newSQLiteTestDefinitions()
+	databaseValue := callBuiltin(t, machine, "sqlite_open",
+		value.NewString(filepath.Join(t.TempDir(), "bytes-param.sqlite")),
+		sqliteTemplate(definitions.database),
+	)
+	defer callBuiltin(t, machine, "sqlite_close", databaseValue)
+
+	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec",
+		databaseValue,
+		value.NewString("CREATE TABLE entries (id INTEGER, value TEXT)"),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec_params",
+		databaseValue,
+		value.NewString("INSERT INTO entries (id, value) VALUES (?, ?)"),
+		value.NewArray([]value.Value{value.NewInt(1), value.NewBytes("hello")}),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	query := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query",
+		databaseValue,
+		value.NewString("SELECT value FROM entries"),
+		sqliteTemplate(definitions.queryResult),
+		sqliteTemplate(definitions.row),
+	), definitions.queryResult)
+	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
+
+	rows, ok := query.Fields["rows"].Obj.(*value.ObjArray)
+	if !ok || len(rows.Elements) != 1 {
+		t.Fatalf("rows = %#v, want exactly one row", query.Fields["rows"])
+	}
+	row, ok := rows.Elements[0].Obj.(*value.ObjInstance)
+	if !ok {
+		t.Fatalf("row = %#v, want *ObjInstance", rows.Elements[0])
+	}
+	values, ok := row.Fields["values"].Obj.(*value.ObjArray)
+	if !ok || len(values.Elements) != 1 {
+		t.Fatalf("row values = %#v, want exactly one column", row.Fields["values"])
+	}
+	stored, ok := values.Elements[0].Obj.(string)
+	if !ok || stored != "hello" {
+		t.Fatalf("stored value = %#v, want the raw string %q with no b\"...\" wrapper", values.Elements[0], "hello")
+	}
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/vm/ -run TestSQLiteBindsBytesParameter -v`
+
+Expected: FAIL — the stored value is `b"hello"`, not `hello`.
+
+- [ ] **Step 3: Fix `sqliteParameter`**
+
+In `internal/vm/builtins_sqlite.go`, add a `VAL_BYTES` case before the `VAL_OBJ` case:
+
+```go
+	case value.VAL_BYTES:
+		if payload, ok := parameter.Obj.(string); ok {
+			return payload
+		}
+		return parameter.String()
+```
+
+The fallback to `parameter.String()` only matters if `Obj` is ever not a Go `string` for a `VAL_BYTES` value, which does not happen anywhere in this codebase today — it mirrors the same defensive shape the existing `VAL_OBJ` case already uses.
+
+- [ ] **Step 4: Run the tests and validate**
+
+```bash
+go test ./internal/vm/ -run 'TestSQLite' -v
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+Re-run `TestSQLiteQueryRejectsInvalidUTF8` from Task 13 specifically and confirm it still passes — the invalid byte should still be caught, now at the true offset 5 rather than 7, since the parameter is no longer wrapped. If the brief's own hard-coded offset assertion (if any) assumed the old wrapped offset, update it to the corrected value; if it asserts only "contains UTF-8" without a specific offset, no change is needed.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/vm/builtins_sqlite.go internal/vm/builtins_sqlite_test.go
+git commit -m "fix: sqlite parameter binding no longer corrupts bytes values
+
+sqliteParameter had no case for VAL_BYTES, so every bytes value bound as
+a SQL parameter fell through to Value.String(), which renders bytes as
+its debug display form b\"...\". Every bound bytes value was silently
+stored with an extra b\" prefix and trailing \" appended. Same defect
+family as the strings_* bytes-display bug fixed earlier in this branch,
+found in a different subsystem while verifying the immediately preceding
+task.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 14: source loading rejects invalid UTF-8
 
 A `.nx` file that is not valid UTF-8 cannot be lexed correctly, and the failure today is silent mis-tokenisation rather than a diagnosable error.
