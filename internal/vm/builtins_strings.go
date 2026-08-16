@@ -35,6 +35,24 @@ func requireBytesArgument(function string, args []value.Value, index int) error 
 	return nil
 }
 
+// requireValidUTF8 guards the bytes-to-text boundary. Every Noxy string is
+// required to hold valid UTF-8, so a character-based operation can never
+// decode a byte the caller did not write.
+func requireValidUTF8(function string, data string) error {
+	if utf8.ValidString(data) {
+		return nil
+	}
+	offset := 0
+	for offset < len(data) {
+		character, width := utf8.DecodeRuneInString(data[offset:])
+		if character == utf8.RuneError && width <= 1 {
+			break
+		}
+		offset += width
+	}
+	return fmt.Errorf("%s: bytes are not valid UTF-8 at byte offset %d", function, offset)
+}
+
 func (vm *VM) defineStringBuiltins() {
 	// Strings Module
 	vm.DefineContextualNative("strings_contains", func(_ value.NativeContext, args []value.Value) (value.Value, error) {

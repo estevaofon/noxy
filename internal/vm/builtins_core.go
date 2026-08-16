@@ -31,15 +31,18 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewNull()
 	})
 
-	vm.DefineNative("to_str", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("to_str", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if len(args) != 1 {
-			// Should return error or empty?
-			return value.NewString("")
+			return value.NewNull(), fmt.Errorf("to_str: expects exactly 1 argument, got %d", len(args))
 		}
 		if args[0].Type == value.VAL_BYTES {
-			return value.NewString(args[0].Obj.(string))
+			payload := args[0].Obj.(string)
+			if err := requireValidUTF8("to_str", payload); err != nil {
+				return value.NewNull(), err
+			}
+			return value.NewString(payload), nil
 		}
-		return value.NewString(args[0].String())
+		return value.NewString(args[0].String()), nil
 	})
 	vm.DefineNative("hex", func(args []value.Value) value.Value {
 		if len(args) != 1 {

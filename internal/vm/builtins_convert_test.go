@@ -328,7 +328,7 @@ func TestToFloatRaisesOnUnconvertibleInput(t *testing.T) {
 
 func TestStrictConversionRaisesOnBadArity(t *testing.T) {
 	machine := New()
-	for _, native := range []string{"to_int", "to_float"} {
+	for _, native := range []string{"to_int", "to_float", "to_str"} {
 		t.Run(native, func(t *testing.T) {
 			if message := requireStrictConversionError(t, machine, native); !strings.Contains(message, "exactly 1 argument") {
 				t.Fatalf("message = %q, want an arity complaint", message)
@@ -342,5 +342,80 @@ func TestStrictConversionMessageNamesValueAndType(t *testing.T) {
 	message := requireStrictConversionError(t, machine, "to_int", value.NewString("abc"))
 	if !strings.Contains(message, `string "abc"`) {
 		t.Fatalf("message = %q, want the rejected type and value", message)
+	}
+}
+
+func TestToStrValidatesUTF8(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name       string
+		input      string
+		wantOffset string
+	}{
+		{name: "lone 0xFF at start", input: "\xffhi", wantOffset: "offset 0"},
+		{name: "lone 0xFF in middle", input: "h\xffi", wantOffset: "offset 1"},
+		{name: "truncated multibyte", input: "caf\xc3", wantOffset: "offset 3"},
+		{name: "bare continuation byte", input: "\x80", wantOffset: "offset 0"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := requireBuiltin(t, machine, "to_str").Invoke(machine, []value.Value{value.NewBytes(test.input)})
+			if err == nil {
+				t.Fatalf("to_str(%q) did not fail", test.input)
+			}
+			message := err.Error()
+			if !strings.HasPrefix(message, "to_str: ") {
+				t.Fatalf("message = %q, want it to name the function", message)
+			}
+			if !strings.Contains(message, "not valid UTF-8") {
+				t.Fatalf("message = %q, want it to say UTF-8", message)
+			}
+			if !strings.Contains(message, test.wantOffset) {
+				t.Fatalf("message = %q, want it to name %s", message, test.wantOffset)
+			}
+		})
+	}
+}
+
+func TestToStrRoundTripsValidBytes(t *testing.T) {
+	machine := New()
+	for _, input := range []string{"", "hello", "café", "\U0001F600 ok", "linha\nquebrada"} {
+		got := callBuiltin(t, machine, "to_str", value.NewBytes(input))
+		text, ok := got.Obj.(string)
+		if !ok || text != input {
+			t.Fatalf("to_str(%q) = %#v, want the same bytes back", input, got)
+		}
+	}
+}
+
+func TestToStrLeavesNonBytesArgumentsAlone(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input value.Value
+		want  string
+	}{
+		{name: "int", input: value.NewInt(42), want: "42"},
+		{name: "bool", input: value.NewBool(true), want: "true"},
+		{name: "string", input: value.NewString("já texto"), want: "já texto"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "to_str", test.input)
+			if text, ok := got.Obj.(string); !ok || text != test.want {
+				t.Fatalf("to_str = %#v, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestToStrBoundsTheEchoedPayload(t *testing.T) {
+	machine := New()
+	payload := strings.Repeat("a", 500) + "\xff"
+	_, err := requireBuiltin(t, machine, "to_str").Invoke(machine, []value.Value{value.NewBytes(payload)})
+	if err == nil {
+		t.Fatal("to_str did not fail")
+	}
+	if len([]rune(err.Error())) > 200 {
+		t.Fatalf("message is %d characters, want a bounded message", len([]rune(err.Error())))
 	}
 }

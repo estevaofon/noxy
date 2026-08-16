@@ -55,11 +55,12 @@ func TestConversionBuiltins(t *testing.T) {
 		{name: "to_str int", builtin: "to_str", args: []value.Value{value.NewInt(-42)}, want: value.NewString("-42")},
 		{name: "to_str float", builtin: "to_str", args: []value.Value{value.NewFloat(3.5)}, want: value.NewString("3.500000")},
 		{name: "to_str string", builtin: "to_str", args: []value.Value{value.NewString("noxy")}, want: value.NewString("noxy")},
-		{name: "to_str short args", builtin: "to_str", want: value.NewString("")},
-		// to_int/to_float now raise on unconvertible input and bad arity
-		// instead of returning a 0 sentinel; those cases are covered by
+		// to_str/to_int/to_float now raise on bad arity instead of returning
+		// a sentinel value ("" / 0); those cases are covered by
 		// TestToIntRaisesOnUnconvertibleInput, TestToFloatRaisesOnUnconvertibleInput,
 		// and TestStrictConversionRaisesOnBadArity in builtins_convert_test.go.
+		// to_str also now raises on invalid UTF-8 bytes; see
+		// TestToStrValidatesUTF8 in builtins_convert_test.go.
 		{name: "to_int int", builtin: "to_int", args: []value.Value{value.NewInt(-42)}, want: value.NewInt(-42)},
 		{name: "to_int float truncates", builtin: "to_int", args: []value.Value{value.NewFloat(3.9)}, want: value.NewInt(3)},
 		{name: "to_int integer string", builtin: "to_int", args: []value.Value{value.NewString("123")}, want: value.NewInt(123)},
