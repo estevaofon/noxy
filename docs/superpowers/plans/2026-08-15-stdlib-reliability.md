@@ -2879,7 +2879,25 @@ Expected: FAIL — the source is currently read and lexed without an encoding ch
 
 - [ ] **Step 3: Validate after reading module source**
 
-`internal/vm/modules.go` reads module source in `resolveModule` (disk path around line 101, embedded stdlib just after). Validate the content immediately after it is read, before it reaches the lexer, and return an error naming the module or path. The embedded stdlib is already covered by `TestEmbeddedStdlibSourcesAreValidUTF8`, so this guard is about user and library sources.
+**Correction, verified by reading `internal/vm/modules.go` directly:** the disk read is
+not where the original text said. `resolveModule` only reads the **embedded**
+stdlib content (`stdlib.FS.ReadFile(pathName + ".nx")`, near the end of that
+function) — it never reads disk files itself; for a disk module it just returns
+a `resolvedFileModule` carrying a `Path`, with no `Content`. The actual disk
+read happens later, and there is exactly **one** call site for it in the whole
+file: `internal/vm/modules.go:134`, inside `loadResolvedModule`'s
+`case resolvedFileModule: content, err := os.ReadFile(source.Path)`. Confirmed
+by `grep -n "os.ReadFile" internal/vm/modules.go` returning exactly one match.
+`loadResolvedDirectory` (for directory-style modules) does not read file
+content itself — it recurses through `vm.loadModule` for each `.nx` entry,
+which funnels back through this same single read site, so fixing it there
+covers directory modules too.
+
+Validate the content immediately after that `os.ReadFile` call succeeds and
+before it is passed to `compileAndRunModule`, returning an error naming
+`source.Path`. The embedded stdlib is already covered by
+`TestEmbeddedStdlibSourcesAreValidUTF8` from an earlier task, so this guard is
+specifically for user and library sources loaded from disk.
 
 - [ ] **Step 4: Run the tests and validate**
 
