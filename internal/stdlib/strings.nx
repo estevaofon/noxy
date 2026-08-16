@@ -107,6 +107,10 @@ func char_code(s: string) -> int
     return ord(s)
 end
 
+func is_valid_utf8(b: bytes) -> bool
+    return strings_is_valid_utf8(b)
+end
+
 func from_char_code(code: int) -> string
     return strings_from_char_code(code)
 end

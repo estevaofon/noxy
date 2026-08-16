@@ -389,4 +389,17 @@ func (vm *VM) defineStringBuiltins() {
 		}
 		return value.NewString(string(rune(args[0].AsInt)))
 	})
+	// strings_is_valid_utf8 takes bytes, not text, so it must not go through
+	// requireTextArgument: that guard rejects bytes, which is the opposite of
+	// what this function wants to check.
+	vm.DefineNative("strings_is_valid_utf8", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewBool(false)
+		}
+		payload, ok := args[0].Obj.(string)
+		if args[0].Type != value.VAL_BYTES || !ok {
+			return value.NewBool(false)
+		}
+		return value.NewBool(utf8.ValidString(payload))
+	})
 }
