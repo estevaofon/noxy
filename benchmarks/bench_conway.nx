@@ -1,0 +1,75 @@
+// Game of Life determinístico em grid 1D, gerações via ref.
+func idx(x: int, y: int, w: int) -> int
+    return y * w + x
+end
+
+func step(grid: ref int[], next: ref int[], w: int, h: int) -> void
+    let y: int = 0
+    while y < h do
+        let x: int = 0
+        while x < w do
+            let n: int = 0
+            let dy: int = -1
+            while dy <= 1 do
+                let dx: int = -1
+                while dx <= 1 do
+                    if dx != 0 || dy != 0 then
+                        let nx: int = (x + dx + w) % w
+                        let ny: int = (y + dy + h) % h
+                        n = n + grid[idx(nx, ny, w)]
+                    end
+                    dx = dx + 1
+                end
+                dy = dy + 1
+            end
+            let alive: int = grid[idx(x, y, w)]
+            if alive == 1 then
+                if n == 2 || n == 3 then
+                    next[idx(x, y, w)] = 1
+                else
+                    next[idx(x, y, w)] = 0
+                end
+            else
+                if n == 3 then
+                    next[idx(x, y, w)] = 1
+                else
+                    next[idx(x, y, w)] = 0
+                end
+            end
+            x = x + 1
+        end
+        y = y + 1
+    end
+end
+
+func main()
+    let w: int = 60
+    let h: int = 60
+    let grid: int[]
+    let next: int[]
+    let i: int = 0
+    while i < w * h do
+        append(grid, (i * 2654435761) % 7 % 2)
+        append(next, 0)
+        i = i + 1
+    end
+    let gen: int = 0
+    while gen < 60 do
+        step(grid, next, w, h)
+        let j: int = 0
+        while j < w * h do
+            grid[j] = next[j]
+            j = j + 1
+        end
+        gen = gen + 1
+    end
+    let s: int = 0
+    i = 0
+    while i < w * h do
+        s = s + grid[i] * (i % 97)
+        i = i + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()

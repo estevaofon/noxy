@@ -1,0 +1,27 @@
+// Soma paralela: canais transportam apenas escalares (semântica idêntica).
+func worker(c: any, base: int, count: int)
+    let s: int = 0
+    let i: int = 0
+    while i < count do
+        s = s + (base + i) % 1000003
+        i = i + 1
+    end
+    chan_send(c, s)
+end
+
+func main()
+    let c: any = make_chan(4)
+    spawn_task(worker, c, 0, 4000000)
+    spawn_task(worker, c, 500000, 4000000)
+    spawn_task(worker, c, 1000000, 4000000)
+    spawn_task(worker, c, 1500000, 4000000)
+    let total: int = 0
+    let got: int = 0
+    while got < 4 do
+        total = total + to_int(chan_recv(c))
+        got = got + 1
+    end
+    print(f"CHECKSUM:{total}")
+end
+
+main()

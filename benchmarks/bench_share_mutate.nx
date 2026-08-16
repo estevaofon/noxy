@@ -1,0 +1,21 @@
+// Pior caso do CoW: compartilha (let b = a) e muta em seguida, em loop.
+// O checksum lê SOMENTE b — conteúdo idêntico nas duas semânticas.
+func main()
+    let a: int[]
+    let i: int = 0
+    while i < 5000 do
+        append(a, i)
+        i = i + 1
+    end
+    let s: int = 0
+    let round: int = 0
+    while round < 2500 do
+        let b: int[] = a
+        b[round % 5000] = round
+        s = s + b[round % 5000]
+        round = round + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()

@@ -1,0 +1,29 @@
+// Pior caso da semântica atual: array grande passado a leitor puro em loop.
+// Baseline paga cópia rasa O(n) por chamada; CoW deve pagar O(1).
+func sum_all(data: int[]) -> int
+    let s: int = 0
+    let i: int = 0
+    while i < length(data) do
+        s = s + data[i]
+        i = i + 1
+    end
+    return s
+end
+
+func main()
+    let data: int[]
+    let i: int = 0
+    while i < 20000 do
+        append(data, i)
+        i = i + 1
+    end
+    let total: int = 0
+    let call: int = 0
+    while call < 300 do
+        total = total + sum_all(data)
+        call = call + 1
+    end
+    print(f"CHECKSUM:{total}")
+end
+
+main()

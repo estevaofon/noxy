@@ -1,0 +1,36 @@
+// Sort in-place via ref: dominado por leitura/escrita indexada.
+func bubble(data: ref int[]) -> void
+    let n: int = length(data)
+    let i: int = 0
+    while i < n do
+        let j: int = 0
+        while j < n - i - 1 do
+            if data[j] > data[j + 1] then
+                let tmp: int = data[j]
+                data[j] = data[j + 1]
+                data[j + 1] = tmp
+            end
+            j = j + 1
+        end
+        i = i + 1
+    end
+end
+
+func main()
+    let data: int[]
+    let i: int = 0
+    while i < 3000 do
+        append(data, (i * 7919) % 104729)
+        i = i + 1
+    end
+    bubble(data)
+    let s: int = 0
+    i = 0
+    while i < 3000 do
+        s = s + data[i] * (i % 13)
+        i = i + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()
