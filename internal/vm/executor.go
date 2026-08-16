@@ -1354,19 +1354,33 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				}
 				instanceVal = uniq
 			}
-			instance, ok := instanceVal.Obj.(*value.ObjInstance)
-			if instanceVal.Type != value.VAL_OBJ || !ok {
-				return vm.runtimeError(c, ip, "only instances have properties")
+			if instanceVal.Type != value.VAL_OBJ {
+				return vm.runtimeError(c, ip, "only instances/maps have properties")
 			}
-			fieldVal, ok := instance.Fields[name]
-			if !ok {
-				return vm.runtimeError(c, ip, "undefined property '%s'", name)
+			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
+				fieldVal, ok := instance.Fields[name]
+				if !ok {
+					return vm.runtimeError(c, ip, "undefined property '%s'", name)
+				}
+				v, changed := vm.unicize(fieldVal)
+				if changed {
+					instance.Fields[name] = v
+				}
+				vm.push(v)
+			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
+				// Membros de módulo (e maps acessados como propriedade)
+				stored, ok := mapObj.Get(name)
+				if !ok {
+					return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
+				}
+				v, changed := vm.unicize(stored)
+				if changed {
+					mapObj.Set(name, v)
+				}
+				vm.push(v)
+			} else {
+				return vm.runtimeError(c, ip, "only instances and maps have properties")
 			}
-			v, changed := vm.unicize(fieldVal)
-			if changed {
-				instance.Fields[name] = v
-			}
-			vm.push(v)
 
 		case chunk.OP_DEREF_MUT:
 			refVal := vm.pop()
