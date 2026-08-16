@@ -1,6 +1,8 @@
 package lexer
 
 import (
+	"unicode/utf8"
+
 	"noxy-vm/internal/token"
 )
 
@@ -157,19 +159,19 @@ func (l *Lexer) NextToken() token.Token {
 		l.readChar()
 		return tok
 	case '"':
-		lit, ok := l.readString('"')
-		if !ok {
+		lit, reason := l.readQuoted('"', literalString)
+		if reason != "" {
 			tok.Type = token.ILLEGAL
-			tok.Literal = "unterminated string"
+			tok.Literal = reason
 		} else {
 			tok.Type = token.STRING
 			tok.Literal = lit
 		}
 	case '\'':
-		lit, ok := l.readString('\'')
-		if !ok {
+		lit, reason := l.readQuoted('\'', literalString)
+		if reason != "" {
 			tok.Type = token.ILLEGAL
-			tok.Literal = "unterminated string"
+			tok.Literal = reason
 		} else {
 			tok.Type = token.STRING
 			tok.Literal = lit
@@ -178,10 +180,10 @@ func (l *Lexer) NextToken() token.Token {
 		if l.peekChar() == '"' || l.peekChar() == '\'' {
 			quote := l.peekChar()
 			l.readChar() // eat 'b'
-			lit, ok := l.readBytes(quote)
-			if !ok {
+			lit, reason := l.readQuoted(quote, literalBytes)
+			if reason != "" {
 				tok.Type = token.ILLEGAL
-				tok.Literal = "unterminated bytes literal"
+				tok.Literal = reason
 			} else {
 				tok.Type = token.BYTES
 				tok.Literal = lit
@@ -198,10 +200,10 @@ func (l *Lexer) NextToken() token.Token {
 		if l.peekChar() == '"' || l.peekChar() == '\'' {
 			quote := l.peekChar()
 			l.readChar() // eat 'f'
-			lit, ok := l.readFString(quote)
-			if !ok {
+			lit, reason := l.readQuoted(quote, literalFString)
+			if reason != "" {
 				tok.Type = token.ILLEGAL
-				tok.Literal = "unterminated f-string"
+				tok.Literal = reason
 			} else {
 				tok.Type = token.FSTRING
 				tok.Literal = lit
@@ -309,125 +311,190 @@ func isHexDigit(ch byte) bool {
 	return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
 }
 
-func (l *Lexer) readString(quote byte) (string, bool) {
-	// l.ch is currently quote
+// literalKind selects which escape rules apply to a quoted literal.
+type literalKind int
+
+const (
+	literalString literalKind = iota
+	literalBytes
+	literalFString
+)
+
+func (k literalKind) name() string {
+	switch k {
+	case literalBytes:
+		return "bytes literal"
+	case literalFString:
+		return "f-string"
+	default:
+		return "string"
+	}
+}
+
+func hexValue(ch byte) (int, bool) {
+	switch {
+	case ch >= '0' && ch <= '9':
+		return int(ch - '0'), true
+	case ch >= 'a' && ch <= 'f':
+		return int(ch-'a') + 10, true
+	case ch >= 'A' && ch <= 'F':
+		return int(ch-'A') + 10, true
+	}
+	return 0, false
+}
+
+// appendRune encodes a validated codepoint as UTF-8. Bytes literals take the
+// same encoding: b"caf\u{e9}" is the UTF-8 spelling of café.
+func appendRune(out []byte, code int) []byte {
+	return utf8.AppendRune(out, rune(code))
+}
+
+// readEscape consumes one escape sequence. l.ch is the character after the
+// backslash on entry and the last consumed character on return. An empty
+// reason means success.
+//
+// Escapes fall into three groups. The historical set (\n \r \t \" \' \\, plus
+// \{ in f-strings) is unchanged. \x writes one raw byte and is confined to
+// bytes literals: allowing it in a string would let a source file build a
+// string holding invalid UTF-8, which is the invariant to_str exists to
+// enforce. \u writes a validated codepoint and is accepted everywhere.
+//
+// An unrecognised escape keeps its current permissive behaviour of preserving
+// the backslash, so a Windows path such as "C:\path" still lexes. That
+// permissiveness is why \u commits to the strict form only once it sees a
+// brace or a hex digit: "C:\users" has no valid escape after the backslash and
+// stays literal, while "\u01" is unambiguously a malformed escape.
+func (l *Lexer) readEscape(out []byte, kind literalKind) ([]byte, string) {
+	switch l.ch {
+	case 'n':
+		return append(out, '\n'), ""
+	case 'r':
+		return append(out, '\r'), ""
+	case 't':
+		return append(out, '\t'), ""
+	case '"':
+		return append(out, '"'), ""
+	case '\'':
+		return append(out, '\''), ""
+	case '\\':
+		return append(out, '\\'), ""
+	case '{':
+		if kind == literalFString {
+			return append(out, '{'), ""
+		}
+	case 'x':
+		return l.readHexEscape(out, kind)
+	case 'u':
+		if l.peekChar() == '{' {
+			return l.readBracedUnicodeEscape(out)
+		}
+		if _, isHex := hexValue(l.peekChar()); isHex {
+			return l.readFourDigitUnicodeEscape(out)
+		}
+	}
+	return append(append(out, '\\'), l.ch), ""
+}
+
+// readHexEscape consumes \xNN, which writes the raw byte NN.
+func (l *Lexer) readHexEscape(out []byte, kind literalKind) ([]byte, string) {
+	if kind != literalBytes {
+		return out, `\x escape is only valid in a bytes literal; use \u{...} to write a character`
+	}
+	code := 0
+	for i := 0; i < 2; i++ {
+		digit, isHex := hexValue(l.peekChar())
+		if !isHex {
+			return out, `\x escape needs 2 hex digits`
+		}
+		l.readChar()
+		code = code*16 + digit
+	}
+	return append(out, byte(code)), ""
+}
+
+// readBracedUnicodeEscape consumes \u{...} with 1 to 6 hex digits.
+func (l *Lexer) readBracedUnicodeEscape(out []byte) ([]byte, string) {
+	l.readChar() // consume '{'
+	code := 0
+	digits := 0
+	for {
+		next := l.peekChar()
+		if next == '}' {
+			l.readChar()
+			break
+		}
+		if next == 0 || next == '"' || next == '\'' || next == '\n' {
+			return out, "unterminated unicode escape"
+		}
+		digit, isHex := hexValue(next)
+		if !isHex || digits == 6 {
+			return out, `\u{...} escape needs 1 to 6 hex digits`
+		}
+		l.readChar()
+		code = code*16 + digit
+		digits++
+	}
+	if digits == 0 {
+		return out, `\u{...} escape needs 1 to 6 hex digits`
+	}
+	return appendValidatedRune(out, code)
+}
+
+// readFourDigitUnicodeEscape consumes \uNNNN, the form three shipped examples
+// already use for ANSI sequences.
+func (l *Lexer) readFourDigitUnicodeEscape(out []byte) ([]byte, string) {
+	code := 0
+	for i := 0; i < 4; i++ {
+		digit, isHex := hexValue(l.peekChar())
+		if !isHex {
+			return out, `\uNNNN escape needs 4 hex digits`
+		}
+		l.readChar()
+		code = code*16 + digit
+	}
+	return appendValidatedRune(out, code)
+}
+
+func appendValidatedRune(out []byte, code int) ([]byte, string) {
+	if code >= 0xD800 && code <= 0xDFFF {
+		return out, "unicode escape is a surrogate codepoint, which is not a character"
+	}
+	if code > 0x10FFFF {
+		return out, "unicode escape is out of range for a codepoint"
+	}
+	return appendRune(out, code), ""
+}
+
+// readQuoted scans the body of a quoted literal. An empty reason means
+// success; otherwise it describes why the literal is illegal.
+func (l *Lexer) readQuoted(quote byte, kind literalKind) (string, string) {
 	l.readChar() // Skip opening quote
 
 	var out []byte
 
 	for {
 		if l.ch == 0 {
-			return string(out), false
+			return string(out), "unterminated " + kind.name()
 		}
 		if l.ch == quote {
 			break
 		}
 		if l.ch == '\\' {
 			l.readChar() // Skip backslash
-			switch l.ch {
-			case 'n':
-				out = append(out, '\n')
-			case 'r':
-				out = append(out, '\r')
-			case 't':
-				out = append(out, '\t')
-			case '"':
-				out = append(out, '"')
-			case '\'':
-				out = append(out, '\'')
-			case '\\':
-				out = append(out, '\\')
-			default:
-				out = append(out, '\\')
-				out = append(out, l.ch)
+			if l.ch == 0 {
+				return string(out), "unterminated " + kind.name()
+			}
+			var reason string
+			out, reason = l.readEscape(out, kind)
+			if reason != "" {
+				return string(out), reason
 			}
 		} else {
 			out = append(out, l.ch)
 		}
 		l.readChar()
 	}
-
-	return string(out), true
-}
-
-func (l *Lexer) readBytes(quote byte) (string, bool) {
-	l.readChar()
-
-	var out []byte
-
-	for {
-		if l.ch == 0 {
-			return string(out), false
-		}
-		if l.ch == quote {
-			break
-		}
-		if l.ch == '\\' {
-			l.readChar()
-			switch l.ch {
-			case 'n':
-				out = append(out, '\n')
-			case 'r':
-				out = append(out, '\r')
-			case 't':
-				out = append(out, '\t')
-			case '"':
-				out = append(out, '"')
-			case '\'':
-				out = append(out, '\'')
-			case '\\':
-				out = append(out, '\\')
-			default:
-				out = append(out, '\\')
-				out = append(out, l.ch)
-			}
-		} else {
-			out = append(out, l.ch)
-		}
-		l.readChar()
-	}
-	return string(out), true // The parser converts this string to Bytes Value
-}
-
-func (l *Lexer) readFString(quote byte) (string, bool) {
-	l.readChar() // Skip opening quote
-
-	var out []byte
-
-	for {
-		if l.ch == 0 {
-			return string(out), false
-		}
-		if l.ch == quote {
-			break
-		}
-		if l.ch == '\\' {
-			l.readChar()
-			switch l.ch {
-			case 'n':
-				out = append(out, '\n')
-			case 'r':
-				out = append(out, '\r')
-			case 't':
-				out = append(out, '\t')
-			case '"':
-				out = append(out, '"')
-			case '\'':
-				out = append(out, '\'')
-			case '\\':
-				out = append(out, '\\')
-			case '{': // Escaped interpolation start?
-				out = append(out, '{')
-			default:
-				out = append(out, '\\')
-				out = append(out, l.ch)
-			}
-		} else {
-			out = append(out, l.ch)
-		}
-		l.readChar()
-	}
-	return string(out), true
+	return string(out), ""
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {
