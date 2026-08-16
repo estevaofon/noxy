@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -195,5 +196,73 @@ func TestParseUrlKeepsMultibyteHostSeparateFromPath(t *testing.T) {
 	got, ok := captured.Obj.(string)
 	if !ok || got != "münchen.de|/path" {
 		t.Fatalf("parse_url = %#v, want %q", captured, "münchen.de|/path")
+	}
+}
+
+func TestStringNativesRejectBytes(t *testing.T) {
+	machine := New()
+	text := value.NewString("x")
+	number := value.NewInt(1)
+	payload := value.NewBytes("hello")
+
+	tests := []struct {
+		native string
+		args   []value.Value
+	}{
+		{native: "strings_contains", args: []value.Value{payload, text}},
+		{native: "strings_contains", args: []value.Value{text, payload}},
+		{native: "strings_starts_with", args: []value.Value{payload, text}},
+		{native: "strings_ends_with", args: []value.Value{payload, text}},
+		{native: "strings_index_of", args: []value.Value{payload, text}},
+		{native: "strings_index_of", args: []value.Value{text, payload}},
+		{native: "strings_count", args: []value.Value{payload, text}},
+		{native: "strings_to_upper", args: []value.Value{payload}},
+		{native: "strings_to_lower", args: []value.Value{payload}},
+		{native: "strings_trim", args: []value.Value{payload}},
+		{native: "strings_reverse", args: []value.Value{payload}},
+		{native: "strings_repeat", args: []value.Value{payload, number}},
+		{native: "strings_replace", args: []value.Value{payload, text, text}},
+		{native: "strings_replace_first", args: []value.Value{payload, text, text}},
+		{native: "strings_pad_left", args: []value.Value{payload, number, text}},
+		{native: "strings_substring", args: []value.Value{payload, number, number}},
+		{native: "strings_is_empty", args: []value.Value{payload}},
+		{native: "strings_is_digit", args: []value.Value{payload}},
+		{native: "strings_is_alpha", args: []value.Value{payload}},
+		{native: "strings_is_alnum", args: []value.Value{payload}},
+		{native: "strings_is_space", args: []value.Value{payload}},
+		{native: "strings_char_at", args: []value.Value{payload, number}},
+		{native: "ord", args: []value.Value{payload}},
+	}
+	for _, test := range tests {
+		t.Run(test.native, func(t *testing.T) {
+			_, err := requireBuiltin(t, machine, test.native).Invoke(machine, test.args)
+			if err == nil {
+				t.Fatalf("%s accepted a bytes argument", test.native)
+			}
+			if !strings.Contains(err.Error(), "expected string, got bytes") {
+				t.Fatalf("message = %q, want it to name the type mismatch", err.Error())
+			}
+			if !strings.Contains(err.Error(), "to_str") {
+				t.Fatalf("message = %q, want it to point at to_str", err.Error())
+			}
+		})
+	}
+}
+
+func TestStringNativesStillAcceptStrings(t *testing.T) {
+	machine := New()
+	got := callBuiltin(t, machine, "strings_contains", value.NewString("hello"), value.NewString("ell"))
+	if got.Type != value.VAL_BOOL || !got.AsBool {
+		t.Fatalf("strings_contains = %#v, want true", got)
+	}
+}
+
+func TestSplitRejectsBytesButAcceptsItsStructArgument(t *testing.T) {
+	source := `use strings select *
+let parts: SplitResult = split(to_str(b"a,b"), ",")
+test_report(parts.count)`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_INT || captured.AsInt != 2 {
+		t.Fatalf("split after explicit to_str = %#v, want 2", captured)
 	}
 }
