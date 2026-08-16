@@ -24,11 +24,95 @@ func valuesEqual(a, b value.Value) bool {
 		case value.VAL_FLOAT:
 			return a.AsFloat == b.AsFloat
 		case value.VAL_OBJ:
-			return a.Obj == b.Obj // Simple pointer/string comparison
+			// CoW: compostos comparam estruturalmente (identidade de ponteiro
+			// ficou instável sob copy-on-write). Demais objetos (strings via
+			// interface, closures, canais…) mantêm a comparação direta.
+			switch ao := a.Obj.(type) {
+			case *value.ObjArray:
+				bo, ok := b.Obj.(*value.ObjArray)
+				if !ok {
+					return false
+				}
+				if ao == bo {
+					return true
+				}
+				if len(ao.Elements) != len(bo.Elements) {
+					return false
+				}
+				for i := range ao.Elements {
+					if !valuesEqual(ao.Elements[i], bo.Elements[i]) {
+						return false
+					}
+				}
+				return true
+			case *value.ObjMap:
+				bo, ok := b.Obj.(*value.ObjMap)
+				if !ok {
+					return false
+				}
+				if ao == bo {
+					return true
+				}
+				as, bs := ao.Snapshot(), bo.Snapshot()
+				if len(as) != len(bs) {
+					return false
+				}
+				for k, av := range as {
+					bv, ok := bs[k]
+					if !ok || !valuesEqual(av, bv) {
+						return false
+					}
+				}
+				return true
+			case *value.ObjInstance:
+				bo, ok := b.Obj.(*value.ObjInstance)
+				if !ok {
+					return false
+				}
+				if ao == bo {
+					return true
+				}
+				if ao.Struct != bo.Struct || len(ao.Fields) != len(bo.Fields) {
+					return false
+				}
+				for k, av := range ao.Fields {
+					bv, ok := bo.Fields[k]
+					if !ok || !valuesEqual(av, bv) {
+						return false
+					}
+				}
+				return true
+			default:
+				return a.Obj == b.Obj
+			}
 		case value.VAL_BYTES:
 			return a.Obj.(string) == b.Obj.(string)
 		case value.VAL_TASK:
 			return a.Obj == b.Obj
+		case value.VAL_REF:
+			// Refs comparam por identidade de SLOT (não são dereferenciados —
+			// o que também impede ciclos na comparação estrutural).
+			ar, aok := a.Obj.(*value.ObjRef)
+			br, bok := b.Obj.(*value.ObjRef)
+			if !aok || !bok || ar == nil || br == nil {
+				return a.Obj == b.Obj
+			}
+			if ar.RefType != br.RefType {
+				return false
+			}
+			switch ar.RefType {
+			case value.REF_GLOBAL:
+				return ar.GlobalOwner == br.GlobalOwner && ar.Name == br.Name
+			case value.REF_UPVALUE:
+				return ar.Upvalue == br.Upvalue
+			case value.REF_PTR:
+				return ar.Ptr == br.Ptr
+			case value.REF_PROPERTY:
+				return ar.Container.Obj == br.Container.Obj && ar.Name == br.Name
+			case value.REF_INDEX:
+				return ar.Container.Obj == br.Container.Obj && valuesEqual(ar.Index, br.Index)
+			}
+			return false
 		default:
 			return false
 		}
