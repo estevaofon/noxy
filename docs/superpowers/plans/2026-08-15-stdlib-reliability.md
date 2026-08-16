@@ -19,7 +19,8 @@
 - Noxy has no `continue` keyword; use `if`/`else` inside loops.
 - Noxy has no `min`/`max` builtin; clamp with explicit `if`.
 - Noxy string literals support only `\n`, `\r`, `\t`, `\"`, `\'`, `\\`. There is no `\u` escape; build a character with `from_char_code(code)`.
-- A top-level variable reassigned inside a function must be declared `global`, not `let`.
+- **Do not use the `global` keyword.** It is in the token table but the parser rejects it: `global counter: int = 0` is `SyntaxError: invalid syntax "global"`. Declare top-level variables with `let`; a function may reassign a `let` declared at top level, which is verified working.
+- **Do not add a `use` statement to a `.nx` module under `internal/stdlib/`.** A stdlib module that gains an import becomes unloadable through the path form (`use internal.stdlib.http_parser select *` fails with `failed to resolve wildcard module`). Inside a stdlib module, call the global native directly and type the result `any`, the way `internal/stdlib/net.nx` already calls `net_select`. This restriction applies only to stdlib modules; top-level scripts under `noxy_examples/` may import freely.
 - `length(s)` on a `string` counts characters; on `bytes` it counts octets.
 - Commit after every task. Commit messages end with:
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
@@ -900,8 +901,8 @@ Create `noxy_examples/test_convert.nx`:
 // Testes de conversão numérica
 use convert select *
 
-global passed: int = 0
-global failed: int = 0
+let passed: int = 0
+let failed: int = 0
 
 func check(name: string, condition: bool) -> void
     if condition then
