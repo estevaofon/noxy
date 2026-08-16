@@ -62,6 +62,27 @@
   O parâmetro é estritamente `bytes`: passar uma `string` — inclusive através
   de `use strings select *` — levanta erro de runtime nomeando o tipo
   recebido.
+- **`http_server` agora faz framing incremental** (ponto 13 do PR #17): lê o
+  bloco de headers e o corpo `Content-Length` até completar, em vez de um
+  único `socket_recv`. Ver `docs/HTTP_SERVER.md`.
+  - `HttpServer` ganha `max_header_bytes`, `max_body_bytes`,
+    `header_timeout_ms`, `body_timeout_ms`, `write_timeout_ms` e
+    `read_chunk_bytes`, com defaults documentados e proteção contra
+    slowloris por deadline absoluto de cada fase.
+  - **`bind_server(server: ref HttpServer) -> bool`** separa o bind do loop de
+    accept e escreve a porta real de volta em `server.port`, tornando a porta
+    `0` utilizável.
+  - Requisições inválidas recebem 400, 408, 413, 414, 431, 501 ou 505 com
+    `Content-Length` byte-exato, em vez de desconexão silenciosa.
+  - **`count_header(headers, count, name)`** em `http_parser`.
+- **Escapes `\uNNNN` e `\u{...}`** em todo literal de string, com o codepoint
+  validado — surrogates e valores acima de `0x10FFFF` são rejeitados na
+  léxica.
+- **Escape `\xNN`** em literais de bytes, para escrever um byte bruto.
+  Recusado em literal de string, onde construiria UTF-8 inválido.
+- **`strings.codes(s) -> int[]`**, que decodifica a string uma vez e devolve
+  todos os codepoints. Um laço com `char_at` redecodifica a string inteira a
+  cada chamada e é quadrático no seu tamanho.
 
 ### Fixed
 
@@ -99,6 +120,46 @@
   de depuração, `b"..."`, adicionando um prefixo e um sufixo espúrios a todo
   valor gravado. Independente de validade UTF-8. Corrigido para passar o
   conteúdo bruto.
+- **Struct com campo de tipo importado nunca compilava.** `use pkg select *`
+  vinculava o tipo importado como valor, mas nunca ensinava ao compilador o
+  layout de campos desse tipo em outra unidade de compilação. Uma struct
+  local com um campo desse tipo — exatamente a forma de
+  `HttpServer.listener: Socket` — construía metadado de tipo em runtime
+  incompleto, e toda chamada ao construtor levantava
+  `struct constructor has incomplete runtime type metadata`,
+  incondicionalmente. `new_server()` nunca funcionou antes desta correção.
+- **Resolução de global/propriedade/import/closure truncava acima de 255
+  constantes no pool.** `OP_GET_GLOBAL`, `OP_SET_GLOBAL`, `OP_GET_PROPERTY`,
+  `OP_SET_PROPERTY`, `OP_IMPORT`, `OP_CLOSURE`, `OP_REF_GLOBAL`,
+  `OP_REF_PROPERTY` e `OP_CONTEXT_REF_PROPERTY` codificavam o índice no pool
+  de constantes em um único byte. Como `AddConstant` nunca deduplica — cada
+  literal de string e cada referência a um nome global reivindica seu
+  próprio slot — um chunk moderadamente grande já ultrapassa 255 constantes;
+  a partir daí o índice `byte(256)` volta para `0` silenciosamente, e a
+  instrução lê a constante errada. Observado como
+  `undefined global variable 'strings'` num exemplo padrão de 85 linhas, e
+  como panic de asserção de tipo em casos mais adversos. Todos os nove
+  opcodes agora codificam um índice de 16 bits.
+- **`bind_server` reescrevia `server.running` para o mesmo valor já
+  presente**, uma escrita desnecessária que corria (`-race`) contra leitura
+  concorrente de outro campo da mesma struct no padrão bind-depois-spawn que
+  a própria função existe para viabilizar. O loop de accept de `serve()`
+  também deixou de reler `server.running` a cada iteração; ele reage à
+  falha de `accept()` — já sincronizada no registro de sockets — quando
+  `stop_server` fecha o listener de outra goroutine, em vez de repetir a
+  leitura de um campo comum de struct, que não é sincronizado entre threads
+  como globals e maps.
+- **`response_error` declarava contagem de runas como `Content-Length`**,
+  subestimando o tamanho de qualquer mensagem não-ASCII.
+- **Handler que falhava vazava o socket do cliente.** A conexão agora fecha
+  por `defer` em todo caminho de saída, incluindo falha do handler.
+- **`get_header` cortava valores contendo `:`**, então
+  `Host: example.com:8080` devolvia `example.com`.
+- **Escape unicode de quatro dígitos era lexado como texto literal.** Uma
+  sequência ANSI de limpar tela escrita como ESC escapado por `\u` saía
+  como oito caracteres visíveis. `conway.nx`, `conway_random.nx` e
+  `langtons_ant.nx` usavam esse padrão e os três imprimiam o texto de escape
+  em vez de limpar a tela.
 
 ## [0.2.0] - 2026-08-13
 
