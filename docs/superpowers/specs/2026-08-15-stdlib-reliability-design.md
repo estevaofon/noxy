@@ -39,11 +39,43 @@ can branch on:
 | `to_int_result(v)` | `IntResult` with `ok = false` |
 | `to_float_result(v)` | `FloatResult` with `ok = false` |
 
-The pair is required, not a convenience. Noxy has `defer` for cleanup but no
-construct that catches a runtime error, so a strict conversion alone would
-leave code that parses untrusted input with no way to recover. The `_result`
-suffix is the convention the standard library already uses for exactly this
-split in `io.close` / `io.close_result` and `io.write` / `io.write_result`.
+The pair is required, not a convenience, for two independent reasons.
+
+**A correct guard cannot be written in Noxy today.** A caller who wants to
+avoid the strict form must validate first, and the language offers no sound way
+to do it. `is_digit` covers non-negative integers but not range:
+
+```noxy
+is_digit("99999999999999999999")   // true
+to_int("99999999999999999999")     // ParseInt overflows
+```
+
+Checking the range without converting requires comparing against
+`9223372036854775807`, which requires converting. There is no `is_float` or
+`is_number` at all, so `to_float` has no guard even in principle. A validate
+first strategy is therefore unsound for integers and unavailable for floats.
+
+**Handling the raised error is possible but disproportionate.** Noxy has no
+`try`, `catch`, `recover`, or `rescue` keyword. The one mechanism that survives
+a runtime error is `spawn_task` with `task_await`, which recovers both runtime
+errors and Go panics into a status envelope. It works, but it runs the call in
+a new VM on its own goroutine under shallow-copy parameter rules, returns the
+value untyped, and reports the cause only as a message string that a caller
+would have to pattern-match. That is a concurrency primitive, not an error
+handler, and using it to convert a string to a number changes the execution
+model of the expression.
+
+The `_result` suffix is the convention the standard library already uses for
+exactly this split in `io.close` / `io.close_result` and `io.write` /
+`io.write_result`. Noxy functions have a single return type, so a result struct
+takes the place of Go's `value, err` pair; `NetResult`, `IOResult`,
+`IOWriteResult`, and `SplitResult` already establish that shape. `to_int` is
+one of the few places that returns a sentinel instead.
+
+Note the naming is the inverse of Go's, where `Atoi` returns an error and
+`MustCompile` panics. Noxy's bare name raises and its `_result` form returns,
+because that is the convention the standard library already created. Internal
+consistency is preferred over mirroring the host language.
 
 ### Conversion rules
 
@@ -295,12 +327,20 @@ migration.
 a `to_int` or `to_float` call that may receive non-numeric input becomes the
 `_result` form with an explicit failure branch.
 
-This change also improves the queued `feat/http-streaming-server` subproject.
-Its `resolve_body_length` planned to gate every `Content-Length` conversion
-behind `is_digit` purely because `to_int` could not report failure. With
-`to_int_result` the gate becomes a direct, honest parse, and `is_digit` remains
-only where the HTTP specification requires a rule stricter than "a valid
-integer" — no sign and no leading zeros beyond a single `0`.
+This change also repairs a defect in the queued `feat/http-streaming-server`
+plan. Its `resolve_body_length` gated every `Content-Length` conversion behind
+`is_digit(raw) && length(raw) <= 19`, purely because `to_int` could not report
+failure. That guard is wrong: `int64` holds up to `9223372036854775807`, which
+is 19 digits, so `"9999999999999999999"` passes the guard and overflows. With
+today's `to_int` it becomes `0`, the server frames the request as bodyless, and
+the client's remaining bytes are read as the start of another request — a
+framing desynchronization in exactly the code path that subproject exists to
+harden.
+
+With `to_int_result` the gate becomes a direct parse that reports overflow
+honestly, and `is_digit` remains only where the HTTP specification requires a
+rule stricter than "a valid integer": no sign and no leading `+`. The HTTP plan
+is updated accordingly before it is executed.
 
 ## Compatibility
 
@@ -385,3 +425,18 @@ reason the queued HTTP subproject bounds method and header-name lengths before
 validating them character by character. Correcting it — by caching a decoded
 form, exposing a character-iterator, or indexing lazily — is a separate
 optimization subproject and changes no semantics defined here.
+
+Two language-level subprojects are candidates that this design deliberately
+does not require:
+
+- **A structured error-catching construct.** The unwind machine from
+  `feat/runtime-defer-unwind` already exists, so catching is largely a matter
+  of stopping the unwind at a marker and defining how that interacts with
+  deferred-failure aggregation. It would make the strict forms usable directly
+  for untrusted input. Even then the `_result` family stays valuable, because
+  an expected data failure and an unexpected program bug deserve different
+  handling — the same reason Go carries both `error` and `panic`.
+- **Multiple return values.** Noxy's single `ReturnType` is why the standard
+  library encodes fallible operations as result structs. Tuple returns would
+  allow Go's `value, err` shape directly. This is a parser, compiler, and VM
+  change, and the result-struct convention works without it.
