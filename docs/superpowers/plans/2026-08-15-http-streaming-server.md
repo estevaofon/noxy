@@ -4,7 +4,7 @@
 
 **Goal:** Replace the HTTP server's single 64 KB socket read with incremental framing that reads headers and body to completion, enforces limits and deadlines, writes responses completely, and answers invalid requests with real HTTP responses.
 
-**Architecture:** Three layers, all in Noxy. `internal/stdlib/http_parser.nx` gains pure framing primitives that perform no I/O. `internal/stdlib/http_server.nx` gains the incremental read loop, deadline handling, and a complete-write loop. Policy stays where it is: one request per connection, always `Connection: close`. No new Go native is introduced; the primitives needed (`socket_recv`, `socket_send`, `settimeout`, `time_now_ms`, `slice`, `defer`) already exist.
+**Architecture:** Three layers, all in Noxy. `internal/stdlib/http_parser.nx` gains pure framing primitives that perform no I/O. `internal/stdlib/http_server.nx` gains the incremental read loop, deadline handling, and a complete-write loop. Policy stays where it is: one request per connection, always `Connection: close`. No new Go native is introduced; the primitives needed (`socket_recv`, `socket_send`, `settimeout`, `time_now_ms`, `slice`, `defer`) already exist, as do the two guards the sanitized runtime requires: `is_valid_utf8` from `strings` and the global `convert_to_int_result`.
 
 **Tech Stack:** Noxy stdlib (`.nx`, embedded via `internal/stdlib/embed.go`), Go 1.x test harness in `internal/vm` that runs Noxy source on the VM and speaks raw TCP against it.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Branch is `feat/http-streaming-server`, already created off `develop`.
+- Branch is `feat/http-streaming-server`, created off `develop` and since merged up to date with it. That merge brought the UTF-8 string invariant and the raising numeric conversions described below; the constraints they impose are not optional.
 - No new Go native builtin. All behavior changes live in `internal/stdlib/*.nx`.
 - Existing exported names keep their signatures: `new_server(host, port)`, `serve(server, handler)`, `stop_server`, `response_ok`, `response_text`, `response_json`, `response_html`, `response_error`, `response_404`, `response_500`, `serve_static`, `find_header_end`, `parse_request`, `parse_response`, `build_request`, `build_response`, `get_header`.
 - Noxy has no `continue` keyword. Use `if`/`else` structure inside loops.
@@ -23,9 +23,13 @@
 - `repeat` comes from `strings`. A script that calls it needs `use strings select *`.
 - `time_now_ms()` **is** a global native and needs no import.
 - `length(s)` on a `string` is a rune count; on `bytes` it is a byte count. All offset arithmetic in the read and write loops operates on `bytes`.
-- `split`, `index_of`, `starts_with`, `contains`, and `trim` are byte-based; `substring`, `char_at`, and `length(string)` are rune-based. Structural framing decisions use only the byte-based natives.
-- `to_int` accepts `"+5"`, `"5.5"`, and `" 5"`. Never call it on a `Content-Length` value before `is_digit` has passed.
+- `split`, `index_of`, `starts_with`, `contains`, and `trim` are byte-oriented; `substring`, `char_at`, and `length(string)` are rune-oriented. Structural framing decisions use only the byte-oriented natives, so a byte offset is never fed to a rune index.
+- **Every Noxy string holds valid UTF-8.** `to_str(bytes)` *raises a runtime error* when the payload is not valid UTF-8, and every text native rejects a `bytes` argument outright — `to_str` is the only route from `bytes` to `string`. Never convert client-supplied bytes without gating on `is_valid_utf8(b: bytes) -> bool` from `strings` first. A raise inside a spawned connection routine kills the routine: the client gets no response and the VM prints `Thread Error: ...` to the server's stdout, which a remote client can trigger at will.
+- `is_valid_utf8` raises a type error if handed a `string`, so only ever pass it a `bytes` value.
+- **`to_int` raises instead of guessing.** It parses through `strconv.ParseInt`: it accepts a leading `+` or `-`, and raises on `" 5"`, `"5.5"`, `"0x10"`, and on any value above `int64`. Never call it on a `Content-Length`. Gate with `is_digit` first, then convert with `convert_to_int_result`, which reports failure as data (`ok`/`value`/`error`) instead of raising. `parse_url` in `http_parser.nx` already uses this native, so no import is needed.
+- `is_digit` plus a 19-character bound does **not** exclude `int64` overflow: `9999999999999999999` is nineteen digits and is above `int64`. Only the `_result` conversion closes that hole.
 - `net_settimeout` raises a synchronous runtime error for a non-positive timeout. Always check `remaining <= 0` and reject before calling `settimeout`.
+- The stdlib hygiene suite (`internal/vm/stdlib_hygiene_test.go`) asserts every embedded `.nx` source is valid UTF-8, holds no `U+FFFD`, and contains neither `DEBUG:` nor `Debug:`. It runs as part of `go test ./internal/...`.
 - Defaults: `max_header_bytes` 16384, `max_body_bytes` 1048576, `header_timeout_ms` 5000, `body_timeout_ms` 15000, `write_timeout_ms` 15000, `read_chunk_bytes` 8192.
 - Fixed bounds: method at most 64 characters, header name at most 256 characters, request target at most 2048 characters, at most 64 header lines.
 - Commit after every task. Commit messages end with:
@@ -456,7 +460,7 @@ func count_header(headers: string[64], count: int, name: string) -> int
 end
 ```
 
-`header_line_value` rejoins every segment after the first `:`, so `Host: example.com:8080` keeps its port. `split` is byte-based, so a value carrying non-UTF-8 bytes is not corrupted.
+`header_line_value` rejoins every segment after the first `:`, so `Host: example.com:8080` keeps its port. `split` matches and rejoins on byte boundaries, so a value is reassembled exactly as received — including a multi-byte UTF-8 character that a rune-indexed `substring` split would have to be reasoned about separately. A non-UTF-8 value cannot appear here at all: `parse_request_head` rejects the header block before any line reaches this function.
 
 - [ ] **Step 8: Run the tests to verify they pass**
 
@@ -494,7 +498,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `internal/vm/http_parser_framing_test.go`
 
 **Interfaces:**
-- Consumes: `HttpFrameResult`, `frame_error`, `empty_request`, `is_token`, `is_visible_ascii`, `HTTP_MAX_METHOD_LENGTH`, `HTTP_MAX_TARGET_LENGTH`, `HTTP_MAX_HEADER_NAME_LENGTH`, `HTTP_MAX_HEADER_LINES` from Task 1.
+- Consumes: `HttpFrameResult`, `frame_error`, `empty_request`, `is_token`, `is_visible_ascii`, `HTTP_MAX_METHOD_LENGTH`, `HTTP_MAX_TARGET_LENGTH`, `HTTP_MAX_HEADER_NAME_LENGTH`, `HTTP_MAX_HEADER_LINES` from Task 1; `is_valid_utf8` from `strings`, already imported at the top of `http_parser.nx`.
 - Produces: `func parse_request_head(header_bytes: bytes) -> HttpFrameResult`. On success `ok` is true and `request` carries `method`, `path`, `query`, `version`, `headers`, `header_count`, with `body` empty.
 
 - [ ] **Step 1: Write the failing test**
@@ -610,9 +614,35 @@ func TestParseRequestHeadAcceptsExactly64Headers(t *testing.T) {
 		t.Fatalf("status = %d, want 0", got)
 	}
 }
+
+// A header block carrying a raw 0xFF is not valid UTF-8. Without the
+// is_valid_utf8 gate, to_str raises and the caller never receives a status at
+// all, so this test fails by erroring out rather than by returning a wrong
+// number. The byte is built with from_char_code(255) because Noxy string
+// literals have no \u or \x escape; the source stays pure ASCII, which is what
+// TestEmbeddedStdlibSourcesAreValidUTF8 expects of anything committed.
+func TestParseRequestHeadRejectsNonUTF8HeaderBlock(t *testing.T) {
+	source := "let raw: bytes = to_bytes(\"GET / HTTP/1.1\\r\\nX-Bad: \") + to_bytes([255, 254]) + to_bytes(\"\\r\\nHost: a\")\n" +
+		"let head: HttpFrameResult = parse_request_head(raw)\n" +
+		"if head.ok then test_report(0) else test_report(head.status) end"
+	if got := captureParserInt(t, source); got != 400 {
+		t.Fatalf("status = %d, want 400", got)
+	}
+}
+
+func TestParseRequestRetainedGateReturnsDefaults(t *testing.T) {
+	source := "let raw: bytes = to_bytes(\"GET /x HTTP/1.1\\r\\nX-Bad: \") + to_bytes([255]) + to_bytes(\"\\r\\n\\r\\n\")\n" +
+		"let req: HttpRequest = parse_request(raw, length(raw))\n" +
+		"test_report(req.path)"
+	if got := captureParserString(t, source); got != "/" {
+		t.Fatalf("path = %q, want the default %q", got, "/")
+	}
+}
 ```
 
 Add `"fmt"` and `"strings"` to the import block of `internal/vm/http_parser_framing_test.go`.
+
+`to_bytes([255, 254])` builds the invalid bytes from an int array, which is the only way to get a non-UTF-8 payload into a Noxy source file that must itself be valid UTF-8. This is verified, not assumed: `to_bytes("A") + to_bytes([255, 254]) + to_bytes("B")` yields a 4-byte value for which `is_valid_utf8` returns `false`, and `to_str` on it raises `to_str: bytes are not valid UTF-8 at byte offset 1`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -626,6 +656,12 @@ Add to `internal/stdlib/http_parser.nx`, in the `Request Parser` section immedia
 
 ```noxy
 func parse_request_head(header_bytes: bytes) -> HttpFrameResult
+    // The bytes-to-text boundary. to_str raises on invalid UTF-8, and a raise
+    // here would kill the connection routine instead of answering the client.
+    if !is_valid_utf8(header_bytes) then
+        return frame_error(400, "Bad Request")
+    end
+
     let header_str: string = to_str(header_bytes)
     let lines: SplitResult = split(header_str, "\r\n")
     if lines.count == 0 then
@@ -724,13 +760,27 @@ end
 
 `is_token` rejects an empty name and any name carrying whitespace, which covers both the empty-name and space-before-colon cases without a separate check.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+The `is_valid_utf8` gate must stay the **first** statement. Every later rule — `split` on the header string, `is_token`, `is_visible_ascii`, the rune-counted length bounds — operates on text, and text only exists past that gate.
+
+- [ ] **Step 4: Guard the retained `parse_request` at the same boundary**
+
+`parse_request` is still exported for callers holding a complete buffer, and it converts header bytes through `to_str` on line 173. Give it the same gate so a non-UTF-8 buffer yields its default `HttpRequest` instead of raising. Insert immediately before the `let header_str: string = to_str(header_bytes)` line inside `parse_request`:
+
+```noxy
+    if !is_valid_utf8(header_bytes) then
+        return req
+    end
+```
+
+`req` is already initialized with the defaults at that point, and `req.body` has already been filled, so the early return is well-formed. The signature does not change.
+
+- [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `go test ./internal/vm/ -run TestParseRequestHead -v`
 
 Expected: PASS, every subtest.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add internal/stdlib/http_parser.nx internal/vm/http_parser_framing_test.go
@@ -740,6 +790,10 @@ parse_request_head validates the request line and every header line and
 returns an HttpFrameResult carrying the status to answer with. Rejects
 obs-folding, whitespace before the colon, non-origin targets, unsupported
 versions, and silent truncation past 64 headers.
+
+Both parse_request_head and the retained parse_request gate the
+bytes-to-text boundary with is_valid_utf8, so a non-UTF-8 header block is
+a 400 rather than a raise that kills the connection routine.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
@@ -755,7 +809,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `internal/vm/http_parser_framing_test.go`
 
 **Interfaces:**
-- Consumes: `BodyLengthResult`, `count_header`, `get_header` from Task 1.
+- Consumes: `BodyLengthResult`, `count_header`, `get_header` from Task 1; `is_digit` from `strings` and the global `convert_to_int_result`.
 - Produces: `func resolve_body_length(headers: string[64], count: int, max_body_bytes: int) -> BodyLengthResult`.
 
 - [ ] **Step 1: Write the failing test**
@@ -799,6 +853,12 @@ func TestResolveBodyLength(t *testing.T) {
 		{name: "empty value", headers: []string{"Content-Length:"}, maxBody: 1024, wantStatus: 400},
 		{name: "hex value", headers: []string{"Content-Length: 0x10"}, maxBody: 1024, wantStatus: 400},
 		{name: "twenty digits", headers: []string{"Content-Length: 99999999999999999999"}, maxBody: 1024, wantStatus: 400},
+		// Nineteen digits, so the length bound admits it, and every character is
+		// a digit, so is_digit admits it too — but the value is above int64.
+		// to_int would raise here; only the _result conversion turns it into a
+		// status the client can be told about.
+		{name: "nineteen digits above int64", headers: []string{"Content-Length: 9999999999999999999"}, maxBody: 1024, wantStatus: 400},
+		{name: "largest int64", headers: []string{"Content-Length: 9223372036854775807"}, maxBody: 1024, wantStatus: 413},
 		{name: "over max body", headers: []string{"Content-Length: 2048"}, maxBody: 1024, wantStatus: 413},
 		{name: "exactly max body", headers: []string{"Content-Length: 1024"}, maxBody: 1024, wantOK: true, wantLength: 1024},
 		{name: "chunked", headers: []string{"Transfer-Encoding: chunked"}, maxBody: 1024, wantStatus: 501},
@@ -857,7 +917,15 @@ func resolve_body_length(headers: string[64], count: int, max_body_bytes: int) -
         return BodyLengthResult(false, 0, 400, "Bad Request")
     end
 
-    let declared: int = to_int(raw)
+    // Never to_int here: it raises on anything it cannot represent, and a
+    // 19-digit value can still exceed int64. The _result form reports that as
+    // data so the client gets a 400 instead of a dead connection routine.
+    let parsed: any = convert_to_int_result(raw)
+    if !parsed.ok then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+
+    let declared: int = parsed.value
     if declared < 0 then
         return BodyLengthResult(false, 0, 400, "Bad Request")
     end
@@ -869,7 +937,9 @@ func resolve_body_length(headers: string[64], count: int, max_body_bytes: int) -
 end
 ```
 
-`is_digit` is ASCII-only and rejects an empty string, so `+5`, `-5`, `5.5`, `0x10`, and `5, 5` never reach `to_int`.
+Two guards, each closing a distinct hole. `is_digit` is ASCII-only and rejects the empty string, so `+5`, `-5`, `5.5`, `0x10`, and `5, 5` are refused on syntax — `to_int` would have *accepted* `+5` and `-5`, since `strconv.ParseInt` allows a sign. `convert_to_int_result` then closes the overflow hole that `is_digit` and the 19-character bound leave open: `9999999999999999999` passes both and is still above `int64`. Verified directly — `convert_to_int_result("9999999999999999999")` returns `ok = false` with `cannot convert string "9999999999999999999" to int: out of range`, while `to_int` on the same value raises.
+
+`convert_to_int_result` is a global native and needs no import; `parse_url` in the same file already calls it and types the result as `any`, which is the pattern followed here.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1700,6 +1770,12 @@ func TestServerRejectsInvalidRequests(t *testing.T) {
 		{name: "target with space", request: "GET /a b HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
 		{name: "absolute form target", request: "GET http://a/b HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
 		{name: "target too long", request: "GET /" + strings.Repeat("q", 2100) + " HTTP/1.1\r\nHost: a\r\n\r\n", want: 414},
+		// The regression that the UTF-8 invariant introduces if left ungated:
+		// to_str raises inside the spawned routine, the client is left hanging,
+		// and the VM prints Thread Error to the server's stdout.
+		{name: "non utf8 header value", request: "GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a\r\n\r\n", want: 400},
+		{name: "non utf8 target", request: "GET /\xff HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
+		{name: "content length above int64", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 9999999999999999999\r\n\r\n", want: 400},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1829,13 +1905,38 @@ func TestServerClosesConnectionWhenHandlerFails(t *testing.T) {
 		t.Fatalf("status after failing handler = %d, want 200 (response %q)", got, raw)
 	}
 }
+
+// A non-UTF-8 request must be an ordinary rejection, not an event that takes
+// the connection routine down. Ungated, to_str raises: this client would hang
+// with no response and the next one would still be served, so the assertion
+// that matters is that THIS connection is answered.
+func TestServerSurvivesNonUTF8Request(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+
+	bad := server.dial()
+	if _, err := bad.Write([]byte("GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := responseStatus(t, readRawResponse(t, bad)); got != 400 {
+		t.Fatalf("status = %d, want 400", got)
+	}
+
+	survivor := server.dial()
+	if _, err := survivor.Write([]byte("GET /ok HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, survivor)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status after non-UTF-8 request = %d, want 200 (response %q)", got, raw)
+	}
+}
 ```
 
 Add `"strconv"`, `"strings"`, and `"sync"` to the import block of `internal/vm/http_server_framing_test.go`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `go test ./internal/vm/ -run 'TestServerFrames|TestServerReads|TestServerTreats|TestServerIgnores|TestServerParses|TestServerRejects|TestServerTimesOut|TestServerCloses' -v`
+Run: `go test ./internal/vm/ -run 'TestServerFrames|TestServerReads|TestServerTreats|TestServerIgnores|TestServerParses|TestServerRejects|TestServerTimesOut|TestServerCloses|TestServerSurvives' -v`
 
 Expected: FAIL — the server still performs a single `socket_recv`, so fragmented requests time out or are mis-framed and no rejection status is ever produced.
 
@@ -2009,7 +2110,7 @@ end
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `go test ./internal/vm/ -run 'TestServerFrames|TestServerReads|TestServerTreats|TestServerIgnores|TestServerParses|TestServerRejects|TestServerTimesOut|TestServerCloses' -v`
+Run: `go test ./internal/vm/ -run 'TestServerFrames|TestServerReads|TestServerTreats|TestServerIgnores|TestServerParses|TestServerRejects|TestServerTimesOut|TestServerCloses|TestServerSurvives' -v`
 
 Expected: PASS, every subtest.
 
@@ -2304,9 +2405,13 @@ a client that trickles one byte at a time still hits them.
   header lines are accepted; the 65th is an error rather than a silent drop.
 - A header value keeps every character after the first `:`, so
   `Host: example.com:8080` is read whole.
+- The header block must be valid UTF-8. Noxy strings are required to hold valid
+  UTF-8, so a header carrying a raw non-UTF-8 byte is rejected at the boundary
+  rather than decoded into something the client did not send.
 - The body length comes from `Content-Length` only. It must be 1 to 19 ASCII
-  digits with no sign, decimal point, or list. A request with neither
-  `Content-Length` nor `Transfer-Encoding` has no body, including a `POST`.
+  digits with no sign, decimal point, or list, and must fit in an `int`. A
+  request with neither `Content-Length` nor `Transfer-Encoding` has no body,
+  including a `POST`.
 - `Transfer-Encoding` is not implemented; chunked requests are refused rather
   than mis-framed.
 - Bytes arriving after the declared body length are discarded, because the
@@ -2316,7 +2421,7 @@ a client that trickles one byte at a time still hits them.
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | malformed request line or header, obsolete folding, whitespace before `:`, non-origin target, duplicate or non-digit `Content-Length`, `Transfer-Encoding` with `Content-Length`, connection ended mid-request |
+| `400 Bad Request` | header block that is not valid UTF-8, malformed request line or header, obsolete folding, whitespace before `:`, non-origin target, duplicate or non-digit `Content-Length`, a `Content-Length` too large to represent, `Transfer-Encoding` with `Content-Length`, connection ended mid-request |
 | `408 Request Timeout` | the header or body budget expired |
 | `413 Content Too Large` | declared `Content-Length` above `max_body_bytes` |
 | `414 URI Too Long` | target longer than 2048 characters |
@@ -2338,6 +2443,27 @@ expires.
 
 The connection is closed through `defer`, so a runtime error raised inside a
 handler closes the socket instead of leaking it.
+
+## Handling request bodies
+
+`req.body` is `bytes`, and the server does not inspect it — a body may legally
+carry any byte, including a PNG or a gzip stream. Noxy strings must hold valid
+UTF-8, so `to_str` raises when the body is not text:
+
+```noxy
+use strings select *
+
+func handler(req: HttpRequest) -> HttpResponse
+    if !is_valid_utf8(req.body) then
+        return response_error(400, "Body must be UTF-8 text")
+    end
+    return response_text(to_str(req.body))
+end
+```
+
+A handler that raises does not take the server down — `defer` closes the
+socket and the accept loop keeps running — but that client receives no
+response. Gate the conversion when the body may not be text.
 
 ## Not supported
 
@@ -2374,6 +2500,14 @@ Add an entry to `CHANGELOG.md` matching the file's existing format, containing:
   the length of any non-ASCII message.
 - **A failing handler leaked its client socket;** the connection now closes
   through `defer`.
+- **A non-UTF-8 request killed its connection routine.** Since `to_str` began
+  validating at the bytes-to-text boundary, a header carrying a raw non-UTF-8
+  byte raised inside the spawned handler: the client got no response and the
+  VM logged `Thread Error`. Both `parse_request_head` and `parse_request` now
+  gate on `is_valid_utf8`, so such a request is answered with 400.
+- **A `Content-Length` above `int64` raised instead of being rejected.**
+  Resolution converts through `convert_to_int_result`, so an unrepresentable
+  value returns 400.
 ```
 
 Merge the two `### Fixed` blocks into one if the changelog format requires a
@@ -2454,6 +2588,7 @@ gh pr create --base develop --title "feat/http-streaming-server - Frame HTTP req
 - Chunked `Transfer-Encoding` decoding.
 - `Expect: 100-continue`.
 - `http_client` response framing by `Content-Length` instead of read-until-EOF.
+- `parse_response` converts header bytes through `to_str` without a UTF-8 gate, so a peer replying with a non-UTF-8 header block raises inside `http_client`. Same defect class as the server-side gate added here, but on the client path this subproject excludes, and fixing it means deciding what `ClientResponse` reports for an unparseable reply.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
@@ -2477,14 +2612,35 @@ raises a synchronous runtime error for a non-positive timeout. Inside a spawned
 connection routine that error terminates the routine, so the check must reject
 first and let the normal 408 path answer the client.
 
-**Why `to_int` is never trusted.** `to_int("+5")` is `5`, `to_int("5.5")` is
-`5`, and `to_int("abc")` is `0`. A `Content-Length` resolved through `to_int`
-alone would accept values that desynchronize framing, so `is_digit` — which is
-ASCII-only and rejects the empty string — gates every conversion.
+**Why the UTF-8 gate is the first line of the parser.** Noxy strings are
+required to hold valid UTF-8, and `to_str` enforces that by raising. A raise
+inside a spawned connection routine is not a caught error: the routine dies,
+the client is left with an open socket and no response, and the VM prints
+`Thread Error: ...` to the server's stdout. Since the header block is entirely
+attacker-controlled, one byte — `0xFF` in any header value — is enough to
+trigger it on demand. `is_valid_utf8(header_bytes)` turns that into an ordinary
+400. Everything downstream of the gate then operates on text that is known to
+be well-formed, which is what makes the rune-based ASCII validation safe.
 
-**Byte-based versus rune-based helpers.** `split`, `index_of`, `starts_with`,
-`contains`, and `trim` operate on bytes; `substring`, `char_at`, and
-`length(string)` operate on runes. Framing decisions use only the byte-based
-helpers so a header carrying non-UTF-8 bytes cannot shift an offset. The
-rune-based helpers appear only in ASCII-constrained validation, where a
-non-ASCII rune fails the check and the request is rejected.
+**Why `to_int` is never trusted.** `to_int` no longer guesses — it raises.
+`strconv.ParseInt` backs it, so `to_int("+5")` and `to_int("-5")` *succeed*
+(the sign is accepted), while `" 5"`, `"5.5"`, `"0x10"`, `"abc"`, and anything
+above `int64` raise. Both halves are wrong for a `Content-Length`: the accepted
+signs would desynchronize framing, and the raises would kill the connection
+routine. `is_digit` gates the syntax and `convert_to_int_result` performs the
+conversion, so every rejection is a status the client can be told about. The
+same reasoning applies to any other attacker-controlled numeric field added
+later.
+
+**Byte-oriented versus rune-oriented helpers.** `split`, `index_of`,
+`starts_with`, `contains`, and `trim` match and report offsets in bytes;
+`substring`, `char_at`, and `length(string)` index runes. Framing decisions use
+only the byte-oriented helpers. Note this rule is no longer what protects
+framing from non-UTF-8 input — the boundary gate is, and text natives reject a
+`bytes` argument outright, so raw request bytes can never reach them. What it
+prevents is mixing offset spaces inside text already known to be valid: an
+`index_of` result is a byte offset, and passing it to `substring`, which counts
+runes, silently mis-slices any value containing a multi-byte character. The
+rune-oriented helpers appear only in ASCII-constrained validation, where a
+non-ASCII rune fails the check and the request is rejected before any offset is
+derived from it.

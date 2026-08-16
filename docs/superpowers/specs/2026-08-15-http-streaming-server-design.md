@@ -16,6 +16,53 @@ chunked `Transfer-Encoding`, `Expect: 100-continue`, HTTP/2, TLS, and the
 `http_client` response loop are excluded. The server continues to serve one
 request per connection and closes afterwards.
 
+## Runtime Foundations Assumed
+
+`develop` has since landed two invariants that change what a parser is allowed
+to do with attacker-controlled bytes. Both are enforced by the runtime, not by
+convention, so the framing path is designed around them rather than in spite of
+them.
+
+**Every Noxy string holds valid UTF-8.** `to_str` is the single choke point at
+the bytes-to-text boundary and *raises a runtime error* when the payload is not
+valid UTF-8. The inverse guard applies too: every text native
+(`split`, `index_of`, `starts_with`, `contains`, `trim`, `to_lower`) rejects a
+`bytes` argument outright. There is therefore no way to run a string operation
+over raw request bytes — the only route from `bytes` to `string` is `to_str`,
+and it validates.
+
+This is load-bearing for a network parser. A client may send any byte it likes,
+so `to_str(header_bytes)` on a header block containing `0xFF` raises inside the
+spawned connection routine. A raised error there does not merely skip the
+response: the routine dies, the client receives nothing, and the VM prints
+`Thread Error: ...` to the server's stdout — a remotely triggerable log flood.
+The framing path therefore gates the boundary explicitly with
+`is_valid_utf8(header_bytes)`, from `strings`, and rejects a non-UTF-8 header
+block with `400` before any conversion is attempted.
+
+**Numeric conversion raises instead of guessing.** `to_int` now parses through
+`strconv.ParseInt` and raises on anything it cannot represent. It accepts a
+leading `+` or `-`, rejects `" 5"`, `"5.5"`, and `"0x10"`, and raises
+`out of range` for a value above `int64`. The `_result` forms
+(`convert_to_int_result`, exposed as `to_int_result` in `convert`) return an
+`ok`/`value`/`error` record instead and never raise.
+
+`Content-Length` is attacker-controlled, so the framing path never calls
+`to_int` on it. `is_digit` gates the value first — it is ASCII-only and rejects
+the empty string, which removes `+5`, `-5`, `5.5`, `0x10`, and `5, 5` — and the
+conversion itself goes through `convert_to_int_result` so that a 19-digit value
+above `int64` is rejected with `400` rather than raising. `parse_url` in
+`http_parser.nx` already uses this native, so the pattern is established.
+
+Two consequences follow for the rest of this design. The "byte-oriented versus
+rune-oriented helper" rule is retained, but its justification changes: it is no
+longer what protects framing from non-UTF-8 input — the boundary gate is — it
+is what keeps byte offsets and rune offsets from being mixed inside text that
+is already known to be valid. And the stdlib hygiene suite added alongside
+these invariants asserts that every embedded `.nx` source is valid UTF-8, holds
+no `U+FFFD`, and ships no debug marker, so the new stdlib code is checked
+against those rules as part of ordinary validation.
+
 ## Implementation Layer
 
 The whole HTTP stack is written in Noxy, and every primitive the framing loop
@@ -189,9 +236,18 @@ any other failure closes silently, because the transport is already unusable.
 
 ### Phase 2: request line and headers
 
-`parse_request_head(header_bytes) -> HttpFrameResult` validates strictly. It
-splits the header block on `\r\n`; a lone `\n` is not accepted as a line
-terminator.
+`parse_request_head(header_bytes) -> HttpFrameResult` validates strictly.
+
+Its first act is the UTF-8 gate. `is_valid_utf8(header_bytes)` is checked
+before any conversion, and a header block that fails it is rejected with 400.
+Without this check `to_str` raises and the connection routine dies with no
+response, so the gate is what turns a hostile byte into an ordinary rejection.
+It is also the point that makes every later rule safe: past it the header block
+is known to be valid UTF-8, so rune-based validation of ASCII-constrained
+fields cannot decode a byte the client did not write.
+
+After the gate it splits the header block on `\r\n`; a lone `\n` is not
+accepted as a line terminator.
 
 Request line rules:
 
@@ -251,9 +307,15 @@ end
 - two or more `Content-Length` headers reject with 400, including headers whose
   values are identical;
 - a `Content-Length` value must be 1 to 19 characters, every character an ASCII
-  digit. `to_int` accepts `"+5"`, `" 5"`, and `"5.5"`, so the digit check runs
-  before conversion and a value failing it is 400. A comma-separated list such
-  as `5, 5` fails the same check;
+  digit. `to_int` accepts a leading `+` or `-` and raises on `" 5"`, `"5.5"`,
+  and `"0x10"`, so the digit check runs before any conversion and a value
+  failing it is 400. A comma-separated list such as `5, 5` fails the same check;
+- conversion goes through `convert_to_int_result`, not `to_int`. `is_digit`
+  plus the 19-character bound still admits a value above `int64` —
+  `9999999999999999999` is nineteen digits and overflows — and `to_int` would
+  raise on it, killing the connection routine instead of answering. The
+  `_result` form reports the failure as data, and a value it cannot convert is
+  rejected with 400;
 - a value greater than `max_body_bytes` rejects with 413;
 - no `Content-Length` and no `Transfer-Encoding` means a body length of zero,
   for every method including `POST`. This follows RFC 9112: a request without
@@ -326,7 +388,7 @@ error response carries `Content-Type: text/plain`, a byte-exact
 
 | Status | Condition |
 |---|---|
-| 400 Bad Request | malformed request line, malformed header, obsolete folding, whitespace before `:`, non-origin target, duplicate `Content-Length`, non-digit `Content-Length`, `Transfer-Encoding` with `Content-Length`, EOF mid-request |
+| 400 Bad Request | header block that is not valid UTF-8, malformed request line, malformed header, obsolete folding, whitespace before `:`, non-origin target, duplicate `Content-Length`, non-digit or unconvertible `Content-Length`, `Transfer-Encoding` with `Content-Length`, EOF mid-request |
 | 408 Request Timeout | header or body deadline expired, including a stalled trickle |
 | 413 Content Too Large | declared `Content-Length` above `max_body_bytes` |
 | 414 URI Too Long | request target longer than 2048 characters |
@@ -354,12 +416,20 @@ header. A new `count_header(headers, count, name) -> int` returns how many
 lines carry a given name, which is what duplicate detection needs.
 
 Value trimming uses the existing `strings_trim` native, whose Go `TrimSpace`
-semantics operate on the raw string and cannot corrupt bytes. Structural
-scanning likewise uses the byte-based `split`, `index_of`, and `starts_with`
-natives rather than the rune-based `substring` and `char_at`, so a header
-carrying non-UTF-8 bytes cannot shift a framing decision. Rune-based helpers
-are used only for validating ASCII-constrained fields, where any non-ASCII rune
-fails validation and the request is rejected.
+semantics operate on the raw string. Structural scanning likewise uses the
+byte-oriented `split`, `index_of`, and `starts_with` natives rather than the
+rune-oriented `substring` and `char_at`.
+
+That split matters, but not for the reason a pre-UTF-8-invariant design would
+give. A header carrying non-UTF-8 bytes cannot reach this code at all: the
+boundary gate in `parse_request_head` rejects it with 400, and every text
+native refuses a `bytes` argument outright. What the rule prevents is the
+subtler error of mixing offset spaces inside text that is already valid —
+`index_of` returns a byte offset while `substring` indexes runes, so feeding
+one to the other silently mis-slices any header value containing a multi-byte
+character. Rune-based helpers are therefore confined to validating
+ASCII-constrained fields, where any non-ASCII rune fails validation and the
+request is rejected before an offset is ever derived from it.
 
 ## Testing
 
@@ -397,6 +467,10 @@ The matrix proves:
 - EOF mid-header and EOF mid-body return 400;
 - duplicate `Content-Length` headers return 400, including identical values;
 - `Content-Length: +5`, `5.5`, `5, 5`, and an empty value return 400;
+- `Content-Length: 9999999999999999999` — nineteen digits, above `int64` —
+  returns 400 rather than raising out of the connection routine;
+- a header block carrying an invalid UTF-8 byte returns 400, and the server
+  survives to answer the next connection;
 - `Transfer-Encoding: chunked` returns 501, and combined with `Content-Length`
   returns 400;
 - `HTTP/0.9` and `HTTP/2.0` return 505, while `HTTP/1.0` and `HTTP/1.1` are
@@ -439,6 +513,11 @@ go test -race ./internal/vm/...
 go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
 ```
 
+`go test ./internal/...` covers the stdlib hygiene suite that landed with the
+UTF-8 invariant — `TestEmbeddedStdlibSourcesAreValidUTF8`,
+`TestNoShippedDebugOutput`, and `TestEveryNativeIsRegisteredExactlyOnce` — so
+the new stdlib code is held to those rules without a separate step.
+
 ## Compatibility
 
 - `new_server(host, port)` keeps its arity and return type; the new fields are
@@ -457,6 +536,17 @@ go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
   mis-framed: a truncated request that used to reach the handler with partial
   data now receives 400 or 408, and a request that used to have headers past 64
   silently dropped now receives 431.
+- `parse_request` is retained but gains the same UTF-8 gate, returning its
+  default `HttpRequest` for a non-UTF-8 buffer instead of raising. Its
+  signature is unchanged and the server no longer calls it.
+
+One related defect is deliberately left out of scope. `parse_response` also
+converts header bytes through `to_str`, so a peer that replies with a non-UTF-8
+header block now raises inside `http_client` rather than returning a response.
+That is inherited from the UTF-8 invariant landing on `develop`, it affects the
+client rather than the server framing path this subproject covers, and fixing
+it means deciding what a `ClientResponse` reports for an unparseable reply.
+It is recorded as follow-up work rather than folded in here.
 
 ## Documentation
 
