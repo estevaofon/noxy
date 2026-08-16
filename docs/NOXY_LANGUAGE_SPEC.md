@@ -875,6 +875,11 @@ Para lidar com bytes arbitrários deliberadamente, mantenha o valor como
 de runtime nomeando o tipo recebido, porque o invariante já respondeu: se o
 valor já é `string`, perguntar de novo é a pergunta errada.
 
+O invariante vale em toda fronteira descrita neste documento, com uma exceção:
+o script de entrada passado na linha de comando é lido por um caminho separado
+do carregamento de módulos e ainda não é validado (registrado como trabalho
+futuro no CHANGELOG).
+
 Noxy não aplica normalização Unicode (NFC/NFD). Comparação é byte-exata, como
 em Python.
 

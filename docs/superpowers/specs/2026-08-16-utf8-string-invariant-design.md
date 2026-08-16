@@ -106,15 +106,19 @@ error. This mirrors the `3a0c199` rule in the opposite direction (text
 functions reject `bytes`; this bytes function rejects `string`) and Python's
 model (`str` has no `.decode`).
 
-No extra code implements the rejection: runtime parameter validation already
-enforces declared types — `TYPE_BYTES` only matches `VAL_BYTES`
-(`runtime_type_validation.go:121-122`) — so declaring `b: bytes` in the
-`strings.nx` wrapper is the whole implementation. Do **not** widen the
-signature to `any`. The error surfaces through the standard message
-(`call_validation.go:46`):
+The static `b: bytes` annotation in the `strings.nx` wrapper is **not** enough
+on its own. It is enforced only for a direct call inside the same compiled
+unit; `use strings select *` — the path every real caller takes — erases it,
+and the argument reaches the native unchecked. So `strings_is_valid_utf8`
+carries its own runtime guard, `requireBytesArgument`
+(`internal/vm/builtins_strings.go`), the mirror image of `requireTextArgument`
+in the opposite direction: text functions reject `bytes`, this bytes function
+rejects `string`. Keep both — the annotation documents the contract, the guard
+enforces it. Do **not** widen the signature to `any`, and do not delete the
+guard as redundant. The message the guard raises is:
 
 ```
-function 'is_valid_utf8' argument 1: expected bytes, got string
+strings.is_valid_utf8: expected bytes, got string; use to_bytes(value) to convert explicitly
 ```
 
 Deferred (add only on demand): `to_str_lossy(bytes)` with explicit U+FFFD

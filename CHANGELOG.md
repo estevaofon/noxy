@@ -22,10 +22,18 @@
   fatiar `h` + `0xFF` + `i` reescrevia três bytes como cinco, em silêncio e sem
   volta. Migração: use `io.read_bytes`, mantenha o valor como `bytes`, ou use
   `strings.is_valid_utf8` antes de decodificar.
-- **`io.read`, `io.read_lines`, `sqlite.query`, `sys.exec_output` e
-  `sys.getenv`** reportam conteúdo não-UTF-8 pelos campos `ok` e de erro que já
-  possuem. `io.read_bytes` e `net.recv` seguem inalterados como as saídas
-  brutas.
+- **`io.read`, `io.read_lines` e `sqlite.query`** reportam conteúdo não-UTF-8
+  pelos campos `ok` e `error` que já possuíam, em vez de levantar.
+  `io.read_bytes` e `net.recv` seguem inalterados como as saídas brutas.
+- **`sys.exec_output` e `sys.getenv`** passam a reportar conteúdo não-UTF-8 da
+  mesma forma, mas por um campo `error` que **não existia antes** — ver o item
+  seguinte sobre a forma dos structs.
+- **`SysResult` e `EnvResult` ganham um campo `error: string`** (em
+  `internal/stdlib/sys.nx`). `SysResult` passa de
+  `(exit_code, output, ok)` para `(exit_code, output, ok, error)` e
+  `EnvResult` de `(value, ok)` para `(value, ok, error)`. Qualquer código que
+  construa um desses structs posicionalmente precisa passar o campo novo;
+  acesso por campo (`r.ok`, `r.output`) não é afetado.
 - **Carregar um `.nx` que não seja UTF-8 válido falha** com erro nomeando o
   arquivo, em vez de lexar bytes mal formados.
 - **O script de entrada passado na linha de comando não está coberto por este
