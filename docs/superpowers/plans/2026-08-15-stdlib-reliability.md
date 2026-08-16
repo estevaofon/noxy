@@ -1793,6 +1793,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Modify: `internal/stdlib/http.nx` (2 lines)
 - Modify: `internal/stdlib/strings.nx` (6 lines)
 - Modify: `internal/stdlib/time.nx` (15 lines)
+- Modify: `internal/stdlib/io.nx` (1 line)
+
+Twenty-four lines across four files. Every other `?` in `internal/stdlib/` is a
+genuine question mark — query-string handling in `http_client.nx` and
+`http_parser.nx`, and English questions in `http_server.nx` comments — and must
+be left alone.
 
 **Interfaces:**
 - Consumes: `TestEmbeddedStdlibSourcesAreValidUTF8` from Task 6.
@@ -1836,11 +1842,28 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 | 155 | `// Dias no m?s` | `// Dias no mês` |
 | 165 | `// Nome do m?s` | `// Nome do mês` |
 
+- [ ] **Step 3b: Repair `io.nx`**
+
+| Line | From | To |
+|---|---|---|
+| 44 | `// Wrappers para fun??es built-in (para uso com 'select *' como 'open(...)')` | `// Wrappers para funções built-in (para uso com 'select *' como 'open(...)')` |
+
 - [ ] **Step 4: Verify no mojibake remains**
 
 Run: `grep -n "?" internal/stdlib/*.nx`
 
-Expected: no output, or only lines where a question mark is genuinely intended. Inspect any remaining match before accepting it.
+Expected: exactly these six lines, all genuine question marks, and nothing else:
+
+```text
+internal/stdlib/http_client.nx:100     path_with_query + "?" + u.query
+internal/stdlib/http_parser.nx:108     // 3. Query (?)
+internal/stdlib/http_parser.nx:109     split(current, "?")
+internal/stdlib/http_parser.nx:186     split(full_path, "?")
+internal/stdlib/http_server.nx:88      // Accept failed (maybe server closed?)
+internal/stdlib/http_server.nx:90      // sleep(10)?
+```
+
+Any other match is mojibake you missed.
 
 - [ ] **Step 5: Run the guard and the full suite**
 
