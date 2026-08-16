@@ -76,8 +76,6 @@ func (vm *VM) callNative(native *value.ObjNative, args []value.Value, argCount i
 }
 
 func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip int) (bool, error) {
-	// fmt.Printf("Calling function %s, code len: %d\n", fn.Name, len(chunk.Code))
-
 	fn := closure.Function
 
 	if argCount != fn.Arity {

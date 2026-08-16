@@ -314,7 +314,9 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
     end
     cells[(HEIGHT - 2) * WIDTH + state.player_x] = "A"
 
-    let frame: string = fixed_width_line("Score: " + to_str(state.score) + " Lives: " + to_str(state.lives) + " Status: " + state.status) + "\n"
+    // Raw mode disables Unix's automatic LF -> CRLF conversion.  Emit CRLF
+    // explicitly so every row starts in column zero on both Unix and Windows.
+    let frame: string = fixed_width_line("Score: " + to_str(state.score) + " Lives: " + to_str(state.lives) + " Status: " + state.status) + "\r\n"
     y = 0
     while y < HEIGHT do
         let row: string = ""
@@ -323,7 +325,7 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
             row = row + cells[y * WIDTH + x]
             x = x + 1
         end
-        frame = frame + row + "\n"
+        frame = frame + row + "\r\n"
         y = y + 1
     end
     frame = frame + fixed_width_line("A/D move  SPACE fire  Q quit")
@@ -379,7 +381,7 @@ func run_smoke()
         if active_enemy_shots > 3 then
             smoke_fail("too many enemy projectiles")
         end
-        if length(frame) != (HEIGHT + 2) * (WIDTH + 1) - 1 then
+        if length(frame) != (HEIGHT + 2) * WIDTH + (HEIGHT + 1) * 2 then
             smoke_fail("invalid frame dimensions")
         end
         frame_number = frame_number + 1
@@ -415,7 +417,8 @@ func run_interactive()
     let escape: string = fmt("%c", 27)
     spawn(read_controls, commands)
 
-    iprint(escape + "[?25l" + escape + "[2J")
+    // Use the alternate screen and keep the cursor hidden while rendering.
+    iprint(escape + "[?1049h" + escape + "[?25l" + escape + "[2J" + escape + "[H")
     while state.status == "playing" do
         let draining_commands: bool = true
         while draining_commands do
@@ -437,7 +440,7 @@ func run_interactive()
         end
 
         let frame: string = build_frame(state, invaders, shot, enemy_shots)
-        iprint(escape + "[H" + frame)
+        iprint(escape + "[?25l" + escape + "[H" + frame)
         if state.status == "playing" then
             time.sleep(FRAME_MS)
         end
@@ -453,8 +456,8 @@ func run_interactive()
         end
     end
 
+    iprint(escape + "[?25h" + escape + "[?1049l")
     let closed: bool = terminal.close()
-    iprint(escape + "[?25h")
     print("")
     if !closed then
         print("Warning: terminal raw mode could not be restored cleanly.")

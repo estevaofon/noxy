@@ -16,6 +16,7 @@ func (shared *SharedState) initializeState() {
 
 func (vm *VM) defineBuiltins() {
 	vm.defineCoreBuiltins()
+	vm.defineConvertBuiltins()
 	vm.defineConcurrencyBuiltins()
 	vm.defineTimeBuiltins()
 	vm.defineIOBuiltins()

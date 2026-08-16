@@ -1,0 +1,24 @@
+// stdlib/convert.nx - Conversões numéricas verificáveis
+//
+// to_int e to_float levantam erro quando a conversão é impossível.
+// Use as formas _result quando a falha for um dado esperado e não um bug.
+
+struct IntResult
+    ok: bool
+    value: int
+    error: string
+end
+
+struct FloatResult
+    ok: bool
+    value: float
+    error: string
+end
+
+func to_int_result(v: any) -> IntResult
+    return convert_to_int_result(v)
+end
+
+func to_float_result(v: any) -> FloatResult
+    return convert_to_float_result(v)
+end

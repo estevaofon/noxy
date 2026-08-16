@@ -281,7 +281,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "Property reference base must be an object")
 			}
 
-			// Debug: Check ID if Node
+			// Push a reference wrapping the container and property name,
+			// so a later dereference or assignment can resolve this field.
 			/*(
 			  if inst, ok := container.Obj.(*value.ObjInstance); ok {
 			       if idVal, hasId := inst.Fields["id"]; hasId {

@@ -1,12 +1,14 @@
 struct SysResult
     exit_code: int,
     output: string,
-    ok: bool
+    ok: bool,
+    error: string
 end
 
 struct EnvResult
     value: string,
-    ok: bool
+    ok: bool,
+    error: string
 end
 
 func exec(cmd: string) -> SysResult

@@ -841,10 +841,7 @@ func (p *Parser) parseIdentifier() ast.Expression {
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	lit := &ast.IntegerLiteral{Token: p.curToken}
 
-	value, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
-	if err != nil {
-		fmt.Printf("Error parsing int: %s\n", err) // Optional debug
-	}
+	value, _ := strconv.ParseInt(p.curToken.Literal, 0, 64)
 	lit.Value = value
 	return lit
 }
@@ -1158,7 +1155,6 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	}
 
 	// Return type
-	// fmt.Printf("DEBUG: parseFuncStmt: cur=%s peek=%s\n", p.curToken.Type, p.peekToken.Type)
 	if p.peekTokenIs(token.ARROW) {
 		p.nextToken() // eat )
 		p.nextToken() // eat ->

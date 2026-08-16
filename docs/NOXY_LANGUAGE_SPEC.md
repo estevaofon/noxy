@@ -22,7 +22,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 
 | Category | Keywords |
 |----------|----------|
-| Declarations | `let`, `global`, `func`, `struct` |
+| Declarations | `let`, `func`, `struct` |
 | Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer` |
 | Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
@@ -340,7 +340,6 @@ end
 
 ```noxy
 let name: type = value
-global name: type = value
 ```
 
 Variables can be reassigned, but the new value **MUST** be of the same type as declared.
@@ -656,6 +655,41 @@ print(f"Hello, {name}!")
 - `to_float(val)`
 - `to_bytes(val)`
 
+### Conversões numéricas
+
+`to_int` e `to_float` **levantam erro de runtime** quando a conversão é
+impossível. Use-os quando uma falha seria um bug do programa.
+
+```noxy
+to_int(5.9)      // 5, truncamento em direção a zero
+to_int("5")      // 5
+to_int("5.5")    // erro: uma string decimal não é um inteiro
+to_int("abc")    // erro
+to_int(true)     // erro: bool não é número em Noxy
+```
+
+Para entrada não confiável, use a forma `_result`, do módulo `convert`, que
+nunca levanta:
+
+```noxy
+use convert select *
+
+let porta: IntResult = to_int_result(getenv("PORT").value)
+if porta.ok then
+    print("porta " + to_str(porta.value))
+else
+    print("PORT inválida: " + porta.error)
+end
+```
+
+Essa é a mesma convenção de `io.close` / `io.close_result`. Como funções Noxy
+têm retorno único, o struct de resultado ocupa o lugar do par `value, err` do
+Go.
+
+Validar antes de converter não é uma alternativa correta: `is_digit` aceita
+`"9999999999999999999"`, que estoura `int64`, e não há como checar o intervalo
+sem converter. Não existe `is_float`.
+
 ### Collections
 - `length(arr_or_map)`
 - `append(arr, val)`
@@ -781,6 +815,73 @@ strings.substring("Hello", 0, -1)   // "Hell" (-1 → index 4)
 strings.substring("Hello", -3, -1)  // "ll"   (-3 → 2, -1 → 4)
 strings.substring("aé🙂z", 1, 3)   // "é🙂"  (rune-based, not byte-based)
 ```
+
+### Indexação de strings
+
+Uma `string` é indexada por **caractere** (code point Unicode), não por byte.
+`length`, `substring`, `char_at`, `index_of`, `slice` e `reverse` usam todos a
+mesma unidade, então compõem entre si:
+
+```noxy
+use strings select *
+
+let nome: string = substring(linha, 0, index_of(linha, ":"))
+```
+
+`length("café")` é `4`, não `5`.
+
+Um code point não é sempre um caractere percebido pelo usuário: `é` pode ser um
+code point ou dois, e um emoji com modificador é vários. Só um modelo de
+grapheme cluster seria exato, e ele não oferece índice inteiro em tempo
+constante. Noxy adota a aproximação por code point, como Python.
+
+`bytes` é o oposto: indexado por **octeto**, através de `length`, `slice` e
+acesso por elemento. As funções de `strings` recusam um `bytes` e apontam
+`to_str`, que é a ponte explícita entre os dois tipos.
+
+### Invariante UTF-8
+
+Toda `string` Noxy contém UTF-8 válido. A validação acontece uma única vez, na
+fronteira onde bytes viram texto, e não em cada operação — dentro do
+invariante, toda operação por caractere é correta por construção.
+
+```noxy
+use strings select *
+
+let dados: bytes = io.read_bytes(arquivo).data
+if is_valid_utf8(dados) then
+    let texto: string = to_str(dados)
+else
+    print("conteúdo não é UTF-8")
+end
+```
+
+`to_str` levanta erro de runtime sobre bytes inválidos, indicando o offset:
+
+```text
+to_str: bytes are not valid UTF-8 at byte offset 5
+```
+
+Funções que já possuem struct de resultado — `io.read`, `io.read_lines`,
+`sqlite.query`, `sys.exec_output`, `sys.getenv` — reportam pelos campos `ok` e
+de erro que já têm, em vez de levantar. Levantar fica reservado às conversões
+puras.
+
+Para lidar com bytes arbitrários deliberadamente, mantenha o valor como
+`bytes`: `io.read_bytes` e `net.recv` já devolvem `bytes` e não validam nada.
+
+`is_valid_utf8` aceita apenas `bytes`. Passar uma `string` — mesmo através de
+`use strings select *`, o caminho que qualquer código real usa — levanta erro
+de runtime nomeando o tipo recebido, porque o invariante já respondeu: se o
+valor já é `string`, perguntar de novo é a pergunta errada.
+
+O invariante vale em toda fronteira descrita neste documento, com uma exceção:
+o script de entrada passado na linha de comando é lido por um caminho separado
+do carregamento de módulos e ainda não é validado (registrado como trabalho
+futuro no CHANGELOG).
+
+Noxy não aplica normalização Unicode (NFC/NFD). Comparação é byte-exata, como
+em Python.
 
 ### Network sockets
 

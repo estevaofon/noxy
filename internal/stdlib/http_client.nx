@@ -1,4 +1,4 @@
-// stdlib/http_client.nx - Debug
+// stdlib/http_client.nx - Cliente HTTP
 use net select *
 use strings select * 
 use http_parser select *
@@ -84,7 +84,6 @@ func read_all(sock: Socket, timeout_ms: int) -> NetResult
 end
 
 func request(client: ref HttpClient, method: string, url: string, headers: string[64], header_count: int, body: bytes) -> ClientResponse
-    print("Debug: request start " + url)
     let empty_h: string[64]
     let empty_res: ClientResponse = ClientResponse(false, 0, empty_h, 0, b"", "")
 

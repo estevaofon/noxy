@@ -553,7 +553,6 @@ func (vm *VM) defineNetworkBuiltins() {
 		}
 		socket, ok := args[0].Obj.(*value.ObjMap)
 		if !ok {
-			fmt.Printf("DEBUG: net_send args[0] not map: %T %v\n", args[0].Obj, args[0].Obj)
 			return value.NewNull(), nil
 		}
 		fdValue, _ := socket.Get("fd")
