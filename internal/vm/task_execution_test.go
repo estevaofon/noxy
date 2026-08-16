@@ -64,7 +64,9 @@ func TestRuntimeErrorRemainsTypedThroughImportFailure(t *testing.T) {
 	}
 }
 
-func TestPreparedTaskCallCopiesOnlyOuterArrayForValueParameter(t *testing.T) {
+// Contrato CoW: parâmetro por valor de task é marcado Shared — mesmo
+// ponteiro, cópia adiada para a primeira mutação (unicize) no bytecode.
+func TestPreparedTaskCallMarksValueParameterShared(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `
 func worker(values: int[][]) -> int
@@ -82,11 +84,14 @@ end`); err != nil {
 	}
 	gotOuter := call.Arguments[0].Obj.(*value.ObjArray)
 	wantOuter := outer.Obj.(*value.ObjArray)
-	if gotOuter == wantOuter {
-		t.Fatal("value parameter reused the outer ObjArray")
+	if gotOuter != wantOuter {
+		t.Fatal("CoW: o arg deve manter o ponteiro (cópia adiada)")
+	}
+	if !value.IsShared(call.Arguments[0]) {
+		t.Fatal("CoW: o arg composto por valor deve estar marcado Shared")
 	}
 	if gotOuter.Elements[0].Obj != nested.Obj {
-		t.Fatal("value parameter deep-copied nested array identity")
+		t.Fatal("marcação não pode clonar o aninhado")
 	}
 }
 

@@ -1864,14 +1864,14 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 		return nil, nil
 	case *ast.MemberAccessExpression:
-		_, owner, err := c.Compile(target.Left)
+		// CoW: um ref para dentro de um contêiner fixa a identidade do
+		// contêiner — a base precisa ser unicizada na criação do ref para a
+		// escrita através dele não vazar em cópias pendentes.
+		owner, err := c.compileLValueBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
 		element := c.memberType(owner, target.Member)
-		if _, ok := owner.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-		}
 		name := c.makeConstant(value.NewString(target.Member))
 		if ref, ok := element.(*ast.RefType); ok {
 			c.emitOpWithConstantIndex(chunk.OP_CONTEXT_REF_PROPERTY, name)
@@ -1880,14 +1880,12 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
 		return element, nil
 	case *ast.IndexExpression:
-		_, container, err := c.Compile(target.Left)
+		// CoW: base do ref unicizada na criação (ver caso MemberAccess acima)
+		container, err := c.compileLValueBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
 		element := indexElementType(container)
-		if _, ok := container.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-		}
 		_, indexType, err := c.Compile(target.Index)
 		if err != nil {
 			return nil, err

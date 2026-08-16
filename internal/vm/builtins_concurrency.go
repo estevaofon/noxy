@@ -54,7 +54,10 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		threadVM.push(fnVal)
 
 		// Push Args
+		// CoW: a exceção legada do spawn (encaminhar identidade) foi removida;
+		// args compostos são valores como em qualquer outra fronteira.
 		for _, arg := range threadArgs {
+			value.MarkShared(arg)
 			threadVM.push(arg)
 		}
 
@@ -105,6 +108,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			return value.NewNull()
 		}
 		ch := args[0].Obj.(*value.ObjChannel).Chan
+		value.MarkShared(args[1]) // CoW: canal transporta valor, não identidade
 		ch <- args[1]
 		return args[1]
 	})

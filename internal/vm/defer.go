@@ -32,7 +32,7 @@ func (vm *VM) prepareDeferredCall(callee value.Value, args []value.Value, regist
 		if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
 			return PreparedCall{}, err
 		}
-		vm.copyPreparedArguments(prepared.Arguments, fn.Params)
+		vm.markPreparedArguments(prepared.Arguments, fn.Params)
 		return prepared, nil
 
 	case value.VAL_NATIVE:
@@ -91,6 +91,23 @@ func nativeParameters(native *value.ObjNative, argCount int) ([]value.ParamInfo,
 	return params, nil
 }
 
+// markPreparedArguments implementa a fronteira de valor do CoW para código
+// Noxy (closures, tasks): em vez de copiar ansiosamente, marca os compostos
+// não-ref como Shared — a cópia só acontece se alguém mutar (unicize).
+func (vm *VM) markPreparedArguments(args []value.Value, params []value.ParamInfo) {
+	for i, param := range params {
+		if i >= len(args) {
+			break
+		}
+		if !param.IsRef {
+			value.MarkShared(args[i])
+		}
+	}
+}
+
+// copyPreparedArguments mantém a cópia ansiosa para NATIVES com assinatura:
+// o corpo em Go pode mutar o argumento sem passar pelo CoW do bytecode, então
+// a cópia é a única proteção do chamador.
 func (vm *VM) copyPreparedArguments(args []value.Value, params []value.ParamInfo) {
 	for i, param := range params {
 		if i >= len(args) {

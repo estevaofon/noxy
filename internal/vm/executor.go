@@ -976,6 +976,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			elements := make([]value.Value, count)
 			for i := count - 1; i >= 0; i-- {
 				elements[i] = vm.pop()
+				// CoW: o elemento pode continuar referenciado pela origem
+				value.MarkShared(elements[i])
 			}
 			vm.push(value.NewArray(elements))
 
@@ -1003,6 +1005,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				} else {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
+				// CoW: o valor pode continuar referenciado pela origem
+				value.MarkShared(val)
 				mapping.Set(key, val)
 			}
 			vm.push(mapObj)
@@ -1401,8 +1405,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.push(a)
 
 		case chunk.OP_COPY:
+			// CoW: deref para contexto de valor marca em vez de copiar
 			val := vm.pop()
-			vm.push(vm.copyValue(val))
+			value.MarkShared(val)
+			vm.push(val)
 		}
 	}
 }

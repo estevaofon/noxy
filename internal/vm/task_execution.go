@@ -72,7 +72,8 @@ func (vm *VM) prepareTaskCall(callable value.Value, arguments []value.Value) (pr
 			break
 		}
 		if !parameter.IsRef {
-			preparedArguments[i] = vm.copyValue(preparedArguments[i])
+			// CoW: fronteira de valor — marca em vez de copiar
+			value.MarkShared(preparedArguments[i])
 		}
 	}
 	return preparedTaskCall{Callable: callable, Closure: closure, Arguments: preparedArguments}, nil

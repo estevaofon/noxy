@@ -93,7 +93,9 @@ append(holder.values, 2)`,
 			// OP_GET_GLOBAL and OP_CONTEXT_REF_PROPERTY's constant-pool index
 			// is a 16-bit operand (see emitOpWithConstantIndex), hence the
 			// extra -1 wildcard after each.
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_CONTEXT_REF_PROPERTY), -1, -1, int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+			// CoW: a base do ref é carregada com OP_GET_GLOBAL_MUT (unicizada
+			// na criação do ref), ver compileLValueBase.
+			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL_MUT), -1, -1, int(chunk.OP_CONTEXT_REF_PROPERTY), -1, -1, int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
 		},
 		{
 			name: "array index",
@@ -103,7 +105,8 @@ let stored: (ref int[])[] = [ref values]
 append(stored[0], 2)`,
 			// OP_GET_GLOBAL's constant-pool index is a 16-bit operand (see
 			// emitOpWithConstantIndex), hence the extra -1 wildcard after each.
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+			// CoW: base do ref via OP_GET_GLOBAL_MUT (ver compileLValueBase).
+			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL_MUT), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
 		},
 		{
 			name: "map index",
@@ -113,7 +116,8 @@ let stored: map[string, ref int[]] = {"values": ref values}
 append(stored["values"], 2)`,
 			// OP_GET_GLOBAL's constant-pool index is a 16-bit operand (see
 			// emitOpWithConstantIndex), hence the extra -1 wildcard after each.
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+			// CoW: base do ref via OP_GET_GLOBAL_MUT (ver compileLValueBase).
+			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL_MUT), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
 		},
 	}
 

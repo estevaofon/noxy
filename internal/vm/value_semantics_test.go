@@ -160,6 +160,180 @@ main()
 	expectInt(t, got, 42, "mutação de caminho através de map deve funcionar")
 }
 
+func TestCallArgIsDeepIndependent(t *testing.T) {
+	got := captureVMSource(t, `
+struct P
+    x: int
+end
+
+func poke(items: P[]) -> void
+    items[0].x = 99
+end
+
+func main()
+    let a: P[]
+    append(a, P(1))
+    poke(a)
+    test_report(a[0].x)
+end
+main()
+`)
+	expectInt(t, got, 1, "mutação aninhada via parâmetro não pode vazar")
+}
+
+func TestCalleeMutationOfArgDoesNotLeak(t *testing.T) {
+	got := captureVMSource(t, `
+func poke(items: int[]) -> void
+    items[0] = 99
+end
+
+func main()
+    let a: int[]
+    append(a, 1)
+    poke(a)
+    test_report(a[0])
+end
+main()
+`)
+	expectInt(t, got, 1, "mutação direta do parâmetro não pode vazar")
+}
+
+func TestReadOnlyCallDoesNotClone(t *testing.T) {
+	machine := New()
+	machine.DefineNative("test_reset_clones", func(args []value.Value) value.Value {
+		ResetCloneCount()
+		return value.NewNull()
+	})
+	if err := interpretVMSource(t, machine, `
+func total(data: int[]) -> int
+    let s: int = 0
+    let i: int = 0
+    while i < length(data) do
+        s = s + data[i]
+        i = i + 1
+    end
+    return s
+end
+
+func main()
+    let data: int[]
+    let i: int = 0
+    while i < 50 do
+        append(data, i)
+        i = i + 1
+    end
+    test_reset_clones()
+    let s: int = 0
+    i = 0
+    while i < 20 do
+        s = s + total(data)
+        i = i + 1
+    end
+end
+main()
+`); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	if n := CloneCountValue(); n != 0 {
+		t.Fatalf("20 chamadas só-leitura deveriam custar 0 clones, veio %d", n)
+	}
+}
+
+func TestChanSendDeliversIndependentValue(t *testing.T) {
+	got := captureVMSource(t, `
+func main()
+    let c: any = make_chan(1)
+    let a: int[]
+    append(a, 1)
+    chan_send(c, a)
+    a[0] = 99
+    let b: int[] = chan_recv(c)
+    test_report(b[0])
+end
+main()
+`)
+	expectInt(t, got, 1, "payload de canal deve ser valor independente")
+}
+
+func TestSpawnArgIsIndependent(t *testing.T) {
+	got := captureVMSource(t, `
+use time
+
+func worker(data: int[], c: any) -> void
+    time.sleep(50)
+    chan_send(c, data[0])
+end
+
+func main()
+    let c: any = make_chan(1)
+    let a: int[]
+    append(a, 1)
+    spawn(worker, a, c)
+    a[0] = 99
+    let seen: int = chan_recv(c)
+    test_report(seen)
+end
+main()
+`)
+	expectInt(t, got, 1, "spawn não pode mais encaminhar identidade do argumento")
+}
+
+func TestStructConstructorArgIsIndependent(t *testing.T) {
+	got := captureVMSource(t, `
+struct Box
+    data: int[]
+end
+
+func main()
+    let a: int[]
+    append(a, 1)
+    let b: Box = Box(a)
+    a[0] = 99
+    test_report(b.data[0])
+end
+main()
+`)
+	expectInt(t, got, 1, "arg de construtor guardado no campo deve ser independente")
+}
+
+func TestArrayLiteralElementIsIndependent(t *testing.T) {
+	got := captureVMSource(t, `
+func main()
+    let inner: int[]
+    append(inner, 1)
+    let outer: int[][] = [inner]
+    inner[0] = 99
+    test_report(outer[0][0])
+end
+main()
+`)
+	expectInt(t, got, 1, "elemento de literal de array deve ser independente da origem")
+}
+
+func TestDeferCapturesValueAtDeclaration(t *testing.T) {
+	got := captureVMSource(t, `
+let seen: int = 0
+
+func observe(data: int[]) -> void
+    seen = data[0]
+end
+
+func run() -> void
+    let a: int[]
+    append(a, 1)
+    defer observe(a)
+    a[0] = 99
+end
+
+func main()
+    run()
+    test_report(seen)
+end
+main()
+`)
+	expectInt(t, got, 1, "defer captura o valor no momento da declaração")
+}
+
 func TestSingleOwnerPathMutationDoesNotClone(t *testing.T) {
 	machine := New()
 	machine.DefineNative("test_reset_clones", func(args []value.Value) value.Value {

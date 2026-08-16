@@ -35,6 +35,12 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			callArgs := append([]value.Value(nil), args...)
 			vm.copyPreparedArguments(callArgs, params)
 			args = callArgs
+		} else if !readonlyNatives[native.Name] {
+			// CoW: native sem assinatura pode reter/mutar args — marca todos
+			// os compostos (conservador; allowlist só-leitura pula isto)
+			for i := range args {
+				value.MarkShared(args[i])
+			}
 		}
 		return vm.callNative(native, args, argCount, c, ip)
 	}
@@ -47,7 +53,9 @@ func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk
 			instance := value.NewInstance(structDef)
 			instObj := instance.Obj.(*value.ObjInstance)
 			for i := 0; i < argCount; i++ {
-				instObj.Fields[structDef.Fields[i]] = vm.peek(argCount - 1 - i)
+				arg := vm.peek(argCount - 1 - i)
+				value.MarkShared(arg) // CoW: o chamador ainda referencia o arg
+				instObj.Fields[structDef.Fields[i]] = arg
 			}
 			vm.stackTop -= argCount + 1
 			vm.push(instance)
@@ -97,9 +105,9 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 		if i < len(fn.Params) {
 			param := fn.Params[i]
 			if !param.IsRef {
-				// Pass by Value: Copy if mutable object
-				val := vm.stack[baseArgs+i]
-				vm.stack[baseArgs+i] = vm.copyValue(val)
+				// CoW: fronteira de valor — marca em vez de copiar; a cópia
+				// só acontece se alguém mutar (unicize)
+				value.MarkShared(vm.stack[baseArgs+i])
 			}
 		}
 	}
