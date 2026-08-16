@@ -415,6 +415,24 @@ func (vm *VM) defineStringBuiltins() {
 		}
 		return value.NewString(string(runes[idx])), nil
 	})
+	// strings_codes decodes a whole string once and returns every codepoint.
+	// char_at rebuilds []rune(s) on each call, so validating a string one
+	// character at a time is quadratic in its length — a real cost for a parser
+	// scanning attacker-supplied input. This is the linear form of that loop.
+	vm.DefineContextualNative("strings_codes", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("strings.codes: expects exactly 1 argument, got %d", len(args))
+		}
+		if err := requireTextArgument("strings.codes", args, 0); err != nil {
+			return value.NewNull(), err
+		}
+		characters := []rune(args[0].String())
+		elements := make([]value.Value, len(characters))
+		for i, character := range characters {
+			elements[i] = value.NewInt(int64(character))
+		}
+		return value.NewArray(elements), nil
+	})
 	vm.DefineNative("strings_from_char_code", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")

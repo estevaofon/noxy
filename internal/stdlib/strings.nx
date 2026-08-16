@@ -107,6 +107,14 @@ func char_code(s: string) -> int
     return ord(s)
 end
 
+// Decodifica a string inteira uma vez e devolve todos os codepoints.
+// char_at reconstrói []rune a cada chamada, então validar caractere a
+// caractere em um laço é quadrático no tamanho da string. Prefira codes
+// quando precisar percorrer todos os caracteres.
+func codes(s: string) -> int[]
+    return strings_codes(s)
+end
+
 func is_valid_utf8(b: bytes) -> bool
     return strings_is_valid_utf8(b)
 end
