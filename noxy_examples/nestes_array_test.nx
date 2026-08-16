@@ -7,3 +7,10 @@ end
 print(a)
 change(a)
 print(a)
+
+let b: int[][] = a
+b[0][0] =7
+print("array original")
+print(a)
+print("array modificada")
+print(b)
