@@ -135,7 +135,11 @@ func (vm *VM) loadResolvedModule(source resolvedModule) (value.Value, error) {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		return vm.compileAndRunModule(source, string(content))
+		text := string(content)
+		if err := requireValidUTF8(source.Path, text); err != nil {
+			return value.NewNull(), err
+		}
+		return vm.compileAndRunModule(source, text)
 	default:
 		return value.NewNull(), fmt.Errorf("unknown resolved module kind for %s", source.Name)
 	}
