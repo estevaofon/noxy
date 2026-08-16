@@ -95,7 +95,7 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 }
 
 func (vm *VM) DefineNative(name string, fn value.NativeFunc) {
-	vm.shared.Root.DefineLocalIfAbsent(name, value.NewNative(name, fn))
+	vm.shared.Root.DefineLocalIfAbsent(name, stampReadonlyArgs(value.NewNative(name, fn)))
 }
 
 func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSignature, fn value.NativeFunc) {
@@ -103,7 +103,7 @@ func (vm *VM) DefineNativeWithSignature(name string, signature value.NativeSigna
 }
 
 func (vm *VM) DefineContextualNative(name string, fn value.ContextualNativeFunc) {
-	vm.SetGlobal(name, value.NewContextualNative(name, fn))
+	vm.SetGlobal(name, stampReadonlyArgs(value.NewContextualNative(name, fn)))
 }
 
 func (vm *VM) DefineContextualNativeWithSignature(name string, signature value.NativeSignature, fn value.ContextualNativeFunc) {

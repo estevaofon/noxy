@@ -1,0 +1,24 @@
+// O caso assintótico do CoW: função O(1) chamada muitas vezes com array
+// grande por valor. Baseline paga cópia O(n) por chamada (30k × 10k
+// elementos); CoW paga O(1) por chamada.
+func first_plus(data: int[], x: int) -> int
+    return data[0] + x
+end
+
+func main()
+    let data: int[]
+    let i: int = 0
+    while i < 10000 do
+        append(data, i + 7)
+        i = i + 1
+    end
+    let s: int = 0
+    let call: int = 0
+    while call < 8000 do
+        s = s + first_plus(data, call % 13)
+        call = call + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()

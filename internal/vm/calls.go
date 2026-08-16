@@ -35,7 +35,7 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			callArgs := append([]value.Value(nil), args...)
 			vm.copyPreparedArguments(callArgs, params)
 			args = callArgs
-		} else if !readonlyNatives[native.Name] {
+		} else if !native.ReadonlyArgs {
 			// CoW: native sem assinatura pode reter/mutar args — marca todos
 			// os compostos (conservador; allowlist só-leitura pula isto)
 			for i := range args {

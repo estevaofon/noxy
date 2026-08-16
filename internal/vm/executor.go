@@ -1260,8 +1260,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slot := c.Code[ip]
 			ip++
 			idx := frame.LocalBase + int(slot)
-			v, changed := vm.unicize(vm.stack[idx])
-			if changed {
+			v := vm.stack[idx]
+			if value.IsShared(v) {
+				v = vm.copyValue(v)
 				vm.stack[idx] = v
 			}
 			vm.push(v)
@@ -1320,8 +1321,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
-					v, changed := vm.unicize(arr.Elements[idx])
-					if changed {
+					v := arr.Elements[idx]
+					if value.IsShared(v) {
+						v = vm.copyValue(v)
 						arr.Elements[idx] = v
 					}
 					vm.push(v)
@@ -1366,11 +1368,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				if !ok {
 					return vm.runtimeError(c, ip, "undefined property '%s'", name)
 				}
-				v, changed := vm.unicize(fieldVal)
-				if changed {
-					instance.Fields[name] = v
+				if value.IsShared(fieldVal) {
+					fieldVal = vm.copyValue(fieldVal)
+					instance.Fields[name] = fieldVal
 				}
-				vm.push(v)
+				vm.push(fieldVal)
 			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
 				// Membros de módulo (e maps acessados como propriedade)
 				stored, ok := mapObj.Get(name)
