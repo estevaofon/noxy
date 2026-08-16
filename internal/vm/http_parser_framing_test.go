@@ -304,6 +304,69 @@ func TestParseRequestRetainedGateReturnsDefaults(t *testing.T) {
 	}
 }
 
+func resolveBodyLength(t *testing.T, headerLines []string, maxBody int) (bool, int64, int64) {
+	t.Helper()
+	source := "let headers: string[64]\n"
+	for i, line := range headerLines {
+		source += fmt.Sprintf("headers[%d] = to_str(%s)\n", i, noxyBytes(line))
+	}
+	source += fmt.Sprintf("let r: BodyLengthResult = resolve_body_length(headers, %d, %d)\n", len(headerLines), maxBody)
+
+	okSource := source + "test_report(r.ok)"
+	lengthSource := source + "test_report(r.length)"
+	statusSource := source + "test_report(r.status)"
+	return captureParserBool(t, okSource), captureParserInt(t, lengthSource), captureParserInt(t, statusSource)
+}
+
+func TestResolveBodyLength(t *testing.T) {
+	tests := []struct {
+		name       string
+		headers    []string
+		maxBody    int
+		wantOK     bool
+		wantLength int64
+		wantStatus int64
+	}{
+		{name: "absent means zero", headers: []string{"Host: a"}, maxBody: 1024, wantOK: true, wantLength: 0},
+		{name: "valid length", headers: []string{"Content-Length: 12"}, maxBody: 1024, wantOK: true, wantLength: 12},
+		{name: "zero length", headers: []string{"Content-Length: 0"}, maxBody: 1024, wantOK: true, wantLength: 0},
+		{name: "case insensitive", headers: []string{"content-length: 7"}, maxBody: 1024, wantOK: true, wantLength: 7},
+		{name: "duplicate identical", headers: []string{"Content-Length: 5", "Content-Length: 5"}, maxBody: 1024, wantStatus: 400},
+		{name: "duplicate conflicting", headers: []string{"Content-Length: 5", "Content-Length: 6"}, maxBody: 1024, wantStatus: 400},
+		{name: "comma list", headers: []string{"Content-Length: 5, 5"}, maxBody: 1024, wantStatus: 400},
+		{name: "signed value", headers: []string{"Content-Length: +5"}, maxBody: 1024, wantStatus: 400},
+		{name: "negative value", headers: []string{"Content-Length: -5"}, maxBody: 1024, wantStatus: 400},
+		{name: "float value", headers: []string{"Content-Length: 5.5"}, maxBody: 1024, wantStatus: 400},
+		{name: "empty value", headers: []string{"Content-Length:"}, maxBody: 1024, wantStatus: 400},
+		{name: "hex value", headers: []string{"Content-Length: 0x10"}, maxBody: 1024, wantStatus: 400},
+		{name: "twenty digits", headers: []string{"Content-Length: 99999999999999999999"}, maxBody: 1024, wantStatus: 400},
+		// Nineteen digits, so the length bound admits it, and every character is
+		// a digit, so is_digit admits it too — but the value is above int64.
+		// to_int would raise here; only the _result conversion turns it into a
+		// status the client can be told about.
+		{name: "nineteen digits above int64", headers: []string{"Content-Length: 9999999999999999999"}, maxBody: 1024, wantStatus: 400},
+		{name: "largest int64", headers: []string{"Content-Length: 9223372036854775807"}, maxBody: 1024, wantStatus: 413},
+		{name: "over max body", headers: []string{"Content-Length: 2048"}, maxBody: 1024, wantStatus: 413},
+		{name: "exactly max body", headers: []string{"Content-Length: 1024"}, maxBody: 1024, wantOK: true, wantLength: 1024},
+		{name: "chunked", headers: []string{"Transfer-Encoding: chunked"}, maxBody: 1024, wantStatus: 501},
+		{name: "chunked with length", headers: []string{"Transfer-Encoding: chunked", "Content-Length: 5"}, maxBody: 1024, wantStatus: 400},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ok, length, status := resolveBodyLength(t, test.headers, test.maxBody)
+			if ok != test.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, test.wantOK)
+			}
+			if length != test.wantLength {
+				t.Fatalf("length = %d, want %d", length, test.wantLength)
+			}
+			if status != test.wantStatus {
+				t.Fatalf("status = %d, want %d", status, test.wantStatus)
+			}
+		})
+	}
+}
+
 func TestFrameHelpersCarryRespondFlag(t *testing.T) {
 	if got := captureParserInt(t, "let f: HttpFrameResult = frame_error(431, \"x\")\ntest_report(f.status)"); got != 431 {
 		t.Fatalf("frame_error status = %d, want 431", got)

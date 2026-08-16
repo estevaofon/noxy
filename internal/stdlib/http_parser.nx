@@ -588,3 +588,51 @@ func count_header(headers: string[64], count: int, name: string) -> int
     end
     return found
 end
+
+// Decides how many body bytes to read. Transfer-Encoding is refused outright
+// rather than guessed at, duplicate Content-Length headers are refused even
+// when their values agree, and an absent framing header means a zero-length
+// body for every method, including POST, per RFC 9112.
+func resolve_body_length(headers: string[64], count: int, max_body_bytes: int) -> BodyLengthResult
+    let encodings: int = count_header(headers, count, "Transfer-Encoding")
+    let lengths: int = count_header(headers, count, "Content-Length")
+
+    if encodings > 0 && lengths > 0 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if encodings > 0 then
+        return BodyLengthResult(false, 0, 501, "Not Implemented")
+    end
+    if lengths > 1 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if lengths == 0 then
+        return BodyLengthResult(true, 0, 0, "")
+    end
+
+    let raw: string = get_header(headers, count, "Content-Length")
+    if length(raw) == 0 || length(raw) > 19 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if !is_digit(raw) then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+
+    // Never to_int here: it raises on anything it cannot represent, and a
+    // 19-digit value can still exceed int64. The _result form reports that as
+    // data so the client gets a 400 instead of a dead connection routine.
+    let parsed: any = convert_to_int_result(raw)
+    if !parsed.ok then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+
+    let declared: int = parsed.value
+    if declared < 0 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if declared > max_body_bytes then
+        return BodyLengthResult(false, 0, 413, "Content Too Large")
+    end
+
+    return BodyLengthResult(true, declared, 0, "")
+end
