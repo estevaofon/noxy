@@ -21,3 +21,22 @@ func (vm *VM) unicize(v value.Value) (value.Value, bool) {
 	}
 	return vm.copyValue(v), true
 }
+
+// unicizeThroughRefValue resolve um valor VAL_REF (slot: variável, campo,
+// índice…), garante posse exclusiva do composto armazenado e grava o clone
+// de volta no slot pelo setter quando clona. Devolve o valor único.
+func (vm *VM) unicizeThroughRefValue(refArg value.Value) (value.Value, error) {
+	ref, err := extractReferenceValue(refArg)
+	if err != nil {
+		return value.Value{}, err
+	}
+	stored, _, store, err := vm.referenceStorage(ref)
+	if err != nil {
+		return value.Value{}, err
+	}
+	v, changed := vm.unicize(stored)
+	if changed {
+		store(v)
+	}
+	return v, nil
+}

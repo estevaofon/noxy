@@ -86,6 +86,14 @@ const (
 	OP_MARK_REF_JSON_DYNAMIC
 	OP_MARK_REF_TARGET_TYPE
 	OP_MARK_RUNTIME_VALUE_TYPE
+	// CoW: variantes de leitura para caminhos de mutação (unicizam cada nível)
+	OP_GET_LOCAL_MUT   // [slot]
+	OP_GET_GLOBAL_MUT  // [const_hi, const_lo]
+	OP_GET_UPVALUE_MUT // [slot]
+	OP_GET_INDEX_MUT   // pops index + container
+	OP_GET_PROP_MUT    // [const_hi, const_lo]; pops container
+	OP_DEREF_MUT       // pops ref; uniciza através do slot
+	OP_MARK_SHARED     // marca peek(0) como Shared
 )
 
 func (op OpCode) String() string {
@@ -130,6 +138,20 @@ func (op OpCode) String() string {
 		return "OP_GET_INDEX"
 	case OP_SET_INDEX:
 		return "OP_SET_INDEX"
+	case OP_GET_LOCAL_MUT:
+		return "OP_GET_LOCAL_MUT"
+	case OP_GET_GLOBAL_MUT:
+		return "OP_GET_GLOBAL_MUT"
+	case OP_GET_UPVALUE_MUT:
+		return "OP_GET_UPVALUE_MUT"
+	case OP_GET_INDEX_MUT:
+		return "OP_GET_INDEX_MUT"
+	case OP_GET_PROP_MUT:
+		return "OP_GET_PROP_MUT"
+	case OP_DEREF_MUT:
+		return "OP_DEREF_MUT"
+	case OP_MARK_SHARED:
+		return "OP_MARK_SHARED"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -323,6 +345,20 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.byteInstruction("OP_GET_LOCAL", offset)
 	case OP_SET_LOCAL:
 		return c.byteInstruction("OP_SET_LOCAL", offset)
+	case OP_GET_LOCAL_MUT:
+		return c.byteInstruction("OP_GET_LOCAL_MUT", offset)
+	case OP_GET_GLOBAL_MUT:
+		return c.constantLongInstruction("OP_GET_GLOBAL_MUT", offset)
+	case OP_GET_UPVALUE_MUT:
+		return c.byteInstruction("OP_GET_UPVALUE_MUT", offset)
+	case OP_GET_INDEX_MUT:
+		return c.simpleInstruction("OP_GET_INDEX_MUT", offset)
+	case OP_GET_PROP_MUT:
+		return c.constantLongInstruction("OP_GET_PROP_MUT", offset)
+	case OP_DEREF_MUT:
+		return c.simpleInstruction("OP_DEREF_MUT", offset)
+	case OP_MARK_SHARED:
+		return c.simpleInstruction("OP_MARK_SHARED", offset)
 	case OP_EQUAL:
 		return c.simpleInstruction("OP_EQUAL", offset)
 	case OP_GREATER:

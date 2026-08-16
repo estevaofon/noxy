@@ -1252,6 +1252,133 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			vm.push(val)
 
+		case chunk.OP_GET_LOCAL_MUT:
+			slot := c.Code[ip]
+			ip++
+			idx := frame.LocalBase + int(slot)
+			v, changed := vm.unicize(vm.stack[idx])
+			if changed {
+				vm.stack[idx] = v
+			}
+			vm.push(v)
+
+		case chunk.OP_GET_GLOBAL_MUT:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			name := c.Constants[index].Obj.(string)
+			owner, ok := frame.Environment.ResolveOwner(name)
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
+			}
+			stored, ok := owner.GetLocal(name)
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
+			}
+			v, changed := vm.unicize(stored)
+			if changed {
+				owner.SetLocal(name, v)
+			}
+			vm.push(v)
+
+		case chunk.OP_GET_UPVALUE_MUT:
+			slot := c.Code[ip]
+			ip++
+			if int(slot) >= len(frame.Closure.Upvalues) {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
+			upv := frame.Closure.Upvalues[slot]
+			stored, ok := upv.Load()
+			if !ok {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
+			v, changed := vm.unicize(stored)
+			if changed {
+				upv.Store(v)
+			}
+			vm.push(v)
+
+		case chunk.OP_GET_INDEX_MUT:
+			indexVal := vm.pop()
+			containerVal := vm.pop()
+			if containerVal.Type == value.VAL_REF {
+				uniq, err := vm.unicizeThroughRefValue(containerVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				containerVal = uniq
+			}
+			if containerVal.Type == value.VAL_OBJ {
+				if arr, ok := containerVal.Obj.(*value.ObjArray); ok {
+					if indexVal.Type != value.VAL_INT {
+						return vm.runtimeError(c, ip, "array index must be integer")
+					}
+					idx := int(indexVal.AsInt)
+					if idx < 0 || idx >= len(arr.Elements) {
+						return vm.runtimeError(c, ip, "array index out of bounds")
+					}
+					v, changed := vm.unicize(arr.Elements[idx])
+					if changed {
+						arr.Elements[idx] = v
+					}
+					vm.push(v)
+					continue
+				}
+				if mapObj, ok := containerVal.Obj.(*value.ObjMap); ok {
+					key, err := referenceMapKey(indexVal)
+					if err != nil {
+						return vm.runtimeError(c, ip, "%s", err)
+					}
+					stored, ok := mapObj.Get(key)
+					if !ok {
+						return vm.runtimeError(c, ip, "map key not found in mutation path")
+					}
+					v, changed := vm.unicize(stored)
+					if changed {
+						mapObj.Set(key, v)
+					}
+					vm.push(v)
+					continue
+				}
+			}
+			return vm.runtimeError(c, ip, "cannot index non-array/map in mutation path")
+
+		case chunk.OP_GET_PROP_MUT:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			name := c.Constants[index].Obj.(string)
+			instanceVal := vm.pop()
+			if instanceVal.Type == value.VAL_REF {
+				uniq, err := vm.unicizeThroughRefValue(instanceVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				instanceVal = uniq
+			}
+			instance, ok := instanceVal.Obj.(*value.ObjInstance)
+			if instanceVal.Type != value.VAL_OBJ || !ok {
+				return vm.runtimeError(c, ip, "only instances have properties")
+			}
+			fieldVal, ok := instance.Fields[name]
+			if !ok {
+				return vm.runtimeError(c, ip, "undefined property '%s'", name)
+			}
+			v, changed := vm.unicize(fieldVal)
+			if changed {
+				instance.Fields[name] = v
+			}
+			vm.push(v)
+
+		case chunk.OP_DEREF_MUT:
+			refVal := vm.pop()
+			v, err := vm.unicizeThroughRefValue(refVal)
+			if err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
+			}
+			vm.push(v)
+
+		case chunk.OP_MARK_SHARED:
+			value.MarkShared(vm.peek(0))
+
 		case chunk.OP_SWAP:
 			// Swap top two stack elements: [a, b] -> [b, a]
 			b := vm.pop()
