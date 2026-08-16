@@ -2125,7 +2125,815 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Pull request
+## Part Two: the UTF-8 string invariant
+
+Spec: `docs/superpowers/specs/2026-08-16-utf8-string-invariant-design.md`
+
+A Noxy `string` is a Go `string` — an arbitrary byte sequence. UTF-8 validity is assumed by every character-based operation and guaranteed by no constructor. The defect reproduces exactly as the spec describes:
+
+```noxy
+let bad: bytes = to_bytes([104, 255, 105])
+let s: string = to_str(bad)           // no error
+length(s)                             // 3
+char_code(s[1])                       // 65533 — the 0xFF is gone
+to_bytes(s)[1]                        // 255 — plain retag still preserves it
+to_bytes(substring(s, 0, 3))          // 5 bytes — U+FFFD materialised as EF BF BD
+```
+
+Three bytes become five on a slice, silently. A program that reads a file, slices a string, and writes it back has corrupted data it never touched.
+
+**Invariant: every Noxy `string` holds valid UTF-8**, established once at each boundary where bytes become text. This is the same shape as Part One — an API that silently produced a plausible wrong answer now fails at the boundary — which is why it belongs on this branch.
+
+### Additional global constraints for Part Two
+
+- A parameter declared `b: bytes` rejects a `string` argument **at compile time**, not at runtime: `argument 1 to 'f': expected bytes, got string`. Verified. So declaring the type is the entire implementation of that rejection — do not add a runtime check and do not widen the signature to `any`.
+- Pure conversions raise; functions that already own a result struct report through their existing `ok` / `error` fields. Do not convert a result-struct function into a raising one.
+- `net_recv` and `io_read_bytes` already return `bytes` and are the raw escape hatches. They must stay unchanged.
+
+### Decision recorded: `http_parser.nx` is deliberately not guarded
+
+`internal/stdlib/http_parser.nx` calls `to_str(header_bytes)` at two places on untrusted network data. After Task 11 a request carrying invalid UTF-8 in its headers raises inside the parser, which kills that connection's spawned routine and drops the connection without a response.
+
+That is accepted for this branch, and it is not a silent failure — it is a hard stop at the boundary, which is the point. Converting it into a proper `400 Bad Request` requires an error channel that `parse_request` does not have; the queued `feat/http-streaming-server` subproject introduces exactly that channel (`HttpFrameResult`) and will own the conversion. Do not paper over it here by returning a default request, which would reintroduce the silent-failure pattern this branch exists to remove.
+
+---
+
+### Task 10: `strings.is_valid_utf8`
+
+The check-before-decode path, for programs that handle dirty data deliberately. Purely additive.
+
+**Files:**
+- Modify: `internal/vm/builtins_strings.go`
+- Modify: `internal/stdlib/strings.nx`
+- Modify: `internal/vm/builtins_registry_test.go`
+- Test: `internal/vm/builtins_strings_test.go`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: native `strings_is_valid_utf8`; Noxy `func is_valid_utf8(b: bytes) -> bool` exported from `strings`.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/vm/builtins_strings_test.go`:
+
+```go
+func TestIsValidUTF8(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "ascii", input: "hello", want: true},
+		{name: "empty", input: "", want: true},
+		{name: "multibyte", input: "café", want: true},
+		{name: "emoji", input: "\U0001F600", want: true},
+		{name: "lone 0xFF", input: "h\xffi", want: false},
+		{name: "truncated multibyte", input: "caf\xc3", want: false},
+		{name: "bare continuation byte", input: "\x80", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "strings_is_valid_utf8", value.NewBytes(test.input))
+			if got.Type != value.VAL_BOOL || got.AsBool != test.want {
+				t.Fatalf("strings_is_valid_utf8(%q) = %#v, want %v", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestIsValidUTF8RejectsStringAtCompileTime(t *testing.T) {
+	source := `use strings select *
+test_report(is_valid_utf8("text"))`
+	machine := New()
+	machine.DefineNative("test_report", func([]value.Value) value.Value { return value.NewNull() })
+	err := interpretVMSource(t, machine, source)
+	if err == nil {
+		t.Fatal("is_valid_utf8 accepted a string argument; the b: bytes signature must reject it")
+	}
+	if !strings.Contains(err.Error(), "expected bytes, got string") {
+		t.Fatalf("error = %q, want it to name the type mismatch", err.Error())
+	}
+}
+
+func TestIsValidUTF8AcceptsBytesFromNoxy(t *testing.T) {
+	source := `use strings select *
+test_report(is_valid_utf8(b"café") && !is_valid_utf8(to_bytes([104, 255, 105])))`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("is_valid_utf8 through the module = %#v, want true", captured)
+	}
+}
+```
+
+`interpretVMSource` may report the type mismatch as a compile error rather than a runtime error; either is acceptable as long as the call fails and the message names the mismatch.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/vm/ -run TestIsValidUTF8 -v`
+
+Expected: FAIL — `strings_is_valid_utf8` is not registered.
+
+- [ ] **Step 3: Add the native**
+
+In `internal/vm/builtins_strings.go`, register alongside the other string natives:
+
+```go
+	vm.DefineNative("strings_is_valid_utf8", func(args []value.Value) value.Value {
+		if len(args) != 1 {
+			return value.NewBool(false)
+		}
+		payload, ok := args[0].Obj.(string)
+		if args[0].Type != value.VAL_BYTES || !ok {
+			return value.NewBool(false)
+		}
+		return value.NewBool(utf8.ValidString(payload))
+	})
+```
+
+`unicode/utf8` is already imported in this file.
+
+Note this native takes `bytes` and therefore must NOT get a `requireTextArgument` guard — that guard rejects bytes, which is the opposite of what this function wants.
+
+- [ ] **Step 4: Export it from the module**
+
+In `internal/stdlib/strings.nx`, add next to `char_code`:
+
+```noxy
+func is_valid_utf8(b: bytes) -> bool
+    return strings_is_valid_utf8(b)
+end
+```
+
+The `b: bytes` declaration is the entire implementation of string rejection. Do not widen it to `any`.
+
+- [ ] **Step 5: Update the builtin registry snapshot**
+
+`internal/vm/builtins_registry_test.go` holds an alphabetised snapshot of every registered native name compared with `reflect.DeepEqual`. Add `"strings_is_valid_utf8"` in alphabetical order.
+
+- [ ] **Step 6: Run the tests**
+
+Run: `go test ./internal/vm/ -run 'TestIsValidUTF8|TestBuiltinRegistry' -v`
+
+Expected: PASS.
+
+- [ ] **Step 7: Full validation and commit**
+
+```bash
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+```bash
+git add internal/vm/builtins_strings.go internal/stdlib/strings.nx internal/vm/builtins_registry_test.go internal/vm/builtins_strings_test.go
+git commit -m "feat(strings): add is_valid_utf8
+
+The check-before-decode path for programs that handle dirty bytes
+deliberately. Its parameter is strictly bytes, so asking the question of
+an already-decoded string is a compile-time error rather than a trivially
+true answer.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 11: `to_str` validates the bytes-to-text boundary
+
+The single choke point for program-driven decoding. This is the breaking change of Part Two.
+
+**Files:**
+- Modify: `internal/vm/builtins_strings.go` (helper)
+- Modify: `internal/vm/builtins_core.go` (`to_str`)
+- Test: `internal/vm/builtins_convert_test.go`
+
+**Interfaces:**
+- Consumes: nothing from Task 10 at the Go level.
+- Produces: `func requireValidUTF8(function string, data string) error`; `to_str` raises on invalid UTF-8 input.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/vm/builtins_convert_test.go`:
+
+```go
+func TestToStrValidatesUTF8(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name       string
+		input      string
+		wantOffset string
+	}{
+		{name: "lone 0xFF at start", input: "\xffhi", wantOffset: "offset 0"},
+		{name: "lone 0xFF in middle", input: "h\xffi", wantOffset: "offset 1"},
+		{name: "truncated multibyte", input: "caf\xc3", wantOffset: "offset 3"},
+		{name: "bare continuation byte", input: "\x80", wantOffset: "offset 0"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := requireBuiltin(t, machine, "to_str").Invoke(machine, []value.Value{value.NewBytes(test.input)})
+			if err == nil {
+				t.Fatalf("to_str(%q) did not fail", test.input)
+			}
+			message := err.Error()
+			if !strings.HasPrefix(message, "to_str: ") {
+				t.Fatalf("message = %q, want it to name the function", message)
+			}
+			if !strings.Contains(message, "not valid UTF-8") {
+				t.Fatalf("message = %q, want it to say UTF-8", message)
+			}
+			if !strings.Contains(message, test.wantOffset) {
+				t.Fatalf("message = %q, want it to name %s", message, test.wantOffset)
+			}
+		})
+	}
+}
+
+func TestToStrRoundTripsValidBytes(t *testing.T) {
+	machine := New()
+	for _, input := range []string{"", "hello", "café", "\U0001F600 ok", "linha\nquebrada"} {
+		got := callBuiltin(t, machine, "to_str", value.NewBytes(input))
+		text, ok := got.Obj.(string)
+		if !ok || text != input {
+			t.Fatalf("to_str(%q) = %#v, want the same bytes back", input, got)
+		}
+	}
+}
+
+func TestToStrLeavesNonBytesArgumentsAlone(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input value.Value
+		want  string
+	}{
+		{name: "int", input: value.NewInt(42), want: "42"},
+		{name: "bool", input: value.NewBool(true), want: "true"},
+		{name: "string", input: value.NewString("já texto"), want: "já texto"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "to_str", test.input)
+			if text, ok := got.Obj.(string); !ok || text != test.want {
+				t.Fatalf("to_str = %#v, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestToStrBoundsTheEchoedPayload(t *testing.T) {
+	machine := New()
+	payload := strings.Repeat("a", 500) + "\xff"
+	_, err := requireBuiltin(t, machine, "to_str").Invoke(machine, []value.Value{value.NewBytes(payload)})
+	if err == nil {
+		t.Fatal("to_str did not fail")
+	}
+	if len([]rune(err.Error())) > 200 {
+		t.Fatalf("message is %d characters, want a bounded message", len([]rune(err.Error())))
+	}
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/vm/ -run TestToStr -v`
+
+Expected: FAIL — `to_str` currently retags without inspection and never returns an error.
+
+- [ ] **Step 3: Add the validation helper**
+
+In `internal/vm/builtins_strings.go`, next to `requireTextArgument`:
+
+```go
+// requireValidUTF8 guards the bytes-to-text boundary. Every Noxy string is
+// required to hold valid UTF-8, so a character-based operation can never
+// decode a byte the caller did not write.
+func requireValidUTF8(function string, data string) error {
+	if utf8.ValidString(data) {
+		return nil
+	}
+	offset := 0
+	for offset < len(data) {
+		character, width := utf8.DecodeRuneInString(data[offset:])
+		if character == utf8.RuneError && width <= 1 {
+			break
+		}
+		offset += width
+	}
+	return fmt.Errorf("%s: bytes are not valid UTF-8 at byte offset %d", function, offset)
+}
+```
+
+`utf8.DecodeRuneInString` returns `(RuneError, 1)` for an invalid byte and `(RuneError, 0)` only for empty input, so the `width <= 1` test locates the first genuinely invalid position without mistaking a legitimately encoded U+FFFD, which decodes with width 3.
+
+- [ ] **Step 4: Make `to_str` validate**
+
+In `internal/vm/builtins_core.go`, replace the `to_str` registration. It currently uses `DefineNative`, whose signature cannot return an error, so it moves to `DefineContextualNative` — the same migration `to_int` and `to_float` went through:
+
+```go
+	vm.DefineContextualNative("to_str", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("to_str: expects exactly 1 argument, got %d", len(args))
+		}
+		if args[0].Type == value.VAL_BYTES {
+			payload := args[0].Obj.(string)
+			if err := requireValidUTF8("to_str", payload); err != nil {
+				return value.NewNull(), err
+			}
+			return value.NewString(payload), nil
+		}
+		return value.NewString(args[0].String()), nil
+	})
+```
+
+Preserve the existing behavior for every non-`bytes` argument exactly — only the `bytes` path gains validation.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `go test ./internal/vm/ -run TestToStr -v`
+
+Expected: PASS, every subtest.
+
+- [ ] **Step 6: Full validation**
+
+```bash
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+If an example now fails, some `.nx` code was decoding non-UTF-8 bytes. Report it; do not weaken the validation. Remember `http_parser.nx` is deliberately unguarded per the decision recorded above — if a *test* exercises it with invalid bytes, that is expected and belongs in the report, not in a fix.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/vm/builtins_strings.go internal/vm/builtins_core.go internal/vm/builtins_convert_test.go
+git commit -m "fix!: to_str validates UTF-8 at the bytes-to-text boundary
+
+BREAKING CHANGE: to_str retagged a byte payload as text without
+inspecting it, so an invalid byte survived in the string but decoded as
+U+FFFD in every character operation. Slicing h+0xFF+i re-encoded three
+bytes as five, silently and irreversibly.
+
+Every Noxy string now holds valid UTF-8, established once at the
+boundary. Use io_read_bytes, keep values as bytes, or gate with
+strings.is_valid_utf8 to handle dirty data deliberately.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 12: `io_read` and `io_read_lines` report invalid UTF-8
+
+File contents are a passive input with an existing error channel, so these report rather than raise.
+
+**Files:**
+- Modify: `internal/vm/builtins_io.go`
+- Test: `internal/vm/builtins_io_test.go`
+
+**Interfaces:**
+- Consumes: `requireValidUTF8` from Task 11.
+- Produces: `io_read` and `io_read_lines` return `ok=false` with a UTF-8 message for invalid content; `io_read_bytes` unchanged.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/vm/builtins_io_test.go`. Follow the file's existing pattern for creating a temp file and calling through Noxy source:
+
+```go
+func TestIOReadRejectsInvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty.bin")
+	if err := os.WriteFile(path, []byte("hello\xffworld"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOResult = io.read(file)\n" +
+		"io.close(file)\n" +
+		"test_report(to_str(!r.ok) + \"|\" + r.error)"
+	captured := captureVMSource(t, source)
+	report, ok := captured.Obj.(string)
+	if !ok {
+		t.Fatalf("test_report value = %#v, want string", captured)
+	}
+	if !strings.HasPrefix(report, "true|") {
+		t.Fatalf("io.read on invalid UTF-8 reported %q, want ok=false", report)
+	}
+	if !strings.Contains(report, "UTF-8") {
+		t.Fatalf("error = %q, want it to mention UTF-8", report)
+	}
+}
+
+func TestIOReadBytesStillReadsInvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty.bin")
+	if err := os.WriteFile(path, []byte("hello\xffworld"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOBytesResult = io.read_bytes(file)\n" +
+		"io.close(file)\n" +
+		"test_report(to_str(r.ok) + \"|\" + to_str(length(r.data)))"
+	captured := captureVMSource(t, source)
+	report, _ := captured.Obj.(string)
+	if report != "true|11" {
+		t.Fatalf("io.read_bytes reported %q, want %q — the raw escape hatch must still work", report, "true|11")
+	}
+}
+
+func TestIOReadLinesRejectsInvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty.txt")
+	if err := os.WriteFile(path, []byte("linha um\nlinha \xff dois\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOLinesResult = io.read_lines(file)\n" +
+		"io.close(file)\n" +
+		"test_report(to_str(!r.ok) + \"|\" + r.error)"
+	captured := captureVMSource(t, source)
+	report, _ := captured.Obj.(string)
+	if !strings.HasPrefix(report, "true|") || !strings.Contains(report, "UTF-8") {
+		t.Fatalf("io.read_lines reported %q, want ok=false with a UTF-8 message", report)
+	}
+}
+
+func TestIOReadAcceptsValidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clean.txt")
+	if err := os.WriteFile(path, []byte("acentuação e emoji \U0001F600"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOResult = io.read(file)\n" +
+		"io.close(file)\n" +
+		"test_report(r.data)"
+	captured := captureVMSource(t, source)
+	if text, _ := captured.Obj.(string); text != "acentuação e emoji \U0001F600" {
+		t.Fatalf("io.read returned %q, want the file content unchanged", text)
+	}
+}
+```
+
+Add whatever imports these need (`os`, `path/filepath`, `strconv`, `strings`) if the file lacks them.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/vm/ -run 'TestIORead' -v`
+
+Expected: the two invalid-UTF-8 tests FAIL — content is currently returned as a string with `ok=true`.
+
+- [ ] **Step 3: Validate in `io_read`**
+
+In `internal/vm/builtins_io.go`, inside the `io_read` registration, the content is turned into a result by:
+
+```go
+			content, ok, errorText := readFileContents(file)
+			return newIOReadResult(resultStruct, ok, value.NewString(string(content)), errorText)
+```
+
+Validate before building the success result, so an invalid file reports rather than returns text:
+
+```go
+			content, ok, errorText := readFileContents(file)
+			if ok {
+				if err := requireValidUTF8("io.read", string(content)); err != nil {
+					return newIOReadResult(resultStruct, false, value.NewString(""), err.Error())
+				}
+			}
+			return newIOReadResult(resultStruct, ok, value.NewString(string(content)), errorText)
+```
+
+- [ ] **Step 4: Validate in `io_read_lines`**
+
+Apply the same shape in the `io_read_lines` registration: validate the whole file content once, before it is split into lines, and on failure return the lines result with `ok=false`, an empty array, and the error message. Read the surrounding code and match its existing result-construction helper rather than inventing a new one.
+
+- [ ] **Step 5: Leave `io_read_bytes` alone**
+
+`io_read_bytes` is the documented raw escape hatch. It must not gain validation.
+
+- [ ] **Step 6: Run the tests and validate**
+
+```bash
+go test ./internal/vm/ -run 'TestIORead' -v
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/vm/builtins_io.go internal/vm/builtins_io_test.go
+git commit -m "fix: io.read and io.read_lines report invalid UTF-8
+
+A file containing bytes that are not valid UTF-8 was returned as a Noxy
+string, so every later character operation decoded them as U+FFFD and
+re-encoded three bytes where one stood. Both now report through the ok
+and error fields they already have. io.read_bytes is unchanged and
+remains the raw escape hatch.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 13: sqlite TEXT columns report invalid UTF-8
+
+SQLite does not enforce UTF-8 in TEXT columns, and the driver hands the bytes straight through.
+
+**Files:**
+- Modify: `internal/vm/builtins_sqlite.go`
+- Test: `internal/vm/builtins_sqlite_test.go`
+
+**Interfaces:**
+- Consumes: `requireValidUTF8` from Task 11.
+- Produces: a query whose row values contain invalid UTF-8 returns the existing query-error shape instead of corrupt strings.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/vm/builtins_sqlite_test.go`, following that file's existing pattern for opening a temp database and running statements. The test must:
+
+1. create a table with a TEXT column;
+2. insert a value containing the byte `0xFF`, using a `bytes` parameter binding so the invalid byte reaches the column intact;
+3. query the table;
+4. assert the result reports `ok == false` and its `error` mentions UTF-8, rather than returning a row whose value silently decodes to U+FFFD.
+
+Also add a companion test asserting that a table of ordinary accented text (`"acentuação"`) still queries successfully and returns the value unchanged, so the validation cannot be satisfied by rejecting everything.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/vm/ -run TestSQLite -v`
+
+Expected: the invalid-UTF-8 test FAILS — the row is currently returned with a corrupt string and `ok=true`.
+
+- [ ] **Step 3: Validate during row conversion**
+
+`sqliteValue` at `internal/vm/builtins_sqlite.go:438` converts a scanned column into a Noxy value, and it is called from the row loop at line 334. `sqliteValue` returns a bare `value.Value` with no error channel, so add a companion that reports:
+
+```go
+// sqliteValueChecked converts a scanned column, rejecting TEXT and BLOB
+// payloads that are not valid UTF-8 rather than letting them become a Noxy
+// string that decodes to U+FFFD.
+func sqliteValueChecked(item interface{}) (value.Value, error) {
+	switch typed := item.(type) {
+	case string:
+		if err := requireValidUTF8("sqlite.query", typed); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(typed), nil
+	case []byte:
+		if err := requireValidUTF8("sqlite.query", string(typed)); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(string(typed)), nil
+	}
+	return sqliteValue(item), nil
+}
+```
+
+In the row loop, use it and abandon the query on the first failure, returning the existing error shape:
+
+```go
+			values := make([]value.Value, len(columns))
+			for index, item := range destination {
+				converted, convertErr := sqliteValueChecked(item)
+				if convertErr != nil {
+					return sqliteQueryError(resultTemplate.Struct, convertErr.Error()), nil
+				}
+				values[index] = converted
+			}
+```
+
+Keep `sqliteValue` itself in place for any other caller; do not change its signature.
+
+- [ ] **Step 4: Run the tests and validate**
+
+```bash
+go test ./internal/vm/ -run TestSQLite -v
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+The example suite includes database-backed examples; if one now fails, it is storing non-UTF-8 text and that is real signal — report it.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/vm/builtins_sqlite.go internal/vm/builtins_sqlite_test.go
+git commit -m "fix: sqlite TEXT columns report invalid UTF-8
+
+SQLite does not enforce UTF-8 in TEXT columns and the driver hands the
+bytes straight through, so a corrupt column became a Noxy string that
+decoded to U+FFFD. A query carrying one now returns the existing query
+error shape instead.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 14: source loading rejects invalid UTF-8
+
+A `.nx` file that is not valid UTF-8 cannot be lexed correctly, and the failure today is silent mis-tokenisation rather than a diagnosable error.
+
+**Files:**
+- Modify: `internal/vm/modules.go`
+- Test: `internal/vm/module_cache_test.go` or a new `internal/vm/module_encoding_test.go`
+
+**Interfaces:**
+- Consumes: `requireValidUTF8` from Task 11.
+- Produces: loading a module whose source is not valid UTF-8 fails with an error naming the file.
+
+- [ ] **Step 1: Write the failing test**
+
+Create the test in `internal/vm`. It must write a `.nx` file containing an invalid byte into a temp directory, point a VM's `RootPath` at that directory (see `TestConcurrentModuleImportInitializesOnce` in `internal/vm/module_exports_test.go` for the established pattern), attempt to `use` it, and assert the resulting error mentions both the file and UTF-8.
+
+Add a companion test that a module containing valid accented source loads and runs normally, so the check cannot be satisfied by rejecting everything.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Expected: FAIL — the source is currently read and lexed without an encoding check.
+
+- [ ] **Step 3: Validate after reading module source**
+
+`internal/vm/modules.go` reads module source in `resolveModule` (disk path around line 101, embedded stdlib just after). Validate the content immediately after it is read, before it reaches the lexer, and return an error naming the module or path. The embedded stdlib is already covered by `TestEmbeddedStdlibSourcesAreValidUTF8`, so this guard is about user and library sources.
+
+- [ ] **Step 4: Run the tests and validate**
+
+```bash
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/vm/modules.go internal/vm/module_encoding_test.go
+git commit -m "fix: reject module sources that are not valid UTF-8
+
+A .nx file containing invalid bytes was lexed anyway, producing
+mis-tokenised source rather than a diagnosable error. Loading one now
+fails with an error naming the file.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 15: `sys` outputs report invalid UTF-8
+
+Command output and environment variables are external byte sources labelled as text.
+
+**Files:**
+- Modify: `internal/vm/builtins_sys.go`
+- Test: `internal/vm/builtins_sys_test.go`
+
+**Interfaces:**
+- Consumes: `requireValidUTF8` from Task 11.
+- Produces: `sys.exec_output` and `sys.getenv` report invalid UTF-8 through their existing result structs.
+
+- [ ] **Step 1: Establish what each function's error channel is**
+
+Read `internal/vm/builtins_sys.go` around the `sys_exec`, `sys_exec_output`, and `sys_getenv` registrations, and the matching structs in `internal/stdlib/sys.nx`. `SysResult` and `EnvResult` each already carry an `ok` field and a message field. Record the exact field names before writing tests — the plan does not restate them because they must match the source.
+
+- [ ] **Step 2: Write the failing tests**
+
+For `exec_output`, run a command that emits a raw invalid byte. Use the platform split already present in this file (`cmd /C` on Windows, `sh -c` elsewhere) so the test runs on both; on Windows, `cmd /C echo` with a byte the console will pass through is awkward, so prefer invoking the repo's own built interpreter or `printf` under `sh -c` and skip with `t.Skip` on platforms where a raw invalid byte cannot be produced reliably. State the skip reason.
+
+For `getenv`, set an environment variable containing an invalid byte with `t.Setenv`, then read it through Noxy and assert the result reports failure rather than a corrupt string.
+
+Add companion tests for valid accented values in both, so the check cannot be satisfied by rejecting everything.
+
+- [ ] **Step 3: Validate in each function**
+
+Apply `requireValidUTF8` to the captured output and to the environment value, and report through the existing `ok` / error fields. Do not convert these into raising functions — they own result structs, and raising is reserved for pure conversions.
+
+- [ ] **Step 4: Run the tests and validate**
+
+```bash
+go build -o noxy.exe cmd/noxy/main.go
+go vet ./...
+go test ./internal/...
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+Note the example suites shell out through `sys.exec_output`; if they break, the validation is rejecting legitimate output and that is a defect in the change, not in the suite.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/vm/builtins_sys.go internal/vm/builtins_sys_test.go
+git commit -m "fix: sys command output and environment values validate UTF-8
+
+Both are external byte sources that were labelled as text without
+inspection. They now report through the result structs they already
+carry.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 16: document the UTF-8 invariant
+
+**Files:**
+- Modify: `docs/NOXY_LANGUAGE_SPEC.md`
+- Modify: `CHANGELOG.md`
+
+- [ ] **Step 1: Document the invariant in the language spec**
+
+Add to the string section, immediately after the existing "Indexação de strings" section added earlier in this branch:
+
+```markdown
+### Invariante UTF-8
+
+Toda `string` Noxy contém UTF-8 válido. A validação acontece uma única vez, na
+fronteira onde bytes viram texto, e não em cada operação — dentro do
+invariante, toda operação por caractere é correta por construção.
+
+```noxy
+use strings select *
+
+let dados: bytes = io.read_bytes(arquivo).data
+if is_valid_utf8(dados) then
+    let texto: string = to_str(dados)
+else
+    print("conteúdo não é UTF-8")
+end
+```
+
+`to_str` levanta erro de runtime sobre bytes inválidos, indicando o offset:
+
+```text
+to_str: bytes are not valid UTF-8 at byte offset 5
+```
+
+Funções que já possuem struct de resultado — `io.read`, `io.read_lines`,
+`sqlite.query`, `sys.exec_output`, `sys.getenv` — reportam pelos campos `ok` e
+de erro que já têm, em vez de levantar. Levantar fica reservado às conversões
+puras.
+
+Para lidar com bytes arbitrários deliberadamente, mantenha o valor como
+`bytes`: `io.read_bytes` e `net.recv` já devolvem `bytes` e não validam nada.
+
+`is_valid_utf8` aceita apenas `bytes`. Perguntar isso de uma `string` é erro de
+compilação, porque o invariante já respondeu — o portão estaria depois da
+porta.
+
+Noxy não aplica normalização Unicode (NFC/NFD). Comparação é byte-exata, como
+em Python.
+```
+
+- [ ] **Step 2: Add the changelog entries**
+
+Add to `CHANGELOG.md`, merging into the sections this branch already created rather than duplicating headings:
+
+```markdown
+### Changed (BREAKING)
+- **Toda `string` Noxy contém UTF-8 válido.** `to_str` levanta erro sobre bytes
+  inválidos em vez de retaggear sem inspeção. Antes, o byte inválido sobrevivia
+  na string mas decodificava como U+FFFD em toda operação por caractere:
+  fatiar `h` + `0xFF` + `i` reescrevia três bytes como cinco, em silêncio e sem
+  volta. Migração: use `io.read_bytes`, mantenha o valor como `bytes`, ou use
+  `strings.is_valid_utf8` antes de decodificar.
+- **`io.read`, `io.read_lines`, `sqlite.query`, `sys.exec_output` e
+  `sys.getenv`** reportam conteúdo não-UTF-8 pelos campos `ok` e de erro que já
+  possuem. `io.read_bytes` e `net.recv` seguem inalterados como as saídas
+  brutas.
+- **Carregar um `.nx` que não seja UTF-8 válido falha** com erro nomeando o
+  arquivo, em vez de lexar bytes mal formados.
+
+### Added
+- **`strings.is_valid_utf8(b: bytes)`**, o caminho de checar-antes-de-decodificar.
+  O parâmetro é estritamente `bytes`: passar uma `string` é erro de compilação.
+```
+
+- [ ] **Step 3: Full validation and commit**
+
+```bash
+go build ./...
+go vet ./...
+go test ./internal/...
+go test -race ./internal/vm/
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx   # 162 passed, 0 failed
+```
+
+```bash
+git add docs/NOXY_LANGUAGE_SPEC.md CHANGELOG.md
+git commit -m "docs: document the UTF-8 string invariant
+
+Where validation happens, which functions raise versus report, and how to
+handle arbitrary bytes deliberately.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
+### Task 17: Pull request
 
 - [ ] **Step 1: Push the branch**
 
