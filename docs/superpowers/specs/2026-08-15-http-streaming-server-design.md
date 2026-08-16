@@ -197,13 +197,15 @@ Request line rules:
 
 - exactly three space-separated tokens, so a target containing a raw space is
   rejected with 400;
-- the method is a non-empty RFC 9110 token: every character is in the visible
-  ASCII token set `!#$%&'*+-.^_`|~`, a digit, or a letter. A violation is 400;
+- the method is a non-empty RFC 9110 token of at most 64 characters: every
+  character is in the visible ASCII token set `!#$%&'*+-.^_`|~`, a digit, or a
+  letter. A violation is 400;
 - the target is non-empty and begins with `/`. Absolute-form and authority-form
   targets are rejected with 400, which matches an origin server that terminates
   its own connections;
-- the target contains no space, control character, or byte below `0x21`, else
-  400;
+- the target is at most 2048 characters, else 414;
+- every target character is visible ASCII in `0x21`–`0x7E`, so a space or a
+  control character is 400;
 - the version is exactly `HTTP/1.0` or `HTTP/1.1`. Any other syntactically
   well-formed version is 505; a malformed version token is 400.
 
@@ -212,8 +214,9 @@ Header line rules:
 - a line beginning with space or horizontal tab is obsolete line folding and is
   rejected with 400 rather than silently joined;
 - a line without `:` is 400;
-- the name is the text before the first `:`. An empty name, a name containing
-  whitespace, or any whitespace between the name and the `:` is 400;
+- the name is the text before the first `:`. An empty name, a name longer than
+  256 characters, a name containing whitespace, or any whitespace between the
+  name and the `:` is 400;
 - the value is everything after the first `:`, with leading and trailing spaces
   and tabs removed. A value may contain `:`;
 - more than 64 headers is 431. The current implementation silently drops
@@ -326,11 +329,12 @@ error response carries `Content-Type: text/plain`, a byte-exact
 | 400 Bad Request | malformed request line, malformed header, obsolete folding, whitespace before `:`, non-origin target, duplicate `Content-Length`, non-digit `Content-Length`, `Transfer-Encoding` with `Content-Length`, EOF mid-request |
 | 408 Request Timeout | header or body deadline expired, including a stalled trickle |
 | 413 Content Too Large | declared `Content-Length` above `max_body_bytes` |
+| 414 URI Too Long | request target longer than 2048 characters |
 | 431 Request Header Fields Too Large | header block at or above `max_header_bytes`, or more than 64 header lines |
 | 501 Not Implemented | `Transfer-Encoding` present |
 | 505 HTTP Version Not Supported | version other than `HTTP/1.0` or `HTTP/1.1` |
 
-`get_status_text` gains 408, 413, 431, 501, and 505.
+`get_status_text` gains 408, 413, 414, 431, 501, and 505.
 
 `response_error` currently computes `Content-Length` as `length(msg)` where
 `msg` is a string, which is a rune count, while the body is `to_bytes(msg)`,
@@ -348,6 +352,14 @@ is truncated. Framing depends on reading `Content-Length` and
 `get_header` keeps its signature and its empty-string result for a missing
 header. A new `count_header(headers, count, name) -> int` returns how many
 lines carry a given name, which is what duplicate detection needs.
+
+Value trimming uses the existing `strings_trim` native, whose Go `TrimSpace`
+semantics operate on the raw string and cannot corrupt bytes. Structural
+scanning likewise uses the byte-based `split`, `index_of`, and `starts_with`
+natives rather than the rune-based `substring` and `char_at`, so a header
+carrying non-UTF-8 bytes cannot shift a framing decision. Rune-based helpers
+are used only for validating ASCII-constrained fields, where any non-ASCII rune
+fails validation and the request is rejected.
 
 ## Testing
 
@@ -391,6 +403,8 @@ The matrix proves:
   accepted;
 - obsolete line folding, whitespace before `:`, a header without `:`, a target
   containing a space, and a non-origin target return 400;
+- a target longer than 2048 characters returns 414, and a method longer than 64
+  characters or a header name longer than 256 characters returns 400;
 - every error response carries a byte-exact `Content-Length` and
   `Connection: close`;
 - a large response to a slow-reading client is written completely, exercising
