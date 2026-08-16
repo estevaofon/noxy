@@ -17,7 +17,7 @@
 - Existing exported names keep their signatures: `new_server(host, port)`, `serve(server, handler)`, `stop_server`, `response_ok`, `response_text`, `response_json`, `response_html`, `response_error`, `response_404`, `response_500`, `serve_static`, `find_header_end`, `parse_request`, `parse_response`, `build_request`, `build_response`, `get_header`.
 - Noxy has no `continue` keyword. Use `if`/`else` structure inside loops.
 - Noxy has no `min`/`max` builtin. Clamp with explicit `if`.
-- A top-level variable that a function reassigns must be declared with `global`, not `let`.
+- **There is no `global` keyword.** An earlier revision of this plan claimed a top-level variable a function reassigns needs `global` instead of `let`; that is not real Noxy syntax — confirmed against the lexer, parser, and token packages, none of which define it, and `global name: type = value` fails to parse with "missing 'let' keyword for variable declaration" regardless of type. A plain top-level `let` already creates a binding any function, including a spawned one, can read and reassign with no special declaration; verified directly with a counter incremented from inside `spawn`. Every `global` in this plan's own code samples (the Task 6 test harness, the Task 7 example) is this same error and must read `let` instead.
 - Noxy string literals support `\n`, `\r`, `\t`, `\"`, `\'`, `\\`, and — as of this branch — `\uNNNN` and `\u{...}` for any codepoint. `\xNN` writes a raw byte and is valid **only** in a bytes literal (`b"..."`), because a string must hold valid UTF-8. An unrecognised escape still preserves its backslash.
 - Use `codes(s) -> int[]` to scan a string character by character. `char_at` rebuilds the rune slice on every call, so a `char_at` loop is quadratic in the string's length — which matters here, where the strings are attacker-supplied and can reach `max_header_bytes`. `codes` also removes the `if ch == ""` guard that `ord`'s single-character requirement forces.
 - `sleep` is not a global native. A script that calls it needs `use time select *`.
@@ -1558,16 +1558,16 @@ func handler(req: HttpRequest) -> HttpResponse
 end
 
 func serve_loop()
-    serve(server, handler)
+    serve(ref server, handler)
 end
 
-global server: HttpServer = new_server("127.0.0.1", 0)
+let server: HttpServer = new_server("127.0.0.1", 0)
 ` + config + `
-if bind_server(server) then
+if bind_server(ref server) then
     spawn(serve_loop)
     harness_ready(server.port)
     harness_wait()
-    stop_server(server)
+    stop_server(ref server)
 else
     harness_ready(0)
     harness_wait()
@@ -2162,6 +2162,8 @@ end
 
 Note `scanned = total - 3` is assigned **before** the buffer grows, so the next scan re-examines only the three bytes that could carry a split terminator. `want` is capped at the exact remaining need, so the body phase never over-reads.
 
+**Concurrency correction found under `-race`, applied on top of the Task 4/5 code above.** The bind-then-spawn(serve) pattern this task's own test harness uses puts `bind_server`'s fast-path write to `server.running` in a genuine cross-goroutine race against the harness's own concurrent reads of other `server` fields: struct fields are not synchronized between threads the way globals and maps are. `bind_server`'s fast path now only writes `server.running = true` when it is not already true, and `serve()`'s accept loop no longer re-reads `server.running` at all -- it runs unconditionally and `break`s when `accept` fails, since a closed listener (by `stop_server`, from another goroutine, which is the whole point of this pattern) unblocks a pending `accept` with an error, and that result is backed by the already-synchronized socket registry. `stop_server` still writes `server.running = false`; nothing in this module reads it anymore, so the write has no concurrent reader left to race against. Confirmed clean across five separate `go test -race ./internal/vm/...` runs. This is not a general fix for concurrent struct mutation -- that remains PR #17's own deliberately deferred limitation -- only the removal of two specific, unnecessary accesses to the one field this task's design put in a real cross-goroutine path.
+
 - [ ] **Step 4: Fix `response_error` to declare a byte-exact length**
 
 Replace the existing `response_error` with:
@@ -2261,8 +2263,8 @@ use http_parser select *
 use strings select *
 use time select *
 
-global passed: int = 0
-global failed: int = 0
+let passed: int = 0
+let failed: int = 0
 
 func check(name: string, condition: bool) -> void
     if condition then
@@ -2290,14 +2292,17 @@ func handler(req: HttpRequest) -> HttpResponse
     return response_404()
 end
 
-global server: HttpServer = new_server("127.0.0.1", 0)
+// A plain top-level let already creates a global binding any function --
+// including a spawned one -- can read and reassign. There is no `global`
+// keyword; see the Global Constraints note above.
+let server: HttpServer = new_server("127.0.0.1", 0)
 
 func run_server()
-    serve(server, handler)
+    serve(ref server, handler)
 end
 
 func main()
-    if !bind_server(server) then
+    if !bind_server(ref server) then
         print("FAIL: could not bind server")
         return
     end
@@ -2325,7 +2330,7 @@ func main()
     let missing: ClientResponse = get(base + "/nope")
     check("unknown path returns 404", missing.status_code == 404)
 
-    stop_server(server)
+    stop_server(ref server)
     sleep(200)
 
     print("")
