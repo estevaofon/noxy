@@ -2935,21 +2935,85 @@ Command output and environment variables are external byte sources labelled as t
 - Consumes: `requireValidUTF8` from Task 11.
 - Produces: `sys.exec_output` and `sys.getenv` report invalid UTF-8 through their existing result structs.
 
-- [ ] **Step 1: Establish what each function's error channel is**
+- [ ] **Step 1: Verified — neither struct has an error-message field today**
 
-Read `internal/vm/builtins_sys.go` around the `sys_exec`, `sys_exec_output`, and `sys_getenv` registrations, and the matching structs in `internal/stdlib/sys.nx`. `SysResult` and `EnvResult` each already carry an `ok` field and a message field. Record the exact field names before writing tests — the plan does not restate them because they must match the source.
+**Correction to the original text above:** `SysResult` and `EnvResult` were
+checked directly in `internal/stdlib/sys.nx` and each has only two
+meaningful fields, no message channel:
+
+```noxy
+struct SysResult
+    exit_code: int,
+    output: string,
+    ok: bool
+end
+
+struct EnvResult
+    value: string,
+    ok: bool
+end
+```
+
+Worse, their existing `ok` already carries a specific meaning that a UTF-8
+failure must not collide with. Read the current native bodies in
+`internal/vm/builtins_sys.go` (`sys_exec_output` and `sys_getenv`) to confirm
+this yourself:
+
+- `sys_exec_output`'s `ok` means "the process completed" — it is `false` only
+  when the command itself could not be started (e.g. the shell was
+  unavailable), and stays `true` for a completed process regardless of its
+  exit code or output content. Reusing `ok=false` for "output was not UTF-8"
+  would make a caller unable to distinguish "the command never ran" from "the
+  command ran fine and produced binary output."
+- `sys_getenv`'s `ok` means `os.LookupEnv`'s "found" — `false` means the
+  variable is unset. Reusing it for "set, but not UTF-8" would make a caller
+  unable to distinguish "unset" from "set to garbage," which is a real,
+  useful distinction (e.g. a `PORT` variable that is merely absent versus one
+  containing corrupted bytes).
+
+Both structs are built exclusively inside their native's Go code via
+`value.NewInstance(structDef)` plus field assignment by name
+(`inst.Fields["ok"] = ...`); a repo-wide search confirms no `.nx` source
+anywhere constructs `SysResult(...)` or `EnvResult(...)` positionally. Adding
+a field is therefore safe — nothing depends on positional field order for
+these two structs.
+
+**The fix adds `error: string` to both structs**, matching the `ok`/`error`
+convention every other result struct in this codebase already uses
+(`NetResult`, `IOResult`, `IntResult`, and the rest). In
+`internal/stdlib/sys.nx`:
+
+```noxy
+struct SysResult
+    exit_code: int,
+    output: string,
+    ok: bool,
+    error: string
+end
+
+struct EnvResult
+    value: string,
+    ok: bool,
+    error: string
+end
+```
+
+Every existing success and failure path in both natives must set
+`error: value.NewString("")` alongside its current fields, so today's
+observable behavior is unchanged for every case except the new one. Only the
+new UTF-8 failure path sets `error` to a real message and leaves `ok=false`.
 
 - [ ] **Step 2: Write the failing tests**
 
 For `exec_output`, run a command that emits a raw invalid byte. Use the platform split already present in this file (`cmd /C` on Windows, `sh -c` elsewhere) so the test runs on both; on Windows, `cmd /C echo` with a byte the console will pass through is awkward, so prefer invoking the repo's own built interpreter or `printf` under `sh -c` and skip with `t.Skip` on platforms where a raw invalid byte cannot be produced reliably. State the skip reason.
 
-For `getenv`, set an environment variable containing an invalid byte with `t.Setenv`, then read it through Noxy and assert the result reports failure rather than a corrupt string.
+For `getenv`, set an environment variable containing an invalid byte with `t.Setenv`, then read it through Noxy and assert the result reports failure with a non-empty `error` mentioning UTF-8, rather than a corrupt string.
 
-Add companion tests for valid accented values in both, so the check cannot be satisfied by rejecting everything.
+Add companion tests for valid accented values in both, so the check cannot be satisfied by rejecting everything, and companion tests confirming the **existing** meaning of `ok=false` is preserved: `getenv` on a genuinely unset variable still reports `ok=false` with an **empty** `error` (not a UTF-8 message), and `exec_output` on a command that fails to start still reports its existing failure shape unchanged.
 
 - [ ] **Step 3: Validate in each function**
 
-Apply `requireValidUTF8` to the captured output and to the environment value, and report through the existing `ok` / error fields. Do not convert these into raising functions — they own result structs, and raising is reserved for pure conversions.
+Apply `requireValidUTF8` to the captured output and to the environment value, and report through the new `error` field alongside the existing `ok`. Do not convert these into raising functions — they own result structs, and raising is reserved for pure conversions. Do not repurpose the existing `ok` semantics: a UTF-8 failure sets `ok=false` (there is no successful outcome with invalid content), but every other `ok=false` path must keep its current, empty `error`.
 
 - [ ] **Step 4: Run the tests and validate**
 
