@@ -239,6 +239,85 @@ main()
 	}
 }
 
+// vmWithCloneReset devolve uma VM com o native de teste test_reset_clones,
+// para zerar o contador de clones depois do setup do programa.
+func vmWithCloneReset() *VM {
+	machine := New()
+	machine.DefineNative("test_reset_clones", func(args []value.Value) value.Value {
+		ResetCloneCount()
+		return value.NewNull()
+	})
+	return machine
+}
+
+func TestHasKeyThenWriteDoesNotClone(t *testing.T) {
+	machine := vmWithCloneReset()
+	if err := interpretVMSource(t, machine, `
+func main()
+    let m: map[string, string] = {}
+    test_reset_clones()
+    let i: int = 0
+    while i < 20 do
+        let e: bool = has_key(m, "key:" + to_str(i))
+        m["key:" + to_str(i)] = "v"
+        i = i + 1
+    end
+end
+main()
+`); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	if n := CloneCountValue(); n != 0 {
+		t.Fatalf("has_key intercalado com escrita deveria custar 0 clones, veio %d", n)
+	}
+}
+
+func TestKeysThenWriteDoesNotClone(t *testing.T) {
+	machine := vmWithCloneReset()
+	if err := interpretVMSource(t, machine, `
+func main()
+    let m: map[string, string] = {}
+    test_reset_clones()
+    let i: int = 0
+    while i < 20 do
+        let ks: string[] = keys(m)
+        m["key:" + to_str(i)] = "v"
+        i = i + 1
+    end
+end
+main()
+`); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	if n := CloneCountValue(); n != 0 {
+		t.Fatalf("keys intercalado com escrita deveria custar 0 clones, veio %d", n)
+	}
+}
+
+// Caso negativo: native sem assinatura fora da allowlist tem que continuar
+// marcando os args (default conservador) — a escrita seguinte deve clonar.
+func TestUnlistedNativeStillMarksArgs(t *testing.T) {
+	machine := vmWithCloneReset()
+	machine.DefineNative("test_observe", func(args []value.Value) value.Value {
+		return value.NewNull()
+	})
+	if err := interpretVMSource(t, machine, `
+func main()
+    let m: map[string, string] = {}
+    m["a"] = "1"
+    test_reset_clones()
+    test_observe(m)
+    m["b"] = "2"
+end
+main()
+`); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	if n := CloneCountValue(); n != 1 {
+		t.Fatalf("native fora da allowlist deve marcar o arg: escrita seguinte deveria clonar 1x, veio %d", n)
+	}
+}
+
 func TestChanSendDeliversIndependentValue(t *testing.T) {
 	got := captureVMSource(t, `
 func main()

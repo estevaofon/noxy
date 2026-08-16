@@ -23,4 +23,6 @@ var readonlyNatives = map[string]bool{
 	"typeof":      true,
 	"chan_recv":   true, // recebe o canal; o payload foi marcado no send
 	"test_report": true, // harness de teste: apenas observa
+	"has_key":     true, // só consulta o mapa; devolve bool novo
+	"keys":        true, // Snapshot + array novo; não compartilha estrutura
 }
