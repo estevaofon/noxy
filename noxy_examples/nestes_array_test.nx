@@ -1,0 +1,9 @@
+let a: int[][] = [[1, 2], [3,4]]
+
+func change(array: int[][]) -> void
+    array[0][0] = 5
+    print(array)
+end
+print(a)
+change(a)
+print(a)
