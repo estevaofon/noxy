@@ -19,8 +19,8 @@
 - Noxy has no `continue` keyword; use `if`/`else` inside loops.
 - Noxy has no `min`/`max` builtin; clamp with explicit `if`.
 - Noxy string literals support only `\n`, `\r`, `\t`, `\"`, `\'`, `\\`. There is no `\u` escape; build a character with `from_char_code(code)`.
-- **Do not use the `global` keyword.** It is in the token table but the parser rejects it: `global counter: int = 0` is `SyntaxError: invalid syntax "global"`. Declare top-level variables with `let`; a function may reassign a `let` declared at top level, which is verified working.
-- **Do not add a `use` statement to a `.nx` module under `internal/stdlib/`.** A stdlib module that gains an import becomes unloadable through the path form (`use internal.stdlib.http_parser select *` fails with `failed to resolve wildcard module`). Inside a stdlib module, call the global native directly and type the result `any`, the way `internal/stdlib/net.nx` already calls `net_select`. This restriction applies only to stdlib modules; top-level scripts under `noxy_examples/` may import freely.
+- **Do not use the `global` keyword.** It was deliberately removed from the syntax; the parser rejects it (`global counter: int = 0` is `SyntaxError: invalid syntax "global"`) and only a leftover entry in the token table still mentions it. Declare top-level variables with `let`; a function may reassign a top-level `let`, which is verified working.
+- **A `.nx` module under `internal/stdlib/` must not contain a `use` statement.** This is by design, not a defect: a stdlib module that gains an import can no longer be loaded through the path form, so `use internal.stdlib.http_parser select *` fails with `failed to resolve wildcard module`. Inside a stdlib module, call the global native directly and type the result `any`, the way `internal/stdlib/net.nx` already calls `net_select`. Top-level scripts under `noxy_examples/` may import freely; the restriction is on stdlib modules only.
 - `length(s)` on a `string` counts characters; on `bytes` it counts octets.
 - Commit after every task. Commit messages end with:
   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
