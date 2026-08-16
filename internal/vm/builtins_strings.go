@@ -232,34 +232,17 @@ func (vm *VM) defineStringBuiltins() {
 		return value.NewString(""), nil
 	})
 	vm.DefineContextualNative("ord", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
-		if len(args) < 1 {
-			return value.NewInt(0), nil
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("ord: expects exactly 1 argument, got %d", len(args))
 		}
 		if err := requireTextArgument("ord", args, 0); err != nil {
 			return value.NewNull(), err
 		}
-		s := args[0].String()
-		if len(s) == 0 {
-			return value.NewInt(0), nil
+		characters := []rune(args[0].String())
+		if len(characters) != 1 {
+			return value.NewNull(), fmt.Errorf("ord: expects a single character, got %d", len(characters))
 		}
-		return value.NewInt(int64(s[0])), nil
-	})
-	vm.DefineNative("strings_contains", func(args []value.Value) value.Value {
-		if len(args) < 2 {
-			return value.NewBool(false)
-		}
-		s := args[0].String()
-		substr := args[1].String()
-		return value.NewBool(strings.Contains(s, substr))
-	})
-	vm.DefineNative("strings_replace", func(args []value.Value) value.Value {
-		if len(args) < 3 {
-			return value.NewString("")
-		}
-		s := args[0].String()
-		old := args[1].String()
-		new := args[2].String()
-		return value.NewString(strings.ReplaceAll(s, old, new))
+		return value.NewInt(int64(characters[0])), nil
 	})
 	vm.DefineContextualNative("strings_substring", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		// args: string, start, end_idx (exclusive, rune-based)

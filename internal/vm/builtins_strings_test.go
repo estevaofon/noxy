@@ -94,9 +94,7 @@ func TestStringBuiltinsScalarTables(t *testing.T) {
 		{name: "from char code zero produces nul", builtin: "strings_from_char_code", args: []value.Value{value.NewInt(0)}, want: value.NewString("\x00")},
 		{name: "from char code short", builtin: "strings_from_char_code", want: value.NewString("")},
 		{name: "ord normal", builtin: "ord", args: []value.Value{value.NewString("A")}, want: value.NewInt(65)},
-		{name: "ord unicode returns first utf8 byte", builtin: "ord", args: []value.Value{value.NewString("é")}, want: value.NewInt(195)},
-		{name: "ord empty", builtin: "ord", args: []value.Value{value.NewString("")}, want: value.NewInt(0)},
-		{name: "ord short", builtin: "ord", want: value.NewInt(0)},
+		{name: "ord unicode returns code point", builtin: "ord", args: []value.Value{value.NewString("é")}, want: value.NewInt(233)},
 	}
 
 	for _, tt := range tests {
@@ -264,5 +262,65 @@ test_report(parts.count)`
 	captured := captureVMSource(t, source)
 	if captured.Type != value.VAL_INT || captured.AsInt != 2 {
 		t.Fatalf("split after explicit to_str = %#v, want 2", captured)
+	}
+}
+
+func TestOrdReturnsCodePoint(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name  string
+		input string
+		want  int64
+	}{
+		{name: "ascii", input: "A", want: 65},
+		{name: "latin1 supplement", input: "é", want: 233},
+		{name: "cjk", input: "中", want: 20013},
+		{name: "emoji", input: "\U0001F600", want: 128512},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "ord", value.NewString(test.input))
+			if got.Type != value.VAL_INT || got.AsInt != test.want {
+				t.Fatalf("ord(%q) = %#v, want %d", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestOrdRoundTripsWithFromCharCode(t *testing.T) {
+	machine := New()
+	for _, code := range []int64{65, 233, 20013, 128512} {
+		character := callBuiltin(t, machine, "strings_from_char_code", value.NewInt(code))
+		back := callBuiltin(t, machine, "ord", character)
+		if back.Type != value.VAL_INT || back.AsInt != code {
+			t.Fatalf("ord(from_char_code(%d)) = %#v, want %d", code, back, code)
+		}
+	}
+}
+
+func TestOrdRequiresExactlyOneCharacter(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input string
+	}{
+		{name: "empty", input: ""},
+		{name: "two characters", input: "ab"},
+		{name: "two multibyte characters", input: "éé"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := requireBuiltin(t, machine, "ord").Invoke(machine, []value.Value{value.NewString(test.input)}); err == nil {
+				t.Fatalf("ord(%q) did not fail", test.input)
+			}
+		})
+	}
+}
+
+func TestCharCodeIsExportedByStrings(t *testing.T) {
+	source := `use strings select *
+test_report(char_code("é") == 233 && from_char_code(233) == "é")`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("char_code round trip = %#v, want true", captured)
 	}
 }

@@ -103,6 +103,10 @@ func char_at(s: string, index: int) -> string
     return strings_char_at(s, index)
 end
 
+func char_code(s: string) -> int
+    return ord(s)
+end
+
 func from_char_code(code: int) -> string
     return strings_from_char_code(code)
 end
