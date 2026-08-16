@@ -50,11 +50,17 @@ let noxy_bin: string = ""
 
 if os_name == "windows" then
     list_cmd = "dir /B noxy_examples"
-    noxy_bin = "noxy.exe"
 else
     list_cmd = "ls noxy_examples"
-    noxy_bin = "./noxy" // Assume ./noxy no linux/mac
 end
+
+// Run every example with the exact interpreter running this script.
+// A bare "noxy.exe" would resolve through PATH and pick up a globally
+// installed build instead of the one under test.
+// Note: a path containing spaces is not supported here, because cmd /C
+// strips the outer quotes of the command string.
+let self_argv: string[] = argv()
+noxy_bin = self_argv[0]
 
 let cmd_res: SysResult = exec_output(list_cmd)
 
