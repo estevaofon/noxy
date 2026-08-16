@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -402,4 +403,85 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	assertBuiltinValue(t, invalidQuery.Fields["ok"], value.NewBool(false))
 	assertBuiltinValue(t, invalidQuery.Fields["error"], value.NewString("invalid database handle"))
 	assertBuiltinValue(t, invalidQuery.Fields["row_count"], value.NewInt(0))
+}
+
+func TestSQLiteQueryRejectsInvalidUTF8(t *testing.T) {
+	machine := New()
+	cleanupSQLiteResources(t, machine)
+	definitions := newSQLiteTestDefinitions()
+	databaseValue := callBuiltin(t, machine, "sqlite_open",
+		value.NewString(filepath.Join(t.TempDir(), "invalid-utf8.sqlite")),
+		sqliteTemplate(definitions.database),
+	)
+	defer callBuiltin(t, machine, "sqlite_close", databaseValue)
+
+	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec",
+		databaseValue,
+		value.NewString("CREATE TABLE entries (id INTEGER, value TEXT)"),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	// Bind the invalid byte as a Noxy `bytes` value so it reaches the TEXT
+	// column without going through any layer that assumes valid UTF-8.
+	insertResult := requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec_params",
+		databaseValue,
+		value.NewString("INSERT INTO entries (id, value) VALUES (?, ?)"),
+		value.NewArray([]value.Value{value.NewInt(1), value.NewBytes("hello\xffworld")}),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+	assertBuiltinValue(t, insertResult.Fields["rows_affected"], value.NewInt(1))
+
+	query := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query",
+		databaseValue,
+		value.NewString("SELECT id, value FROM entries"),
+		sqliteTemplate(definitions.queryResult),
+		sqliteTemplate(definitions.row),
+	), definitions.queryResult)
+	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(false))
+	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(0))
+	errorText, ok := query.Fields["error"].Obj.(string)
+	if !ok {
+		t.Fatalf("query error field = %#v, want string", query.Fields["error"])
+	}
+	if !strings.Contains(errorText, "UTF-8") {
+		t.Fatalf("query error = %q, want it to mention UTF-8", errorText)
+	}
+}
+
+func TestSQLiteQueryAllowsValidAccentedText(t *testing.T) {
+	machine := New()
+	cleanupSQLiteResources(t, machine)
+	definitions := newSQLiteTestDefinitions()
+	databaseValue := callBuiltin(t, machine, "sqlite_open",
+		value.NewString(filepath.Join(t.TempDir(), "valid-utf8.sqlite")),
+		sqliteTemplate(definitions.database),
+	)
+	defer callBuiltin(t, machine, "sqlite_close", databaseValue)
+
+	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec",
+		databaseValue,
+		value.NewString("CREATE TABLE entries (id INTEGER, value TEXT)"),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	insertResult := requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec_params",
+		databaseValue,
+		value.NewString("INSERT INTO entries (id, value) VALUES (?, ?)"),
+		value.NewArray([]value.Value{value.NewInt(1), value.NewString("acentuação")}),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+	assertBuiltinValue(t, insertResult.Fields["rows_affected"], value.NewInt(1))
+
+	query := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query",
+		databaseValue,
+		value.NewString("SELECT id, value FROM entries"),
+		sqliteTemplate(definitions.queryResult),
+		sqliteTemplate(definitions.row),
+	), definitions.queryResult)
+	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, query.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(1))
+	rows := requireBuiltinArray(t, query.Fields["rows"])
+	row := requireBuiltinInstance(t, rows.Elements[0], definitions.row)
+	assertBuiltinArray(t, row.Fields["values"], []value.Value{value.NewInt(1), value.NewString("acentuação")})
 }

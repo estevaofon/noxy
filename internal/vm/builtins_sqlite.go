@@ -331,7 +331,11 @@ func (vm *VM) defineSQLiteBuiltins() {
 
 			values := make([]value.Value, len(columns))
 			for index, item := range destination {
-				values[index] = sqliteValue(item)
+				converted, convertErr := sqliteValueChecked(item)
+				if convertErr != nil {
+					return sqliteQueryError(resultTemplate.Struct, convertErr.Error()), nil
+				}
+				values[index] = converted
 			}
 			row := value.NewInstance(rowTemplate.Struct).Obj.(*value.ObjInstance)
 			row.Fields["values"] = value.NewArray(values)
@@ -450,4 +454,23 @@ func sqliteValue(item interface{}) value.Value {
 	default:
 		return value.NewString(fmt.Sprintf("%v", typed))
 	}
+}
+
+// sqliteValueChecked converts a scanned column, rejecting TEXT and BLOB
+// payloads that are not valid UTF-8 rather than letting them become a Noxy
+// string that decodes to U+FFFD.
+func sqliteValueChecked(item interface{}) (value.Value, error) {
+	switch typed := item.(type) {
+	case string:
+		if err := requireValidUTF8("sqlite.query", typed); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(typed), nil
+	case []byte:
+		if err := requireValidUTF8("sqlite.query", string(typed)); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(string(typed)), nil
+	}
+	return sqliteValue(item), nil
 }
