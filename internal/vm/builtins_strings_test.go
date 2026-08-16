@@ -4,9 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/compiler"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
 	"noxy-vm/internal/value"
 )
 
@@ -353,48 +350,39 @@ func TestIsValidUTF8(t *testing.T) {
 	}
 }
 
-func TestIsValidUTF8RejectsStringAtCompileTime(t *testing.T) {
-	// Two adjustments from the brief's literal source, both explained in the
-	// task report:
-	//
-	// 1. This case is checked by compiling directly rather than through
-	//    interpretVMSource: the type mismatch is caught by the compiler, and
-	//    compileVMSource (which interpretVMSource calls) treats any compiler
-	//    error as a harness failure via t.Fatalf, which would end the test
-	//    before the assertions below ever ran. Reproducing the lex/parse/
-	//    compile steps here captures the error value instead of failing on
-	//    it.
-	//
-	// 2. The function is declared inline instead of imported with
-	//    `use strings select *`. The compiler only performs this static
-	//    argument-type check when the callee's exact *ast.FunctionType is
-	//    known at the call site; every `use` import path (select *, select
-	//    name list, or plain `use pkg`) records the imported name with a nil
-	//    type in c.globals, so the check never fires through an import. That
-	//    is a pre-existing, general compiler limitation unrelated to this
-	//    native — see compiler.predeclareImport / the UseStmt case in
-	//    compiler.Compile. Declaring the same `b: bytes` signature inline
-	//    reproduces the exact mechanism the strings.nx wrapper relies on
-	//    (predeclareGlobalBindings registers a real *ast.FunctionType for a
-	//    function declared in the compiled unit), without which this test
-	//    cannot observe the rejection at all: calling
-	//    is_valid_utf8("text") through the real module import compiles and
-	//    runs successfully, silently returning false, because the native
-	//    itself only checks VAL_BYTES and otherwise returns false rather than
-	//    erroring.
-	source := `func is_valid_utf8(b: bytes) -> bool
-    return strings_is_valid_utf8(b)
-end
+func TestIsValidUTF8RejectsStringThroughModuleImport(t *testing.T) {
+	// This supersedes a prior version of this test that sidestepped the real
+	// call path: `use strings select *` erases is_valid_utf8's static
+	// `b: bytes` parameter type at its call site (every `use` import path
+	// records the imported name with a nil type in c.globals — see
+	// compiler.predeclareImport / the UseStmt case in compiler.Compile), so
+	// the compiler's static argument-type check never fires here. The
+	// previous test worked around that by declaring `func is_valid_utf8(b:
+	// bytes)` inline in the same compiled unit (where
+	// predeclareGlobalBindings does register a real *ast.FunctionType),
+	// which correctly demonstrated the compiler check exists but never
+	// exercised what a real caller of `use strings select *` experiences.
+	// Through the real module-import path, the string silently reached the
+	// native, which checked only VAL_BYTES and otherwise returned false —
+	// so `is_valid_utf8("text")` printed false instead of raising a type
+	// error. The fix guards strings_is_valid_utf8 itself with
+	// requireBytesArgument (the mirror image of requireTextArgument, which
+	// already protects every other string native, e.g. ord/char_code, the
+	// same way). This test exercises the real path and must now observe a
+	// raised error, not a silently wrong answer.
+	source := `use strings select *
 test_report(is_valid_utf8("text"))`
-	l := lexer.New(source)
-	p := parser.New(l)
-	program := p.ParseProgram()
-	if len(p.Errors()) != 0 {
-		t.Fatalf("parser errors: %v", p.Errors())
-	}
-	_, _, err := compiler.New().Compile(program)
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	err := interpretVMSource(t, machine, source)
 	if err == nil {
-		t.Fatal("is_valid_utf8 accepted a string argument; the b: bytes signature must reject it")
+		t.Fatalf("is_valid_utf8(\"text\") through use strings select * returned %#v with no error; want a raised type error", captured)
 	}
 	if !strings.Contains(err.Error(), "expected bytes, got string") {
 		t.Fatalf("error = %q, want it to name the type mismatch", err.Error())

@@ -21,6 +21,20 @@ func requireTextArgument(function string, args []value.Value, index int) error {
 	return nil
 }
 
+// requireBytesArgument rejects a non-bytes value where bytes are expected —
+// the inverse of requireTextArgument. A module-imported function's static
+// parameter type is not enforced at its call site, so the native itself is
+// the only real enforcement point.
+func requireBytesArgument(function string, args []value.Value, index int) error {
+	if index >= len(args) {
+		return nil
+	}
+	if args[index].Type != value.VAL_BYTES {
+		return fmt.Errorf("%s: expected bytes, got %s", function, conversionTypeName(args[index]))
+	}
+	return nil
+}
+
 func (vm *VM) defineStringBuiltins() {
 	// Strings Module
 	vm.DefineContextualNative("strings_contains", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
@@ -391,15 +405,18 @@ func (vm *VM) defineStringBuiltins() {
 	})
 	// strings_is_valid_utf8 takes bytes, not text, so it must not go through
 	// requireTextArgument: that guard rejects bytes, which is the opposite of
-	// what this function wants to check.
-	vm.DefineNative("strings_is_valid_utf8", func(args []value.Value) value.Value {
+	// what this function wants to check. Instead it guards with the inverse,
+	// requireBytesArgument: `use strings select *` erases the static b: bytes
+	// parameter type at the call site, so a string can otherwise reach this
+	// native and get silently answered "false" instead of raising a type
+	// error — see requireBytesArgument's doc comment.
+	vm.DefineContextualNative("strings_is_valid_utf8", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if len(args) != 1 {
-			return value.NewBool(false)
+			return value.NewBool(false), fmt.Errorf("strings.is_valid_utf8: expects exactly 1 argument, got %d", len(args))
 		}
-		payload, ok := args[0].Obj.(string)
-		if args[0].Type != value.VAL_BYTES || !ok {
-			return value.NewBool(false)
+		if err := requireBytesArgument("strings.is_valid_utf8", args, 0); err != nil {
+			return value.NewNull(), err
 		}
-		return value.NewBool(utf8.ValidString(payload))
+		return value.NewBool(utf8.ValidString(args[0].Obj.(string))), nil
 	})
 }
