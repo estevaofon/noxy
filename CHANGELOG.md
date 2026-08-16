@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Build do GitHub Pages voltou a passar: `superpowers/` entrou no `exclude:`
+  do Jekyll (`docs/_config.yml`). Os planos internos em
+  `docs/superpowers/plans` contêm literais de struct no estilo Go (`{{...}}`)
+  que o Liquid interpretava como variável não terminada, derrubando o build
+  (`Liquid::SyntaxError` em `2026-08-14-runtime-defer-unwind.md:308`). Os
+  documentos continuam no repositório; apenas saem do site publicado.
+
 - `has_key` e `keys` entraram na allowlist de natives só-leitura do CoW
   (`internal/vm/cow_natives.go`). Sem elas, passar um map para qualquer um dos
   dois o marcava `Shared` e a mutação seguinte clonava a estrutura inteira —
