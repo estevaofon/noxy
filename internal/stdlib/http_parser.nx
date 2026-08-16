@@ -266,6 +266,120 @@ end
 // Request Parser
 // ============================================
 
+// Strict head parsing for the streaming server. Validates the request line
+// and every header line and returns the status to answer with rather than
+// tolerating malformed input the way the legacy parse_request below does.
+func parse_request_head(header_bytes: bytes) -> HttpFrameResult
+    // The bytes-to-text boundary. to_str raises on invalid UTF-8, and a raise
+    // here would kill the connection routine instead of answering the client.
+    if !is_valid_utf8(header_bytes) then
+        return frame_error(400, "Bad Request")
+    end
+
+    let header_str: string = to_str(header_bytes)
+    let lines: SplitResult = split(header_str, "\r\n")
+    if lines.count == 0 then
+        return frame_error(400, "Bad Request")
+    end
+
+    let req_line: string = lines.parts[0]
+    if length(req_line) == 0 then
+        return frame_error(400, "Bad Request")
+    end
+
+    let req_parts: SplitResult = split(req_line, " ")
+    if req_parts.count != 3 then
+        return frame_error(400, "Bad Request")
+    end
+
+    let method: string = req_parts.parts[0]
+    if length(method) > HTTP_MAX_METHOD_LENGTH then
+        return frame_error(400, "Bad Request")
+    end
+    if !is_token(method) then
+        return frame_error(400, "Bad Request")
+    end
+
+    let target: string = req_parts.parts[1]
+    if length(target) == 0 then
+        return frame_error(400, "Bad Request")
+    end
+    if length(target) > HTTP_MAX_TARGET_LENGTH then
+        return frame_error(414, "URI Too Long")
+    end
+    if !starts_with(target, "/") then
+        return frame_error(400, "Bad Request")
+    end
+    if !is_visible_ascii(target) then
+        return frame_error(400, "Bad Request")
+    end
+
+    let version: string = req_parts.parts[2]
+    if version != "HTTP/1.0" && version != "HTTP/1.1" then
+        if starts_with(version, "HTTP/") then
+            return frame_error(505, "HTTP Version Not Supported")
+        end
+        return frame_error(400, "Bad Request")
+    end
+
+    let req: HttpRequest = empty_request()
+    req.method = method
+    req.version = version
+
+    let q: SplitResult = split(target, "?")
+    req.path = q.parts[0]
+    if q.count > 1 then
+        let query: string = q.parts[1]
+        let k: int = 2
+        while k < q.count do
+            query = query + "?" + q.parts[k]
+            k = k + 1
+        end
+        req.query = query
+    end
+
+    let count: int = 0
+    let i: int = 1
+    while i < lines.count do
+        let line: string = lines.parts[i]
+        if length(line) == 0 then
+            return frame_error(400, "Bad Request")
+        end
+        if starts_with(line, " ") || starts_with(line, "\t") then
+            return frame_error(400, "Bad Request")
+        end
+        // Response-splitting defense. CR, LF, and NUL are valid UTF-8, so the
+        // boundary gate lets them through, and splitting on "\r\n" leaves a
+        // lone "\n" or a bare "\r" inside the value.
+        if !is_field_text(line) then
+            return frame_error(400, "Bad Request")
+        end
+        let parts: SplitResult = split(line, ":")
+        if parts.count < 2 then
+            return frame_error(400, "Bad Request")
+        end
+        let name: string = parts.parts[0]
+        if length(name) > HTTP_MAX_HEADER_NAME_LENGTH then
+            return frame_error(400, "Bad Request")
+        end
+        // is_token rejects an empty name and any name carrying whitespace,
+        // which covers both the empty-name and space-before-colon cases
+        // without a separate check.
+        if !is_token(name) then
+            return frame_error(400, "Bad Request")
+        end
+        if count >= HTTP_MAX_HEADER_LINES then
+            return frame_error(431, "Request Header Fields Too Large")
+        end
+        req.headers[count] = line
+        count = count + 1
+        i = i + 1
+    end
+    req.header_count = count
+
+    return HttpFrameResult(true, req, 0, "", true)
+end
+
 func parse_request(data: bytes, len: int) -> HttpRequest
     // Strategy: Find Double CRLF. Split everything before into lines. Everything after is body.
     let end_headers: int = find_header_end(data, len)
@@ -283,13 +397,17 @@ func parse_request(data: bytes, len: int) -> HttpRequest
     
     let empty_h: string[64]
     let req: HttpRequest = HttpRequest("GET", "/", "", "HTTP/1.1", empty_h, 0, b"")
-    
+
     if body_start < len then
         req.body = slice(data, body_start, len)
     end
-    
-    // Bytes -> String for headers
-    // Warning: Binary data in headers is illegal anyway, so safe to convert.
+
+    // Bytes -> String for headers. to_str raises on invalid UTF-8, so guard the
+    // boundary first: a non-UTF-8 header block yields the defaults above,
+    // with req.body already filled, rather than raising out of this call.
+    if !is_valid_utf8(header_bytes) then
+        return req
+    end
     let header_str: string = to_str(header_bytes)
     
     // Split by \r\n

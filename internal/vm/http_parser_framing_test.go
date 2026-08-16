@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -159,6 +161,146 @@ func TestGetStatusTextCoversFramingCodes(t *testing.T) {
 				t.Fatalf("get_status_text(%s) = %q, want %q", code, got, want)
 			}
 		})
+	}
+}
+
+// noxyBytes renders a Go string as a Noxy bytes literal.
+//
+// A bytes literal accepts \xNN, so any byte — a control character, or a byte
+// that is not valid UTF-8 — is written directly. That is why this returns
+// b"..." rather than a string literal: parse_request_head takes bytes, and a
+// string literal could not carry the invalid-UTF-8 cases the tests need.
+func noxyBytes(s string) string {
+	var b []byte
+	b = append(b, 'b', '"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"':
+			b = append(b, '\\', '"')
+		case c == '\\':
+			b = append(b, '\\', '\\')
+		case c == '\r':
+			b = append(b, '\\', 'r')
+		case c == '\n':
+			b = append(b, '\\', 'n')
+		case c == '\t':
+			b = append(b, '\\', 't')
+		case c < 0x20 || c >= 0x7F:
+			b = append(b, []byte(fmt.Sprintf(`\x%02x`, c))...)
+		default:
+			b = append(b, c)
+		}
+	}
+	return string(append(b, '"'))
+}
+
+func parseHeadStatus(t *testing.T, block string) int64 {
+	t.Helper()
+	source := "let head: HttpFrameResult = parse_request_head(" + noxyBytes(block) + ")\n" +
+		"if head.ok then test_report(0) else test_report(head.status) end"
+	return captureParserInt(t, source)
+}
+
+func TestParseRequestHeadAccepts(t *testing.T) {
+	block := "POST /a/b?x=1&y=2 HTTP/1.1\r\nHost: example.com:8080\r\nContent-Length: 3"
+	source := "let head: HttpFrameResult = parse_request_head(" + noxyBytes(block) + ")\n" +
+		"test_report(head.request.method + \"|\" + head.request.path + \"|\" + head.request.query + \"|\" + head.request.version + \"|\" + to_str(head.request.header_count))"
+	want := "POST|/a/b|x=1&y=2|HTTP/1.1|2"
+	if got := captureParserString(t, source); got != want {
+		t.Fatalf("parse_request_head = %q, want %q", got, want)
+	}
+}
+
+func TestParseRequestHeadQueryKeepsLaterQuestionMarks(t *testing.T) {
+	block := "GET /a?x=1?y=2 HTTP/1.1\r\nHost: a"
+	source := "let head: HttpFrameResult = parse_request_head(" + noxyBytes(block) + ")\n" +
+		"test_report(head.request.query)"
+	if got := captureParserString(t, source); got != "x=1?y=2" {
+		t.Fatalf("query = %q, want %q", got, "x=1?y=2")
+	}
+}
+
+func TestParseRequestHeadRejects(t *testing.T) {
+	longTarget := "/" + strings.Repeat("a", 2100)
+	longMethod := strings.Repeat("G", 65)
+	longName := strings.Repeat("n", 257)
+	tests := []struct {
+		name  string
+		block string
+		want  int64
+	}{
+		{name: "two token request line", block: "GET /\r\nHost: a", want: 400},
+		{name: "four token request line", block: "GET / x HTTP/1.1\r\nHost: a", want: 400},
+		{name: "empty request line", block: "\r\nGET / HTTP/1.1", want: 400},
+		{name: "non token method", block: "GE T / HTTP/1.1\r\nHost: a", want: 400},
+		{name: "over long method", block: longMethod + " / HTTP/1.1\r\nHost: a", want: 400},
+		{name: "absolute form target", block: "GET http://a/b HTTP/1.1\r\nHost: a", want: 400},
+		{name: "over long target", block: "GET " + longTarget + " HTTP/1.1\r\nHost: a", want: 414},
+		{name: "http 0.9", block: "GET / HTTP/0.9\r\nHost: a", want: 505},
+		{name: "http 2.0", block: "GET / HTTP/2.0\r\nHost: a", want: 505},
+		{name: "malformed version", block: "GET / HTTPS/1.1\r\nHost: a", want: 400},
+		{name: "obs fold with space", block: "GET / HTTP/1.1\r\nHost: a\r\n more", want: 400},
+		{name: "obs fold with tab", block: "GET / HTTP/1.1\r\nHost: a\r\n\tmore", want: 400},
+		{name: "header without colon", block: "GET / HTTP/1.1\r\nHost a", want: 400},
+		{name: "space before colon", block: "GET / HTTP/1.1\r\nHost : a", want: 400},
+		{name: "empty header name", block: "GET / HTTP/1.1\r\n: a", want: 400},
+		{name: "over long header name", block: "GET / HTTP/1.1\r\n" + longName + ": a", want: 400},
+		{name: "bare lf in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\nInjected: yes", want: 400},
+		{name: "bare cr in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\rInjected: yes", want: 400},
+		{name: "nul in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\x00b", want: 400},
+		{name: "del in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\x7fb", want: 400},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := parseHeadStatus(t, test.block); got != test.want {
+				t.Fatalf("status = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestParseRequestHeadAcceptsHttp10(t *testing.T) {
+	if got := parseHeadStatus(t, "GET / HTTP/1.0\r\nHost: a"); got != 0 {
+		t.Fatalf("status = %d, want 0", got)
+	}
+}
+
+func TestParseRequestHeadRejectsMoreThan64Headers(t *testing.T) {
+	block := "GET / HTTP/1.1"
+	for i := 0; i < 65; i++ {
+		block += fmt.Sprintf("\r\nX-H%d: v", i)
+	}
+	if got := parseHeadStatus(t, block); got != 431 {
+		t.Fatalf("status = %d, want 431", got)
+	}
+}
+
+func TestParseRequestHeadAcceptsExactly64Headers(t *testing.T) {
+	block := "GET / HTTP/1.1"
+	for i := 0; i < 64; i++ {
+		block += fmt.Sprintf("\r\nX-H%d: v", i)
+	}
+	if got := parseHeadStatus(t, block); got != 0 {
+		t.Fatalf("status = %d, want 0", got)
+	}
+}
+
+// A header block carrying a raw 0xFF is not valid UTF-8. Without the
+// is_valid_utf8 gate, to_str raises and the caller never receives a status at
+// all, so this test fails by erroring out rather than by returning a wrong
+// number.
+func TestParseRequestHeadRejectsNonUTF8HeaderBlock(t *testing.T) {
+	if got := parseHeadStatus(t, "GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a"); got != 400 {
+		t.Fatalf("status = %d, want 400", got)
+	}
+}
+
+func TestParseRequestRetainedGateReturnsDefaults(t *testing.T) {
+	source := "let raw: bytes = " + noxyBytes("GET /x HTTP/1.1\r\nX-Bad: \xff\r\n\r\n") + "\n" +
+		"let req: HttpRequest = parse_request(raw, length(raw))\n" +
+		"test_report(req.path)"
+	if got := captureParserString(t, source); got != "/" {
+		t.Fatalf("path = %q, want the default %q", got, "/")
 	}
 }
 
