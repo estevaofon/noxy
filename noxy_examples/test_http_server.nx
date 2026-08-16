@@ -1,0 +1,87 @@
+// Integration test: HTTP streaming server framing
+use http_server select *
+use http_client select *
+use http_parser select *
+use strings select *
+use time select *
+
+let passed: int = 0
+let failed: int = 0
+
+func check(name: string, condition: bool) -> void
+    if condition then
+        passed = passed + 1
+        print("PASS: " + name)
+    else
+        failed = failed + 1
+        print("FAIL: " + name)
+    end
+end
+
+func handler(req: HttpRequest) -> HttpResponse
+    if req.path == "/hello" then
+        return response_text("Hello Noxy World")
+    end
+    if req.path == "/echo" then
+        return response_text(to_str(req.body))
+    end
+    if req.path == "/size" then
+        return response_text(to_str(length(req.body)))
+    end
+    if req.path == "/host" then
+        return response_text(get_header(req.headers, req.header_count, "Host"))
+    end
+    return response_404()
+end
+
+// A plain top-level let already creates a global binding any function --
+// including a spawned one -- can read and reassign. There is no `global`
+// keyword in Noxy.
+let server: HttpServer = new_server("127.0.0.1", 0)
+
+func run_server()
+    serve(ref server, handler)
+end
+
+func main()
+    if !bind_server(ref server) then
+        print("FAIL: could not bind server")
+        return
+    end
+
+    let base: string = "http://127.0.0.1:" + to_str(server.port)
+    spawn(run_server)
+    sleep(300)
+
+    let hello: ClientResponse = get(base + "/hello")
+    check("GET /hello succeeds", hello.ok)
+    check("GET /hello body", hello.body == b"Hello Noxy World")
+
+    let echoed: ClientResponse = post(base + "/echo", b"{\"msg\": \"noxy\"}")
+    check("POST /echo succeeds", echoed.ok)
+    check("POST /echo echoes the body", echoed.body == b"{\"msg\": \"noxy\"}")
+
+    let large_body: bytes = to_bytes(repeat("n", 20000))
+    let large: ClientResponse = post(base + "/size", large_body)
+    check("POST large body succeeds", large.ok)
+    check("POST large body is complete", large.body == b"20000")
+
+    let host: ClientResponse = get(base + "/host")
+    check("Host header keeps its port", host.body == to_bytes("127.0.0.1:" + to_str(server.port)))
+
+    let missing: ClientResponse = get(base + "/nope")
+    check("unknown path returns 404", missing.status_code == 404)
+
+    stop_server(ref server)
+    sleep(200)
+
+    print("")
+    print("passed=" + to_str(passed) + " failed=" + to_str(failed))
+    if failed > 0 then
+        print("HTTP SERVER TESTS FAILED")
+    else
+        print("HTTP SERVER TESTS OK")
+    end
+end
+
+main()
