@@ -136,7 +136,7 @@ func (vm *VM) loadResolvedModule(source resolvedModule) (value.Value, error) {
 			return value.NewNull(), err
 		}
 		text := string(content)
-		if err := requireValidUTF8(source.Path, text); err != nil {
+		if err := requireValidUTF8("module "+source.Path, text); err != nil {
 			return value.NewNull(), err
 		}
 		return vm.compileAndRunModule(source, text)

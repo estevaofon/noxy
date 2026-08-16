@@ -139,7 +139,9 @@ func (vm *VM) defineSystemBuiltins() {
 		outBytes, err := cmd.CombinedOutput()
 		outputStr := string(outBytes)
 
-		// OK indicates execution completion, regardless of exit code.
+		// ok is true only when the process both started and exited with code
+		// 0. A non-zero exit (an *exec.ExitError) and a failure to start both
+		// report ok=false; exit_code distinguishes them.
 		okVal := true
 		exitCode := 0
 		errMsg := ""

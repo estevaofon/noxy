@@ -408,6 +408,50 @@ func TestToStrLeavesNonBytesArgumentsAlone(t *testing.T) {
 	}
 }
 
+// TestToStrRejectsContainerHoldingInvalidBytes covers the laundering path: a
+// container is not VAL_BYTES, so to_str used to take its non-bytes branch and
+// wrap Value.String() — which renders a nested bytes value as its raw,
+// unescaped payload — as a string with no validation at all. The UTF-8
+// invariant says to_str is the single choke point, so the rendered result has
+// to be checked too, not just the direct bytes payload.
+func TestToStrRejectsContainerHoldingInvalidBytes(t *testing.T) {
+	machine := New()
+	container := value.NewArray([]value.Value{value.NewBytes("h\xffi")})
+	_, err := requireBuiltin(t, machine, "to_str").Invoke(machine, []value.Value{container})
+	if err == nil {
+		t.Fatal("to_str on an array holding invalid UTF-8 bytes did not fail")
+	}
+	message := err.Error()
+	if !strings.HasPrefix(message, "to_str: ") {
+		t.Fatalf("message = %q, want it to name the function", message)
+	}
+	if !strings.Contains(message, "not valid UTF-8") {
+		t.Fatalf("message = %q, want it to say UTF-8", message)
+	}
+}
+
+// TestToStrAcceptsContainerOfOrdinaryValues is the companion guard: the new
+// validation must not reject containers whose rendering is ordinary text.
+func TestToStrAcceptsContainerOfOrdinaryValues(t *testing.T) {
+	machine := New()
+	container := value.NewArray([]value.Value{
+		value.NewInt(1),
+		value.NewString("café"),
+		value.NewBool(true),
+		value.NewBytes("ok"),
+	})
+	got := callBuiltin(t, machine, "to_str", container)
+	text, ok := got.Obj.(string)
+	if !ok {
+		t.Fatalf("to_str on an ordinary array = %#v, want a string", got)
+	}
+	for _, fragment := range []string{"1", "café", "true", "ok"} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("to_str = %q, want it to contain %q", text, fragment)
+		}
+	}
+}
+
 func TestToStrBoundsTheEchoedPayload(t *testing.T) {
 	machine := New()
 	payload := strings.Repeat("a", 500) + "\xff"

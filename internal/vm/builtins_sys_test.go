@@ -35,14 +35,19 @@ func TestSafeSystemBuiltinsPreserveProcessStateContracts(t *testing.T) {
 
 	environmentKey := "NOXY_VM_STATEFUL_BUILTIN_TEST"
 	t.Setenv(environmentKey, "before")
-	environmentDefinition := value.NewStruct("EnvResult", []string{"value", "ok"})
+	// EnvResult carries an error field alongside value/ok: a lookup that finds
+	// a non-UTF-8 environment value reports it there. On the ordinary success
+	// path the field must be present and empty.
+	environmentDefinition := value.NewStruct("EnvResult", []string{"value", "ok", "error"})
 	before := requireBuiltinInstance(t, callBuiltin(t, machine, "sys_getenv", value.NewString(environmentKey), environmentDefinition), environmentDefinition)
 	assertBuiltinValue(t, before.Fields["value"], value.NewString("before"))
 	assertBuiltinValue(t, before.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, before.Fields["error"], value.NewString(""))
 	assertBuiltinValue(t, callBuiltin(t, machine, "sys_setenv", value.NewString(environmentKey), value.NewString("after")), value.NewBool(true))
 	after := requireBuiltinInstance(t, callBuiltin(t, machine, "sys_getenv", value.NewString(environmentKey), environmentDefinition), environmentDefinition)
 	assertBuiltinValue(t, after.Fields["value"], value.NewString("after"))
 	assertBuiltinValue(t, after.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, after.Fields["error"], value.NewString(""))
 
 	arguments := requireBuiltinArray(t, callBuiltin(t, machine, "sys_argv"))
 	if len(arguments.Elements) != len(os.Args) {

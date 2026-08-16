@@ -30,7 +30,7 @@ func requireBytesArgument(function string, args []value.Value, index int) error 
 		return nil
 	}
 	if args[index].Type != value.VAL_BYTES {
-		return fmt.Errorf("%s: expected bytes, got %s", function, conversionTypeName(args[index]))
+		return fmt.Errorf("%s: expected bytes, got %s; use to_bytes(value) to convert explicitly", function, conversionTypeName(args[index]))
 	}
 	return nil
 }

@@ -42,7 +42,17 @@ func (vm *VM) defineCoreBuiltins() {
 			}
 			return value.NewString(payload), nil
 		}
-		return value.NewString(args[0].String()), nil
+		// Every other value renders through Value.String(). That rendering is
+		// not automatically valid UTF-8: a container holding a bytes value
+		// emits the raw, unescaped payload, so an array of invalid bytes would
+		// otherwise launder those bytes into a string. to_str is the single
+		// choke point for the invariant, so the rendered result is validated
+		// too — free for scalars, which always render as ASCII.
+		result := args[0].String()
+		if err := requireValidUTF8("to_str", result); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(result), nil
 	})
 	vm.DefineNative("hex", func(args []value.Value) value.Value {
 		if len(args) != 1 {
