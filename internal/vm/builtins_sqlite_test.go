@@ -485,3 +485,52 @@ func TestSQLiteQueryAllowsValidAccentedText(t *testing.T) {
 	row := requireBuiltinInstance(t, rows.Elements[0], definitions.row)
 	assertBuiltinArray(t, row.Fields["values"], []value.Value{value.NewInt(1), value.NewString("acentuação")})
 }
+
+func TestSQLiteBindsBytesParameterWithoutCorruption(t *testing.T) {
+	machine := New()
+	cleanupSQLiteResources(t, machine)
+	definitions := newSQLiteTestDefinitions()
+	databaseValue := callBuiltin(t, machine, "sqlite_open",
+		value.NewString(filepath.Join(t.TempDir(), "bytes-param.sqlite")),
+		sqliteTemplate(definitions.database),
+	)
+	defer callBuiltin(t, machine, "sqlite_close", databaseValue)
+
+	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec",
+		databaseValue,
+		value.NewString("CREATE TABLE entries (id INTEGER, value TEXT)"),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec_params",
+		databaseValue,
+		value.NewString("INSERT INTO entries (id, value) VALUES (?, ?)"),
+		value.NewArray([]value.Value{value.NewInt(1), value.NewBytes("hello")}),
+		sqliteTemplate(definitions.execResult),
+	), definitions, true, "")
+
+	query := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query",
+		databaseValue,
+		value.NewString("SELECT value FROM entries"),
+		sqliteTemplate(definitions.queryResult),
+		sqliteTemplate(definitions.row),
+	), definitions.queryResult)
+	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
+
+	rows, ok := query.Fields["rows"].Obj.(*value.ObjArray)
+	if !ok || len(rows.Elements) != 1 {
+		t.Fatalf("rows = %#v, want exactly one row", query.Fields["rows"])
+	}
+	row, ok := rows.Elements[0].Obj.(*value.ObjInstance)
+	if !ok {
+		t.Fatalf("row = %#v, want *ObjInstance", rows.Elements[0])
+	}
+	values, ok := row.Fields["values"].Obj.(*value.ObjArray)
+	if !ok || len(values.Elements) != 1 {
+		t.Fatalf("row values = %#v, want exactly one column", row.Fields["values"])
+	}
+	stored, ok := values.Elements[0].Obj.(string)
+	if !ok || stored != "hello" {
+		t.Fatalf("stored value = %#v, want the raw string %q with no b\"...\" wrapper", values.Elements[0], "hello")
+	}
+}

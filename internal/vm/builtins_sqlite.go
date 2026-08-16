@@ -396,6 +396,11 @@ func sqliteParameter(parameter value.Value) interface{} {
 		return parameter.AsBool
 	case value.VAL_NULL:
 		return nil
+	case value.VAL_BYTES:
+		if payload, ok := parameter.Obj.(string); ok {
+			return payload
+		}
+		return parameter.String()
 	case value.VAL_OBJ:
 		if text, ok := parameter.Obj.(string); ok {
 			return text
