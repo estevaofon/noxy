@@ -7,7 +7,7 @@ struct DateTime
     hour: int         // 0-23
     minute: int       // 0-59
     second: int       // 0-59
-    weekday: int      // 0=domingo, 6=s?bado
+    weekday: int      // 0=domingo, 6=sábado
     yearday: int      // 1-366
     timestamp: int     // Unix timestamp (segundos desde 1970)
 end
@@ -32,22 +32,22 @@ end
 
 // Retorna DateTime atual
 func now_datetime() -> DateTime
-    // Passamos a defini??o da struct DateTime para a fun??o nativa
+    // Passamos a definição da struct DateTime para a função nativa
     return time_now_datetime(DateTime)
 end
 
-// Retorna timestamp em milissegundos (para medi??es precisas)
+// Retorna timestamp em milissegundos (para medições precisas)
 func now_ms() -> int
     return time_now_ms()
 end
 
-// Pausa a execu??o por ms milissegundos
+// Pausa a execução por ms milissegundos
 func sleep(ms: int) -> void
     time_sleep(ms)
 end
 
 // ============================================
-// Convers?o
+// Conversão
 // ============================================
 
 // Timestamp -> DateTime
@@ -66,17 +66,17 @@ func make_datetime(year: int, month: int, day: int, hour: int, minute: int, seco
 end
 
 // ============================================
-// Formata??o
+// Formatação
 // ============================================
 
 // Formata DateTime para string
-// Formato: "YYYY-MM-DD HH:MM:SS" (padr?o)
+// Formato: "YYYY-MM-DD HH:MM:SS" (padrão)
 func format(dt: DateTime) -> string
     return time_format(dt)
 end
 
 // Formato customizado (simplificado)
-// %Y=ano, %m=m?s, %d=dia, %H=hora, %M=min, %S=seg
+// %Y=ano, %m=mês, %d=dia, %H=hora, %M=min, %S=seg
 func format_custom(dt: DateTime, fmt: string) -> string
     return time_format_custom(dt, fmt)
 end
@@ -106,7 +106,7 @@ func parse_date(s: string) -> DateTime
 end
 
 // ============================================
-// Aritm?tica
+// Aritmética
 // ============================================
 
 // Adiciona segundos a um timestamp
@@ -119,18 +119,18 @@ func add_days(ts: int, days: int) -> int
     return time_add_days(ts, days)
 end
 
-// Diferen?a entre dois timestamps (em segundos)
+// Diferença entre dois timestamps (em segundos)
 func diff(ts1: int, ts2: int) -> int
     return time_diff(ts1, ts2)
 end
 
-// Diferen?a como Duration
+// Diferença como Duration
 func diff_duration(ts1: int, ts2: int) -> Duration
     return time_diff_duration(ts1, ts2, Duration)
 end
 
 // ============================================
-// Compara??o
+// Comparação
 // ============================================
 
 // ts1 < ts2
@@ -144,7 +144,7 @@ func after(ts1: int, ts2: int) -> bool
 end
 
 // ============================================
-// Utilit?rios
+// Utilitários
 // ============================================
 
 // Verifica ano bissexto
@@ -152,7 +152,7 @@ func is_leap_year(year: int) -> bool
     return time_is_leap_year(year)
 end
 
-// Dias no m?s
+// Dias no mês
 func days_in_month(year: int, month: int) -> int
     return time_days_in_month(year, month)
 end
@@ -162,7 +162,7 @@ func weekday_name(weekday: int) -> string
     return time_weekday_name(weekday)
 end
 
-// Nome do m?s
+// Nome do mês
 func month_name(month: int) -> string
     return time_month_name(month)
 end
