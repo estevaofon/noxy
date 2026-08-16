@@ -2,10 +2,37 @@
 
 ## [Unreleased]
 
+### Changed (BREAKING)
+- **`to_int` e `to_float` levantam erro** em vez de devolver `0` / `0.0` quando
+  a conversão é impossível. `to_int("abc")` era indistinguível de
+  `to_int("0")`. A forma leniente por `strconv.ParseFloat` também some:
+  `to_int("12.75")` devolvia `12` e agora levanta, como qualquer outra string
+  decimal. Migração: chamadas sobre entrada não confiável passam a usar
+  `to_int_result` / `to_float_result` do módulo `convert`, com ramo explícito
+  de falha.
+- **`index_of` devolve índice em caractere**, não em byte, alinhado a
+  `substring`, `char_at`, `length` e `slice`. Texto ASCII não é afetado.
+- **Funções de `strings` recusam `bytes`** e apontam `to_str`. Antes operavam
+  sobre a forma de exibição `b"..."`.
+- **`ord` devolve o code point** de uma string de um caractere e exige
+  exatamente um caractere. Antes devolvia o primeiro byte UTF-8.
+
+### Removed (BREAKING)
+- **A palavra-chave `global` foi removida do léxico.** Já não fazia parte da
+  sintaxe da linguagem — o parser sempre a rejeitava — mas o lexer ainda a
+  reconhecia como palavra reservada, produzindo `invalid syntax "global"` em
+  vez do diagnóstico comum de `let` ausente. Declare variáveis de topo com
+  `let`; uma função pode reatribuir um `let` de topo normalmente.
+
 ### Added
 
 - `defer call(...)` with immediate argument capture and frame-level LIFO cleanup across functions, scripts, modules, loops, and spawned functions.
 - Portable positive TCP read, write, and accept timeouts through `net.settimeout`.
+- **Módulo `convert`** com `to_int_result`, `to_float_result`, `IntResult` e
+  `FloatResult`.
+- **`strings.char_code(s)`**, inverso de `from_char_code(code)`.
+- **Guards de arquitetura**: nenhum native registrado duas vezes, nenhum marcador
+  de debug em fonte de produção, fontes embarcados da stdlib em UTF-8 válido.
 
 ### Fixed
 
@@ -13,6 +40,18 @@
 - `net.setblocking(sock, true)` now restores indefinite blocking, while the deprecated `false` branch remains a compatibility no-op.
 - `net.poll`/`net_select` now reports non-consuming readiness through independent 64-entry read, write, and error sets, with immediate zero-time polls, one global positive timeout, portable EOF/hangup projection, and concurrent-close wakeups that omit detached resources.
 - `net.listen(host, 0)` now returns the operating-system-assigned port in `Socket.port`, allowing collision-free loopback listeners.
+- **`parse_url` cortava host e path no lugar errado** para autoridade com
+  caractere não-ASCII: `http://münchen.de/path` devolvia host `münchen.de/` e
+  path `path`.
+- **`net_send` imprimia uma linha de debug em stdout** para um argumento
+  malformado, e **o cliente HTTP imprimia uma linha de debug a cada
+  requisição**, corrompendo a saída de qualquer programa que o usasse.
+- **`strings_contains` e `strings_replace` estavam registrados duas vezes**, com
+  a segunda cópia inalcançável — uma correção aplicada a ela seria
+  silenciosamente descartada.
+- **24 linhas de comentário da stdlib**, em `http.nx`, `strings.nx`, `time.nx`
+  e `io.nx`, tiveram os acentos restaurados após uma conversão de encoding
+  com perda.
 
 ## [0.2.0] - 2026-08-13
 
