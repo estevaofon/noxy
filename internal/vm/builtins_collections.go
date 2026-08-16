@@ -69,7 +69,7 @@ func (vm *VM) defineCollectionBuiltins() {
 		if len(args) != 2 {
 			return value.NewNull(), nil
 		}
-		mapVal, err := machine.resolveReferenceValue(args[0])
+		mapVal, err := machine.unicizeThroughRefValue(args[0])
 		if err != nil {
 			return value.NewNull(), nil
 		}
@@ -107,7 +107,7 @@ func (vm *VM) defineCollectionBuiltins() {
 			return value.NewNull(), nil
 		}
 		targetRef, _ := args[0].Obj.(*value.ObjRef)
-		arrVal, err := machine.resolveReferenceValue(args[0])
+		arrVal, err := machine.unicizeThroughRefValue(args[0])
 		if err != nil {
 			return value.NewNull(), nil
 		}
@@ -117,6 +117,7 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
+				value.MarkShared(item) // o chamador ainda segura um ponteiro para o item
 				arr.Elements = append(arr.Elements, item)
 			}
 		}
@@ -137,7 +138,7 @@ func (vm *VM) defineCollectionBuiltins() {
 		if len(args) != 1 {
 			return value.NewNull(), nil
 		}
-		arrVal, err := machine.resolveReferenceValue(args[0])
+		arrVal, err := machine.unicizeThroughRefValue(args[0])
 		if err != nil {
 			return value.NewNull(), nil
 		}

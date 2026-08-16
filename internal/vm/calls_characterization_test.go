@@ -18,7 +18,10 @@ test_report(length(original) * 10 + local_length)`)
 	testExpectedObject(t, 12, got)
 }
 
-func TestScriptCallSharesNestedCompositeValues(t *testing.T) {
+// Contrato CoW (spec 2026-08-16): parâmetros sem ref são valores independentes
+// em qualquer profundidade — mutação aninhada no callee não vaza mais para o
+// chamador (antes desta mudança o esperado era 22, com o aninhado compartilhado).
+func TestScriptCallKeepsNestedCompositeValuesIndependent(t *testing.T) {
 	got := captureVMSource(t, `
 func change(values: int[][]) -> int
     append(values[0], 9)
@@ -27,7 +30,7 @@ end
 let original: int[][] = [[1]]
 let local_length: int = change(original)
 test_report(length(original[0]) * 10 + local_length)`)
-	testExpectedObject(t, 22, got)
+	testExpectedObject(t, 12, got)
 }
 
 func TestExactClosureCallReturnsValue(t *testing.T) {
