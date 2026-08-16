@@ -1864,6 +1864,100 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 8b: Remove the orphaned `global` keyword
+
+`global` was deliberately removed from Noxy's syntax, but the lexer still recognises it as a keyword. The parser has no case for it, so the only thing the leftover token achieves is a worse error message and a language spec that documents a declaration form the language does not have. This is the same defect family as the rest of the branch: the code says one thing and does another.
+
+**Files:**
+- Modify: `internal/token/token.go:20`, `:120`
+- Modify: `internal/token/display.go:12`
+- Modify: `internal/lexer/lexer_test.go:179`
+- Modify: `docs/NOXY_LANGUAGE_SPEC.md:25`, `:343`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `token.GLOBAL` no longer exists. `global` lexes as an ordinary identifier.
+
+- [ ] **Step 1: Confirm the current behavior**
+
+Build the interpreter and run a one-line script that uses the keyword:
+
+```bash
+go build -o noxy.exe cmd/noxy/main.go
+printf 'global counter: int = 0\nprint(counter)\n' > /tmp/global_check.nx
+./noxy.exe /tmp/global_check.nx
+```
+
+Expected now: `[1:1] SyntaxError: invalid syntax "global"`.
+
+Record the exact message. After the change it becomes the ordinary
+missing-`let` diagnostic, because `global` is then just an identifier.
+
+- [ ] **Step 2: Update the lexer test**
+
+`internal/lexer/lexer_test.go:179` asserts that `global` lexes to `token.GLOBAL`. It is part of a longer token sequence built from a source fixture in the same test — find the fixture line that contains `global g = 1` and change it and the expectation together, so the test still covers the surrounding tokens.
+
+The declaration is no longer valid syntax, so replace it with the `let` form in the fixture and expect `token.LET` in place of `token.GLOBAL`:
+
+```go
+		{token.LET, "let"},
+		{token.IDENTIFIER, "g"},
+		{token.ASSIGN, "="},
+		{token.INT, "1"},
+```
+
+Run `go test ./internal/lexer/` and watch it fail before you touch `token.go`, so you know the assertion is really exercised.
+
+- [ ] **Step 3: Delete the token**
+
+Remove all three entries:
+
+- `internal/token/token.go:20` — the `GLOBAL TokenType = "GLOBAL"` constant
+- `internal/token/token.go:120` — the `"global":  GLOBAL,` keyword-map entry
+- `internal/token/display.go:12` — the `GLOBAL: "global",` display entry
+
+- [ ] **Step 4: Update the language spec**
+
+In `docs/NOXY_LANGUAGE_SPEC.md`:
+
+- line 25, drop `global` from the Declarations keyword row so it reads:
+  `| Declarations | \`let\`, \`func\`, \`struct\` |`
+- line 343, delete the `global name: type = value` line from the variable
+  declarations block, leaving only the `let` form.
+
+- [ ] **Step 5: Verify**
+
+Foreground only:
+
+```bash
+go build -o noxy.exe cmd/noxy/main.go
+go test ./internal/...
+./noxy.exe /tmp/global_check.nx
+./noxy.exe noxy_examples/run_all_tests_concurrent.nx
+```
+
+Expected: build and tests pass; the script now reports the ordinary
+missing-`let` diagnostic rather than `invalid syntax "global"`; the
+concurrent suite reports 161 passed, 0 failed.
+
+Do NOT run `noxy_examples/run_all_tests.nx` — the sequential runner takes over ten minutes.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/token/token.go internal/token/display.go internal/lexer/lexer_test.go docs/NOXY_LANGUAGE_SPEC.md
+git commit -m "fix: remove the orphaned global keyword
+
+global was removed from Noxy's syntax, but the lexer still recognised it,
+so the parser rejected it with \"invalid syntax\" and the language spec
+documented a declaration form the language does not have. It now lexes as
+an ordinary identifier.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 9: Documentation
 
 **Files:**
