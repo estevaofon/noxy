@@ -36,7 +36,10 @@ func should_ignore(s: string) -> bool
     "simple_server.nx", "web_app.nx", "http_server_basic.nx", "http_server_docs.nx", 
     "form_app.nx", "http_server_sockets.nx", "todo_app2.nx", "todo_app.nx", "cadastro_usuarios.nx", "md2html.nx",
     "watch_file.nx", "stress_test.nx", "division_error.nx", "error_type.nx", "error_arity.nx", "test_let_error.nx", "error_index.nx", "to_int_conversion_demo.nx",
-    "test_let_error_function.nx", "test_unclosed.nx", "benchmark_parallel.nx", "concurrency.nx", "concurrency_parallel_sum.nx", "concurrency_producer_consumer.nx", "space_invaders.nx", "space_invaders2.nx", "signal_demo.nx"]
+    "test_let_error_function.nx", "test_unclosed.nx", "benchmark_parallel.nx", "concurrency.nx", "concurrency_parallel_sum.nx", "concurrency_producer_consumer.nx", "space_invaders.nx", "space_invaders2.nx", "signal_demo.nx",
+    // Simulação de muitas gerações: leva minutos, tempo dominado pelo cálculo
+    // e não pela linguagem. run_all_tests_concurrent.nx já a excluía.
+    "conway_random.nx"]
     if contains(exclusions, s) then
          return true
     end

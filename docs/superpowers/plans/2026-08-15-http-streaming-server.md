@@ -18,7 +18,8 @@
 - Noxy has no `continue` keyword. Use `if`/`else` structure inside loops.
 - Noxy has no `min`/`max` builtin. Clamp with explicit `if`.
 - A top-level variable that a function reassigns must be declared with `global`, not `let`.
-- Noxy string literals support only the escapes `\n`, `\r`, `\t`, `\"`, `\'`, and `\\`. There is no `\u` escape; build a non-ASCII character with `from_char_code(code)`.
+- Noxy string literals support `\n`, `\r`, `\t`, `\"`, `\'`, `\\`, and — as of this branch — `\uNNNN` and `\u{...}` for any codepoint. `\xNN` writes a raw byte and is valid **only** in a bytes literal (`b"..."`), because a string must hold valid UTF-8. An unrecognised escape still preserves its backslash.
+- Use `codes(s) -> int[]` to scan a string character by character. `char_at` rebuilds the rune slice on every call, so a `char_at` loop is quadratic in the string's length — which matters here, where the strings are attacker-supplied and can reach `max_header_bytes`. `codes` also removes the `if ch == ""` guard that `ord`'s single-character requirement forces.
 - `sleep` is not a global native. A script that calls it needs `use time select *`.
 - `repeat` comes from `strings`. A script that calls it needs `use strings select *`.
 - `time_now_ms()` **is** a global native and needs no import.
@@ -39,7 +40,9 @@
 
 | File | Action | Responsibility |
 |---|---|---|
-| `internal/stdlib/http_parser.nx` | Modify | framing primitives: resumable terminator scan, token/ASCII validation, strict head parsing, `Content-Length` resolution, corrected header lookup, extended status text |
+| `internal/lexer/lexer.go` | Modify | `\xNN` in bytes literals, `\uNNNN` and `\u{...}` everywhere, one shared quoted-literal scanner (done) |
+| `internal/vm/builtins_strings.go`, `internal/stdlib/strings.nx` | Modify | `codes(s) -> int[]` for linear codepoint scanning (done) |
+| `internal/stdlib/http_parser.nx` | Modify | framing primitives: resumable terminator scan, token/ASCII/field-text validation, strict head parsing, `Content-Length` resolution, corrected header lookup, extended status text |
 | `internal/stdlib/http_server.nx` | Modify | server configuration, binding, incremental read loop, complete-write loop, connection lifecycle |
 | `internal/vm/http_parser_framing_test.go` | Create | Go tests exercising the pure framing primitives through the Noxy source harness |
 | `internal/vm/http_server_framing_test.go` | Create | Go tests running the Noxy server on the VM and driving it over raw TCP |
@@ -171,7 +174,7 @@ func TestIsTokenVisibleAsciiAndFieldText(t *testing.T) {
 		{name: "space is not a token", source: "test_report(is_token(\"Bad Name\"))", want: false},
 		{name: "trailing space is not a token", source: "test_report(is_token(\"Name \"))", want: false},
 		{name: "colon is not a token", source: "test_report(is_token(\"Na:me\"))", want: false},
-		{name: "non ascii is not a token", source: "test_report(is_token(\"Nome\" + from_char_code(231)))", want: false},
+		{name: "non ascii is not a token", source: "test_report(is_token(\"Nome\\u{e7}\"))", want: false},
 		{name: "origin target is visible ascii", source: "test_report(is_visible_ascii(\"/a/b?c=1\"))", want: true},
 		{name: "space is not visible ascii", source: "test_report(is_visible_ascii(\"/a b\"))", want: false},
 		{name: "tab is not visible ascii", source: "test_report(is_visible_ascii(\"/a\\tb\"))", want: false},
@@ -179,11 +182,11 @@ func TestIsTokenVisibleAsciiAndFieldText(t *testing.T) {
 		{name: "plain header line is field text", source: "test_report(is_field_text(\"Host: example.com:8080\"))", want: true},
 		{name: "empty is field text", source: "test_report(is_field_text(\"\"))", want: true},
 		{name: "tab is field text", source: "test_report(is_field_text(\"X: a\\tb\"))", want: true},
-		{name: "non ascii is field text", source: "test_report(is_field_text(\"X: caf\" + from_char_code(233)))", want: true},
+		{name: "non ascii is field text", source: "test_report(is_field_text(\"X: caf\\u{e9}\"))", want: true},
 		{name: "bare lf is not field text", source: "test_report(is_field_text(\"X: a\\nb\"))", want: false},
 		{name: "bare cr is not field text", source: "test_report(is_field_text(\"X: a\\rb\"))", want: false},
-		{name: "nul is not field text", source: "test_report(is_field_text(\"X: a\" + from_char_code(0) + \"b\"))", want: false},
-		{name: "del is not field text", source: "test_report(is_field_text(\"X: a\" + from_char_code(127) + \"b\"))", want: false},
+		{name: "nul is not field text", source: "test_report(is_field_text(\"X: a\\u{0}b\"))", want: false},
+		{name: "del is not field text", source: "test_report(is_field_text(\"X: a\\u{7f}b\"))", want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -294,21 +297,13 @@ let HTTP_MAX_HEADER_NAME_LENGTH: int = 256
 let HTTP_MAX_HEADER_LINES: int = 64
 
 let HTTP_TOKEN_EXTRA: string = "!#$%&'*+-.^_`|~"
-
-func build_visible_ascii() -> string
-    let out: string = ""
-    let code: int = 33
-    while code <= 126 do
-        out = out + from_char_code(code)
-        code = code + 1
-    end
-    return out
-end
-
-let HTTP_VISIBLE_ASCII: string = build_visible_ascii()
 ```
 
-`build_visible_ascii` produces every character from `0x21` to `0x7E` without needing escape sequences in a string literal.
+An earlier revision of this plan also built a 94-character `HTTP_VISIBLE_ASCII`
+string at module load and tested membership with `contains`. That is gone: the
+validators below compare codepoint ranges numerically, which is both clearer
+and cheaper, and it was only ever written that way to dodge escape-sequence
+limitations the lexer no longer has.
 
 - [ ] **Step 4: Extend `get_status_text`**
 
@@ -371,19 +366,25 @@ end
 
 Add after `find_header_end`, still inside the `Parse Helpers` section:
 
+Each validator decodes once with `codes` and then compares numbers. A
+`char_at` loop would re-decode the whole string on every iteration, which is
+quadratic in inputs an attacker controls the length of.
+
 ```noxy
-func is_token_char(ch: string) -> bool
-    if ch == "" then return false end
-    if is_alnum(ch) then return true end
-    return contains(HTTP_TOKEN_EXTRA, ch)
+func is_token_code(code: int) -> bool
+    if code >= 48 && code <= 57 then return true end
+    if code >= 65 && code <= 90 then return true end
+    if code >= 97 && code <= 122 then return true end
+    return contains(HTTP_TOKEN_EXTRA, from_char_code(code))
 end
 
 func is_token(s: string) -> bool
-    let n: int = length(s)
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
     if n == 0 then return false end
     let i: int = 0
     while i < n do
-        if !is_token_char(char_at(s, i)) then
+        if !is_token_code(cs[i]) then
             return false
         end
         i = i + 1
@@ -391,14 +392,15 @@ func is_token(s: string) -> bool
     return true
 end
 
+// Visible ASCII: 0x21 to 0x7E, so a space, a control character, DEL, and any
+// non-ASCII codepoint all fail.
 func is_visible_ascii(s: string) -> bool
-    let n: int = length(s)
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
     if n == 0 then return false end
     let i: int = 0
     while i < n do
-        let ch: string = char_at(s, i)
-        if ch == "" then return false end
-        if !contains(HTTP_VISIBLE_ASCII, ch) then
+        if cs[i] < 33 || cs[i] > 126 then
             return false
         end
         i = i + 1
@@ -409,23 +411,15 @@ end
 // RFC 9110 field-value: horizontal tab, or 0x20 and above excluding 0x7F.
 // Rejecting CR, LF, and NUL here is the response-splitting defense: they are
 // all valid UTF-8, so the boundary gate passes them through, and build_response
-// concatenates header strings without validating them.
+// concatenates header strings without validating them. An empty value is legal.
 func is_field_text(s: string) -> bool
-    let n: int = length(s)
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
     let i: int = 0
     while i < n do
-        let ch: string = char_at(s, i)
-        if ch == "" then
+        let code: int = cs[i]
+        if code != 9 && (code < 32 || code == 127) then
             return false
-        end
-        let code: int = char_code(ch)
-        if code != 9 then
-            if code < 32 then
-                return false
-            end
-            if code == 127 then
-                return false
-            end
         end
         i = i + 1
     end
@@ -541,25 +535,15 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 Append to `internal/vm/http_parser_framing_test.go`:
 
 ```go
-func parseHeadStatus(t *testing.T, block string) int64 {
-	t.Helper()
-	source := "let head: HttpFrameResult = parse_request_head(to_bytes(" + noxyQuote(block) + "))\n" +
-		"if head.ok then test_report(0) else test_report(head.status) end"
-	return captureParserInt(t, source)
-}
-
-// noxyQuote renders a Go string as a Noxy expression of type string.
+// noxyBytes renders a Go string as a Noxy bytes literal.
 //
-// Noxy string literals support only \n, \r, \t, \" , \' and \\ — there is no
-// \x or \u escape — so any other control character is emitted as a
-// from_char_code call concatenated into the literal. The result is an
-// expression rather than a bare literal, which callers must keep in mind when
-// embedding it. Emitting such a byte raw would put a control character inside
-// a source string literal, which is not something the lexer is required to
-// accept.
-func noxyQuote(s string) string {
+// A bytes literal accepts \xNN, so any byte — a control character, or a byte
+// that is not valid UTF-8 — is written directly. That is why this returns
+// b"..." rather than a string literal: parse_request_head takes bytes, and a
+// string literal could not carry the invalid-UTF-8 cases the tests need.
+func noxyBytes(s string) string {
 	var b []byte
-	b = append(b, '"')
+	b = append(b, 'b', '"')
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"':
@@ -572,8 +556,8 @@ func noxyQuote(s string) string {
 			b = append(b, '\\', 'n')
 		case c == '\t':
 			b = append(b, '\\', 't')
-		case c < 0x20 || c == 0x7F:
-			b = append(b, []byte(fmt.Sprintf(`" + from_char_code(%d) + "`, c))...)
+		case c < 0x20 || c >= 0x7F:
+			b = append(b, []byte(fmt.Sprintf(`\x%02x`, c))...)
 		default:
 			b = append(b, c)
 		}
@@ -581,9 +565,16 @@ func noxyQuote(s string) string {
 	return string(append(b, '"'))
 }
 
+func parseHeadStatus(t *testing.T, block string) int64 {
+	t.Helper()
+	source := "let head: HttpFrameResult = parse_request_head(" + noxyBytes(block) + ")\n" +
+		"if head.ok then test_report(0) else test_report(head.status) end"
+	return captureParserInt(t, source)
+}
+
 func TestParseRequestHeadAccepts(t *testing.T) {
 	block := "POST /a/b?x=1&y=2 HTTP/1.1\r\nHost: example.com:8080\r\nContent-Length: 3"
-	source := "let head: HttpFrameResult = parse_request_head(to_bytes(" + noxyQuote(block) + "))\n" +
+	source := "let head: HttpFrameResult = parse_request_head(" + noxyBytes(block) + ")\n" +
 		"test_report(head.request.method + \"|\" + head.request.path + \"|\" + head.request.query + \"|\" + head.request.version + \"|\" + to_str(head.request.header_count))"
 	want := "POST|/a/b|x=1&y=2|HTTP/1.1|2"
 	if got := captureParserString(t, source); got != want {
@@ -593,7 +584,7 @@ func TestParseRequestHeadAccepts(t *testing.T) {
 
 func TestParseRequestHeadQueryKeepsLaterQuestionMarks(t *testing.T) {
 	block := "GET /a?x=1?y=2 HTTP/1.1\r\nHost: a"
-	source := "let head: HttpFrameResult = parse_request_head(to_bytes(" + noxyQuote(block) + "))\n" +
+	source := "let head: HttpFrameResult = parse_request_head(" + noxyBytes(block) + ")\n" +
 		"test_report(head.request.query)"
 	if got := captureParserString(t, source); got != "x=1?y=2" {
 		t.Fatalf("query = %q, want %q", got, "x=1?y=2")
@@ -668,20 +659,15 @@ func TestParseRequestHeadAcceptsExactly64Headers(t *testing.T) {
 // A header block carrying a raw 0xFF is not valid UTF-8. Without the
 // is_valid_utf8 gate, to_str raises and the caller never receives a status at
 // all, so this test fails by erroring out rather than by returning a wrong
-// number. The byte is built with from_char_code(255) because Noxy string
-// literals have no \u or \x escape; the source stays pure ASCII, which is what
-// TestEmbeddedStdlibSourcesAreValidUTF8 expects of anything committed.
+// number.
 func TestParseRequestHeadRejectsNonUTF8HeaderBlock(t *testing.T) {
-	source := "let raw: bytes = to_bytes(\"GET / HTTP/1.1\\r\\nX-Bad: \") + to_bytes([255, 254]) + to_bytes(\"\\r\\nHost: a\")\n" +
-		"let head: HttpFrameResult = parse_request_head(raw)\n" +
-		"if head.ok then test_report(0) else test_report(head.status) end"
-	if got := captureParserInt(t, source); got != 400 {
+	if got := parseHeadStatus(t, "GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a"); got != 400 {
 		t.Fatalf("status = %d, want 400", got)
 	}
 }
 
 func TestParseRequestRetainedGateReturnsDefaults(t *testing.T) {
-	source := "let raw: bytes = to_bytes(\"GET /x HTTP/1.1\\r\\nX-Bad: \") + to_bytes([255]) + to_bytes(\"\\r\\n\\r\\n\")\n" +
+	source := "let raw: bytes = " + noxyBytes("GET /x HTTP/1.1\r\nX-Bad: \xff\r\n\r\n") + "\n" +
 		"let req: HttpRequest = parse_request(raw, length(raw))\n" +
 		"test_report(req.path)"
 	if got := captureParserString(t, source); got != "/" {
@@ -692,7 +678,7 @@ func TestParseRequestRetainedGateReturnsDefaults(t *testing.T) {
 
 Add `"fmt"` and `"strings"` to the import block of `internal/vm/http_parser_framing_test.go`.
 
-`to_bytes([255, 254])` builds the invalid bytes from an int array, which is the only way to get a non-UTF-8 payload into a Noxy source file that must itself be valid UTF-8. This is verified, not assumed: `to_bytes("A") + to_bytes([255, 254]) + to_bytes("B")` yields a 4-byte value for which `is_valid_utf8` returns `false`, and `to_str` on it raises `to_str: bytes are not valid UTF-8 at byte offset 1`.
+`noxyBytes` renders these blocks as `b"..."` literals with `\xNN` escapes, so a byte that is not valid UTF-8 goes into the test source directly while the source file itself stays valid UTF-8 — which is what `TestEmbeddedStdlibSourcesAreValidUTF8` requires of anything committed.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -877,7 +863,7 @@ func resolveBodyLength(t *testing.T, headerLines []string, maxBody int) (bool, i
 	t.Helper()
 	source := "let headers: string[64]\n"
 	for i, line := range headerLines {
-		source += fmt.Sprintf("headers[%d] = %s\n", i, noxyQuote(line))
+		source += fmt.Sprintf("headers[%d] = to_str(%s)\n", i, noxyBytes(line))
 	}
 	source += fmt.Sprintf("let r: BodyLengthResult = resolve_body_length(headers, %d, %d)\n", len(headerLines), maxBody)
 
@@ -2583,6 +2569,13 @@ Add an entry to `CHANGELOG.md` matching the file's existing format, containing:
 - **Coherent rejections:** invalid requests receive 400, 408, 413, 414, 431,
   501, or 505 with a byte-exact `Content-Length` instead of a bare disconnect.
 - **`count_header(headers, count, name)`** in `http_parser`.
+- **`\uNNNN` and `\u{...}` escapes** in every string literal, with the codepoint
+  validated so surrogates and out-of-range values are rejected at lex time.
+- **`\xNN` escape** in bytes literals, for writing a raw byte. It is refused in
+  a string literal, where it could otherwise construct invalid UTF-8.
+- **`strings.codes(s) -> int[]`**, which decodes a string once and returns every
+  codepoint. A `char_at` loop re-decodes the whole string per call and is
+  quadratic in its length.
 
 ### Fixed
 - **`get_header` truncated values containing a colon,** so
@@ -2599,6 +2592,9 @@ Add an entry to `CHANGELOG.md` matching the file's existing format, containing:
 - **A `Content-Length` above `int64` raised instead of being rejected.**
   Resolution converts through `convert_to_int_result`, so an unrepresentable
   value returns 400.
+- **A four-digit unicode escape lexed as literal text.** An ANSI clear-screen
+  sequence written as a unicode-escaped ESC came out as eight visible
+  characters. `conway.nx`, `conway_random.nx`, and `langtons_ant.nx` all used it and all three printed the escape text instead of clearing the screen. Fixed.
 - **Header values could carry `CR`, `LF`, and `NUL`,** which are valid UTF-8 and
   survive the `\r\n` split. A handler echoing such a value into a response
   header let a client forge a second response. Header lines are now rejected
