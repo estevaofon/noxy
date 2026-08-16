@@ -275,9 +275,30 @@ Header line rules:
   name and the `:` is 400;
 - the value is everything after the first `:`, with leading and trailing spaces
   and tabs removed. A value may contain `:`;
+- no header line may carry a control character. Every character must be
+  horizontal tab, or `0x20` and above excluding `0x7F`; `0x00`–`0x08`,
+  `0x0A`–`0x1F`, and `0x7F` are rejected with 400. Characters above `0x7F` are
+  permitted, matching RFC 9110 `obs-text`, and are already known to be
+  well-formed because the UTF-8 gate ran first;
 - more than 64 headers is 431. The current implementation silently drops
   headers past 64, which can drop `Content-Length` itself and desynchronize
   framing, so silent truncation is replaced by explicit rejection.
+
+The control-character rule is the response-splitting defense, and it is the one
+rule the UTF-8 invariant does not supply. `CR`, `LF`, and `NUL` are all valid
+UTF-8, so the boundary gate passes them through unchanged. The header block is
+split on `\r\n`, which means a lone `\n`, or a `\r` not followed by `\n`,
+survives inside a header value. `build_response` assembles response headers by
+string concatenation with no validation of its own, so a handler that echoes a
+received value into a response header — a routine thing to write — would let a
+client inject `\r\n` and forge an entire second response.
+
+Validating on the way in fixes this once, at the point where the bytes are
+already being inspected, rather than depending on every handler author to
+sanitize on the way out. The check runs against the whole header line rather
+than the extracted value: the name is already constrained to a token and `:` is
+a visible character, so scanning the line is equivalent to scanning the value
+and costs one pass instead of two.
 
 The parsed `HttpRequest` keeps its existing shape: `headers` holds the raw
 `Name: value` lines, `header_count` their number, and `query` the substring
@@ -388,7 +409,7 @@ error response carries `Content-Type: text/plain`, a byte-exact
 
 | Status | Condition |
 |---|---|
-| 400 Bad Request | header block that is not valid UTF-8, malformed request line, malformed header, obsolete folding, whitespace before `:`, non-origin target, duplicate `Content-Length`, non-digit or unconvertible `Content-Length`, `Transfer-Encoding` with `Content-Length`, EOF mid-request |
+| 400 Bad Request | header block that is not valid UTF-8, control character in a header line, malformed request line, malformed header, obsolete folding, whitespace before `:`, non-origin target, duplicate `Content-Length`, non-digit or unconvertible `Content-Length`, `Transfer-Encoding` with `Content-Length`, EOF mid-request |
 | 408 Request Timeout | header or body deadline expired, including a stalled trickle |
 | 413 Content Too Large | declared `Content-Length` above `max_body_bytes` |
 | 414 URI Too Long | request target longer than 2048 characters |
@@ -471,6 +492,11 @@ The matrix proves:
   returns 400 rather than raising out of the connection routine;
 - a header block carrying an invalid UTF-8 byte returns 400, and the server
   survives to answer the next connection;
+- a header value carrying a bare `LF`, a bare `CR`, a `NUL`, or `DEL` returns
+  400, so a handler echoing that value cannot be made to split the response;
+- a header value carrying a horizontal tab or a non-ASCII character is
+  accepted, so the rule rejects control characters without rejecting
+  legitimate text;
 - `Transfer-Encoding: chunked` returns 501, and combined with `Content-Length`
   returns 400;
 - `HTTP/0.9` and `HTTP/2.0` return 505, while `HTTP/1.0` and `HTTP/1.1` are

@@ -66,6 +66,7 @@ Resumable terminator scan, ASCII/token validation helpers, corrected `get_header
   - `func find_header_end(data: bytes, len: int) -> int`
   - `func is_token(s: string) -> bool`
   - `func is_visible_ascii(s: string) -> bool`
+  - `func is_field_text(s: string) -> bool`
   - `func count_header(headers: string[64], count: int, name: string) -> int`
   - `func get_header(headers: string[64], count: int, name: string) -> string` (corrected)
   - `func frame_error(status: int, message: string) -> HttpFrameResult`
@@ -158,7 +159,7 @@ func TestFindHeaderEndFromResumesScan(t *testing.T) {
 	}
 }
 
-func TestIsTokenAndVisibleAscii(t *testing.T) {
+func TestIsTokenVisibleAsciiAndFieldText(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
@@ -175,6 +176,14 @@ func TestIsTokenAndVisibleAscii(t *testing.T) {
 		{name: "space is not visible ascii", source: "test_report(is_visible_ascii(\"/a b\"))", want: false},
 		{name: "tab is not visible ascii", source: "test_report(is_visible_ascii(\"/a\\tb\"))", want: false},
 		{name: "empty is not visible ascii", source: "test_report(is_visible_ascii(\"\"))", want: false},
+		{name: "plain header line is field text", source: "test_report(is_field_text(\"Host: example.com:8080\"))", want: true},
+		{name: "empty is field text", source: "test_report(is_field_text(\"\"))", want: true},
+		{name: "tab is field text", source: "test_report(is_field_text(\"X: a\\tb\"))", want: true},
+		{name: "non ascii is field text", source: "test_report(is_field_text(\"X: caf\" + from_char_code(233)))", want: true},
+		{name: "bare lf is not field text", source: "test_report(is_field_text(\"X: a\\nb\"))", want: false},
+		{name: "bare cr is not field text", source: "test_report(is_field_text(\"X: a\\rb\"))", want: false},
+		{name: "nul is not field text", source: "test_report(is_field_text(\"X: a\" + from_char_code(0) + \"b\"))", want: false},
+		{name: "del is not field text", source: "test_report(is_field_text(\"X: a\" + from_char_code(127) + \"b\"))", want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -397,6 +406,32 @@ func is_visible_ascii(s: string) -> bool
     return true
 end
 
+// RFC 9110 field-value: horizontal tab, or 0x20 and above excluding 0x7F.
+// Rejecting CR, LF, and NUL here is the response-splitting defense: they are
+// all valid UTF-8, so the boundary gate passes them through, and build_response
+// concatenates header strings without validating them.
+func is_field_text(s: string) -> bool
+    let n: int = length(s)
+    let i: int = 0
+    while i < n do
+        let ch: string = char_at(s, i)
+        if ch == "" then
+            return false
+        end
+        let code: int = char_code(ch)
+        if code != 9 then
+            if code < 32 then
+                return false
+            end
+            if code == 127 then
+                return false
+            end
+        end
+        i = i + 1
+    end
+    return true
+end
+
 func empty_request() -> HttpRequest
     let empty_h: string[64]
     return HttpRequest("GET", "/", "", "HTTP/1.1", empty_h, 0, b"")
@@ -513,23 +548,34 @@ func parseHeadStatus(t *testing.T, block string) int64 {
 	return captureParserInt(t, source)
 }
 
+// noxyQuote renders a Go string as a Noxy expression of type string.
+//
+// Noxy string literals support only \n, \r, \t, \" , \' and \\ — there is no
+// \x or \u escape — so any other control character is emitted as a
+// from_char_code call concatenated into the literal. The result is an
+// expression rather than a bare literal, which callers must keep in mind when
+// embedding it. Emitting such a byte raw would put a control character inside
+// a source string literal, which is not something the lexer is required to
+// accept.
 func noxyQuote(s string) string {
 	var b []byte
 	b = append(b, '"')
 	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '"':
+		switch c := s[i]; {
+		case c == '"':
 			b = append(b, '\\', '"')
-		case '\\':
+		case c == '\\':
 			b = append(b, '\\', '\\')
-		case '\r':
+		case c == '\r':
 			b = append(b, '\\', 'r')
-		case '\n':
+		case c == '\n':
 			b = append(b, '\\', 'n')
-		case '\t':
+		case c == '\t':
 			b = append(b, '\\', 't')
+		case c < 0x20 || c == 0x7F:
+			b = append(b, []byte(fmt.Sprintf(`" + from_char_code(%d) + "`, c))...)
 		default:
-			b = append(b, s[i])
+			b = append(b, c)
 		}
 	}
 	return string(append(b, '"'))
@@ -579,6 +625,10 @@ func TestParseRequestHeadRejects(t *testing.T) {
 		{name: "space before colon", block: "GET / HTTP/1.1\r\nHost : a", want: 400},
 		{name: "empty header name", block: "GET / HTTP/1.1\r\n: a", want: 400},
 		{name: "over long header name", block: "GET / HTTP/1.1\r\n" + longName + ": a", want: 400},
+		{name: "bare lf in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\nInjected: yes", want: 400},
+		{name: "bare cr in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\rInjected: yes", want: 400},
+		{name: "nul in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\x00b", want: 400},
+		{name: "del in header value", block: "GET / HTTP/1.1\r\nX-Echo: a\x7fb", want: 400},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -646,7 +696,7 @@ Add `"fmt"` and `"strings"` to the import block of `internal/vm/http_parser_fram
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `go test ./internal/vm/ -run TestParseRequestHead -v`
+Run: `go test ./internal/vm/ -run TestParseRequest -v`
 
 Expected: FAIL — `parse_request_head` is undefined.
 
@@ -734,6 +784,12 @@ func parse_request_head(header_bytes: bytes) -> HttpFrameResult
         if starts_with(line, " ") || starts_with(line, "\t") then
             return frame_error(400, "Bad Request")
         end
+        // Response-splitting defense. CR, LF, and NUL are valid UTF-8, so the
+        // boundary gate lets them through, and splitting on "\r\n" leaves a
+        // lone "\n" or a bare "\r" inside the value.
+        if !is_field_text(line) then
+            return frame_error(400, "Bad Request")
+        end
         let parts: SplitResult = split(line, ":")
         if parts.count < 2 then
             return frame_error(400, "Bad Request")
@@ -776,7 +832,7 @@ The `is_valid_utf8` gate must stay the **first** statement. Every later rule —
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `go test ./internal/vm/ -run TestParseRequestHead -v`
+Run: `go test ./internal/vm/ -run TestParseRequest -v`
 
 Expected: PASS, every subtest.
 
@@ -949,7 +1005,7 @@ Expected: PASS, every subtest.
 
 - [ ] **Step 5: Run the full parser suite and commit**
 
-Run: `go test ./internal/vm/ -run 'TestFindHeaderEnd|TestIsToken|TestGetHeader|TestCountHeader|TestGetStatusText|TestFrameHelpers|TestParseRequestHead|TestResolveBodyLength'`
+Run: `go test ./internal/vm/ -run 'TestFindHeaderEnd|TestIsToken|TestGetHeader|TestCountHeader|TestGetStatusText|TestFrameHelpers|TestParseRequest|TestResolveBodyLength'`
 
 Expected: PASS.
 
@@ -1776,6 +1832,12 @@ func TestServerRejectsInvalidRequests(t *testing.T) {
 		{name: "non utf8 header value", request: "GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a\r\n\r\n", want: 400},
 		{name: "non utf8 target", request: "GET /\xff HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
 		{name: "content length above int64", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 9999999999999999999\r\n\r\n", want: 400},
+		// Response splitting. A bare LF survives the \r\n split, so without the
+		// is_field_text rule these reach a handler intact and any handler that
+		// echoes the value into a response header forges a second response.
+		{name: "bare lf in header value", request: "GET / HTTP/1.1\r\nX-Echo: a\nInjected: yes\r\nHost: a\r\n\r\n", want: 400},
+		{name: "bare cr in header value", request: "GET / HTTP/1.1\r\nX-Echo: a\rInjected: yes\r\nHost: a\r\n\r\n", want: 400},
+		{name: "nul in header value", request: "GET / HTTP/1.1\r\nX-Echo: a\x00b\r\nHost: a\r\n\r\n", want: 400},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1903,6 +1965,30 @@ func TestServerClosesConnectionWhenHandlerFails(t *testing.T) {
 	raw := readRawResponse(t, survivor)
 	if got := responseStatus(t, raw); got != 200 {
 		t.Fatalf("status after failing handler = %d, want 200 (response %q)", got, raw)
+	}
+}
+
+// The end-to-end response-splitting proof: a handler that echoes a received
+// header value into a response header is the realistic vulnerable shape, and
+// the request that would exploit it must never reach that handler.
+func TestServerRejectsResponseSplittingAttempt(t *testing.T) {
+	echoing := `    let out: string[64]
+    out[0] = "Content-Type: text/plain"
+    out[1] = "X-Echo: " + get_header(req.headers, req.header_count, "X-Echo")
+    out[2] = "Content-Length: 2"
+    out[3] = "Connection: close"
+    return HttpResponse("HTTP/1.1", 200, "OK", out, 4, b"ok")`
+	server := startNoxyHTTPServer(t, echoing, "")
+	conn := server.dial()
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\nX-Echo: a\r\nContent-Length: 0\r\n\r\nHTTP/1.1 200 OK\r\n\r\nInjected: yes\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if strings.Count(raw, "HTTP/1.1 ") != 1 {
+		t.Fatalf("expected exactly one response, got %q", raw)
+	}
+	if strings.Contains(raw, "Injected") {
+		t.Fatalf("injected header reached the response: %q", raw)
 	}
 }
 
@@ -2403,6 +2489,11 @@ a client that trickles one byte at a time still hits them.
 - A header name is a token of at most 256 characters with no whitespace before
   the `:`. Obsolete line folding is rejected rather than joined. At most 64
   header lines are accepted; the 65th is an error rather than a silent drop.
+- A header line may not contain a control character. Horizontal tab is allowed,
+  as is any character from `0x20` up excluding `0x7F`; `CR`, `LF`, `NUL`, and
+  `DEL` are rejected. This is what stops response splitting: `CR` and `LF` are
+  valid UTF-8, so a header value carrying them would otherwise reach a handler
+  intact and forge a second response the moment the handler echoed it back.
 - A header value keeps every character after the first `:`, so
   `Host: example.com:8080` is read whole.
 - The header block must be valid UTF-8. Noxy strings are required to hold valid
@@ -2421,7 +2512,7 @@ a client that trickles one byte at a time still hits them.
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | header block that is not valid UTF-8, malformed request line or header, obsolete folding, whitespace before `:`, non-origin target, duplicate or non-digit `Content-Length`, a `Content-Length` too large to represent, `Transfer-Encoding` with `Content-Length`, connection ended mid-request |
+| `400 Bad Request` | header block that is not valid UTF-8, control character in a header line, malformed request line or header, obsolete folding, whitespace before `:`, non-origin target, duplicate or non-digit `Content-Length`, a `Content-Length` too large to represent, `Transfer-Encoding` with `Content-Length`, connection ended mid-request |
 | `408 Request Timeout` | the header or body budget expired |
 | `413 Content Too Large` | declared `Content-Length` above `max_body_bytes` |
 | `414 URI Too Long` | target longer than 2048 characters |
@@ -2508,6 +2599,10 @@ Add an entry to `CHANGELOG.md` matching the file's existing format, containing:
 - **A `Content-Length` above `int64` raised instead of being rejected.**
   Resolution converts through `convert_to_int_result`, so an unrepresentable
   value returns 400.
+- **Header values could carry `CR`, `LF`, and `NUL`,** which are valid UTF-8 and
+  survive the `\r\n` split. A handler echoing such a value into a response
+  header let a client forge a second response. Header lines are now rejected
+  with 400 when they contain a control character other than horizontal tab.
 ```
 
 Merge the two `### Fixed` blocks into one if the changelog format requires a
@@ -2561,11 +2656,12 @@ gh pr create --base develop --title "feat/http-streaming-server - Frame HTTP req
 - Replace the HTTP server's single 64 KB socket read with incremental framing that reads the header block and the `Content-Length` body to completion.
 - Enforce explicit per-server limits and per-phase deadlines, giving slowloris protection through absolute header, body, and write budgets.
 - Validate framing strictly and answer invalid requests with real HTTP responses (400, 408, 413, 414, 431, 501, 505) instead of a bare disconnect.
+- Close a response-splitting vector by rejecting control characters in header lines, and gate the bytes-to-text boundary so a non-UTF-8 request is a 400 rather than a dead connection routine.
 - Write every response completely, resuming from the transferred offset after a partial write.
 - Keep one request per connection with `Connection: close`, and keep every existing exported signature.
 
 ## Components
-- `internal/stdlib/http_parser.nx`: resumable `find_header_end_from`, token and visible-ASCII validation, `parse_request_head`, `resolve_body_length`, `count_header`, corrected `get_header`, extended `get_status_text`.
+- `internal/stdlib/http_parser.nx`: resumable `find_header_end_from`, token, visible-ASCII and field-text validation, `parse_request_head`, `resolve_body_length`, `count_header`, corrected `get_header`, extended `get_status_text`.
 - `internal/stdlib/http_server.nx`: `HttpLimits`, configuration fields and defaults on `HttpServer`, `bind_server`, `server_limits`, `read_request`, `send_all`, and a `defer`-closed connection lifecycle.
 - `internal/vm/http_parser_framing_test.go`: Go tests for the pure framing primitives through the Noxy source harness.
 - `internal/vm/http_server_framing_test.go`: Go tests running the Noxy server on the VM and driving it over raw TCP.
@@ -2621,6 +2717,19 @@ attacker-controlled, one byte — `0xFF` in any header value — is enough to
 trigger it on demand. `is_valid_utf8(header_bytes)` turns that into an ordinary
 400. Everything downstream of the gate then operates on text that is known to
 be well-formed, which is what makes the rune-based ASCII validation safe.
+
+**Why header lines are scanned for control characters.** This is the one rule
+the UTF-8 invariant does not supply for free. `CR`, `LF`, and `NUL` are all
+valid UTF-8, so `is_valid_utf8` passes them through untouched, and splitting the
+header block on `\r\n` leaves a lone `\n` — or a `\r` with no `\n` after it —
+sitting inside a header value. `build_response` concatenates header strings
+without validating them, so a handler written the obvious way,
+`"X-Echo: " + get_header(...)`, hands a client the ability to inject `\r\n` and
+forge a whole second response. Rejecting the request on the way in fixes it
+once, where the bytes are already under inspection, instead of relying on every
+handler author to sanitize on the way out. The scan covers the entire line
+rather than just the extracted value: the name is already a token and `:` is a
+visible character, so scanning the line is equivalent and costs one pass.
 
 **Why `to_int` is never trusted.** `to_int` no longer guesses — it raises.
 `strconv.ParseInt` backs it, so `to_int("+5")` and `to_int("-5")` *succeed*
