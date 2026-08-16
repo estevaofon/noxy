@@ -5,6 +5,7 @@ use sqlite
 use strings
 use time
 use crypto
+use convert select *
 
 // No need for 'use json' if they are built-ins, but if it fails I'll add it.
 // Assuming they are global per instructions.
@@ -200,11 +201,12 @@ func handle_list_passwords() -> http_parser.HttpResponse
 end
 
 func handle_delete_password(id_str: string) -> http_parser.HttpResponse
-    let id: int = to_int(id_str)
-    if id <= 0 then
+    let parsed_id: IntResult = to_int_result(id_str)
+    if !parsed_id.ok || parsed_id.value <= 0 then
         return http_server.response_error(400, "Invalid ID")
     end
-    
+    let id: int = parsed_id.value
+
     let sql: string = "DELETE FROM passwords WHERE id = " + id_str
     let res: sqlite.ExecResult = sqlite.exec(db, sql)
     

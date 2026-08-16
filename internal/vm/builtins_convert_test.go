@@ -212,3 +212,38 @@ end`
 		t.Fatalf("convert module wrappers = %#v, want true", captured)
 	}
 }
+
+func TestParseUrlRejectsUnparsablePort(t *testing.T) {
+	source := `use http_parser select *
+let u: HttpUrl = parse_url("http://example.com:notaport/path")
+test_report(u.valid)`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_BOOL || captured.AsBool {
+		t.Fatalf("parse_url valid = %#v, want false for an unparsable port", captured)
+	}
+}
+
+func TestParseUrlKeepsValidPort(t *testing.T) {
+	source := `use http_parser select *
+let u: HttpUrl = parse_url("http://example.com:8080/path")
+if u.valid && u.port == 8080 && u.host == "example.com" && u.path == "/path" then
+    test_report(true)
+else
+    test_report(false)
+end`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("parse_url on a valid port = %#v, want true", captured)
+	}
+}
+
+func TestParseResponseZeroesUnparsableStatus(t *testing.T) {
+	source := `use http_parser select *
+let raw: bytes = to_bytes("HTTP/1.1 NOPE Weird\r\nHost: a\r\n\r\n")
+let r: HttpResponse = parse_response(raw, length(raw))
+test_report(r.status_code)`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_INT || captured.AsInt != 0 {
+		t.Fatalf("parse_response status_code = %#v, want 0", captured)
+	}
+}

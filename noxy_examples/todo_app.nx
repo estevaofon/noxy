@@ -6,6 +6,7 @@ use sqlite
 use strings select *
 
 use sys select *
+use convert select *
 
 // ============================================
 // Database Setup
@@ -193,7 +194,12 @@ init_db()
 let port_str: string = getenv("PORT").value
 let port: int = 8080
 if !is_empty(port_str) then
-    port = to_int(port_str)
+    let parsed_port: IntResult = to_int_result(port_str)
+    if parsed_port.ok && parsed_port.value > 0 then
+        port = parsed_port.value
+    else
+        print("PORT inválida, usando 8080")
+    end
 end
 
 //let server: HttpServer = new_server("0.0.0.0", port)
