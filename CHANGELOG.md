@@ -16,6 +16,23 @@
   sobre a forma de exibição `b"..."`.
 - **`ord` devolve o code point** de uma string de um caractere e exige
   exatamente um caractere. Antes devolvia o primeiro byte UTF-8.
+- **Toda `string` Noxy contém UTF-8 válido.** `to_str` levanta erro sobre bytes
+  inválidos em vez de retaggear sem inspeção. Antes, o byte inválido sobrevivia
+  na string mas decodificava como U+FFFD em toda operação por caractere:
+  fatiar `h` + `0xFF` + `i` reescrevia três bytes como cinco, em silêncio e sem
+  volta. Migração: use `io.read_bytes`, mantenha o valor como `bytes`, ou use
+  `strings.is_valid_utf8` antes de decodificar.
+- **`io.read`, `io.read_lines`, `sqlite.query`, `sys.exec_output` e
+  `sys.getenv`** reportam conteúdo não-UTF-8 pelos campos `ok` e de erro que já
+  possuem. `io.read_bytes` e `net.recv` seguem inalterados como as saídas
+  brutas.
+- **Carregar um `.nx` que não seja UTF-8 válido falha** com erro nomeando o
+  arquivo, em vez de lexar bytes mal formados.
+- **O script de entrada passado na linha de comando não está coberto por este
+  invariante.** `cmd/noxy/main.go` lê o arquivo principal por um caminho
+  separado do carregamento de módulos; um `.nx` de entrada com bytes
+  inválidos ainda é lexado sem checagem. Módulos importados via `use` são
+  validados. Esta lacuna fica registrada como trabalho futuro.
 
 ### Removed (BREAKING)
 - **A palavra-chave `global` foi removida do léxico.** Já não fazia parte da
@@ -33,6 +50,10 @@
 - **`strings.char_code(s)`**, inverso de `from_char_code(code)`.
 - **Guards de arquitetura**: nenhum native registrado duas vezes, nenhum marcador
   de debug em fonte de produção, fontes embarcados da stdlib em UTF-8 válido.
+- **`strings.is_valid_utf8(b: bytes)`**, o caminho de checar-antes-de-decodificar.
+  O parâmetro é estritamente `bytes`: passar uma `string` — inclusive através
+  de `use strings select *` — levanta erro de runtime nomeando o tipo
+  recebido.
 
 ### Fixed
 
@@ -56,6 +77,11 @@
 - **24 linhas de comentário da stdlib**, em `http.nx`, `strings.nx`, `time.nx`
   e `io.nx`, tiveram os acentos restaurados após uma conversão de encoding
   com perda.
+- **Vincular um valor `bytes` como parâmetro SQL corrompia o conteúdo.**
+  `sqliteParameter` não tinha caso para `bytes` e caía no formato de exibição
+  de depuração, `b"..."`, adicionando um prefixo e um sufixo espúrios a todo
+  valor gravado. Independente de validade UTF-8. Corrigido para passar o
+  conteúdo bruto.
 
 ## [0.2.0] - 2026-08-13
 

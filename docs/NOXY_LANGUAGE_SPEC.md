@@ -839,6 +839,45 @@ constante. Noxy adota a aproximação por code point, como Python.
 acesso por elemento. As funções de `strings` recusam um `bytes` e apontam
 `to_str`, que é a ponte explícita entre os dois tipos.
 
+### Invariante UTF-8
+
+Toda `string` Noxy contém UTF-8 válido. A validação acontece uma única vez, na
+fronteira onde bytes viram texto, e não em cada operação — dentro do
+invariante, toda operação por caractere é correta por construção.
+
+```noxy
+use strings select *
+
+let dados: bytes = io.read_bytes(arquivo).data
+if is_valid_utf8(dados) then
+    let texto: string = to_str(dados)
+else
+    print("conteúdo não é UTF-8")
+end
+```
+
+`to_str` levanta erro de runtime sobre bytes inválidos, indicando o offset:
+
+```text
+to_str: bytes are not valid UTF-8 at byte offset 5
+```
+
+Funções que já possuem struct de resultado — `io.read`, `io.read_lines`,
+`sqlite.query`, `sys.exec_output`, `sys.getenv` — reportam pelos campos `ok` e
+de erro que já têm, em vez de levantar. Levantar fica reservado às conversões
+puras.
+
+Para lidar com bytes arbitrários deliberadamente, mantenha o valor como
+`bytes`: `io.read_bytes` e `net.recv` já devolvem `bytes` e não validam nada.
+
+`is_valid_utf8` aceita apenas `bytes`. Passar uma `string` — mesmo através de
+`use strings select *`, o caminho que qualquer código real usa — levanta erro
+de runtime nomeando o tipo recebido, porque o invariante já respondeu: se o
+valor já é `string`, perguntar de novo é a pergunta errada.
+
+Noxy não aplica normalização Unicode (NFC/NFD). Comparação é byte-exata, como
+em Python.
+
 ### Network sockets
 
 `net.listen(host, 0)` asks the operating system to choose an available port.
