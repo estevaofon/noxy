@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/compiler"
+	"noxy-vm/internal/console"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/pkgmanager"
@@ -97,6 +98,10 @@ func startREPL(showDisasm bool) {
 	var inputBuffer string
 
 	for {
+		// A crashed raw-mode program (e.g. a terminal game) leaves the shared
+		// console without line input or echo, which would freeze Scan below.
+		console.EnsureLineInput()
+
 		if inputBuffer == "" {
 			fmt.Print(">>> ")
 		} else {

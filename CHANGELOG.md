@@ -65,6 +65,15 @@
 
 ### Fixed
 
+- **REPL e `input()` congelavam em terminais com raw mode vazado no Windows.**
+  O modo de entrada do console é estado compartilhado do terminal: quando um
+  programa em raw mode (ex.: um jogo via `noxy-plugin-terminal`) morria sem
+  restaurar, `ENABLE_LINE_INPUT`/`ENABLE_ECHO_INPUT` ficavam desligados e o
+  próximo REPL naquele terminal mostrava `>>> ` mas nunca recebia a linha —
+  digitação invisível, Enter sem efeito, "resolvia" só abrindo outro terminal
+  (o PowerShell mascara o problema porque o PSReadLine redefine o modo a cada
+  prompt). Agora `internal/console.EnsureLineInput` normaliza o modo do console
+  antes de cada prompt do REPL e de cada `input()`.
 - Normal returns and runtime failures now share safe frame unwinding, preserving primary errors while collecting observable cleanup failures.
 - `net.setblocking(sock, true)` now restores indefinite blocking, while the deprecated `false` branch remains a compatibility no-op.
 - `net.poll`/`net_select` now reports non-consuming readiness through independent 64-entry read, write, and error sets, with immediate zero-time polls, one global positive timeout, portable EOF/hangup projection, and concurrent-close wakeups that omit detached resources.
