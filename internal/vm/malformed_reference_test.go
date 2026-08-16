@@ -315,7 +315,11 @@ func TestContextualReferenceOpcodesRejectTypedNilContainers(t *testing.T) {
 			if tt.indexValue == nil {
 				nameConstant := code.AddConstant(value.NewString("field"))
 				code.Write(byte(chunk.OP_CONTEXT_REF_PROPERTY), 1)
-				code.Write(byte(nameConstant), 1)
+				// OP_CONTEXT_REF_PROPERTY's constant-pool index is a 16-bit
+				// big-endian operand (see emitOpWithConstantIndex), not a
+				// single byte, so both halves must be written here.
+				code.Write(byte((nameConstant>>8)&0xff), 1)
+				code.Write(byte(nameConstant&0xff), 1)
 			} else {
 				indexConstant := code.AddConstant(*tt.indexValue)
 				code.Write(byte(chunk.OP_CONSTANT), 1)

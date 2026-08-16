@@ -13,7 +13,33 @@ struct HttpServer
     port: int
     listener: Socket
     running: bool
+    max_header_bytes: int
+    max_body_bytes: int
+    header_timeout_ms: int
+    body_timeout_ms: int
+    write_timeout_ms: int
+    read_chunk_bytes: int
 end
+
+struct HttpLimits
+    max_header_bytes: int
+    max_body_bytes: int
+    header_timeout_ms: int
+    body_timeout_ms: int
+    write_timeout_ms: int
+    read_chunk_bytes: int
+end
+
+// ============================================
+// Defaults
+// ============================================
+
+let HTTP_DEFAULT_MAX_HEADER_BYTES: int = 16384
+let HTTP_DEFAULT_MAX_BODY_BYTES: int = 1048576
+let HTTP_DEFAULT_HEADER_TIMEOUT_MS: int = 5000
+let HTTP_DEFAULT_BODY_TIMEOUT_MS: int = 15000
+let HTTP_DEFAULT_WRITE_TIMEOUT_MS: int = 15000
+let HTTP_DEFAULT_READ_CHUNK_BYTES: int = 8192
 
 // ============================================
 // Factory
@@ -22,75 +48,309 @@ end
 func new_server(host: string, port: int) -> HttpServer
     // Return with invalid socket initially
     let s: Socket = Socket(-1, "", 0, false)
-    return HttpServer(host, port, s, false)
+    let server: HttpServer = HttpServer(host, port, s, false, 0, 0, 0, 0, 0, 0)
+    server.max_header_bytes = HTTP_DEFAULT_MAX_HEADER_BYTES
+    server.max_body_bytes = HTTP_DEFAULT_MAX_BODY_BYTES
+    server.header_timeout_ms = HTTP_DEFAULT_HEADER_TIMEOUT_MS
+    server.body_timeout_ms = HTTP_DEFAULT_BODY_TIMEOUT_MS
+    server.write_timeout_ms = HTTP_DEFAULT_WRITE_TIMEOUT_MS
+    server.read_chunk_bytes = HTTP_DEFAULT_READ_CHUNK_BYTES
+    return server
+end
+
+// Non-positive configuration is a caller mistake, not a request to disable a
+// limit, so it falls back to the default rather than being taken literally.
+func positive_or(candidate: int, fallback: int) -> int
+    if candidate > 0 then
+        return candidate
+    end
+    return fallback
+end
+
+// Normalizes configuration once per serve call. The normalized HttpLimits is
+// what gets passed to each spawned connection routine, so a later mutation of
+// the server struct cannot change the rules applied to a request already in
+// flight.
+func server_limits(server: ref HttpServer) -> HttpLimits
+    let max_header: int = positive_or(server.max_header_bytes, HTTP_DEFAULT_MAX_HEADER_BYTES)
+    let max_body: int = positive_or(server.max_body_bytes, HTTP_DEFAULT_MAX_BODY_BYTES)
+    let header_ms: int = positive_or(server.header_timeout_ms, HTTP_DEFAULT_HEADER_TIMEOUT_MS)
+    let body_ms: int = positive_or(server.body_timeout_ms, HTTP_DEFAULT_BODY_TIMEOUT_MS)
+    let write_ms: int = positive_or(server.write_timeout_ms, HTTP_DEFAULT_WRITE_TIMEOUT_MS)
+    let chunk: int = positive_or(server.read_chunk_bytes, HTTP_DEFAULT_READ_CHUNK_BYTES)
+    if chunk > max_header then
+        chunk = max_header
+    end
+    return HttpLimits(max_header, max_body, header_ms, body_ms, write_ms, chunk)
+end
+
+// ============================================
+// Complete Write
+// ============================================
+
+// Writes data completely, resuming from the transferred offset after a
+// partial write, under a single deadline covering the whole call. A slow
+// or stalled reader must not truncate the response, and a peer that never
+// reads must not hang the caller past write_timeout_ms.
+func send_all(client: Socket, data: bytes, write_timeout_ms: int) -> bool
+    let size: int = length(data)
+    let offset: int = 0
+    let deadline: int = time_now_ms() + write_timeout_ms
+
+    while offset < size do
+        let remaining: int = deadline - time_now_ms()
+        if remaining <= 0 then
+            return false
+        end
+        settimeout(client, remaining)
+
+        let res: NetResult = socket_send(client, slice(data, offset, size))
+        // The offset advances by res.count even when ok is false: net_send
+        // reports the actual transferred count alongside a failure, and a
+        // partial transfer that failed must still resume from where it left
+        // off rather than resending bytes the peer already has.
+        offset = offset + res.count
+        if !res.ok && res.count == 0 then
+            return false
+        end
+    end
+    return true
+end
+
+// ============================================
+// Request Framing
+// ============================================
+
+// net_settimeout normalizes every failure to this string (see
+// feat/network-deadlines), so it is the only signal read_request has for
+// "the deadline expired" versus "the transport is gone." Anything else
+// closes silently rather than answering, because the transport is already
+// unusable.
+func recv_failure_status(message: string) -> int
+    if message == "operation timed out" then
+        return 408
+    end
+    return 0
+end
+
+// Reads one request to completion: the header block up to \r\n\r\n, then
+// exactly the declared Content-Length body. Each phase runs under its own
+// absolute deadline, so a client that stalls -- or trickles one byte at a
+// time -- still hits a bounded total wait rather than tying up the
+// connection routine indefinitely.
+func read_request(client: Socket, limits: HttpLimits) -> HttpFrameResult
+    let buffer: bytes = b""
+    let total: int = 0
+    let scanned: int = 0
+    let terminator: int = -1
+    let deadline: int = time_now_ms() + limits.header_timeout_ms
+
+    // Phase 1: read until the header terminator arrives.
+    while terminator < 0 do
+        terminator = find_header_end_from(buffer, total, scanned)
+        if terminator < 0 then
+            if total >= limits.max_header_bytes then
+                return frame_error(431, "Request Header Fields Too Large")
+            end
+
+            let remaining: int = deadline - time_now_ms()
+            if remaining <= 0 then
+                return frame_error(408, "Request Timeout")
+            end
+            settimeout(client, remaining)
+
+            let res: NetResult = socket_recv(client, limits.read_chunk_bytes)
+            if !res.ok then
+                let status: int = recv_failure_status(res.error)
+                if status == 0 then
+                    return frame_silent()
+                end
+                return frame_error(status, "Request Timeout")
+            end
+            if res.count == 0 then
+                if total == 0 then
+                    return frame_silent()
+                end
+                return frame_error(400, "Bad Request")
+            end
+
+            // Re-examine only the three bytes that could carry a split
+            // terminator: total is the length before this chunk lands, so
+            // total - 3 is where a partial \r\n\r\n could have started.
+            scanned = total - 3
+            if scanned < 0 then
+                scanned = 0
+            end
+            buffer = buffer + slice(res.data, 0, res.count)
+            total = total + res.count
+        end
+    end
+
+    if terminator + 4 > limits.max_header_bytes then
+        return frame_error(431, "Request Header Fields Too Large")
+    end
+
+    // Phase 2: validate the request line and headers.
+    let head: HttpFrameResult = parse_request_head(slice(buffer, 0, terminator))
+    if !head.ok then
+        return head
+    end
+    let req: HttpRequest = head.request
+
+    // Phase 3: resolve the declared body length.
+    let framing: BodyLengthResult = resolve_body_length(req.headers, req.header_count, limits.max_body_bytes)
+    if !framing.ok then
+        return frame_error(framing.status, framing.message)
+    end
+
+    // Phase 4: read exactly the declared number of body bytes. Bytes already
+    // buffered past the header terminator count first; surplus beyond
+    // framing.length is pipelined data and is left unread, discarded when
+    // the connection closes after this one response.
+    let body_start: int = terminator + 4
+    let have: int = total - body_start
+    if have > framing.length then
+        have = framing.length
+    end
+    let body: bytes = slice(buffer, body_start, body_start + have)
+
+    if have < framing.length then
+        let body_deadline: int = time_now_ms() + limits.body_timeout_ms
+        while have < framing.length do
+            let body_remaining: int = body_deadline - time_now_ms()
+            if body_remaining <= 0 then
+                return frame_error(408, "Request Timeout")
+            end
+
+            let want: int = framing.length - have
+            if want > limits.read_chunk_bytes then
+                want = limits.read_chunk_bytes
+            end
+            settimeout(client, body_remaining)
+
+            let chunk: NetResult = socket_recv(client, want)
+            if !chunk.ok then
+                let chunk_status: int = recv_failure_status(chunk.error)
+                if chunk_status == 0 then
+                    return frame_silent()
+                end
+                return frame_error(chunk_status, "Request Timeout")
+            end
+            if chunk.count == 0 then
+                return frame_error(400, "Bad Request")
+            end
+
+            body = body + slice(chunk.data, 0, chunk.count)
+            have = have + chunk.count
+        end
+    end
+
+    req.body = body
+    return HttpFrameResult(true, req, 0, "", true)
 end
 
 // ============================================
 // Handler Internal Logic
 // ============================================
 
-// This function runs in a separate routine (spawned)
-func handle_client_connection(client: Socket, user_handler: func)
-    // 1. Read Request
-    // Read request chunk. Note: A production implementation should read continuously until header end.
-    // Blocking read is acceptable here as this runs in a separate routine.
-    
-    let res: NetResult = socket_recv(client, 65536) // 64KB buffer
-    
-    if !res.ok || res.count == 0 then
-        socket_close(client)
+// This function runs in a separate routine (spawned). defer closes the
+// socket on every exit path, including a handler failure: the previous
+// implementation closed only on the success path, so a runtime error raised
+// by the user handler leaked the socket until process exit.
+func handle_client_connection(client: Socket, user_handler: func, limits: HttpLimits)
+    defer socket_close(client)
+
+    let frame: HttpFrameResult = read_request(client, limits)
+
+    if !frame.ok then
+        if frame.respond then
+            let rejection: HttpResponse = response_error(frame.status, frame.message)
+            let rejection_bytes: bytes = build_response(rejection.status_code, rejection.status_text, rejection.headers, rejection.header_count, rejection.body)
+            send_all(client, rejection_bytes, limits.write_timeout_ms)
+        end
         return
     end
-    
-    // 2. Parse
-    let req: HttpRequest = parse_request(res.data, res.count)
-    
-    // 3. Call User Handler
+
     // Dispatch request to user handler. Handler must match expected signature.
-    // Note: Exceptions in handler will terminate this routine.
-    
-    let response: HttpResponse = user_handler(req)
-    
-    // 4. Send Response
+    let response: HttpResponse = user_handler(frame.request)
+
     let resp_bytes: bytes = build_response(response.status_code, response.status_text, response.headers, response.header_count, response.body)
-    socket_send(client, resp_bytes)
-    
-    // 5. Close
-    socket_close(client)
+    send_all(client, resp_bytes, limits.write_timeout_ms)
 end
 
 // ============================================
 // Server Loop
 // ============================================
 
-func serve(server: ref HttpServer, handler: func) -> void
-    // 1. Listen
+// Binds the listener without entering the accept loop. Separating binding
+// from serve() lets a caller read the actual bound port before accepting --
+// port 0 asks for an ephemeral port, and this is where the real one is
+// written back. Idempotent: a server that is already bound just confirms
+// running and returns, so serve() can call this unconditionally.
+func bind_server(server: ref HttpServer) -> bool
+    if server.listener.open then
+        // Struct fields are not synchronized between threads the way
+        // globals and maps are (see docs/RUNTIME_CONCURRENCY.md and PR #17's
+        // own notes on composite mutation): writing a field to the value it
+        // already holds is still a write, and an unconditional one here
+        // raced against a concurrent reader of any other field on the same
+        // server -- exactly the bind-then-spawn(serve) pattern this
+        // function exists to support. Skipping the write when the value
+        // would not change removes that race without weakening behavior:
+        // the write only ever mattered when running was false, and by then
+        // the paired socket_close in stop_server has already made
+        // listener.open false too, so this branch would not be taken.
+        if !server.running then
+            server.running = true
+        end
+        return true
+    end
+
     let s: Socket = listen(server.host, server.port)
     if !s.open then
+        return false
+    end
+
+    server.listener = s
+    server.port = s.port
+    server.running = true
+    return true
+end
+
+func serve(server: ref HttpServer, handler: func) -> void
+    if !bind_server(server) then
         print("Failed to bind to " + server.host + ":" + to_str(server.port))
         return
     end
-    
-    server.listener = s
-    server.running = true
-    
+
+    let limits: HttpLimits = server_limits(server)
+
     print("Server listening on " + server.host + ":" + to_str(server.port))
-    
-    // 2. Accept Loop
-    while server.running do
+
+    // Accept Loop. Deliberately does not re-check server.running: struct
+    // fields are not synchronized between threads the way globals and maps
+    // are (see bind_server's comment above), and stop_server is meant to be
+    // called from a different goroutine than this loop while intentionally
+    // running concurrently -- that is the whole point of bind-then-spawn.
+    // A closed listener makes accept fail, and the accept result itself is
+    // backed by the already-synchronized socket registry, so reacting to
+    // that failure is both sufficient to stop and race-free, unlike
+    // repeatedly reading server.running.
+    while true do
         // Accept blocks until a connection arrives
         let client: Socket = accept(server.listener)
-        
+
         if client.open then
             // Spawn a routine to handle this client
-            spawn(handle_client_connection, client, handler)
+            spawn(handle_client_connection, client, handler, limits)
         else
-            // Accept failed (maybe server closed?)
-            // Small sleep to avoid cpu spin if it's a transient fail
-            // sleep(10)? 
+            // Listener closed (stop_server) or a real accept failure. Either
+            // way there is nothing left to accept from, so stop serving
+            // rather than spinning on a listener that will keep failing.
+            break
         end
     end
-    
+
     socket_close(server.listener)
 end
 
@@ -125,12 +385,16 @@ func response_html(html: string) -> HttpResponse
 end
 
 func response_error(status: int, msg: string) -> HttpResponse
+    // length(string) counts runes; length(bytes) counts bytes. Measuring the
+    // encoded body -- not msg itself -- is what keeps a non-ASCII message's
+    // declared Content-Length byte-exact instead of understating it.
+    let body: bytes = to_bytes(msg)
     let headers: string[64]
     headers[0] = "Content-Type: text/plain"
-    headers[1] = "Content-Length: " + to_str(length(msg))
+    headers[1] = "Content-Length: " + to_str(length(body))
     headers[2] = "Connection: close"
-    
-    return HttpResponse("HTTP/1.1", status, get_status_text(status), headers, 3, to_bytes(msg))
+
+    return HttpResponse("HTTP/1.1", status, get_status_text(status), headers, 3, body)
 end
 
 func response_404() -> HttpResponse

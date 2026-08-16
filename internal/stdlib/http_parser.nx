@@ -34,6 +34,21 @@ struct HttpUrl
     valid: bool
 end
 
+struct HttpFrameResult
+    ok: bool
+    request: HttpRequest
+    status: int
+    message: string
+    respond: bool
+end
+
+struct BodyLengthResult
+    ok: bool
+    length: int
+    status: int
+    message: string
+end
+
 // ============================================
 // Constants
 // ============================================
@@ -41,6 +56,13 @@ end
 let HTTP_200_OK: int = 200
 let HTTP_404_NOT_FOUND: int = 404
 let HTTP_500_INTERNAL_ERROR: int = 500
+
+let HTTP_MAX_METHOD_LENGTH: int = 64
+let HTTP_MAX_TARGET_LENGTH: int = 2048
+let HTTP_MAX_HEADER_NAME_LENGTH: int = 256
+let HTTP_MAX_HEADER_LINES: int = 64
+
+let HTTP_TOKEN_EXTRA: string = "!#$%&'*+-.^_`|~"
 
 func get_status_text(code: int) -> string
     if code == 200 then return "OK" end
@@ -50,7 +72,13 @@ func get_status_text(code: int) -> string
     if code == 401 then return "Unauthorized" end
     if code == 403 then return "Forbidden" end
     if code == 404 then return "Not Found" end
+    if code == 408 then return "Request Timeout" end
+    if code == 413 then return "Content Too Large" end
+    if code == 414 then return "URI Too Long" end
+    if code == 431 then return "Request Header Fields Too Large" end
     if code == 500 then return "Internal Server Error" end
+    if code == 501 then return "Not Implemented" end
+    if code == 505 then return "HTTP Version Not Supported" end
     return "Unknown"
 end
 
@@ -58,11 +86,20 @@ end
 // Parse Helpers
 // ============================================
 
-// Scan for \r\n\r\n (13, 10, 13, 10)
-func find_header_end(data: bytes, len: int) -> int
-    let i: int = 0
+// Scan for \r\n\r\n (13, 10, 13, 10), resuming at `start`.
+//
+// Resuming matters for the streaming read loop: rescanning from zero after
+// every socket read is quadratic in the number of segments, so a client that
+// trickles a 16 KB header one byte at a time would cost millions of
+// comparisons. The caller resumes at total - 3, the only window where a
+// terminator split across two reads can begin.
+func find_header_end_from(data: bytes, len: int, start: int) -> int
+    let i: int = start
+    if i < 0 then
+        i = 0
+    end
     let limit: int = len - 3
-    
+
     while i < limit do
         if data[i] == 13 then
             if data[i+1] == 10 then
@@ -76,6 +113,89 @@ func find_header_end(data: bytes, len: int) -> int
         i = i + 1
     end
     return -1
+end
+
+func find_header_end(data: bytes, len: int) -> int
+    return find_header_end_from(data, len, 0)
+end
+
+// ============================================
+// Validation Helpers
+// ============================================
+//
+// Each validator decodes once with codes() and then compares numbers. A
+// char_at loop re-decodes the whole string on every iteration, which is
+// quadratic in inputs whose length an attacker controls.
+
+func is_token_code(code: int) -> bool
+    if code >= 48 && code <= 57 then return true end
+    if code >= 65 && code <= 90 then return true end
+    if code >= 97 && code <= 122 then return true end
+    return contains(HTTP_TOKEN_EXTRA, from_char_code(code))
+end
+
+func is_token(s: string) -> bool
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
+    if n == 0 then return false end
+    let i: int = 0
+    while i < n do
+        if !is_token_code(cs[i]) then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+// Visible ASCII: 0x21 to 0x7E, so a space, a control character, DEL, and any
+// non-ASCII codepoint all fail.
+func is_visible_ascii(s: string) -> bool
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
+    if n == 0 then return false end
+    let i: int = 0
+    while i < n do
+        if cs[i] < 33 || cs[i] > 126 then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+// RFC 9110 field-value: horizontal tab, or 0x20 and above excluding 0x7F.
+// Rejecting CR, LF, and NUL here is the response-splitting defense. They are
+// all valid UTF-8, so the boundary gate passes them through, splitting on
+// "\r\n" leaves a lone "\n" inside a value, and build_response concatenates
+// header strings without validating them. An empty value is legal.
+func is_field_text(s: string) -> bool
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
+    let i: int = 0
+    while i < n do
+        let code: int = cs[i]
+        if code != 9 && (code < 32 || code == 127) then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+func empty_request() -> HttpRequest
+    let empty_h: string[64]
+    return HttpRequest("GET", "/", "", "HTTP/1.1", empty_h, 0, b"")
+end
+
+func frame_error(status: int, message: string) -> HttpFrameResult
+    return HttpFrameResult(false, empty_request(), status, message, true)
+end
+
+// No response can be sent: the client vanished before any request byte
+// arrived, or the transport already failed.
+func frame_silent() -> HttpFrameResult
+    return HttpFrameResult(false, empty_request(), 0, "", false)
 end
 
 // ============================================
@@ -146,6 +266,120 @@ end
 // Request Parser
 // ============================================
 
+// Strict head parsing for the streaming server. Validates the request line
+// and every header line and returns the status to answer with rather than
+// tolerating malformed input the way the legacy parse_request below does.
+func parse_request_head(header_bytes: bytes) -> HttpFrameResult
+    // The bytes-to-text boundary. to_str raises on invalid UTF-8, and a raise
+    // here would kill the connection routine instead of answering the client.
+    if !is_valid_utf8(header_bytes) then
+        return frame_error(400, "Bad Request")
+    end
+
+    let header_str: string = to_str(header_bytes)
+    let lines: SplitResult = split(header_str, "\r\n")
+    if lines.count == 0 then
+        return frame_error(400, "Bad Request")
+    end
+
+    let req_line: string = lines.parts[0]
+    if length(req_line) == 0 then
+        return frame_error(400, "Bad Request")
+    end
+
+    let req_parts: SplitResult = split(req_line, " ")
+    if req_parts.count != 3 then
+        return frame_error(400, "Bad Request")
+    end
+
+    let method: string = req_parts.parts[0]
+    if length(method) > HTTP_MAX_METHOD_LENGTH then
+        return frame_error(400, "Bad Request")
+    end
+    if !is_token(method) then
+        return frame_error(400, "Bad Request")
+    end
+
+    let target: string = req_parts.parts[1]
+    if length(target) == 0 then
+        return frame_error(400, "Bad Request")
+    end
+    if length(target) > HTTP_MAX_TARGET_LENGTH then
+        return frame_error(414, "URI Too Long")
+    end
+    if !starts_with(target, "/") then
+        return frame_error(400, "Bad Request")
+    end
+    if !is_visible_ascii(target) then
+        return frame_error(400, "Bad Request")
+    end
+
+    let version: string = req_parts.parts[2]
+    if version != "HTTP/1.0" && version != "HTTP/1.1" then
+        if starts_with(version, "HTTP/") then
+            return frame_error(505, "HTTP Version Not Supported")
+        end
+        return frame_error(400, "Bad Request")
+    end
+
+    let req: HttpRequest = empty_request()
+    req.method = method
+    req.version = version
+
+    let q: SplitResult = split(target, "?")
+    req.path = q.parts[0]
+    if q.count > 1 then
+        let query: string = q.parts[1]
+        let k: int = 2
+        while k < q.count do
+            query = query + "?" + q.parts[k]
+            k = k + 1
+        end
+        req.query = query
+    end
+
+    let count: int = 0
+    let i: int = 1
+    while i < lines.count do
+        let line: string = lines.parts[i]
+        if length(line) == 0 then
+            return frame_error(400, "Bad Request")
+        end
+        if starts_with(line, " ") || starts_with(line, "\t") then
+            return frame_error(400, "Bad Request")
+        end
+        // Response-splitting defense. CR, LF, and NUL are valid UTF-8, so the
+        // boundary gate lets them through, and splitting on "\r\n" leaves a
+        // lone "\n" or a bare "\r" inside the value.
+        if !is_field_text(line) then
+            return frame_error(400, "Bad Request")
+        end
+        let parts: SplitResult = split(line, ":")
+        if parts.count < 2 then
+            return frame_error(400, "Bad Request")
+        end
+        let name: string = parts.parts[0]
+        if length(name) > HTTP_MAX_HEADER_NAME_LENGTH then
+            return frame_error(400, "Bad Request")
+        end
+        // is_token rejects an empty name and any name carrying whitespace,
+        // which covers both the empty-name and space-before-colon cases
+        // without a separate check.
+        if !is_token(name) then
+            return frame_error(400, "Bad Request")
+        end
+        if count >= HTTP_MAX_HEADER_LINES then
+            return frame_error(431, "Request Header Fields Too Large")
+        end
+        req.headers[count] = line
+        count = count + 1
+        i = i + 1
+    end
+    req.header_count = count
+
+    return HttpFrameResult(true, req, 0, "", true)
+end
+
 func parse_request(data: bytes, len: int) -> HttpRequest
     // Strategy: Find Double CRLF. Split everything before into lines. Everything after is body.
     let end_headers: int = find_header_end(data, len)
@@ -163,13 +397,17 @@ func parse_request(data: bytes, len: int) -> HttpRequest
     
     let empty_h: string[64]
     let req: HttpRequest = HttpRequest("GET", "/", "", "HTTP/1.1", empty_h, 0, b"")
-    
+
     if body_start < len then
         req.body = slice(data, body_start, len)
     end
-    
-    // Bytes -> String for headers
-    // Warning: Binary data in headers is illegal anyway, so safe to convert.
+
+    // Bytes -> String for headers. to_str raises on invalid UTF-8, so guard the
+    // boundary first: a non-UTF-8 header block yields the defaults above,
+    // with req.body already filled, rather than raising out of this call.
+    if !is_valid_utf8(header_bytes) then
+        return req
+    end
     let header_str: string = to_str(header_bytes)
     
     // Split by \r\n
@@ -302,21 +540,99 @@ end
 // Header Utils
 // ============================================
 
+func header_matches(line: string, search: string) -> bool
+    return starts_with(to_lower(line), search)
+end
+
+// Rejoins every segment after the first ":", so a value containing a colon
+// survives intact. Splitting on ":" and taking parts[1] truncated
+// "Host: example.com:8080" to "example.com", which matters because framing
+// depends on reading Content-Length and Transfer-Encoding exactly.
+func header_line_value(line: string) -> string
+    let parts: SplitResult = split(line, ":")
+    if parts.count < 2 then
+        return ""
+    end
+    let value: string = parts.parts[1]
+    let k: int = 2
+    while k < parts.count do
+        value = value + ":" + parts.parts[k]
+        k = k + 1
+    end
+    return trim(value)
+end
+
 func get_header(headers: string[64], count: int, name: string) -> string
-    let search: string = strings_to_lower(name) + ":"
+    let search: string = to_lower(name) + ":"
     let i: int = 0
     while i < count do
-        let h: string = strings_to_lower(headers[i])
-        if strings_starts_with(h, search) then
-            // Found. Now need original value.
-            let orig: string = headers[i]
-            let parts: SplitResult = split(orig, ":")
-            if parts.count > 1 then
-                // Return trimmed value after the first colon.
-                return strings_trim(parts.parts[1]) 
-            end
+        if header_matches(headers[i], search) then
+            return header_line_value(headers[i])
         end
         i = i + 1
     end
     return ""
+end
+
+// Duplicate detection needs a count, not a first match: two Content-Length
+// headers are a request-smuggling vector even when their values agree.
+func count_header(headers: string[64], count: int, name: string) -> int
+    let search: string = to_lower(name) + ":"
+    let found: int = 0
+    let i: int = 0
+    while i < count do
+        if header_matches(headers[i], search) then
+            found = found + 1
+        end
+        i = i + 1
+    end
+    return found
+end
+
+// Decides how many body bytes to read. Transfer-Encoding is refused outright
+// rather than guessed at, duplicate Content-Length headers are refused even
+// when their values agree, and an absent framing header means a zero-length
+// body for every method, including POST, per RFC 9112.
+func resolve_body_length(headers: string[64], count: int, max_body_bytes: int) -> BodyLengthResult
+    let encodings: int = count_header(headers, count, "Transfer-Encoding")
+    let lengths: int = count_header(headers, count, "Content-Length")
+
+    if encodings > 0 && lengths > 0 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if encodings > 0 then
+        return BodyLengthResult(false, 0, 501, "Not Implemented")
+    end
+    if lengths > 1 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if lengths == 0 then
+        return BodyLengthResult(true, 0, 0, "")
+    end
+
+    let raw: string = get_header(headers, count, "Content-Length")
+    if length(raw) == 0 || length(raw) > 19 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if !is_digit(raw) then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+
+    // Never to_int here: it raises on anything it cannot represent, and a
+    // 19-digit value can still exceed int64. The _result form reports that as
+    // data so the client gets a 400 instead of a dead connection routine.
+    let parsed: any = convert_to_int_result(raw)
+    if !parsed.ok then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+
+    let declared: int = parsed.value
+    if declared < 0 then
+        return BodyLengthResult(false, 0, 400, "Bad Request")
+    end
+    if declared > max_body_bytes then
+        return BodyLengthResult(false, 0, 413, "Content Too Large")
+    end
+
+    return BodyLengthResult(true, declared, 0, "")
 end

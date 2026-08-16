@@ -208,7 +208,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.globals[n.Name.Value] = n.Type
 
 			nameConstant := c.makeConstant(value.NewString(n.Name.Value))
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
+			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
 			c.emitByte(byte(chunk.OP_POP))
 		}
 		return c.currentChunk, nil, nil
@@ -397,7 +397,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							if err := c.emitRuntimeValueType(globalType); err != nil {
 								return nil, nil, err
 							}
-							c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
+							c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
 							c.emitByte(byte(chunk.OP_POP))
 						} else {
 							// User tried `ref = val`. Explicitly FORBID update via name.
@@ -418,7 +418,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					}
 				}
 				nameConstant := c.makeConstant(value.NewString(ident.Value))
-				c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConstant))
+				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
 				c.emitByte(byte(chunk.OP_POP))
 			}
 		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
@@ -576,7 +576,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// Field Name
 			nameConst := c.makeConstant(value.NewString(memberExp.Member))
-			c.emitBytes(byte(chunk.OP_SET_PROPERTY), byte(nameConst))
+			c.emitOpWithConstantIndex(chunk.OP_SET_PROPERTY, nameConst)
 			c.emitByte(byte(chunk.OP_POP))
 
 		} else {
@@ -630,7 +630,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.structs[n.Name] = n
 
 			nameConst := c.makeConstant(value.NewString(n.Name))
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
+			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
 			c.emitByte(byte(chunk.OP_POP))
 		}
 		return c.currentChunk, nil, nil
@@ -649,7 +649,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		nameConst := c.makeConstant(value.NewString(n.Member))
-		c.emitBytes(byte(chunk.OP_GET_PROPERTY), byte(nameConst))
+		c.emitOpWithConstantIndex(chunk.OP_GET_PROPERTY, nameConst)
 
 		// RESOLVE FIELD TYPE:
 		// Look up struct definition if leftType is a named PrimitiveType
@@ -797,7 +797,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		} else {
 			// Global
 			nameConstant := c.makeConstant(value.NewString(n.Value))
-			c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConstant))
+			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
 
 			if t, ok := c.globals[n.Value]; ok {
 				return c.currentChunk, t, nil
@@ -1152,7 +1152,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// Get 'keys' global
 			nameConst := c.makeConstant(value.NewString("keys"))
-			c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(nameConst))
+			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConst)
 
 			// Get '$map' local
 			slot := len(c.locals) - 1 // The last local added
@@ -1407,7 +1407,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// 1. Emit Module Name
 		nameConst := c.makeConstant(value.NewString(n.Module))
 		// 2. Emit Import (Loads module and pushes it to stack)
-		c.emitBytes(byte(chunk.OP_IMPORT), byte(nameConst))
+		c.emitOpWithConstantIndex(chunk.OP_IMPORT, nameConst)
 
 		// 3. Handle Result
 		if n.SelectAll {
@@ -1419,9 +1419,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			for name := range exports {
 				c.globals[name] = nil
 			}
+			c.importModuleStructs(n.Module, nil)
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b
+			c.importModuleStructs(n.Module, n.Selectors)
 			for _, sel := range n.Selectors {
 				c.globals[sel] = nil
 				// DUP the module
@@ -1429,10 +1431,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 				// Get Property 'sel'
 				selConst := c.makeConstant(value.NewString(sel))
-				c.emitBytes(byte(chunk.OP_GET_PROPERTY), byte(selConst))
+				c.emitOpWithConstantIndex(chunk.OP_GET_PROPERTY, selConst)
 
 				// Set Global 'sel'
-				c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(selConst))
+				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, selConst)
 				c.emitByte(byte(chunk.OP_POP)) // Pop the set value
 			}
 			// Pop the original Module
@@ -1454,7 +1456,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			nameConst := c.makeConstant(value.NewString(bindName))
 			c.globals[bindName] = nil
-			c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
+			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
 		return c.currentChunk, nil, nil
@@ -1519,7 +1521,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		funcIndex := c.makeConstant(fnObj)
-		c.emitBytes(byte(chunk.OP_CLOSURE), byte(funcIndex))
+		c.emitOpWithConstantIndex(chunk.OP_CLOSURE, funcIndex)
 
 		// Emit upvalue bytes
 		for _, up := range fnCompiler.upvalues {
@@ -1532,7 +1534,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		nameConst := c.makeConstant(value.NewString(n.Name))
-		c.emitBytes(byte(chunk.OP_SET_GLOBAL), byte(nameConst))
+		c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
 		c.emitByte(byte(chunk.OP_POP))
 
 		return c.currentChunk, nil, nil
@@ -1554,7 +1556,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		funcIndex := c.makeConstant(fnObj)
-		c.emitBytes(byte(chunk.OP_CLOSURE), byte(funcIndex))
+		c.emitOpWithConstantIndex(chunk.OP_CLOSURE, funcIndex)
 
 		for _, up := range fnCompiler.upvalues {
 			isLocal := byte(0)
@@ -1844,13 +1846,13 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		name := c.makeConstant(value.NewString(target.Value))
 		if declared, ok := c.resolveGlobalType(target.Value); ok {
 			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitBytes(byte(chunk.OP_GET_GLOBAL), byte(name))
+				c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, name)
 				return ref.ElementType, nil
 			}
-			c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(name))
+			c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 			return declared, nil
 		}
-		c.emitBytes(byte(chunk.OP_REF_GLOBAL), byte(name))
+		c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 		return nil, nil
 	case *ast.MemberAccessExpression:
 		_, owner, err := c.Compile(target.Left)
@@ -1863,10 +1865,10 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		}
 		name := c.makeConstant(value.NewString(target.Member))
 		if ref, ok := element.(*ast.RefType); ok {
-			c.emitBytes(byte(chunk.OP_CONTEXT_REF_PROPERTY), byte(name))
+			c.emitOpWithConstantIndex(chunk.OP_CONTEXT_REF_PROPERTY, name)
 			return ref.ElementType, nil
 		}
-		c.emitBytes(byte(chunk.OP_REF_PROPERTY), byte(name))
+		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
 		return element, nil
 	case *ast.IndexExpression:
 		_, container, err := c.Compile(target.Left)
@@ -1944,6 +1946,32 @@ func (c *Compiler) emitByte(b byte) {
 func (c *Compiler) emitBytes(b1, b2 byte) {
 	c.emitByte(b1)
 	c.emitByte(b2)
+}
+
+// emitOpWithConstantIndex emits an opcode whose operand is an index into the
+// constant pool, always as a 16-bit big-endian value. OP_GET_GLOBAL,
+// OP_SET_GLOBAL, OP_GET_PROPERTY, OP_SET_PROPERTY, OP_IMPORT, OP_CLOSURE,
+// OP_REF_GLOBAL, OP_REF_PROPERTY, and OP_CONTEXT_REF_PROPERTY all read a name
+// or function constant this way. A single-byte operand silently truncates
+// past 255 constants: a chunk with, say, 256 distinct global names truncates
+// index 256 to 0, so OP_GET_GLOBAL reads whatever constant happens to sit at
+// index 0 instead of the one the compiler meant, corrupting variable
+// resolution with no compile-time signal. 255 constants is not a large
+// program — every distinct string literal, every global name reference (not
+// just every declaration), and every imported struct's runtime-type metadata
+// each claims one slot, and AddConstant never deduplicates. This is the
+// pattern OP_CONSTANT_LONG and OP_JUMP already use for the same reason;
+// unlike OP_CONSTANT, there is no short form to keep here; that a matching
+// module-scoped struct-field fix pushed one ordinary stdlib test over 255
+// constants and none of its constant-index reads at the low end of the pool
+// happened to be spot-checked is what surfaced this.
+func (c *Compiler) emitOpWithConstantIndex(op chunk.OpCode, index int) {
+	if index < 0 || index > 65535 {
+		panic("constant index out of range for a 16-bit operand")
+	}
+	c.emitByte(byte(op))
+	c.emitByte(byte((index >> 8) & 0xff))
+	c.emitByte(byte(index & 0xff))
 }
 
 func (c *Compiler) emitJump(op chunk.OpCode) int {

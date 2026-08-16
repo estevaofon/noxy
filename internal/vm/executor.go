@@ -183,8 +183,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 		case chunk.OP_GET_GLOBAL:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
@@ -195,8 +195,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.push(val)
 
 		case chunk.OP_SET_GLOBAL:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 			frame.Environment.SetLocal(name, vm.peek(0))
@@ -240,8 +240,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			})
 
 		case chunk.OP_REF_GLOBAL:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
@@ -259,8 +259,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			})
 
 		case chunk.OP_REF_PROPERTY:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
@@ -315,8 +315,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			})
 
 		case chunk.OP_CONTEXT_REF_PROPERTY:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 			container := vm.pop()
@@ -896,8 +896,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			frame.Deferred = append(frame.Deferred, prepared)
 
 		case chunk.OP_CLOSURE:
-			idx := c.Code[ip]
-			ip++
+			idx := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			fnVal := c.Constants[idx]
 			fn := fnVal.Obj.(*value.ObjFunction)
 			boundFn := &value.ObjFunction{
@@ -1011,8 +1011,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.push(vm.peek(0))
 
 		case chunk.OP_IMPORT:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameConstant := c.Constants[index]
 			moduleName := nameConstant.Obj.(string)
 
@@ -1145,8 +1145,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			return vm.runtimeError(c, ip, "cannot set index on non-array/map")
 
 		case chunk.OP_GET_PROPERTY:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
@@ -1183,8 +1183,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 		case chunk.OP_SET_PROPERTY:
-			index := c.Code[ip]
-			ip++
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 

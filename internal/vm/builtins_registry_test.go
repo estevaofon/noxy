@@ -27,7 +27,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"sqlite_bind_int", "sqlite_bind_text", "sqlite_close", "sqlite_exec",
 		"sqlite_exec_params", "sqlite_finalize", "sqlite_open",
 		"sqlite_prepare", "sqlite_query", "sqlite_reset", "sqlite_step_exec",
-		"strings_char_at", "strings_contains", "strings_count",
+		"strings_char_at", "strings_codes", "strings_contains", "strings_count",
 		"strings_ends_with", "strings_from_char_code", "strings_index_of",
 		"strings_is_alnum", "strings_is_alpha", "strings_is_digit",
 		"strings_is_empty", "strings_is_space", "strings_is_valid_utf8",

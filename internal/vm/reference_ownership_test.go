@@ -21,10 +21,13 @@ func TestModuleFrameGlobalReferenceCapturesSharedFallbackOwner(t *testing.T) {
 	code.FileName = "shared_global_reference"
 	name := code.AddConstant(value.NewString("shared_value"))
 	captured := code.AddConstant(value.NewString("captured"))
+	// OP_REF_GLOBAL and OP_SET_GLOBAL's constant-pool index is a 16-bit
+	// big-endian operand (see emitOpWithConstantIndex), so each name/captured
+	// index below is written as two bytes rather than one.
 	for _, instruction := range []byte{
-		byte(chunk.OP_REF_GLOBAL), byte(name),
+		byte(chunk.OP_REF_GLOBAL), byte((name >> 8) & 0xff), byte(name & 0xff),
 		byte(chunk.OP_DEREF),
-		byte(chunk.OP_SET_GLOBAL), byte(captured),
+		byte(chunk.OP_SET_GLOBAL), byte((captured >> 8) & 0xff), byte(captured & 0xff),
 		byte(chunk.OP_POP),
 		byte(chunk.OP_NULL),
 		byte(chunk.OP_RETURN),
