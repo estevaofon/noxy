@@ -1,7 +1,10 @@
 package vm
 
 import (
+	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/value"
 )
@@ -115,5 +118,132 @@ stop_server(ref s)
 test_report(first && second && same)`
 	if !captureServerBool(t, source) {
 		t.Fatal("a second bind_server call rebound the listener")
+	}
+}
+
+// send_all must resume from the transferred offset after a partial write,
+// not just retry the whole buffer, and must bound the whole response with
+// one write deadline rather than resetting it on every partial write. A
+// slow-reading real TCP peer is what actually forces socket_send to return
+// a partial count -- a fake/mocked socket would not exercise that.
+func TestSendAllWritesCompletelyToSlowReader(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	const payloadSize = 4 << 20
+	received := make(chan int, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			received <- -1
+			return
+		}
+		defer conn.Close()
+		total := 0
+		buffer := make([]byte, 4096)
+		for total < payloadSize {
+			_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+			n, readErr := conn.Read(buffer)
+			total += n
+			if readErr != nil {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		received <- total
+	}()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	source := fmt.Sprintf(`use http_server select *
+use net select *
+use strings select *
+let sock: Socket = connect("127.0.0.1", %d)
+let payload: bytes = to_bytes(repeat("x", %d))
+let ok: bool = send_all(sock, payload, 20000)
+socket_close(sock)
+test_report(ok)`, port, payloadSize)
+
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	if interpretErr := interpretVMSourceWithinBound(t, machine, source); interpretErr != nil {
+		t.Fatal(interpretErr)
+	}
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("send_all = %#v, want true", captured)
+	}
+
+	select {
+	case total := <-received:
+		if total != payloadSize {
+			t.Fatalf("peer received %d bytes, want %d", total, payloadSize)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("peer did not finish reading")
+	}
+}
+
+// A write that transfers nothing and fails must abort rather than retry
+// forever, and once the deadline governs the whole call, a peer that never
+// reads must not hang the caller indefinitely either.
+func TestSendAllFailsWhenPeerIsGone(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	closed := make(chan struct{})
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			// A graceful close (FIN) lets the local OS keep accepting writes
+			// into its send buffer for a while -- on this platform's loopback,
+			// long enough to swallow the whole 4 MB payload without ever
+			// blocking, which would make send_all report success despite the
+			// peer being gone. SetLinger(0) sends an immediate RST instead, so
+			// the client's next write fails deterministically rather than
+			// depending on OS-specific buffer sizing.
+			if tcpConn, ok := conn.(*net.TCPConn); ok {
+				_ = tcpConn.SetLinger(0)
+			}
+			_ = conn.Close()
+		}
+		_ = listener.Close()
+		close(closed)
+	}()
+
+	source := fmt.Sprintf(`use http_server select *
+use net select *
+use strings select *
+use time select *
+let sock: Socket = connect("127.0.0.1", %d)
+sleep(200)
+let payload: bytes = to_bytes(repeat("y", 4194304))
+let ok: bool = send_all(sock, payload, 2000)
+socket_close(sock)
+test_report(ok)`, port)
+
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	if interpretErr := interpretVMSourceWithinBound(t, machine, source); interpretErr != nil {
+		t.Fatal(interpretErr)
+	}
+	<-closed
+	if captured.Type != value.VAL_BOOL || captured.AsBool {
+		t.Fatalf("send_all = %#v, want false", captured)
 	}
 }

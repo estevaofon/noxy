@@ -85,6 +85,39 @@ func server_limits(server: ref HttpServer) -> HttpLimits
 end
 
 // ============================================
+// Complete Write
+// ============================================
+
+// Writes data completely, resuming from the transferred offset after a
+// partial write, under a single deadline covering the whole call. A slow
+// or stalled reader must not truncate the response, and a peer that never
+// reads must not hang the caller past write_timeout_ms.
+func send_all(client: Socket, data: bytes, write_timeout_ms: int) -> bool
+    let size: int = length(data)
+    let offset: int = 0
+    let deadline: int = time_now_ms() + write_timeout_ms
+
+    while offset < size do
+        let remaining: int = deadline - time_now_ms()
+        if remaining <= 0 then
+            return false
+        end
+        settimeout(client, remaining)
+
+        let res: NetResult = socket_send(client, slice(data, offset, size))
+        // The offset advances by res.count even when ok is false: net_send
+        // reports the actual transferred count alongside a failure, and a
+        // partial transfer that failed must still resume from where it left
+        // off rather than resending bytes the peer already has.
+        offset = offset + res.count
+        if !res.ok && res.count == 0 then
+            return false
+        end
+    end
+    return true
+end
+
+// ============================================
 // Handler Internal Logic
 // ============================================
 
