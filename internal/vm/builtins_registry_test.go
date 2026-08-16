@@ -13,7 +13,8 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 	expected := []string{
 		"append", "base62_decode", "base62_encode", "base64_decode",
 		"base64_encode", "chan_close", "chan_is_closed", "chan_recv",
-		"chan_send", "contains", "crypto_aes256_gcm_decrypt",
+		"chan_send", "contains", "convert_to_float_result", "convert_to_int_result",
+		"crypto_aes256_gcm_decrypt",
 		"crypto_aes256_gcm_encrypt", "crypto_pbkdf2_sha256",
 		"crypto_random_bytes", "delete", "fmt", "has_key", "hex",
 		"hex_decode", "hex_encode", "input", "io_close", "io_close_result", "io_exists",
