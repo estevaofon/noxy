@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-16
+
 ### Changed (BREAKING)
 - **`to_int` e `to_float` levantam erro** em vez de devolver `0` / `0.0` quando
   a conversão é impossível. `to_int("abc")` era indistinguível de

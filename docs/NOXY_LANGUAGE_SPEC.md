@@ -1017,6 +1017,6 @@ register, roll back, poison, or close the resource again.
     - **Reference Parameters**: A parameter declared with `ref` receives access to the caller's original value and no shallow copy is performed.
 
 ---
-*Version: 0.2.0*
+*Version: 0.3.0*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*
