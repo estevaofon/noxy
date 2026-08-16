@@ -305,26 +305,41 @@ landing silently.
 
 Two natives are registered twice in the same function:
 
-| Native | First registration | Second registration |
+| Native | Live registration | Dead registration |
 |---|---|---|
 | `strings_contains` | `builtins_strings.go:11` | `builtins_strings.go:159` |
 | `strings_replace` | `builtins_strings.go:77` | `builtins_strings.go:167` |
 
-`DefineNative` overwrites, so the second definition always wins and the first
-is unreachable. The bodies are currently equivalent, so nothing misbehaves
-today. The hazard is maintenance: a correction applied to the first copy is
-silently discarded, and a reader has no signal that the code being read is
-dead.
+`DefineNative` resolves to `DefineLocalIfAbsent`, so the **first** registration
+wins and every later one is a silent no-op. The bodies are currently
+equivalent, so nothing misbehaves today. The hazard is maintenance: a
+correction applied to the second copy is silently discarded, and nothing in the
+source signals that the code being edited is unreachable.
+
+The two registration paths disagree about which duplicate wins, which makes the
+hazard worse rather than merely redundant:
+
+| Entry point | Underlying call | Winner on conflict |
+|---|---|---|
+| `DefineNative`, `DefineNativeWithSignature` | `DefineLocalIfAbsent` | first |
+| `DefineContextualNative` | `SetGlobal` → `SetLocal` | last |
+
+So the answer to "which definition is live?" depends on which registration
+helper was used, and neither is visible at the call site.
 
 ### The fix
 
-The unreachable first registration of each native is deleted. The surviving
-definition is the later one, so behavior is unchanged by construction.
+The dead second registration of each native is deleted, at
+`builtins_strings.go:159` and `:167`. The surviving definition is the earlier
+one, which is already the live one, so behavior is unchanged by construction.
 
-A guard test asserts that no native name is registered more than once across
-the whole builtin surface. It collects registrations by instrumenting a VM
-built for the test rather than by scanning source text, so it also covers
-duplicates introduced across different builtin files.
+A guard test asserts that no native name is registered more than once. It
+parses every non-test Go source under `internal/vm/` with `go/ast` and collects
+the string literal argument of each `DefineNative`,
+`DefineNativeWithSignature`, `DefineContextualNative`, and
+`DefineContextualNativeWithSignature` call, so duplicates spanning different
+builtin files are caught too. `internal/vm/architecture_test.go` already parses
+sources this way, so the mechanism is established rather than new.
 
 ## 7. `ord` Reads a Character, Not a Byte
 
@@ -416,8 +431,9 @@ is updated accordingly before it is executed.
   is meaningless.
 - Removing the debug statements changes program output, which is the intent.
 - Comment repair changes no behavior.
-- Deleting the unreachable duplicate registrations changes nothing observable;
-  the surviving definition is the one that already won.
+- Deleting the dead duplicate registrations changes nothing observable; the
+  surviving definition is the first one, which already won under
+  `DefineLocalIfAbsent`.
 - `ord` changes behavior for non-ASCII input and now raises for an empty or
   multi-character argument. It has no caller in the repository and is not
   exported by any module, so no existing code is affected.
