@@ -1,3 +1,10 @@
+// Demonstração da semântica de valor do Noxy (copy-on-write, 0.4.0+).
+//
+// Todo array, map ou struct se comporta como uma cópia profunda e
+// independente em qualquer vínculo sem ref — atribuição, chamada, leitura
+// de contêiner. O único mecanismo de compartilhamento é ref.
+// (Este arquivo demonstrava a antiga "shallow copy", removida na 0.4.0.)
+
 use sys select exit
 
 struct Box
@@ -13,40 +20,18 @@ func assert(condition: bool, message: string) -> void
     end
 end
 
-// Cria um novo array e copia os valores primitivos elemento a elemento.
-func copy_int_array(source: int[]) -> int[]
-    let result: int[] = []
-    let i: int = 0
-
-    while i < length(source) do
-        append(result, source[i])
-        i = i + 1
-    end
-
-    return result
-end
-
-// Deep copy tipado para Box, escrito inteiramente em Noxy.
-// Como values recebe um novo array, a cópia não compartilha dados mutáveis.
-func deep_copy_box(source: Box) -> Box
-    let values_copy: int[] = copy_int_array(source.values)
-    return Box(values_copy)
-end
-
-// Recebe uma cópia rasa de Box.
-// Substituir um campo da cópia não altera a Box original.
+// Recebe a Box por valor: substituir um campo da cópia não altera a original.
 func replace_top(box: Box)
     box.values = [100, 200]
 end
 
-// A Box é copiada, mas o array interno continua compartilhado.
-// Modificar o conteúdo do array afeta o original.
+// Por valor em QUALQUER profundidade: mutar o array aninhado da cópia
+// também não altera a original (antes da 0.4.0 isto vazava!).
 func mutate_nested(box: Box)
     box.values[0] = 99
 end
 
-// Com ref, nem a Box externa é copiada.
-// Substituir o campo afeta diretamente a Box original.
+// Com ref, não há cópia: substituir o campo afeta a Box original.
 func replace_by_ref(box: ref Box)
     box.values = [7, 8]
 end
@@ -57,24 +42,24 @@ let box: Box = Box(original_values)
 print("Inicial:", box.values)
 
 replace_top(box)
-print("Após replace_top:", box.values)
+assert(box.values[0] == 1, "replace_top não altera a Box do chamador")
 
 mutate_nested(box)
-print("Após mutate_nested:", box.values)
-print("Array original:", original_values)
+assert(box.values[0] == 1, "mutate_nested não vaza mais para o chamador (CoW)")
+assert(original_values[0] == 1, "o array original também fica intacto")
 
 replace_by_ref(box)
-print("Após replace_by_ref:", box.values)
+assert(box.values[0] == 7, "ref continua compartilhando: replace_by_ref altera a original")
 
-// Deep copy manual em Noxy: a cópia deve ter seu próprio array interno.
-let deep_source_values: int[] = [10, 20]
-let deep_source: Box = Box(deep_source_values)
-let deep_copy: Box = deep_copy_box(deep_source)
+// Deep copy manual não é mais necessária: atribuição já é cópia profunda.
+let source: Box = Box([10, 20])
+let copy: Box = source
+copy.values[0] = 999
 
-deep_copy.values[0] = 999
+assert(source.values[0] == 10, "atribuição é cópia — a origem fica intacta")
+assert(copy.values[0] == 999, "a cópia pode ser modificada independentemente")
 
-assert(deep_source.values[0] == 10, "deep_copy_box não deve compartilhar o array interno")
-assert(deep_copy.values[0] == 999, "a cópia deve poder ser modificada independentemente")
+// Igualdade estrutural: compostos comparam por conteúdo, não por identidade.
+assert([1, 2] == [1, 2], "== de arrays é estrutural")
 
-print("Original após deep copy:", deep_source.values)
-print("Cópia profunda modificada:", deep_copy.values)
+print("Semântica de valor OK")

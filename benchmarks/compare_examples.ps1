@@ -27,7 +27,19 @@ $exclude = @(
     "dynamodb_example.nx", "dynamodb_query_scan.nx", "test_dynamodb_plugin.nx",
     "test_libs.nx", "test_file_hash.nx", "fs_test.nx",
     # meta-runners (rodam os demais)
-    "run_all_tests.nx", "run_all_tests_concurrent.nx"
+    "run_all_tests.nx", "run_all_tests_concurrent.nx",
+    # ordem de threads não-determinística entre execuções
+    "concurrency.nx", "concurrency_parallel_sum.nx", "test_waitgroup.nx",
+    # ordem de iteração de map não-determinística no print
+    "json_analogy_test.nx", "json_map_test.nx", "json_test.nx",
+    "stress_test.nx", "stress_test_json.nx", "multiline_test.nx",
+    "test_for_loop.nx",
+    # imprime tempo de execução / endereços / caminho do binário
+    "fibonacci.nx", "test_addr.nx", "test_addr_struct.nx",
+    "test_basic_import.nx", "test_sys.nx",
+    # migração semântica 0.4.0 documentada no CHANGELOG (mutação aninhada
+    # não vaza mais; shallow_copy.nx foi reescrito para a semântica nova)
+    "shallow_copy.nx", "repro_struct_val_array.nx"
 )
 
 function Run-WithTimeout([string]$exe, [string]$file, [int]$timeoutSec) {
