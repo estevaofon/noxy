@@ -34,6 +34,21 @@ struct HttpUrl
     valid: bool
 end
 
+struct HttpFrameResult
+    ok: bool
+    request: HttpRequest
+    status: int
+    message: string
+    respond: bool
+end
+
+struct BodyLengthResult
+    ok: bool
+    length: int
+    status: int
+    message: string
+end
+
 // ============================================
 // Constants
 // ============================================
@@ -41,6 +56,13 @@ end
 let HTTP_200_OK: int = 200
 let HTTP_404_NOT_FOUND: int = 404
 let HTTP_500_INTERNAL_ERROR: int = 500
+
+let HTTP_MAX_METHOD_LENGTH: int = 64
+let HTTP_MAX_TARGET_LENGTH: int = 2048
+let HTTP_MAX_HEADER_NAME_LENGTH: int = 256
+let HTTP_MAX_HEADER_LINES: int = 64
+
+let HTTP_TOKEN_EXTRA: string = "!#$%&'*+-.^_`|~"
 
 func get_status_text(code: int) -> string
     if code == 200 then return "OK" end
@@ -50,7 +72,13 @@ func get_status_text(code: int) -> string
     if code == 401 then return "Unauthorized" end
     if code == 403 then return "Forbidden" end
     if code == 404 then return "Not Found" end
+    if code == 408 then return "Request Timeout" end
+    if code == 413 then return "Content Too Large" end
+    if code == 414 then return "URI Too Long" end
+    if code == 431 then return "Request Header Fields Too Large" end
     if code == 500 then return "Internal Server Error" end
+    if code == 501 then return "Not Implemented" end
+    if code == 505 then return "HTTP Version Not Supported" end
     return "Unknown"
 end
 
@@ -58,11 +86,20 @@ end
 // Parse Helpers
 // ============================================
 
-// Scan for \r\n\r\n (13, 10, 13, 10)
-func find_header_end(data: bytes, len: int) -> int
-    let i: int = 0
+// Scan for \r\n\r\n (13, 10, 13, 10), resuming at `start`.
+//
+// Resuming matters for the streaming read loop: rescanning from zero after
+// every socket read is quadratic in the number of segments, so a client that
+// trickles a 16 KB header one byte at a time would cost millions of
+// comparisons. The caller resumes at total - 3, the only window where a
+// terminator split across two reads can begin.
+func find_header_end_from(data: bytes, len: int, start: int) -> int
+    let i: int = start
+    if i < 0 then
+        i = 0
+    end
     let limit: int = len - 3
-    
+
     while i < limit do
         if data[i] == 13 then
             if data[i+1] == 10 then
@@ -76,6 +113,89 @@ func find_header_end(data: bytes, len: int) -> int
         i = i + 1
     end
     return -1
+end
+
+func find_header_end(data: bytes, len: int) -> int
+    return find_header_end_from(data, len, 0)
+end
+
+// ============================================
+// Validation Helpers
+// ============================================
+//
+// Each validator decodes once with codes() and then compares numbers. A
+// char_at loop re-decodes the whole string on every iteration, which is
+// quadratic in inputs whose length an attacker controls.
+
+func is_token_code(code: int) -> bool
+    if code >= 48 && code <= 57 then return true end
+    if code >= 65 && code <= 90 then return true end
+    if code >= 97 && code <= 122 then return true end
+    return contains(HTTP_TOKEN_EXTRA, from_char_code(code))
+end
+
+func is_token(s: string) -> bool
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
+    if n == 0 then return false end
+    let i: int = 0
+    while i < n do
+        if !is_token_code(cs[i]) then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+// Visible ASCII: 0x21 to 0x7E, so a space, a control character, DEL, and any
+// non-ASCII codepoint all fail.
+func is_visible_ascii(s: string) -> bool
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
+    if n == 0 then return false end
+    let i: int = 0
+    while i < n do
+        if cs[i] < 33 || cs[i] > 126 then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+// RFC 9110 field-value: horizontal tab, or 0x20 and above excluding 0x7F.
+// Rejecting CR, LF, and NUL here is the response-splitting defense. They are
+// all valid UTF-8, so the boundary gate passes them through, splitting on
+// "\r\n" leaves a lone "\n" inside a value, and build_response concatenates
+// header strings without validating them. An empty value is legal.
+func is_field_text(s: string) -> bool
+    let cs: int[] = codes(s)
+    let n: int = length(cs)
+    let i: int = 0
+    while i < n do
+        let code: int = cs[i]
+        if code != 9 && (code < 32 || code == 127) then
+            return false
+        end
+        i = i + 1
+    end
+    return true
+end
+
+func empty_request() -> HttpRequest
+    let empty_h: string[64]
+    return HttpRequest("GET", "/", "", "HTTP/1.1", empty_h, 0, b"")
+end
+
+func frame_error(status: int, message: string) -> HttpFrameResult
+    return HttpFrameResult(false, empty_request(), status, message, true)
+end
+
+// No response can be sent: the client vanished before any request byte
+// arrived, or the transport already failed.
+func frame_silent() -> HttpFrameResult
+    return HttpFrameResult(false, empty_request(), 0, "", false)
 end
 
 // ============================================
@@ -302,21 +422,51 @@ end
 // Header Utils
 // ============================================
 
+func header_matches(line: string, search: string) -> bool
+    return starts_with(to_lower(line), search)
+end
+
+// Rejoins every segment after the first ":", so a value containing a colon
+// survives intact. Splitting on ":" and taking parts[1] truncated
+// "Host: example.com:8080" to "example.com", which matters because framing
+// depends on reading Content-Length and Transfer-Encoding exactly.
+func header_line_value(line: string) -> string
+    let parts: SplitResult = split(line, ":")
+    if parts.count < 2 then
+        return ""
+    end
+    let value: string = parts.parts[1]
+    let k: int = 2
+    while k < parts.count do
+        value = value + ":" + parts.parts[k]
+        k = k + 1
+    end
+    return trim(value)
+end
+
 func get_header(headers: string[64], count: int, name: string) -> string
-    let search: string = strings_to_lower(name) + ":"
+    let search: string = to_lower(name) + ":"
     let i: int = 0
     while i < count do
-        let h: string = strings_to_lower(headers[i])
-        if strings_starts_with(h, search) then
-            // Found. Now need original value.
-            let orig: string = headers[i]
-            let parts: SplitResult = split(orig, ":")
-            if parts.count > 1 then
-                // Return trimmed value after the first colon.
-                return strings_trim(parts.parts[1]) 
-            end
+        if header_matches(headers[i], search) then
+            return header_line_value(headers[i])
         end
         i = i + 1
     end
     return ""
+end
+
+// Duplicate detection needs a count, not a first match: two Content-Length
+// headers are a request-smuggling vector even when their values agree.
+func count_header(headers: string[64], count: int, name: string) -> int
+    let search: string = to_lower(name) + ":"
+    let found: int = 0
+    let i: int = 0
+    while i < count do
+        if header_matches(headers[i], search) then
+            found = found + 1
+        end
+        i = i + 1
+    end
+    return found
 end
