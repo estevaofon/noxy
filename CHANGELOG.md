@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `has_key` e `keys` entraram na allowlist de natives só-leitura do CoW
+  (`internal/vm/cow_natives.go`). Sem elas, passar um map para qualquer um dos
+  dois o marcava `Shared` e a mutação seguinte clonava a estrutura inteira —
+  o padrão ler-antes-de-escrever (o laço normal de banco/cache/índice) ficava
+  O(N²). Medido no repro: `has_key`+`put` a N=5000 caiu de 5.807ms para 15ms,
+  agora linear e igual à leitura por índice. Regressão ancorada no contador de
+  clones (`TestHasKeyThenWriteDoesNotClone`, `TestKeysThenWriteDoesNotClone`),
+  com caso negativo garantindo o default conservador para natives fora da
+  allowlist (`TestUnlistedNativeStillMarksArgs`).
+
 ## [0.4.0] - 2026-08-16
 
 ### Changed (BREAKING) — Semântica de valor com copy-on-write
