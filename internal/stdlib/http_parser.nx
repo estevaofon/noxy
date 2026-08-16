@@ -129,7 +129,11 @@ func parse_url(url: string) -> HttpUrl
     let split_port: SplitResult = split(authority, ":")
     if split_port.count > 1 then
         res.host = split_port.parts[0]
-        res.port = to_int(split_port.parts[1])
+        let parsed_port: any = convert_to_int_result(split_port.parts[1])
+        if !parsed_port.ok then
+            return res
+        end
+        res.port = parsed_port.value
     else
         res.host = authority
     end
@@ -230,7 +234,14 @@ func parse_response(data: bytes, len: int) -> HttpResponse
         let status_line: string = lines.parts[0]
         let s_parts: SplitResult = split(status_line, " ")
         if s_parts.count > 0 then resp.version = s_parts.parts[0] end
-        if s_parts.count > 1 then resp.status_code = to_int(s_parts.parts[1]) end
+        if s_parts.count > 1 then
+            let parsed_status: any = convert_to_int_result(s_parts.parts[1])
+            if parsed_status.ok then
+                resp.status_code = parsed_status.value
+            else
+                resp.status_code = 0
+            end
+        end
         
         if s_parts.count > 2 then
              // Reconstruct status text from remaining parts.

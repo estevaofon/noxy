@@ -209,6 +209,11 @@ func (vm *VM) defineIOBuiltins() {
 		}
 		operationResult, used := resource.use(func(file *os.File) value.Value {
 			content, ok, errorText := readFileContents(file)
+			if ok {
+				if err := requireValidUTF8("io.read", string(content)); err != nil {
+					return newIOReadResult(resultStruct, false, value.NewString(""), err.Error())
+				}
+			}
 			return newIOReadResult(resultStruct, ok, value.NewString(string(content)), errorText)
 		})
 		if !used {
@@ -289,6 +294,9 @@ func (vm *VM) defineIOBuiltins() {
 			content, ok, errorText := readFileContents(file)
 			var lines []string
 			if ok {
+				if err := requireValidUTF8("io.read_lines", string(content)); err != nil {
+					return newIOLinesResult(resultStruct, false, nil, err.Error())
+				}
 				normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
 				lines = strings.Split(normalized, "\n")
 			}

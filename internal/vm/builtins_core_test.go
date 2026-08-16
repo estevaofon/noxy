@@ -55,22 +55,18 @@ func TestConversionBuiltins(t *testing.T) {
 		{name: "to_str int", builtin: "to_str", args: []value.Value{value.NewInt(-42)}, want: value.NewString("-42")},
 		{name: "to_str float", builtin: "to_str", args: []value.Value{value.NewFloat(3.5)}, want: value.NewString("3.500000")},
 		{name: "to_str string", builtin: "to_str", args: []value.Value{value.NewString("noxy")}, want: value.NewString("noxy")},
-		{name: "to_str short args", builtin: "to_str", want: value.NewString("")},
-		{name: "to_int null sentinel", builtin: "to_int", args: []value.Value{value.NewNull()}, want: value.NewInt(0)},
-		{name: "to_int bool sentinel", builtin: "to_int", args: []value.Value{value.NewBool(true)}, want: value.NewInt(0)},
+		// to_str/to_int/to_float now raise on bad arity instead of returning
+		// a sentinel value ("" / 0); those cases are covered by
+		// TestToIntRaisesOnUnconvertibleInput, TestToFloatRaisesOnUnconvertibleInput,
+		// and TestStrictConversionRaisesOnBadArity in builtins_convert_test.go.
+		// to_str also now raises on invalid UTF-8 bytes; see
+		// TestToStrValidatesUTF8 in builtins_convert_test.go.
 		{name: "to_int int", builtin: "to_int", args: []value.Value{value.NewInt(-42)}, want: value.NewInt(-42)},
 		{name: "to_int float truncates", builtin: "to_int", args: []value.Value{value.NewFloat(3.9)}, want: value.NewInt(3)},
 		{name: "to_int integer string", builtin: "to_int", args: []value.Value{value.NewString("123")}, want: value.NewInt(123)},
-		{name: "to_int float string truncates", builtin: "to_int", args: []value.Value{value.NewString("12.75")}, want: value.NewInt(12)},
-		{name: "to_int invalid string sentinel", builtin: "to_int", args: []value.Value{value.NewString("twelve")}, want: value.NewInt(0)},
-		{name: "to_int short args", builtin: "to_int", want: value.NewInt(0)},
-		{name: "to_float null sentinel", builtin: "to_float", args: []value.Value{value.NewNull()}, want: value.NewFloat(0)},
-		{name: "to_float bool sentinel", builtin: "to_float", args: []value.Value{value.NewBool(true)}, want: value.NewFloat(0)},
 		{name: "to_float int", builtin: "to_float", args: []value.Value{value.NewInt(-42)}, want: value.NewFloat(-42)},
 		{name: "to_float float", builtin: "to_float", args: []value.Value{value.NewFloat(3.5)}, want: value.NewFloat(3.5)},
 		{name: "to_float string", builtin: "to_float", args: []value.Value{value.NewString("12.75")}, want: value.NewFloat(12.75)},
-		{name: "to_float invalid string sentinel", builtin: "to_float", args: []value.Value{value.NewString("twelve")}, want: value.NewFloat(0)},
-		{name: "to_float short args", builtin: "to_float", want: value.NewFloat(0)},
 	}
 
 	for _, tt := range tests {

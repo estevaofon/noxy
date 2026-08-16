@@ -9,7 +9,6 @@ var tokenDisplay = map[TokenType]string{
 	IDENTIFIER: "identifier",
 
 	LET:    "let",
-	GLOBAL: "global",
 	FUNC:   "func",
 	STRUCT: "struct",
 	IF:     "if",

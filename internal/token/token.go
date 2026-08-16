@@ -17,7 +17,6 @@ const (
 
 	// Palavras-chave - Declarações
 	LET    TokenType = "LET"
-	GLOBAL TokenType = "GLOBAL"
 	FUNC   TokenType = "FUNC"
 	STRUCT TokenType = "STRUCT"
 
@@ -117,7 +116,6 @@ const (
 
 var keywords = map[string]TokenType{
 	"let":     LET,
-	"global":  GLOBAL,
 	"func":    FUNC,
 	"struct":  STRUCT,
 	"if":      IF,

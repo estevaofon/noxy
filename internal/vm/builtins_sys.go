@@ -114,6 +114,7 @@ func (vm *VM) defineSystemBuiltins() {
 		inst.Fields["exit_code"] = value.NewInt(int64(exitCode))
 		inst.Fields["output"] = value.NewString(outputStr)
 		inst.Fields["ok"] = value.NewBool(okVal)
+		inst.Fields["error"] = value.NewString("")
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -138,9 +139,12 @@ func (vm *VM) defineSystemBuiltins() {
 		outBytes, err := cmd.CombinedOutput()
 		outputStr := string(outBytes)
 
-		// OK indicates execution completion, regardless of exit code.
+		// ok is true only when the process both started and exited with code
+		// 0. A non-zero exit (an *exec.ExitError) and a failure to start both
+		// report ok=false; exit_code distinguishes them.
 		okVal := true
 		exitCode := 0
+		errMsg := ""
 
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
@@ -153,10 +157,29 @@ func (vm *VM) defineSystemBuiltins() {
 			okVal = true
 		}
 
+		// The process's output is an external byte source labelled as
+		// text: it must be valid UTF-8 before it is handed back as a Noxy
+		// string, regardless of exit code — a crashing command's partial
+		// output is just as untrusted as a clean one's. This does not
+		// collide with the "process completed" meaning of ok above — a
+		// process that ran and produced binary output is still reported
+		// as a distinct, diagnosable case via ok=false plus a UTF-8 error
+		// message.
+		if verifyErr := requireValidUTF8("sys.exec_output", outputStr); verifyErr != nil {
+			okVal = false
+			errMsg = verifyErr.Error()
+		}
+
+		outputField := ""
+		if errMsg == "" {
+			outputField = strings.TrimSpace(outputStr)
+		}
+
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
 		inst.Fields["exit_code"] = value.NewInt(int64(exitCode))
-		inst.Fields["output"] = value.NewString(strings.TrimSpace(outputStr))
+		inst.Fields["output"] = value.NewString(outputField)
 		inst.Fields["ok"] = value.NewBool(okVal)
+		inst.Fields["error"] = value.NewString(errMsg)
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -274,9 +297,26 @@ func (vm *VM) defineSystemBuiltins() {
 
 		val, found := os.LookupEnv(key)
 
+		// ok's pre-existing meaning is "the variable is set" (found).
+		// Invalid UTF-8 in a set variable is a distinct, diagnosable case:
+		// it must not be reported the same way as "unset", so it also
+		// clears ok but carries its own error message instead of the
+		// empty one every other path here keeps.
+		okVal := found
+		errMsg := ""
+		valueField := val
+		if found {
+			if verifyErr := requireValidUTF8("sys.getenv", val); verifyErr != nil {
+				okVal = false
+				errMsg = verifyErr.Error()
+				valueField = ""
+			}
+		}
+
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["value"] = value.NewString(val)
-		inst.Fields["ok"] = value.NewBool(found)
+		inst.Fields["value"] = value.NewString(valueField)
+		inst.Fields["ok"] = value.NewBool(okVal)
+		inst.Fields["error"] = value.NewString(errMsg)
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})

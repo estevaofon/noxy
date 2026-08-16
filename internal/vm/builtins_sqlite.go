@@ -331,7 +331,11 @@ func (vm *VM) defineSQLiteBuiltins() {
 
 			values := make([]value.Value, len(columns))
 			for index, item := range destination {
-				values[index] = sqliteValue(item)
+				converted, convertErr := sqliteValueChecked(item)
+				if convertErr != nil {
+					return sqliteQueryError(resultTemplate.Struct, convertErr.Error()), nil
+				}
+				values[index] = converted
 			}
 			row := value.NewInstance(rowTemplate.Struct).Obj.(*value.ObjInstance)
 			row.Fields["values"] = value.NewArray(values)
@@ -392,6 +396,11 @@ func sqliteParameter(parameter value.Value) interface{} {
 		return parameter.AsBool
 	case value.VAL_NULL:
 		return nil
+	case value.VAL_BYTES:
+		if payload, ok := parameter.Obj.(string); ok {
+			return payload
+		}
+		return parameter.String()
 	case value.VAL_OBJ:
 		if text, ok := parameter.Obj.(string); ok {
 			return text
@@ -435,6 +444,10 @@ func sqliteQueryError(definition *value.ObjStruct, errorText string) value.Value
 	return value.Value{Type: value.VAL_OBJ, Obj: instance}
 }
 
+// sqliteValue converts a scanned column that carries no text payload. TEXT and
+// BLOB columns never reach it: sqliteValueChecked handles string and []byte
+// itself, with UTF-8 validation, so no unvalidated string constructor sits on
+// the query path.
 func sqliteValue(item interface{}) value.Value {
 	switch typed := item.(type) {
 	case nil:
@@ -443,11 +456,26 @@ func sqliteValue(item interface{}) value.Value {
 		return value.NewInt(typed)
 	case float64:
 		return value.NewFloat(typed)
-	case string:
-		return value.NewString(typed)
-	case []byte:
-		return value.NewString(string(typed))
 	default:
 		return value.NewString(fmt.Sprintf("%v", typed))
 	}
+}
+
+// sqliteValueChecked converts a scanned column, rejecting TEXT and BLOB
+// payloads that are not valid UTF-8 rather than letting them become a Noxy
+// string that decodes to U+FFFD.
+func sqliteValueChecked(item interface{}) (value.Value, error) {
+	switch typed := item.(type) {
+	case string:
+		if err := requireValidUTF8("sqlite.query", typed); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(typed), nil
+	case []byte:
+		if err := requireValidUTF8("sqlite.query", string(typed)); err != nil {
+			return value.NewNull(), err
+		}
+		return value.NewString(string(typed)), nil
+	}
+	return sqliteValue(item), nil
 }

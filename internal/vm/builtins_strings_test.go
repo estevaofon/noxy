@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -23,7 +24,7 @@ func TestStringBuiltinsScalarTables(t *testing.T) {
 		{name: "ends with normal", builtin: "strings_ends_with", args: []value.Value{value.NewString("noxy.vm"), value.NewString(".vm")}, want: value.NewBool(true)},
 		{name: "ends with empty", builtin: "strings_ends_with", args: []value.Value{value.NewString(""), value.NewString("")}, want: value.NewBool(true)},
 		{name: "ends with short", builtin: "strings_ends_with", args: []value.Value{value.NewString("noxy")}, want: value.NewBool(false)},
-		{name: "index of normal byte offset", builtin: "strings_index_of", args: []value.Value{value.NewString("aéz"), value.NewString("z")}, want: value.NewInt(3)},
+		{name: "index of returns character index", builtin: "strings_index_of", args: []value.Value{value.NewString("aéz"), value.NewString("z")}, want: value.NewInt(2)},
 		{name: "index of empty", builtin: "strings_index_of", args: []value.Value{value.NewString(""), value.NewString("")}, want: value.NewInt(0)},
 		{name: "index of short", builtin: "strings_index_of", want: value.NewInt(-1)},
 		{name: "count normal", builtin: "strings_count", args: []value.Value{value.NewString("banana"), value.NewString("an")}, want: value.NewInt(2)},
@@ -93,9 +94,7 @@ func TestStringBuiltinsScalarTables(t *testing.T) {
 		{name: "from char code zero produces nul", builtin: "strings_from_char_code", args: []value.Value{value.NewInt(0)}, want: value.NewString("\x00")},
 		{name: "from char code short", builtin: "strings_from_char_code", want: value.NewString("")},
 		{name: "ord normal", builtin: "ord", args: []value.Value{value.NewString("A")}, want: value.NewInt(65)},
-		{name: "ord unicode returns first utf8 byte", builtin: "ord", args: []value.Value{value.NewString("é")}, want: value.NewInt(195)},
-		{name: "ord empty", builtin: "ord", args: []value.Value{value.NewString("")}, want: value.NewInt(0)},
-		{name: "ord short", builtin: "ord", want: value.NewInt(0)},
+		{name: "ord unicode returns code point", builtin: "ord", args: []value.Value{value.NewString("é")}, want: value.NewInt(233)},
 	}
 
 	for _, tt := range tests {
@@ -145,5 +144,256 @@ func TestStringsSplitBuiltin(t *testing.T) {
 				assertBuiltinValue(t, parts.Elements[i], value.NewString(want))
 			}
 		})
+	}
+}
+
+func TestIndexOfReturnsCharacterIndex(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name    string
+		subject string
+		needle  string
+		want    int64
+	}{
+		{name: "ascii matches byte offset", subject: "abc:def", needle: ":", want: 3},
+		{name: "multibyte before match", subject: "münchen.de/path", needle: "/", want: 10},
+		{name: "multibyte needle", subject: "café bar", needle: "é", want: 3},
+		{name: "emoji before match", subject: "\U0001F600x:y", needle: ":", want: 2},
+		{name: "absent", subject: "abc", needle: "z", want: -1},
+		{name: "empty needle", subject: "abc", needle: "", want: 0},
+		{name: "match at start", subject: ":abc", needle: ":", want: 0},
+		{name: "empty subject", subject: "", needle: "a", want: -1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "strings_index_of", value.NewString(test.subject), value.NewString(test.needle))
+			if got.Type != value.VAL_INT || got.AsInt != test.want {
+				t.Fatalf("strings_index_of(%q, %q) = %#v, want %d", test.subject, test.needle, got, test.want)
+			}
+		})
+	}
+}
+
+func TestIndexOfComposesWithSubstring(t *testing.T) {
+	source := `use strings select *
+let line: string = "München: Bayern"
+let name: string = substring(line, 0, index_of(line, ":"))
+test_report(name)`
+	captured := captureVMSource(t, source)
+	got, ok := captured.Obj.(string)
+	if !ok || got != "München" {
+		t.Fatalf("substring with index_of = %#v, want %q", captured, "München")
+	}
+}
+
+func TestParseUrlKeepsMultibyteHostSeparateFromPath(t *testing.T) {
+	source := "use http_parser select *\n" +
+		"let u: HttpUrl = parse_url(\"http://münchen.de/path\")\n" +
+		"test_report(u.host + \"|\" + u.path)"
+	captured := captureVMSource(t, source)
+	got, ok := captured.Obj.(string)
+	if !ok || got != "münchen.de|/path" {
+		t.Fatalf("parse_url = %#v, want %q", captured, "münchen.de|/path")
+	}
+}
+
+func TestStringNativesRejectBytes(t *testing.T) {
+	machine := New()
+	text := value.NewString("x")
+	number := value.NewInt(1)
+	payload := value.NewBytes("hello")
+
+	tests := []struct {
+		native string
+		args   []value.Value
+	}{
+		{native: "strings_contains", args: []value.Value{payload, text}},
+		{native: "strings_contains", args: []value.Value{text, payload}},
+		{native: "strings_starts_with", args: []value.Value{payload, text}},
+		{native: "strings_ends_with", args: []value.Value{payload, text}},
+		{native: "strings_index_of", args: []value.Value{payload, text}},
+		{native: "strings_index_of", args: []value.Value{text, payload}},
+		{native: "strings_count", args: []value.Value{payload, text}},
+		{native: "strings_to_upper", args: []value.Value{payload}},
+		{native: "strings_to_lower", args: []value.Value{payload}},
+		{native: "strings_trim", args: []value.Value{payload}},
+		{native: "strings_reverse", args: []value.Value{payload}},
+		{native: "strings_repeat", args: []value.Value{payload, number}},
+		{native: "strings_replace", args: []value.Value{payload, text, text}},
+		{native: "strings_replace_first", args: []value.Value{payload, text, text}},
+		{native: "strings_pad_left", args: []value.Value{payload, number, text}},
+		{native: "strings_substring", args: []value.Value{payload, number, number}},
+		{native: "strings_is_empty", args: []value.Value{payload}},
+		{native: "strings_is_digit", args: []value.Value{payload}},
+		{native: "strings_is_alpha", args: []value.Value{payload}},
+		{native: "strings_is_alnum", args: []value.Value{payload}},
+		{native: "strings_is_space", args: []value.Value{payload}},
+		{native: "strings_char_at", args: []value.Value{payload, number}},
+		{native: "ord", args: []value.Value{payload}},
+	}
+	for _, test := range tests {
+		t.Run(test.native, func(t *testing.T) {
+			_, err := requireBuiltin(t, machine, test.native).Invoke(machine, test.args)
+			if err == nil {
+				t.Fatalf("%s accepted a bytes argument", test.native)
+			}
+			if !strings.Contains(err.Error(), "expected string, got bytes") {
+				t.Fatalf("message = %q, want it to name the type mismatch", err.Error())
+			}
+			if !strings.Contains(err.Error(), "to_str") {
+				t.Fatalf("message = %q, want it to point at to_str", err.Error())
+			}
+		})
+	}
+}
+
+func TestStringNativesStillAcceptStrings(t *testing.T) {
+	machine := New()
+	got := callBuiltin(t, machine, "strings_contains", value.NewString("hello"), value.NewString("ell"))
+	if got.Type != value.VAL_BOOL || !got.AsBool {
+		t.Fatalf("strings_contains = %#v, want true", got)
+	}
+}
+
+func TestSplitRejectsBytesButAcceptsItsStructArgument(t *testing.T) {
+	source := `use strings select *
+let parts: SplitResult = split(to_str(b"a,b"), ",")
+test_report(parts.count)`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_INT || captured.AsInt != 2 {
+		t.Fatalf("split after explicit to_str = %#v, want 2", captured)
+	}
+}
+
+func TestOrdReturnsCodePoint(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name  string
+		input string
+		want  int64
+	}{
+		{name: "ascii", input: "A", want: 65},
+		{name: "latin1 supplement", input: "é", want: 233},
+		{name: "cjk", input: "中", want: 20013},
+		{name: "emoji", input: "\U0001F600", want: 128512},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "ord", value.NewString(test.input))
+			if got.Type != value.VAL_INT || got.AsInt != test.want {
+				t.Fatalf("ord(%q) = %#v, want %d", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestOrdRoundTripsWithFromCharCode(t *testing.T) {
+	machine := New()
+	for _, code := range []int64{65, 233, 20013, 128512} {
+		character := callBuiltin(t, machine, "strings_from_char_code", value.NewInt(code))
+		back := callBuiltin(t, machine, "ord", character)
+		if back.Type != value.VAL_INT || back.AsInt != code {
+			t.Fatalf("ord(from_char_code(%d)) = %#v, want %d", code, back, code)
+		}
+	}
+}
+
+func TestOrdRequiresExactlyOneCharacter(t *testing.T) {
+	machine := New()
+	for _, test := range []struct {
+		name  string
+		input string
+	}{
+		{name: "empty", input: ""},
+		{name: "two characters", input: "ab"},
+		{name: "two multibyte characters", input: "éé"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := requireBuiltin(t, machine, "ord").Invoke(machine, []value.Value{value.NewString(test.input)}); err == nil {
+				t.Fatalf("ord(%q) did not fail", test.input)
+			}
+		})
+	}
+}
+
+func TestCharCodeIsExportedByStrings(t *testing.T) {
+	source := `use strings select *
+test_report(char_code("é") == 233 && from_char_code(233) == "é")`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("char_code round trip = %#v, want true", captured)
+	}
+}
+
+func TestIsValidUTF8(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "ascii", input: "hello", want: true},
+		{name: "empty", input: "", want: true},
+		{name: "multibyte", input: "café", want: true},
+		{name: "emoji", input: "\U0001F600", want: true},
+		{name: "lone 0xFF", input: "h\xffi", want: false},
+		{name: "truncated multibyte", input: "caf\xc3", want: false},
+		{name: "bare continuation byte", input: "\x80", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "strings_is_valid_utf8", value.NewBytes(test.input))
+			if got.Type != value.VAL_BOOL || got.AsBool != test.want {
+				t.Fatalf("strings_is_valid_utf8(%q) = %#v, want %v", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestIsValidUTF8RejectsStringThroughModuleImport(t *testing.T) {
+	// This supersedes a prior version of this test that sidestepped the real
+	// call path: `use strings select *` erases is_valid_utf8's static
+	// `b: bytes` parameter type at its call site (every `use` import path
+	// records the imported name with a nil type in c.globals — see
+	// compiler.predeclareImport / the UseStmt case in compiler.Compile), so
+	// the compiler's static argument-type check never fires here. The
+	// previous test worked around that by declaring `func is_valid_utf8(b:
+	// bytes)` inline in the same compiled unit (where
+	// predeclareGlobalBindings does register a real *ast.FunctionType),
+	// which correctly demonstrated the compiler check exists but never
+	// exercised what a real caller of `use strings select *` experiences.
+	// Through the real module-import path, the string silently reached the
+	// native, which checked only VAL_BYTES and otherwise returned false —
+	// so `is_valid_utf8("text")` printed false instead of raising a type
+	// error. The fix guards strings_is_valid_utf8 itself with
+	// requireBytesArgument (the mirror image of requireTextArgument, which
+	// already protects every other string native, e.g. ord/char_code, the
+	// same way). This test exercises the real path and must now observe a
+	// raised error, not a silently wrong answer.
+	source := `use strings select *
+test_report(is_valid_utf8("text"))`
+	machine := New()
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	err := interpretVMSource(t, machine, source)
+	if err == nil {
+		t.Fatalf("is_valid_utf8(\"text\") through use strings select * returned %#v with no error; want a raised type error", captured)
+	}
+	if !strings.Contains(err.Error(), "expected bytes, got string") {
+		t.Fatalf("error = %q, want it to name the type mismatch", err.Error())
+	}
+}
+
+func TestIsValidUTF8AcceptsBytesFromNoxy(t *testing.T) {
+	source := `use strings select *
+test_report(is_valid_utf8(b"café") && !is_valid_utf8(to_bytes([104, 255, 105])))`
+	captured := captureVMSource(t, source)
+	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+		t.Fatalf("is_valid_utf8 through the module = %#v, want true", captured)
 	}
 }

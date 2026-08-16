@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"noxy-vm/internal/value"
@@ -32,58 +31,28 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewNull()
 	})
 
-	vm.DefineNative("to_str", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("to_str", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if len(args) != 1 {
-			// Should return error or empty?
-			return value.NewString("")
+			return value.NewNull(), fmt.Errorf("to_str: expects exactly 1 argument, got %d", len(args))
 		}
 		if args[0].Type == value.VAL_BYTES {
-			return value.NewString(args[0].Obj.(string))
-		}
-		return value.NewString(args[0].String())
-	})
-	vm.DefineNative("to_int", func(args []value.Value) value.Value {
-		if len(args) != 1 {
-			return value.NewInt(0)
-		}
-		v := args[0]
-		if v.Type == value.VAL_INT {
-			return value.NewInt(v.AsInt)
-		}
-		if v.Type == value.VAL_FLOAT {
-			return value.NewInt(int64(v.AsFloat))
-		}
-		if v.Type == value.VAL_OBJ {
-			if s, ok := v.Obj.(string); ok {
-				if i, err := strconv.ParseInt(s, 10, 64); err == nil {
-					return value.NewInt(i)
-				}
-				if f, err := strconv.ParseFloat(s, 64); err == nil {
-					return value.NewInt(int64(f))
-				}
+			payload := args[0].Obj.(string)
+			if err := requireValidUTF8("to_str", payload); err != nil {
+				return value.NewNull(), err
 			}
+			return value.NewString(payload), nil
 		}
-		return value.NewInt(0)
-	})
-	vm.DefineNative("to_float", func(args []value.Value) value.Value {
-		if len(args) != 1 {
-			return value.NewFloat(0.0)
+		// Every other value renders through Value.String(). That rendering is
+		// not automatically valid UTF-8: a container holding a bytes value
+		// emits the raw, unescaped payload, so an array of invalid bytes would
+		// otherwise launder those bytes into a string. to_str is the single
+		// choke point for the invariant, so the rendered result is validated
+		// too — free for scalars, which always render as ASCII.
+		result := args[0].String()
+		if err := requireValidUTF8("to_str", result); err != nil {
+			return value.NewNull(), err
 		}
-		v := args[0]
-		if v.Type == value.VAL_FLOAT {
-			return value.NewFloat(v.AsFloat)
-		}
-		if v.Type == value.VAL_INT {
-			return value.NewFloat(float64(v.AsInt))
-		}
-		if v.Type == value.VAL_OBJ {
-			if s, ok := v.Obj.(string); ok {
-				if f, err := strconv.ParseFloat(s, 64); err == nil {
-					return value.NewFloat(f)
-				}
-			}
-		}
-		return value.NewFloat(0.0)
+		return value.NewString(result), nil
 	})
 	vm.DefineNative("hex", func(args []value.Value) value.Value {
 		if len(args) != 1 {

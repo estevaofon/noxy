@@ -4,6 +4,7 @@ use net select *
 use strings select *
 use io select *
 use sys select getenv
+use convert select *
 
 // --- Helper Functions ---
 
@@ -118,11 +119,11 @@ let host: string = "0.0.0.0"
 
 let port_env: EnvResult = getenv("PORT")
 if port_env.ok then
-    // Tenta converter string para int
-    // Nota: to_int é builtin
-    let p: int = to_int(port_env.value)
-    if p > 0 then
-        port = p
+    let parsed_port: IntResult = to_int_result(port_env.value)
+    if parsed_port.ok && parsed_port.value > 0 then
+        port = parsed_port.value
+    else
+        print("PORT inválida, usando " + to_str(port))
     end
 end
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -375,4 +376,73 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	assertBuiltinValue(t, missingInfo.Fields["exists"], value.NewBool(false))
 	assertBuiltinValue(t, missingInfo.Fields["size"], value.NewInt(0))
 	assertBuiltinValue(t, missingInfo.Fields["is_dir"], value.NewBool(false))
+}
+
+func TestIOReadRejectsInvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty.bin")
+	if err := os.WriteFile(path, []byte("hello\xffworld"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOResult = io.read(file)\n" +
+		"io.close(file)\n" +
+		"test_report(to_str(!r.ok) + \"|\" + r.error)"
+	captured := captureVMSource(t, source)
+	report, ok := captured.Obj.(string)
+	if !ok {
+		t.Fatalf("test_report value = %#v, want string", captured)
+	}
+	if !strings.HasPrefix(report, "true|") {
+		t.Fatalf("io.read on invalid UTF-8 reported %q, want ok=false", report)
+	}
+	if !strings.Contains(report, "UTF-8") {
+		t.Fatalf("error = %q, want it to mention UTF-8", report)
+	}
+}
+
+func TestIOReadBytesStillReadsInvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty.bin")
+	if err := os.WriteFile(path, []byte("hello\xffworld"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOBytesResult = io.read_bytes(file)\n" +
+		"io.close(file)\n" +
+		"test_report(to_str(r.ok) + \"|\" + to_str(length(r.data)))"
+	captured := captureVMSource(t, source)
+	report, _ := captured.Obj.(string)
+	if report != "true|11" {
+		t.Fatalf("io.read_bytes reported %q, want %q — the raw escape hatch must still work", report, "true|11")
+	}
+}
+
+func TestIOReadLinesRejectsInvalidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dirty.txt")
+	if err := os.WriteFile(path, []byte("linha um\nlinha \xff dois\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOLinesResult = io.read_lines(file)\n" +
+		"io.close(file)\n" +
+		"test_report(to_str(!r.ok) + \"|\" + r.error)"
+	captured := captureVMSource(t, source)
+	report, _ := captured.Obj.(string)
+	if !strings.HasPrefix(report, "true|") || !strings.Contains(report, "UTF-8") {
+		t.Fatalf("io.read_lines reported %q, want ok=false with a UTF-8 message", report)
+	}
+}
+
+func TestIOReadAcceptsValidUTF8(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clean.txt")
+	if err := os.WriteFile(path, []byte("acentuação e emoji \U0001F600"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use io\nlet file: io.File = io.open(" + strconv.Quote(path) + ", \"r\")\n" +
+		"let r: io.IOResult = io.read(file)\n" +
+		"io.close(file)\n" +
+		"test_report(r.data)"
+	captured := captureVMSource(t, source)
+	if text, _ := captured.Obj.(string); text != "acentuação e emoji \U0001F600" {
+		t.Fatalf("io.read returned %q, want the file content unchanged", text)
+	}
 }
