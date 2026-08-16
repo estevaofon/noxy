@@ -2146,7 +2146,7 @@ Three bytes become five on a slice, silently. A program that reads a file, slice
 
 ### Additional global constraints for Part Two
 
-- A parameter declared `b: bytes` rejects a `string` argument **at compile time**, not at runtime: `argument 1 to 'f': expected bytes, got string`. Verified. So declaring the type is the entire implementation of that rejection — do not add a runtime check and do not widen the signature to `any`.
+- **Corrected during Task 10, verified by testing:** a `b: bytes` parameter on a function declared and called in the same file does reject a `string` argument at compile time. But `use module select *` erases the imported function's static type at its call site, so that check never fires for any real module consumer — `is_valid_utf8("text")` through `use strings select *` compiled, ran, and silently returned `false`. The declared type is therefore NOT sufficient enforcement by itself. Every `bytes`-only native needs a runtime guard inside the native, mirroring `requireTextArgument` in the opposite direction (see the correction embedded in Task 10 below). Do not rely on the parameter annotation alone for enforcement, and do not widen a `bytes`-only signature to `any`.
 - Pure conversions raise; functions that already own a result struct report through their existing `ok` / `error` fields. Do not convert a result-struct function into a raising one.
 - `net_recv` and `io_read_bytes` already return `bytes` and are the raw escape hatches. They must stay unchanged.
 
