@@ -257,6 +257,7 @@ func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 type ObjArray struct {
 	Elements    []Value
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
+	Shared      atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
 }
 
 func (oa *ObjArray) String() string {
@@ -296,6 +297,7 @@ type ObjMap struct {
 	store       *bindingStore
 	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
+	Shared      atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
 }
 
 func (om *ObjMap) String() string {
@@ -349,6 +351,7 @@ func (os *ObjStruct) Format(f fmt.State, verb rune) {
 type ObjInstance struct {
 	Struct *ObjStruct
 	Fields map[string]Value
+	Shared atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
 }
 
 func (oi *ObjInstance) String() string {
