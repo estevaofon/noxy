@@ -1402,23 +1402,28 @@ func TestEveryNativeIsRegisteredExactlyOnce(t *testing.T) {
 }
 
 func TestNoShippedDebugOutput(t *testing.T) {
-	goSources, err := filepath.Glob(filepath.Join(".", "*.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, source := range goSources {
-		if strings.HasSuffix(source, "_test.go") {
-			continue
+	// Walk all of internal/, not just internal/vm, so a debug marker cannot
+	// hide in the parser, compiler, or lexer.
+	walkErr := filepath.WalkDir("..", func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		content, readErr := os.ReadFile(source)
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
 		if readErr != nil {
-			t.Fatal(readErr)
+			return readErr
 		}
 		for _, marker := range []string{"DEBUG:", "Debug:"} {
 			if strings.Contains(string(content), marker) {
-				t.Errorf("%s contains the debug marker %q", source, marker)
+				t.Errorf("%s contains the debug marker %q", filepath.ToSlash(path), marker)
 			}
 		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatal(walkErr)
 	}
 
 	entries, err := stdlib.FS.ReadDir(".")
@@ -1619,16 +1624,28 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Modify: `internal/vm/builtins_net.go:556`
 - Modify: `internal/stdlib/http_client.nx:87`
+- Modify: `internal/vm/executor.go:284`
+- Modify: `internal/parser/parser.go:1161`
 
 **Interfaces:**
 - Consumes: `TestNoShippedDebugOutput` from Task 6.
 - Produces: no new names.
 
+There are four sites, not two. Two emit output at runtime and two are dead
+debug text that the guard also catches:
+
+| Site | Kind |
+|---|---|
+| `internal/vm/builtins_net.go:556` | live `fmt.Printf` to stdout |
+| `internal/stdlib/http_client.nx:87` | live `print` on every request |
+| `internal/vm/executor.go:284` | comment reading `// Debug: Check ID if Node` |
+| `internal/parser/parser.go:1161` | commented-out `fmt.Printf("DEBUG: ...")` |
+
 - [ ] **Step 1: Confirm the guard is failing**
 
 Run: `go test ./internal/vm/ -run TestNoShippedDebugOutput -v`
 
-Expected: FAIL, naming `builtins_net.go` and `stdlib/http_client.nx`.
+Expected: FAIL, naming `builtins_net.go`, `executor.go`, `parser/parser.go`, and `stdlib/http_client.nx`.
 
 - [ ] **Step 2: Remove the native debug print**
 
@@ -1662,6 +1679,27 @@ In `internal/stdlib/http_client.nx`, delete line 87 entirely:
 ```
 
 Also update the file's header comment on line 1 from `// stdlib/http_client.nx - Debug` to `// stdlib/http_client.nx - Cliente HTTP`, since the file is no longer a debug variant.
+
+- [ ] **Step 3b: Clear the two dead debug sites**
+
+In `internal/vm/executor.go`, reword the comment on line 284 so it describes
+what the code does rather than carrying a debug marker:
+
+```go
+			// Resolve the node identity before comparison
+```
+
+Read the surrounding lines first and adjust the wording to match what the code
+actually does; the requirement is only that the `Debug:` marker is gone and the
+comment still explains the code.
+
+In `internal/parser/parser.go`, delete line 1161 entirely:
+
+```go
+	// fmt.Printf("DEBUG: parseFuncStmt: cur=%s peek=%s\n", p.curToken.Type, p.peekToken.Type)
+```
+
+Commented-out debug output is dead code; version control holds the history.
 
 - [ ] **Step 4: Write the behavioral test**
 
