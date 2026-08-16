@@ -32,6 +32,7 @@ be mutable.
 - ✅ Line tracking for debugging
 - ✅ SQLite database support (Thread-safe)
 - ✅ HTTP server support
+- ✅ Value semantics with copy-on-write (composites are independent values; `ref` is the only sharing mechanism)
 - ✅ First-class functions
 - ✅ Closures
 - ✅ Concurrency (noxy routines) [docs/CONCURRENCY.md](docs/CONCURRENCY.md)

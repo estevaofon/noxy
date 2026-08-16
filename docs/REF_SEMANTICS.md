@@ -136,10 +136,20 @@ Referências podem escapar por retorno, closure, campo ou global. Quando o alvo
 é uma variável local capturada, a VM usa o armazenamento de upvalue para que a
 referência permaneça válida depois que a função criadora retorna.
 
-## 7. Parâmetros comuns e cópia rasa
+## 7. Parâmetros comuns e semântica de valor
 
-Parâmetros sem `ref` mantêm a semântica comum de Noxy. Primitivos são copiados,
-e arrays, maps e structs recebem uma cópia rasa do container superior. Valores
-compostos aninhados continuam compartilhando identidade. Use um parâmetro
-`ref T` quando a função precisar alcançar o armazenamento superior do
-chamador.
+Parâmetros sem `ref` seguem a semântica de valor de Noxy (0.4.0+): primitivos
+são copiados, e arrays, maps e structs se comportam como cópias profundas
+independentes em qualquer profundidade, implementadas com copy-on-write.
+**`ref` é o único mecanismo de compartilhamento da linguagem** — quando uma
+assinatura não tem `ref`, o chamador tem a garantia de que seus dados não
+serão tocados.
+
+## 8. Refs para dentro de contêineres e copy-on-write
+
+Um `ref` criado para dentro de um contêiner (`ref arr[0]`, campo de struct)
+fixa a identidade daquele contêiner no momento da criação — a base do caminho
+é unicizada nesse instante. Aresta documentada: se o contêiner for copiado
+*depois* da criação do ref (ex.: `let b = a`), uma escrita através do ref
+pré-existente ainda é visível pela cópia que não materializou seu clone.
+Crie refs depois de compartilhar, não antes.

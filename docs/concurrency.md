@@ -16,7 +16,7 @@ Individual global-binding and map operations are synchronized and do not crash t
 
 These guarantees do not make a sequence of operations atomic. For example, `counter = counter + 1` is still a separate read and write. Likewise, arrays, structs, and composite values nested inside a map or global binding are not recursively synchronized. Coordinate compound operations and mutation of nested composite values with channels (or another explicit single-owner protocol).
 
-Normal function calls, including functions launched by `spawn_task`, preserve Noxy's shallow-copy rules: the outer array, map, or struct is copied for an ordinary parameter, while nested composites remain shared. The legacy detached `spawn` is a compatibility exception: it forwards its argument values directly, so mutable composites retain their top-level identity. Coordinate every concurrent access to those shared values explicitly; the synchronized runtime foundation neither deep-copies them nor prevents data races in compound mutations.
+Normal function calls, `spawn`, and `spawn_task` all follow Noxy's value semantics (0.4.0+): an ordinary composite parameter is an independent value at any depth, implemented with copy-on-write — the legacy `spawn` identity exception was removed. Data handed to another routine by argument or channel is therefore race-free by construction. Intentionally shared state (globals, `ref`) still requires explicit coordination; the synchronized runtime foundation does not make compound mutations atomic.
 
 This foundation does not change the behavior of existing concurrency primitives. It also underpins supervised tasks, described below, without changing detached `spawn`.
 
@@ -47,7 +47,7 @@ end
 - **Non-blocking**: `spawn` returns immediately.
 - **Concurrent**: The spawned function runs in parallel (on multi-core systems).
 - **Detached**: `spawn` returns `null`, exposes no handle, and never propagates a worker result or failure to its caller. Existing validation and worker diagnostics remain on standard output as `Runtime Error:`, `Thread Error:`, or `Thread Panic:` messages.
-- **Argument compatibility**: Unlike a normal call or `spawn_task`, legacy `spawn` forwards mutable arguments without a top-level shallow copy. Caller and worker therefore observe the same composite identity and must coordinate reads and writes to avoid races.
+- **Argument compatibility**: Since 0.4.0, `spawn` follows the same value semantics as a normal call or `spawn_task`: composite arguments are independent values in the worker. To share mutable state with a worker, use a global with explicit coordination, or channels.
 
 ---
 
@@ -79,7 +79,7 @@ An error map contains `kind`, `message`, and `stack`. `kind` is `"runtime"` for 
 
 A timeout is non-terminal: it never cancels the worker, consumes its outcome, or changes the task. If completion is observable at the deadline, completion wins over timeout. A later or repeated wait therefore observes the same terminal outcome. Envelopes and error maps are fresh on every wait so their mutation cannot alter the private outcome, while a successful composite `value` preserves its original identity rather than being deep-copied.
 
-Supervised tasks share global/module runtime state and use the normal parameter rules: ordinary composite parameters receive a top-level shallow copy, while `ref` parameters, nested composites, closure upvalues, and successful composite results can preserve shared identity. Coordinate concurrent access to shared references, arrays, maps, structs, and upvalues with channels or another explicit ownership protocol.
+Supervised tasks share global/module runtime state and use the normal parameter rules: ordinary composite parameters are independent values at any depth (copy-on-write), while `ref` parameters and closure upvalues preserve shared identity. Coordinate concurrent access to intentionally shared state (globals, refs, upvalues) with channels or another explicit ownership protocol.
 
 The original `spawn` API remains detached for compatibility. Choose `spawn_task` only when the caller needs structured completion, replayable results, or failures it can inspect.
 
