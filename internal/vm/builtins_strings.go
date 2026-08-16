@@ -2,6 +2,7 @@ package vm
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"noxy-vm/internal/value"
 )
@@ -30,7 +31,14 @@ func (vm *VM) defineStringBuiltins() {
 		if len(args) < 2 {
 			return value.NewInt(-1)
 		}
-		return value.NewInt(int64(strings.Index(args[0].String(), args[1].String())))
+		subject := args[0].String()
+		byteOffset := strings.Index(subject, args[1].String())
+		if byteOffset < 0 {
+			return value.NewInt(-1)
+		}
+		// Noxy indexes strings by character, so translate the byte offset
+		// that strings.Index reports into a character index.
+		return value.NewInt(int64(utf8.RuneCountInString(subject[:byteOffset])))
 	})
 	vm.DefineNative("strings_count", func(args []value.Value) value.Value {
 		if len(args) < 2 {

@@ -23,7 +23,7 @@ func TestStringBuiltinsScalarTables(t *testing.T) {
 		{name: "ends with normal", builtin: "strings_ends_with", args: []value.Value{value.NewString("noxy.vm"), value.NewString(".vm")}, want: value.NewBool(true)},
 		{name: "ends with empty", builtin: "strings_ends_with", args: []value.Value{value.NewString(""), value.NewString("")}, want: value.NewBool(true)},
 		{name: "ends with short", builtin: "strings_ends_with", args: []value.Value{value.NewString("noxy")}, want: value.NewBool(false)},
-		{name: "index of normal byte offset", builtin: "strings_index_of", args: []value.Value{value.NewString("aéz"), value.NewString("z")}, want: value.NewInt(3)},
+		{name: "index of returns character index", builtin: "strings_index_of", args: []value.Value{value.NewString("aéz"), value.NewString("z")}, want: value.NewInt(2)},
 		{name: "index of empty", builtin: "strings_index_of", args: []value.Value{value.NewString(""), value.NewString("")}, want: value.NewInt(0)},
 		{name: "index of short", builtin: "strings_index_of", want: value.NewInt(-1)},
 		{name: "count normal", builtin: "strings_count", args: []value.Value{value.NewString("banana"), value.NewString("an")}, want: value.NewInt(2)},
@@ -145,5 +145,55 @@ func TestStringsSplitBuiltin(t *testing.T) {
 				assertBuiltinValue(t, parts.Elements[i], value.NewString(want))
 			}
 		})
+	}
+}
+
+func TestIndexOfReturnsCharacterIndex(t *testing.T) {
+	machine := New()
+	tests := []struct {
+		name    string
+		subject string
+		needle  string
+		want    int64
+	}{
+		{name: "ascii matches byte offset", subject: "abc:def", needle: ":", want: 3},
+		{name: "multibyte before match", subject: "münchen.de/path", needle: "/", want: 10},
+		{name: "multibyte needle", subject: "café bar", needle: "é", want: 3},
+		{name: "emoji before match", subject: "\U0001F600x:y", needle: ":", want: 2},
+		{name: "absent", subject: "abc", needle: "z", want: -1},
+		{name: "empty needle", subject: "abc", needle: "", want: 0},
+		{name: "match at start", subject: ":abc", needle: ":", want: 0},
+		{name: "empty subject", subject: "", needle: "a", want: -1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "strings_index_of", value.NewString(test.subject), value.NewString(test.needle))
+			if got.Type != value.VAL_INT || got.AsInt != test.want {
+				t.Fatalf("strings_index_of(%q, %q) = %#v, want %d", test.subject, test.needle, got, test.want)
+			}
+		})
+	}
+}
+
+func TestIndexOfComposesWithSubstring(t *testing.T) {
+	source := `use strings select *
+let line: string = "München: Bayern"
+let name: string = substring(line, 0, index_of(line, ":"))
+test_report(name)`
+	captured := captureVMSource(t, source)
+	got, ok := captured.Obj.(string)
+	if !ok || got != "München" {
+		t.Fatalf("substring with index_of = %#v, want %q", captured, "München")
+	}
+}
+
+func TestParseUrlKeepsMultibyteHostSeparateFromPath(t *testing.T) {
+	source := "use http_parser select *\n" +
+		"let u: HttpUrl = parse_url(\"http://münchen.de/path\")\n" +
+		"test_report(u.host + \"|\" + u.path)"
+	captured := captureVMSource(t, source)
+	got, ok := captured.Obj.(string)
+	if !ok || got != "münchen.de|/path" {
+		t.Fatalf("parse_url = %#v, want %q", captured, "münchen.de|/path")
 	}
 }
