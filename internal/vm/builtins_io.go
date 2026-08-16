@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"noxy-vm/internal/console"
 	"noxy-vm/internal/value"
 )
 
@@ -338,6 +339,9 @@ func (vm *VM) defineIOBuiltins() {
 		return value.NewBool(os.MkdirAll(args[0].String(), 0755) == nil)
 	})
 	vm.DefineNative("input", func(args []value.Value) value.Value {
+		// Repair a raw console mode leaked by a crashed program before a
+		// line-oriented read, which would otherwise block forever.
+		console.EnsureLineInput()
 		if len(args) > 0 {
 			fmt.Print(args[0].String())
 		}
