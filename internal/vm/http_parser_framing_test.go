@@ -381,3 +381,20 @@ func TestFrameHelpersCarryRespondFlag(t *testing.T) {
 		t.Fatal("frame_silent ok = true, want false")
 	}
 }
+
+// "requisição inválida" is 19 runes and 22 bytes in UTF-8, so a rune-count
+// regression in response_error's Content-Length calculation fails this test.
+func TestResponseErrorDeclaresByteLength(t *testing.T) {
+	source := `use http_server select *
+use http_parser select *
+let r: HttpResponse = response_error(400, "requisição inválida")
+test_report(r.headers[1] + "|" + to_str(length(r.body)))`
+	captured := captureVMSource(t, source)
+	got, ok := captured.Obj.(string)
+	if !ok {
+		t.Fatalf("test_report value = %#v, want string", captured)
+	}
+	if got != "Content-Length: 22|22" {
+		t.Fatalf("response_error framing = %q, want %q", got, "Content-Length: 22|22")
+	}
+}

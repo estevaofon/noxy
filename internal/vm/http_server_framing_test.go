@@ -3,6 +3,9 @@ package vm
 import (
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -245,5 +248,499 @@ test_report(ok)`, port)
 	<-closed
 	if captured.Type != value.VAL_BOOL || captured.AsBool {
 		t.Fatalf("send_all = %#v, want false", captured)
+	}
+}
+
+type noxyHTTPServer struct {
+	t       *testing.T
+	port    int
+	release chan struct{}
+	done    chan error
+	once    sync.Once
+}
+
+// startNoxyHTTPServer runs the Noxy HTTP server on an ephemeral port.
+// handlerBody is Noxy source for the body of `func handler(req: HttpRequest) -> HttpResponse`.
+// config is Noxy source assigning fields on the `server` variable, e.g. `server.body_timeout_ms = 400`.
+//
+// bind_server, serve, and stop_server all take `ref HttpServer`. This
+// harness calls them through `use http_server select *`, which erases the
+// exact static signature at the call site (docs/REF_SEMANTICS.md section
+// 2), so every call below is explicit `ref server` -- the plain form only
+// works for a same-file caller who compiles against the real signature.
+func startNoxyHTTPServer(t *testing.T, handlerBody string, config string) *noxyHTTPServer {
+	t.Helper()
+
+	harness := &noxyHTTPServer{
+		t:       t,
+		release: make(chan struct{}),
+		done:    make(chan error, 1),
+	}
+	ready := make(chan int, 1)
+
+	machine := New()
+	machine.DefineNative("harness_ready", func(args []value.Value) value.Value {
+		port := 0
+		if len(args) == 1 {
+			port = int(args[0].AsInt)
+		}
+		ready <- port
+		return value.NewNull()
+	})
+	machine.DefineNative("harness_wait", func([]value.Value) value.Value {
+		<-harness.release
+		return value.NewNull()
+	})
+
+	source := `use http_server select *
+use http_parser select *
+
+func handler(req: HttpRequest) -> HttpResponse
+` + handlerBody + `
+end
+
+func serve_loop()
+    serve(ref server, handler)
+end
+
+let server: HttpServer = new_server("127.0.0.1", 0)
+` + config + `
+if bind_server(ref server) then
+    spawn(serve_loop)
+    harness_ready(server.port)
+    harness_wait()
+    stop_server(ref server)
+else
+    harness_ready(0)
+    harness_wait()
+end
+`
+
+	code := compileVMSource(t, source)
+	go func() {
+		harness.done <- machine.Interpret(code)
+	}()
+
+	select {
+	case port := <-ready:
+		if port <= 0 {
+			harness.stop()
+			t.Fatal("noxy http server failed to bind")
+		}
+		harness.port = port
+	case <-time.After(10 * time.Second):
+		harness.stop()
+		t.Fatal("noxy http server did not report its port")
+	}
+
+	t.Cleanup(harness.stop)
+	return harness
+}
+
+func (h *noxyHTTPServer) stop() {
+	h.once.Do(func() {
+		close(h.release)
+		select {
+		case err := <-h.done:
+			if err != nil {
+				h.t.Errorf("noxy http server exited with error: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			h.t.Error("noxy http server did not shut down")
+		}
+	})
+}
+
+func (h *noxyHTTPServer) dial() net.Conn {
+	h.t.Helper()
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", h.port), 5*time.Second)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
+	return conn
+}
+
+// readRawResponse reads until EOF, which the server guarantees by closing after one response.
+func readRawResponse(t *testing.T, conn net.Conn) string {
+	t.Helper()
+	var builder strings.Builder
+	buffer := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buffer)
+		builder.Write(buffer[:n])
+		if err != nil {
+			break
+		}
+	}
+	return builder.String()
+}
+
+func responseStatus(t *testing.T, raw string) int {
+	t.Helper()
+	if raw == "" {
+		return 0
+	}
+	line, _, found := strings.Cut(raw, "\r\n")
+	if !found {
+		t.Fatalf("response has no status line: %q", raw)
+	}
+	fields := strings.Split(line, " ")
+	if len(fields) < 2 {
+		t.Fatalf("malformed status line: %q", line)
+	}
+	code, err := strconv.Atoi(fields[1])
+	if err != nil {
+		t.Fatalf("status line %q: %v", line, err)
+	}
+	return code
+}
+
+func responseBody(t *testing.T, raw string) string {
+	t.Helper()
+	_, body, found := strings.Cut(raw, "\r\n\r\n")
+	if !found {
+		t.Fatalf("response has no body separator: %q", raw)
+	}
+	return body
+}
+
+const echoHandler = `    if req.path == "/echo" then
+        return response_text(to_str(req.body))
+    end
+    if req.path == "/len" then
+        return response_text(to_str(length(req.body)))
+    end
+    if req.path == "/query" then
+        return response_text(req.query)
+    end
+    return response_text("ok")`
+
+func TestServerFramesRequestDeliveredOneByteAtATime(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	request := "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 11\r\n\r\nhello world"
+	for i := 0; i < len(request); i++ {
+		if _, err := conn.Write([]byte(request[i : i+1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status = %d, want 200", got)
+	}
+	if got := responseBody(t, raw); got != "hello world" {
+		t.Fatalf("body = %q, want %q", got, "hello world")
+	}
+}
+
+func TestServerFramesRequestSplitInsideTerminator(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	head := "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\n\r"
+	if _, err := conn.Write([]byte(head)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := conn.Write([]byte("\nabcde")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status = %d, want 200", got)
+	}
+	if got := responseBody(t, raw); got != "abcde" {
+		t.Fatalf("body = %q, want %q", got, "abcde")
+	}
+}
+
+func TestServerReadsBodyLargerThanReadChunk(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "server.read_chunk_bytes = 64")
+	conn := server.dial()
+	payload := strings.Repeat("z", 5000)
+	request := fmt.Sprintf("POST /len HTTP/1.1\r\nHost: a\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+	if _, err := conn.Write([]byte(request)); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status = %d, want 200", got)
+	}
+	if got := responseBody(t, raw); got != "5000" {
+		t.Fatalf("body = %q, want %q", got, "5000")
+	}
+}
+
+func TestServerReadsBodyDeliveredInSegments(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	if _, err := conn.Write([]byte("POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 9\r\n\r\nabc")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := conn.Write([]byte("def")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := conn.Write([]byte("ghi")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseBody(t, raw); got != "abcdefghi" {
+		t.Fatalf("body = %q, want %q", got, "abcdefghi")
+	}
+}
+
+func TestServerTreatsMissingContentLengthAsEmptyBody(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	if _, err := conn.Write([]byte("POST /len HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status = %d, want 200", got)
+	}
+	if got := responseBody(t, raw); got != "0" {
+		t.Fatalf("body = %q, want %q", got, "0")
+	}
+}
+
+func TestServerIgnoresSurplusPipelinedBytes(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	request := "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\n\r\nokGET /extra HTTP/1.1\r\nHost: a\r\n\r\n"
+	if _, err := conn.Write([]byte(request)); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseBody(t, raw); got != "ok" {
+		t.Fatalf("body = %q, want %q", got, "ok")
+	}
+	if strings.Count(raw, "HTTP/1.1 ") != 1 {
+		t.Fatalf("expected exactly one response, got %q", raw)
+	}
+}
+
+func TestServerParsesQuery(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	if _, err := conn.Write([]byte("GET /query?a=1&b=2 HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if got := responseBody(t, raw); got != "a=1&b=2" {
+		t.Fatalf("body = %q, want %q", got, "a=1&b=2")
+	}
+}
+
+func TestServerRejectsInvalidRequests(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		request string
+		want    int
+	}{
+		{name: "header block too large", config: "server.max_header_bytes = 256", request: "GET / HTTP/1.1\r\nX-Big: " + strings.Repeat("p", 400) + "\r\n\r\n", want: 431},
+		{name: "body too large", config: "server.max_body_bytes = 16", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 64\r\n\r\n", want: 413},
+		{name: "duplicate content length", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nabcde", want: 400},
+		{name: "signed content length", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: +5\r\n\r\nabcde", want: 400},
+		{name: "chunked encoding", request: "POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", want: 501},
+		{name: "chunked with length", request: "POST /echo HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\nabcde", want: 400},
+		{name: "unsupported version", request: "GET / HTTP/2.0\r\nHost: a\r\n\r\n", want: 505},
+		{name: "obs fold", request: "GET / HTTP/1.1\r\nHost: a\r\n more\r\n\r\n", want: 400},
+		{name: "space before colon", request: "GET / HTTP/1.1\r\nHost : a\r\n\r\n", want: 400},
+		{name: "target with space", request: "GET /a b HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
+		{name: "absolute form target", request: "GET http://a/b HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
+		{name: "target too long", request: "GET /" + strings.Repeat("q", 2100) + " HTTP/1.1\r\nHost: a\r\n\r\n", want: 414},
+		// The regression that the UTF-8 invariant introduces if left ungated:
+		// to_str raises inside the spawned routine, the client is left hanging,
+		// and the VM prints Thread Error to the server's stdout.
+		{name: "non utf8 header value", request: "GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a\r\n\r\n", want: 400},
+		{name: "non utf8 target", request: "GET /\xff HTTP/1.1\r\nHost: a\r\n\r\n", want: 400},
+		{name: "content length above int64", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 9999999999999999999\r\n\r\n", want: 400},
+		// Response splitting. A bare LF survives the \r\n split, so without the
+		// is_field_text rule these reach a handler intact and any handler that
+		// echoes the value into a response header forges a second response.
+		{name: "bare lf in header value", request: "GET / HTTP/1.1\r\nX-Echo: a\nInjected: yes\r\nHost: a\r\n\r\n", want: 400},
+		{name: "bare cr in header value", request: "GET / HTTP/1.1\r\nX-Echo: a\rInjected: yes\r\nHost: a\r\n\r\n", want: 400},
+		{name: "nul in header value", request: "GET / HTTP/1.1\r\nX-Echo: a\x00b\r\nHost: a\r\n\r\n", want: 400},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := startNoxyHTTPServer(t, echoHandler, test.config)
+			conn := server.dial()
+			if _, err := conn.Write([]byte(test.request)); err != nil {
+				t.Fatal(err)
+			}
+			raw := readRawResponse(t, conn)
+			if got := responseStatus(t, raw); got != test.want {
+				t.Fatalf("status = %d, want %d (response %q)", got, test.want, raw)
+			}
+			if !strings.Contains(raw, "Connection: close") {
+				t.Fatalf("response is missing Connection: close: %q", raw)
+			}
+			declared := fmt.Sprintf("Content-Length: %d\r\n", len(responseBody(t, raw)))
+			if !strings.Contains(raw, declared) {
+				t.Fatalf("response does not declare %q: %q", declared, raw)
+			}
+		})
+	}
+}
+
+func TestServerRejectsEofMidRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		request string
+	}{
+		{name: "eof mid header", request: "GET / HTTP/1.1\r\nHost: a"},
+		{name: "eof mid body", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := startNoxyHTTPServer(t, echoHandler, "")
+			conn := server.dial()
+			if _, err := conn.Write([]byte(test.request)); err != nil {
+				t.Fatal(err)
+			}
+			if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+				t.Fatal(err)
+			}
+			raw := readRawResponse(t, conn)
+			if got := responseStatus(t, raw); got != 400 {
+				t.Fatalf("status = %d, want 400 (response %q)", got, raw)
+			}
+		})
+	}
+}
+
+func TestServerTimesOutStalledClients(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  string
+		request string
+	}{
+		{name: "stalled mid header", config: "server.header_timeout_ms = 400", request: "GET / HTTP/1.1\r\nHost: a\r\n"},
+		{name: "stalled mid body", config: "server.body_timeout_ms = 400", request: "POST /echo HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := startNoxyHTTPServer(t, echoHandler, test.config)
+			conn := server.dial()
+			started := time.Now()
+			if _, err := conn.Write([]byte(test.request)); err != nil {
+				t.Fatal(err)
+			}
+			raw := readRawResponse(t, conn)
+			if got := responseStatus(t, raw); got != 408 {
+				t.Fatalf("status = %d, want 408 (response %q)", got, raw)
+			}
+			if elapsed := time.Since(started); elapsed > 10*time.Second {
+				t.Fatalf("timeout took %s, want a bounded wait", elapsed)
+			}
+		})
+	}
+}
+
+func TestServerTimesOutSlowlorisTrickle(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "server.header_timeout_ms = 600")
+	conn := server.dial()
+	request := "GET / HTTP/1.1\r\nHost: a\r\nX-Pad: 0123456789\r\n\r\n"
+	go func() {
+		for i := 0; i < len(request); i++ {
+			if _, err := conn.Write([]byte(request[i : i+1])); err != nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+	raw := readRawResponse(t, conn)
+	if got := responseStatus(t, raw); got != 408 {
+		t.Fatalf("status = %d, want 408 (response %q)", got, raw)
+	}
+}
+
+func TestServerClosesSilentlyOnEmptyConnection(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+	conn := server.dial()
+	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	if raw := readRawResponse(t, conn); raw != "" {
+		t.Fatalf("response = %q, want no bytes", raw)
+	}
+}
+
+func TestServerClosesConnectionWhenHandlerFails(t *testing.T) {
+	failing := `    if req.path == "/boom" then
+        let numbers: int[2]
+        return response_text(to_str(numbers[9]))
+    end
+    return response_text("ok")`
+	server := startNoxyHTTPServer(t, failing, "")
+
+	boom := server.dial()
+	if _, err := boom.Write([]byte("GET /boom HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = readRawResponse(t, boom)
+
+	survivor := server.dial()
+	if _, err := survivor.Write([]byte("GET /ok HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, survivor)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status after failing handler = %d, want 200 (response %q)", got, raw)
+	}
+}
+
+// The end-to-end response-splitting proof: a handler that echoes a received
+// header value into a response header is the realistic vulnerable shape, and
+// the request that would exploit it must never reach that handler.
+func TestServerRejectsResponseSplittingAttempt(t *testing.T) {
+	echoing := `    let out: string[64]
+    out[0] = "Content-Type: text/plain"
+    out[1] = "X-Echo: " + get_header(req.headers, req.header_count, "X-Echo")
+    out[2] = "Content-Length: 2"
+    out[3] = "Connection: close"
+    return HttpResponse("HTTP/1.1", 200, "OK", out, 4, b"ok")`
+	server := startNoxyHTTPServer(t, echoing, "")
+	conn := server.dial()
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\nX-Echo: a\r\nContent-Length: 0\r\n\r\nHTTP/1.1 200 OK\r\n\r\nInjected: yes\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, conn)
+	if strings.Count(raw, "HTTP/1.1 ") != 1 {
+		t.Fatalf("expected exactly one response, got %q", raw)
+	}
+	if strings.Contains(raw, "Injected") {
+		t.Fatalf("injected header reached the response: %q", raw)
+	}
+}
+
+// A non-UTF-8 request must be an ordinary rejection, not an event that takes
+// the connection routine down. Ungated, to_str raises: this client would hang
+// with no response and the next one would still be served, so the assertion
+// that matters is that THIS connection is answered.
+func TestServerSurvivesNonUTF8Request(t *testing.T) {
+	server := startNoxyHTTPServer(t, echoHandler, "")
+
+	bad := server.dial()
+	if _, err := bad.Write([]byte("GET / HTTP/1.1\r\nX-Bad: \xff\xfe\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := responseStatus(t, readRawResponse(t, bad)); got != 400 {
+		t.Fatalf("status = %d, want 400", got)
+	}
+
+	survivor := server.dial()
+	if _, err := survivor.Write([]byte("GET /ok HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	raw := readRawResponse(t, survivor)
+	if got := responseStatus(t, raw); got != 200 {
+		t.Fatalf("status after non-UTF-8 request = %d, want 200 (response %q)", got, raw)
 	}
 }
