@@ -440,7 +440,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// 1. Compile Array (Left) — CoW: cadeia MUT uniciza cada nível
 			// do caminho (inclui OP_DEREF_MUT quando a base é ref)
-			leftType, err := c.compileLValueBase(indexExp.Left)
+			leftType, _, err := c.compileLValueBase(indexExp.Left)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -525,9 +525,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// 1. Compile Object — CoW: cadeia MUT uniciza cada nível do
 			// caminho (inclui OP_DEREF_MUT quando a base é ref)
-			leftType, err := c.compileLValueBase(memberExp.Left)
+			leftType, baseWasRef, err := c.compileLValueBase(memberExp.Left)
 			if err != nil {
 				return nil, nil, err
+			}
+			// Compatibilidade pré-0.4: com base ref, o checker antigo nunca
+			// resolvia o tipo do campo (a asserção sobre RefType falhava em
+			// silêncio) e o assignment passava sem checagem. Replicado aqui
+			// para não rejeitar programas existentes (ex.: stack.nx).
+			if baseWasRef {
+				leftType = nil
 			}
 
 			// 2. Compile Value
@@ -1867,7 +1874,7 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		// CoW: um ref para dentro de um contêiner fixa a identidade do
 		// contêiner — a base precisa ser unicizada na criação do ref para a
 		// escrita através dele não vazar em cópias pendentes.
-		owner, err := c.compileLValueBase(target.Left)
+		owner, _, err := c.compileLValueBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
@@ -1881,7 +1888,7 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		return element, nil
 	case *ast.IndexExpression:
 		// CoW: base do ref unicizada na criação (ver caso MemberAccess acima)
-		container, err := c.compileLValueBase(target.Left)
+		container, _, err := c.compileLValueBase(target.Left)
 		if err != nil {
 			return nil, err
 		}

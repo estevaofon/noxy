@@ -1388,6 +1388,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 		case chunk.OP_DEREF_MUT:
 			refVal := vm.pop()
+			if refVal.Type != value.VAL_REF {
+				// Tolerância herdada do auto-deref antigo: slots com tipo
+				// estático ref podem conter valores planos (checker leniente
+				// pré-0.4). O valor já foi unicizado no nível anterior da
+				// cadeia MUT — segue adiante como contêiner.
+				vm.push(refVal)
+				continue
+			}
 			v, err := vm.unicizeThroughRefValue(refVal)
 			if err != nil {
 				return vm.runtimeError(c, ip, "%s", err)

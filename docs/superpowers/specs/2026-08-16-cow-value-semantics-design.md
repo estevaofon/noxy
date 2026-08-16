@@ -85,9 +85,13 @@ Uma operação marca `Shared` no composto quando **cria um segundo ponteiro vivo
 - captura de `defer` (`defer.go`), args de `spawn`/`spawn_task` (`task_execution.go`);
 - deref de `ref` para contexto de valor (o `OP_COPY` de `compiler.go:1497` vira marcação);
 - construção de instância (args viram campos);
-- **natives**: por padrão, todo composto passado a native é marcado (conservador).
-  Natives comprovadamente só-leitura entram numa allowlist auditada que não marca
-  (`print`, `length`, `to_str`, `fmt`, `json.stringify`, `contains`, …).
+- **natives SEM assinatura**: por padrão, todo composto passado é marcado
+  (conservador). Natives comprovadamente só-leitura entram numa allowlist
+  auditada que não marca (`length`, `to_str`, `fmt`, …) — `cow_natives.go`.
+- **natives COM assinatura mantêm a cópia rasa ansiosa** (decisão refinada na
+  implementação): o corpo em Go pode mutar o argumento sem passar pelo CoW do
+  bytecode, então a cópia é a única proteção do chamador. Custo restrito a
+  natives; closures/tasks/defer-closures usam marcação.
 
 Leitura pura (`print(a[0])`, `a[0].x` em expressão) **não marca** — evita clones
 espúrios em loops de leitura.
@@ -217,6 +221,7 @@ binário CoW ao final; `benchmarks/RESULTS.md` consolida a comparação e é com
 
 | Risco | Mitigação |
 |---|---|
+| Ref para dentro de contêiner (`ref a[0]`, campo) fixa a identidade do contêiner | a base do ref é **unicizada na criação** (cadeia MUT em `compileLValueBase`); anomalia residual: se o contêiner for compartilhado DEPOIS da criação do ref, a escrita através do ref é visível pela cópia ainda não materializada — documentado como limitação (mesma classe de aresta do ref pré-CoW) |
 | Lvalue fora do lowering → vazamento de mutação | guard de arquitetura + suite de contrato por forma de lvalue |
 | Native retentor fora da marcação → aliasing oculto | default conservador (marca tudo), allowlist auditada só-leitura |
 | Marcação espúria → clones em loop (O(n²) acidental) | mark-on-store (não on-read) + contador de clones em benchs |

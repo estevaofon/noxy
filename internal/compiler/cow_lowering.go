@@ -11,8 +11,10 @@ import (
 // compileLValueBase compila a BASE de um lvalue emitindo a cadeia de opcodes
 // *_MUT que uniciza cada nível do caminho de mutação (CoW), gravando clones
 // de volta no slot pai. Devolve o tipo estático da expressão, já com refs
-// dereferenciados (emite OP_DEREF_MUT quando o tipo é ref).
-func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, error) {
+// dereferenciados (emite OP_DEREF_MUT quando o tipo é ref), e um flag
+// indicando se o nível final era ref — o branch de member-assignment usa o
+// flag para replicar a leniência do checker pré-0.4 com bases ref.
+func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, error) {
 	switch n := expr.(type) {
 	case *ast.Identifier:
 		var t ast.NoxyType
@@ -27,16 +29,17 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, error) 
 			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL_MUT, nameConstant)
 			t = c.globals[n.Value] // pode ser nil (desconhecido/any)
 		}
-		return c.derefMutIfRef(t), nil
+		t, wasRef := c.derefMutIfRef(t)
+		return t, wasRef, nil
 
 	case *ast.IndexExpression:
-		leftType, err := c.compileLValueBase(n.Left)
+		leftType, _, err := c.compileLValueBase(n.Left)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		_, idxType, err := c.Compile(n.Index)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if _, ok := idxType.(*ast.RefType); ok {
 			c.emitByte(byte(chunk.OP_DEREF))
@@ -48,12 +51,13 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, error) 
 		} else if mapType, ok := leftType.(*ast.MapType); ok {
 			t = mapType.ValueType
 		}
-		return c.derefMutIfRef(t), nil
+		t, wasRef := c.derefMutIfRef(t)
+		return t, wasRef, nil
 
 	case *ast.MemberAccessExpression:
-		leftType, err := c.compileLValueBase(n.Left)
+		leftType, _, err := c.compileLValueBase(n.Left)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		nameConst := c.makeConstant(value.NewString(n.Member))
 		c.emitOpWithConstantIndex(chunk.OP_GET_PROP_MUT, nameConst)
@@ -68,21 +72,22 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, error) 
 				}
 			}
 		}
-		return c.derefMutIfRef(t), nil
+		t, wasRef := c.derefMutIfRef(t)
+		return t, wasRef, nil
 
 	default:
-		return nil, fmt.Errorf("[line %d] invalid assignment target", c.currentLine)
+		return nil, false, fmt.Errorf("[line %d] invalid assignment target", c.currentLine)
 	}
 }
 
 // derefMutIfRef emite OP_DEREF_MUT quando o tipo estático é ref, devolvendo
-// o tipo do elemento; caso contrário devolve o tipo inalterado.
-func (c *Compiler) derefMutIfRef(t ast.NoxyType) ast.NoxyType {
+// o tipo do elemento e true; caso contrário devolve o tipo inalterado e false.
+func (c *Compiler) derefMutIfRef(t ast.NoxyType) (ast.NoxyType, bool) {
 	if refType, ok := t.(*ast.RefType); ok {
 		c.emitByte(byte(chunk.OP_DEREF_MUT))
-		return refType.ElementType
+		return refType.ElementType, true
 	}
-	return t
+	return t, false
 }
 
 // isFreshComposite reconhece expressões que produzem um composto novo em
