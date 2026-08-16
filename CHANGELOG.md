@@ -2,6 +2,69 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-16
+
+### Changed (BREAKING) — Semântica de valor com copy-on-write
+
+Arrays, maps e structs passam a se comportar como **cópias profundas
+independentes em qualquer vínculo sem `ref`** — atribuição, chamada, leitura
+e escrita de contêiner, canais, `spawn`/`spawn_task` e captura de `defer`.
+A implementação é copy-on-write: nada é copiado no vínculo; o clone acontece
+lazily, um nível por vez, na primeira mutação de um valor compartilhado.
+`ref` vira o único mecanismo de compartilhamento da linguagem. Spec de design:
+`docs/superpowers/specs/2026-08-16-cow-value-semantics-design.md`.
+
+- **`let b = a` e `x = y` deixam de aliasar.** Antes, mutar `b` era visível
+  em `a`. Migração: quem dependia do aliasing usa `ref`.
+- **Ler de contêiner deixa de aliasar** (`let p = arr[0]; p.x = 1` não altera
+  mais `arr[0]`). Migração: mutar pelo caminho (`arr[0].x = 1`) ou `ref`.
+- **Mutação aninhada via parâmetro não vaza mais.** A antiga cópia rasa
+  copiava só o contêiner externo; `f(a)` seguido de `a[0].x = 1` dentro de
+  `f` era visível no chamador. Agora o parâmetro é independente em qualquer
+  profundidade. Migração: declarar o parâmetro `ref`.
+- **`append(dest, item)` guarda um valor independente** — mutar `item` depois
+  não altera `dest`. O alvo de `append`/`pop`/`delete` compartilhado é
+  clonado antes da mutação (CoW pelo slot).
+- **`spawn` perde a exceção de identidade**: seus argumentos seguem a mesma
+  semântica de valor de `spawn_task` e chamadas normais. `chan_send` entrega
+  valor independente — dados passados por canal ficam livres de race por
+  construção. Migração para estado compartilhado: globals coordenados ou
+  canais.
+- **`==`/`!=` de compostos vira estrutural** (recursivo por conteúdo);
+  `[1, 2] == [1, 2]` agora é `true`. Refs comparam por identidade de slot e
+  não são dereferenciados. Antes, compostos comparavam por identidade de
+  ponteiro — instável através de chamadas. Migração para identidade: comparar
+  refs ou uma chave própria.
+- **Natives com assinatura mantêm a cópia ansiosa** dos args compostos
+  não-ref: o corpo em Go muta fora do copy-on-write do bytecode, e a cópia é
+  a única proteção do chamador. Natives sem assinatura marcam os args
+  conservadoramente; uma allowlist auditada de natives só-leitura
+  (`internal/vm/cow_natives.go`) evita o custo onde é provado desnecessário.
+- **Limitação documentada**: um `ref` criado para dentro de um contêiner
+  (`ref arr[0]`, campo) fixa a identidade do contêiner na criação (a base é
+  unicizada nesse momento). Se o contêiner for copiado DEPOIS, escrita
+  através do ref pré-existente ainda é visível pela cópia não materializada.
+  Crie refs depois de compartilhar. Ver `docs/REF_SEMANTICS.md` §8.
+- **Leniência preservada**: campos tipados `ref T` que recebiam valores
+  planos (o checker antigo não validava campos quando a base era ref)
+  continuam aceitos, e o caminho de mutação tolera valor plano em slot de
+  tipo ref — programas como `noxy_examples/stack.nx` e `linked_list.nx`
+  seguem rodando sem alteração.
+
+### Added
+
+- Bit `Shared` atômico em arrays/maps/instâncias + opcodes de caminho de
+  mutação (`OP_GET_LOCAL_MUT`, `OP_GET_GLOBAL_MUT`, `OP_GET_UPVALUE_MUT`,
+  `OP_GET_INDEX_MUT`, `OP_GET_PROP_MUT`, `OP_DEREF_MUT`, `OP_MARK_SHARED`)
+  com lowering de lvalues no compilador (`compileLValueBase`).
+- Contador de clones CoW (`vm.CloneCountValue`) para testes e diagnóstico —
+  chamadas só-leitura custam 0 clones (coberto por teste).
+- Suite de benchmarks em `benchmarks/` com harness (`run_benchmarks.ps1`),
+  comparação de corpus (`compare_examples.ps1`) e resultados antes/depois
+  commitados (`benchmarks/RESULTS.md`).
+- `noxy_examples/shallow_copy.nx` reescrito como demonstração da semântica
+  de valor.
+
 ## [0.3.0] - 2026-08-16
 
 ### Changed (BREAKING)

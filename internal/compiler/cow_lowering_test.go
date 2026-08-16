@@ -1,0 +1,158 @@
+package compiler
+
+import (
+	"testing"
+
+	"noxy-vm/internal/chunk"
+	"noxy-vm/internal/lexer"
+	"noxy-vm/internal/parser"
+	"noxy-vm/internal/value"
+)
+
+func compileSource(t *testing.T, source string) *chunk.Chunk {
+	t.Helper()
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := New().Compile(program)
+	if err != nil {
+		t.Fatalf("compiler error: %v", err)
+	}
+	return code
+}
+
+// collectOpcodes percorre o bytecode do chunk raiz e de todas as funções
+// (constantes ObjFunction), respeitando o tamanho dos operandos.
+func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
+	t.Helper()
+	seen := map[chunk.OpCode]int{}
+	var walk func(c *chunk.Chunk)
+	walk = func(c *chunk.Chunk) {
+		for offset := 0; offset < len(c.Code); {
+			op := chunk.OpCode(c.Code[offset])
+			seen[op]++
+			offset++
+			switch op {
+			case chunk.OP_CONSTANT, chunk.OP_GET_LOCAL, chunk.OP_SET_LOCAL,
+				chunk.OP_GET_UPVALUE, chunk.OP_SET_UPVALUE, chunk.OP_CALL,
+				chunk.OP_DEFER, chunk.OP_REF_LOCAL, chunk.OP_REF_UPVALUE,
+				chunk.OP_GET_LOCAL_MUT, chunk.OP_GET_UPVALUE_MUT,
+				chunk.OP_SET_PROPERTY_DEREF, chunk.OP_INVOKE:
+				offset++
+			case chunk.OP_CONSTANT_LONG:
+				offset += 3
+			case chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL, chunk.OP_GET_PROPERTY,
+				chunk.OP_SET_PROPERTY, chunk.OP_JUMP, chunk.OP_JUMP_IF_FALSE,
+				chunk.OP_JUMP_IF_TRUE, chunk.OP_LOOP, chunk.OP_ARRAY, chunk.OP_MAP,
+				chunk.OP_REF_GLOBAL, chunk.OP_REF_PROPERTY, chunk.OP_CONTEXT_REF_PROPERTY,
+				chunk.OP_IMPORT, chunk.OP_IMPORT_FROM_ALL, chunk.OP_SELECT,
+				chunk.OP_GET_GLOBAL_MUT, chunk.OP_GET_PROP_MUT,
+				chunk.OP_MARK_REF_TARGET_TYPE, chunk.OP_MARK_RUNTIME_VALUE_TYPE:
+				offset += 2
+			case chunk.OP_CLOSURE:
+				// [const_index] [upvalue_count] ([is_local, index])*
+				if offset+1 < len(c.Code) {
+					upvalues := int(c.Code[offset+1])
+					offset += 2 + upvalues*2
+				} else {
+					offset = len(c.Code)
+				}
+			}
+		}
+		for _, constant := range c.Constants {
+			if fn, ok := constant.Obj.(*value.ObjFunction); ok && fn != nil {
+				if fnChunk, ok := fn.Chunk.(*chunk.Chunk); ok && fnChunk != nil {
+					walk(fnChunk)
+				}
+			}
+		}
+	}
+	walk(code)
+	return seen
+}
+
+func TestLoweringLocalIndexAssignment(t *testing.T) {
+	code := compileSource(t, `func f()
+    let a: int[] = [1, 2]
+    a[0] = 9
+end`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_GET_LOCAL_MUT] == 0 {
+		t.Fatal("a[0] = 9 com a local deve emitir OP_GET_LOCAL_MUT")
+	}
+}
+
+func TestLoweringGlobalIndexAssignment(t *testing.T) {
+	code := compileSource(t, `let a: int[] = [1, 2]
+a[0] = 9`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_GET_GLOBAL_MUT] == 0 {
+		t.Fatal("a[0] = 9 com a global deve emitir OP_GET_GLOBAL_MUT")
+	}
+}
+
+func TestLoweringNestedIndexAssignment(t *testing.T) {
+	code := compileSource(t, `let a: int[][] = [[1]]
+a[0][0] = 9`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_GET_INDEX_MUT] == 0 {
+		t.Fatal("a[0][0] = 9 deve emitir OP_GET_INDEX_MUT no nível intermediário")
+	}
+}
+
+func TestLoweringStructPathAssignment(t *testing.T) {
+	code := compileSource(t, `struct P
+    x: int
+end
+let a: P[] = [P(1)]
+a[0].x = 9`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_GET_GLOBAL_MUT] == 0 || ops[chunk.OP_GET_INDEX_MUT] == 0 {
+		t.Fatal("a[0].x = 9 deve unicizar a base (GET_GLOBAL_MUT) e o elemento (GET_INDEX_MUT)")
+	}
+}
+
+func TestLoweringRefParamIndexAssignment(t *testing.T) {
+	code := compileSource(t, `func f(a: ref int[])
+    a[0] = 9
+end`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_DEREF_MUT] == 0 {
+		t.Fatal("a[0] = 9 com a ref deve emitir OP_DEREF_MUT")
+	}
+}
+
+func TestMarkSharedOnAliasingLet(t *testing.T) {
+	code := compileSource(t, `func f()
+    let a: int[] = [1]
+    let b: int[] = a
+end`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_MARK_SHARED] == 0 {
+		t.Fatal("let b = a deve emitir OP_MARK_SHARED")
+	}
+}
+
+func TestNoMarkSharedOnFreshLiteralLet(t *testing.T) {
+	code := compileSource(t, `func f()
+    let b: int[] = [1, 2]
+end`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_MARK_SHARED] != 0 {
+		t.Fatal("let b = [literal] não deve emitir OP_MARK_SHARED")
+	}
+}
+
+func TestNoMarkSharedOnScalarAssignment(t *testing.T) {
+	code := compileSource(t, `func f()
+    let i: int = 0
+    i = i + 1
+end`)
+	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_MARK_SHARED] != 0 {
+		t.Fatal("atribuição escalar não deve emitir OP_MARK_SHARED (custo em hot loop)")
+	}
+}

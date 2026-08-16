@@ -135,7 +135,11 @@ test_report(void_result["status"] == "ok" && void_result["value"] == null && voi
 	assertBuiltinValue(t, got, value.NewBool(true))
 }
 
-func TestSpawnTaskReplaysCompositeIdentityInFreshEnvelopes(t *testing.T) {
+// Contrato CoW: == de compostos é estrutural, então dois envelopes de
+// task_await com o mesmo conteúdo comparam IGUAIS (antes o teste usava
+// identidade de ponteiro para provar que cada await devolve envelope fresco;
+// essa propriedade de mecanismo deixou de ser observável em código Noxy).
+func TestSpawnTaskAwaitEnvelopesCompareStructurally(t *testing.T) {
 	got := captureVMSource(t, `
 func worker() -> int[]
     return [1, 2, 3]
@@ -143,7 +147,7 @@ end
 let task: any = spawn_task(worker)
 let first: any = task_await(task)
 let second: any = task_await(task)
-test_report(first != second && first["value"] == second["value"] && first["error"] == null && second["error"] == null)
+test_report(first == second && first["value"] == second["value"] && first["error"] == null && second["error"] == null)
 `)
 	assertBuiltinValue(t, got, value.NewBool(true))
 }

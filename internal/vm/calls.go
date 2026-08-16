@@ -35,6 +35,12 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			callArgs := append([]value.Value(nil), args...)
 			vm.copyPreparedArguments(callArgs, params)
 			args = callArgs
+		} else if !native.ReadonlyArgs {
+			// CoW: native sem assinatura pode reter/mutar args — marca todos
+			// os compostos (conservador; allowlist só-leitura pula isto)
+			for i := range args {
+				value.MarkShared(args[i])
+			}
 		}
 		return vm.callNative(native, args, argCount, c, ip)
 	}
@@ -47,7 +53,9 @@ func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk
 			instance := value.NewInstance(structDef)
 			instObj := instance.Obj.(*value.ObjInstance)
 			for i := 0; i < argCount; i++ {
-				instObj.Fields[structDef.Fields[i]] = vm.peek(argCount - 1 - i)
+				arg := vm.peek(argCount - 1 - i)
+				value.MarkShared(arg) // CoW: o chamador ainda referencia o arg
+				instObj.Fields[structDef.Fields[i]] = arg
 			}
 			vm.stackTop -= argCount + 1
 			vm.push(instance)
@@ -97,9 +105,9 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 		if i < len(fn.Params) {
 			param := fn.Params[i]
 			if !param.IsRef {
-				// Pass by Value: Copy if mutable object
-				val := vm.stack[baseArgs+i]
-				vm.stack[baseArgs+i] = vm.copyValue(val)
+				// CoW: fronteira de valor — marca em vez de copiar; a cópia
+				// só acontece se alguém mutar (unicize)
+				value.MarkShared(vm.stack[baseArgs+i])
 			}
 		}
 	}
@@ -125,27 +133,39 @@ func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *ch
 	return true, nil
 }
 
+// copyValue é o clone raso do CoW: o contêiner novo nasce unshared, e os
+// filhos imediatos compostos ficam marcados Shared (passam a ter dois donos).
 func (vm *VM) copyValue(v value.Value) value.Value {
 	if v.Type != value.VAL_OBJ {
 		return v
 	}
 	switch obj := v.Obj.(type) {
 	case *value.ObjArray:
+		cloneCount.Add(1)
 		newElems := make([]value.Value, len(obj.Elements))
 		copy(newElems, obj.Elements)
+		for _, el := range newElems {
+			value.MarkShared(el)
+		}
 		copied := value.NewArray(newElems)
 		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjMap:
+		cloneCount.Add(1)
 		newData := obj.Snapshot()
+		for _, val := range newData {
+			value.MarkShared(val)
+		}
 		copied := value.NewMap()
 		copiedMap := copied.Obj.(*value.ObjMap)
 		copiedMap.Replace(newData)
 		copiedMap.RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjInstance:
+		cloneCount.Add(1)
 		newFields := make(map[string]value.Value)
 		for k, val := range obj.Fields {
+			value.MarkShared(val)
 			newFields[k] = val
 		}
 		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjInstance{Struct: obj.Struct, Fields: newFields}}

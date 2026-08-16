@@ -186,9 +186,11 @@ func TestPrepareDeferredCallUsesCallableCaptureSemantics(t *testing.T) {
 	closureValue := value.NewFunction("cleanup", 1, 0, []value.ParamInfo{{TypeName: "int[]"}}, chunk.New(), machine.shared.Root)
 	closure := &value.ObjClosure{Function: closureValue.Obj.(*value.ObjFunction), Environment: machine.shared.Root}
 
+	// Contrato CoW: closure defer captura por valor via marcação Shared —
+	// mesmo ponteiro, cópia adiada para a primeira mutação (unicize).
 	prepared, err := machine.prepareDeferredCall(value.Value{Type: value.VAL_FUNCTION, Obj: closure}, []value.Value{array}, SourceLocation{})
-	if err != nil || prepared.Arguments[0].Obj == array.Obj {
-		t.Fatalf("closure did not shallow-copy array")
+	if err != nil || prepared.Arguments[0].Obj != array.Obj || !value.IsShared(prepared.Arguments[0]) {
+		t.Fatalf("closure defer deve marcar o arg composto como Shared (captura CoW)")
 	}
 
 	reference := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "items", GlobalOwner: machine.shared.Root}}

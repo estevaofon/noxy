@@ -14,6 +14,10 @@ type ObjNative struct {
 	Fn         NativeFunc
 	Contextual ContextualNativeFunc
 	Signature  *NativeSignature
+	// ReadonlyArgs: native auditado que não retém nem muta args — o CoW não
+	// precisa marcar os compostos passados. Estampado no registro (hot path
+	// de chamada lê o campo em vez de consultar mapa por nome).
+	ReadonlyArgs bool
 }
 
 func (native *ObjNative) IsCallable() bool {

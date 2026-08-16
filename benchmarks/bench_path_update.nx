@@ -1,0 +1,34 @@
+// Custo do lowering de mutação por caminho (a[i].x = v) em dono único.
+// Nunca compartilhado: CoW não deve clonar nada aqui.
+struct Cell
+    hits: int
+    score: int
+end
+
+func main()
+    let cells: Cell[]
+    let i: int = 0
+    while i < 2000 do
+        append(cells, Cell(0, 0))
+        i = i + 1
+    end
+    let round: int = 0
+    while round < 500 do
+        i = 0
+        while i < 2000 do
+            cells[i].hits = cells[i].hits + 1
+            cells[i].score = cells[i].score + cells[i].hits
+            i = i + 1
+        end
+        round = round + 1
+    end
+    let s: int = 0
+    i = 0
+    while i < 2000 do
+        s = s + cells[i].score
+        i = i + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()

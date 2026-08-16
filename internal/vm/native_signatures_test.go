@@ -821,14 +821,17 @@ test_report(first.value + second.value)`)
 	testExpectedObject(t, 83, got)
 }
 
-func TestTypedAppendStoresOrdinaryCompositeItemWithoutNativeCopy(t *testing.T) {
+// Contrato CoW (spec 2026-08-16): o item guardado por append é um valor
+// independente — mutar o original depois não altera o que foi guardado
+// (antes desta mudança o esperado era 42, com o item compartilhado).
+func TestTypedAppendStoresIndependentCompositeItem(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let item: int[] = [1]
 let values: int[][] = []
 append(values, item)
 item[0] = 42
 test_report(values[0][0])`)
-	testExpectedObject(t, 42, got)
+	testExpectedObject(t, 1, got)
 }
 
 func TestDynamicAppendSpecializesItemModeFromTargetType(t *testing.T) {

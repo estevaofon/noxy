@@ -94,24 +94,41 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
 
 ### 2.2 Composite Types
 
-#### Shallow-Copy Semantics
+#### Value Semantics (Copy-on-Write)
 
-Arrays, maps, and structs are heap-backed composite values. When one of these values is passed to a function parameter that is not declared with `ref`, Noxy creates a **shallow copy**:
+Arrays, maps, and structs are composite **values**. Every binding without
+`ref` behaves as an independent deep copy, at any depth:
 
-1. A new top-level array, map, or struct instance is created for the parameter.
-2. Immediate elements, entries, or fields are copied into that new container.
-3. Primitive values are independent after the copy.
-4. Nested composite values keep their identity and therefore remain shared with the caller.
+1. **Assignment copies**: `let b = a` and `x = y` produce independent values.
+2. **Calls copy**: arguments to non-`ref` parameters are independent values —
+   nested mutation inside the callee never leaks to the caller.
+3. **Reading from a container copies**: `let p = arr[0]` produces an
+   independent value; mutating `p` does not affect `arr[0]`.
+4. **Storing into a container copies**: `append(outer, inner)`, `m[k] = v`,
+   `s.field = arr`, and constructor arguments store independent values.
+5. **Channels carry values**: `chan_send` delivers an independent copy. This
+   applies to `spawn` and `spawn_task` arguments equally.
+6. **`ref` is the only sharing mechanism.** A `ref` points to a *slot*
+   (variable, field, index, map entry); writes through any alias of the slot
+   are visible to all aliases of that slot.
+7. **`==`/`!=` on composites is structural** (recursive by content). `ref`
+   values compare by slot identity and are not dereferenced.
+8. Closures capture *variables* (slots); captured-variable aliasing is
+   unchanged and orthogonal to value semantics.
 
-Consequently, replacing or directly mutating the top-level copy does not affect the caller, but mutating a nested composite value can be observed by the caller. This is **not** a deep copy.
+The runtime implements this contract with **copy-on-write**: no copy is made
+at the binding site — composites are marked as shared and cloned lazily, one
+level at a time, at the first mutation. Read-only sharing therefore costs
+O(1); programs never observe the difference, only the performance.
 
-Parameters declared with `ref` skip the shallow copy and access the caller's original value directly.
+One documented edge: a `ref` taken *into* a container (`ref arr[0]`, a `ref`
+field) pins that container's identity at creation time. If the container is
+copied *afterwards*, writes through the pre-existing `ref` are visible to
+copies that have not yet materialized. Take refs after, not before, sharing.
 
 #### Concurrency and composite values
 
-Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Normal calls and `spawn_task` use the shallow-copy parameter rules above. The legacy detached `spawn` is a compatibility exception and forwards argument values directly, preserving the top-level identity of mutable composites. Concurrent compound operations or mutation through any shared identity require coordination through channels or another explicit single-owner protocol.
-
-This runtime foundation does not change any public Noxy syntax, builtin signature, result shape, or shallow-copy rule.
+Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Normal calls, `spawn`, and `spawn_task` all follow the value-semantics parameter rules above — the legacy `spawn` identity exception was removed in 0.4.0 — so data handed to another routine by argument or channel is race-free by construction. Concurrent mutation of intentionally shared state (globals, `ref`) still requires coordination through channels or another explicit single-owner protocol.
 
 #### Arrays (Dynamic and Fixed)
 
@@ -132,7 +149,7 @@ let zeroed: int[100] = zeros(100)
 ```
 
 **Pass-by-Value Behavior**:
-Arrays are passed by **VALUE** using a shallow copy by default. The outer array is independent, but nested arrays, maps, or structs remain shared. Use `ref` when the function must modify the caller's outer array directly.
+Arrays are passed by **VALUE**: the callee's array is independent at any depth (copy-on-write). Use `ref` when the function must modify the caller's array.
 
 #### Maps (Hashmaps)
 
@@ -143,7 +160,7 @@ scores["Bob"] = 50
 ```
 
 **Pass-by-Value Behavior**:
-Maps are passed by **VALUE** using a shallow copy by default. The outer map is independent, but nested composite values remain shared. Use `ref` when the function must modify the caller's outer map directly.
+Maps are passed by **VALUE**: the callee's map is independent at any depth (copy-on-write). Use `ref` when the function must modify the caller's map.
 
 #### Structs
 
@@ -155,7 +172,7 @@ end
 ```
 
 **Pass-by-Value Behavior**:
-Structs are passed by **VALUE** using a shallow copy by default. Direct fields belong to the copied instance, but nested composite fields remain shared. Use `ref` when the function must modify the caller's original struct instance directly.
+Structs are passed by **VALUE**: the callee's instance is independent at any depth (copy-on-write), including nested composite fields. Use `ref` when the function must modify the caller's original instance.
 
 ---
 ### 2.3 The `ref` Operator
@@ -432,15 +449,15 @@ Exact function types may also appear in parameters, returns, struct fields, map 
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 
-Noxy uses **Pass-by-Value** by default. Primitive values are copied directly. Composite values (arrays, maps, and structs) receive a **shallow copy** of their top-level container.
+Noxy uses **Pass-by-Value** by default. Primitive values are copied directly. Composite values (arrays, maps, and structs) behave as independent deep copies at any depth, implemented with copy-on-write (see §2.2).
 
-#### Pass-by-Value / Shallow Copy (Default)
+#### Pass-by-Value (Default)
 
-When a composite value is passed to a parameter without `ref`, the function receives a new top-level container. Replacing or directly mutating that top-level container does not affect the caller:
+When a composite value is passed to a parameter without `ref`, the function's view is fully independent of the caller's — mutating it at any depth never affects the caller:
 
 ```noxy
 func modify(arr: int[]) -> void
-    append(arr, 999) // Modifies local copy only
+    append(arr, 999) // Callee's value only
 end
 
 let list: int[] = [1, 2, 3]
@@ -448,34 +465,27 @@ modify(list)
 // list is still [1, 2, 3]
 ```
 
-The copy is shallow. Nested composite values are not recursively copied and remain shared:
+Independence is deep — nested composites do not leak either:
 
 ```noxy
 struct Box
     values: int[]
 end
 
-func replace_nested(box: Box) -> void
-    box.values = [100, 200] // Replaces a field only in the copied Box
-end
-
 func mutate_nested(box: Box) -> void
-    box.values[0] = 99 // Mutates the shared nested array
+    box.values[0] = 99 // Mutates the callee's independent value
 end
 
 let values: int[] = [1, 2]
 let box: Box = Box(values)
 
-replace_nested(box)
-// box.values is still [1, 2]
-
 mutate_nested(box)
-// box.values is now [99, 2]
-// values is also [99, 2]
+// box.values is still [1, 2]
+// values is still [1, 2]
 ```
 
 #### Pass-by-Reference (`ref`)
-To skip the shallow copy and let a function access the caller's original top-level value, use `ref` in the parameter type.
+To share the caller's value and let the function mutate it, use `ref` in the parameter type — the only sharing mechanism in the language.
 
 ```noxy
 func modify(arr: ref int[]) -> void
@@ -576,10 +586,11 @@ defer io.close(file)
 The callee and every argument are evaluated immediately, from left to right,
 when the `defer` statement executes. An evaluation or registration error does
 not register that call, although calls registered earlier in the frame still
-run. For typed Noxy functions and signed natives, non-`ref` arguments receive
-the normal top-level shallow copy at registration time, while `ref` parameters
-retain their reference. Nested composite identities therefore remain shared as
-described in [Shallow-Copy Semantics](#shallow-copy-semantics). Legacy untyped
+run. For typed Noxy functions, non-`ref` arguments are captured **by value** at
+registration time (copy-on-write): later mutations by the enclosing frame are
+not observed by the deferred call. Signed natives keep an eager copy at
+registration, since native bodies mutate outside the bytecode's
+copy-on-write. `ref` parameters retain their reference. Legacy untyped
 natives retain values using their existing dynamic calling convention because
 they expose no parameter-mode metadata. Struct constructors retain evaluated
 field values directly, matching their existing constructor semantics.
@@ -727,7 +738,7 @@ let back: bytes = hex_decode(hex)   // b"Hello"
 
 ### Concurrency and Supervised Tasks
 
-`spawn(function, ...arguments)` starts a detached Noxy routine and immediately returns `null`. It exposes no handle and does not propagate the worker's result, runtime error, or panic to its caller. For compatibility, it also forwards arguments without the normal top-level shallow copy, so mutable composite arguments keep the same identity in caller and worker and require explicit coordination to avoid races. Its existing validation and asynchronous diagnostics remain compatible.
+`spawn(function, ...arguments)` starts a detached Noxy routine and immediately returns `null`. It exposes no handle and does not propagate the worker's result, runtime error, or panic to its caller. Since 0.4.0 its arguments follow the normal value semantics (the legacy identity-forwarding exception was removed): composite arguments are independent values in the worker. Its existing validation and asynchronous diagnostics remain compatible.
 
 `spawn_task(function, ...arguments)` instead validates a Noxy function or closure, arity, and parameter modes synchronously, launches it in a shared child VM, and returns an opaque task handle. Handles may be stored as `any`, passed, printed, and compared by identity, but cannot be constructed or inspected by Noxy code.
 
@@ -747,7 +758,7 @@ Task completion is published exactly once and can be awaited consistently by mul
 
 Timeout is local and non-terminal: it does not cancel the worker, consume the result, or mutate the task. Completion is preferred whenever it is observably available at the deadline. A wait that returns `"timeout"` may therefore be followed by a later wait that returns `"ok"` or `"error"`.
 
-Supervised tasks share globals, module state, runtime resources, closure environments, and the VM configuration. Ordinary composite arguments retain Noxy's top-level shallow-copy semantics and `ref` arguments retain reference identity. Shared references, nested composites, returned composite values, and closure upvalues require explicit concurrency coordination.
+Supervised tasks share globals, module state, runtime resources, closure environments, and the VM configuration. Ordinary composite arguments follow value semantics (independent at any depth, copy-on-write) and `ref` arguments retain reference identity. Intentionally shared state — globals, `ref`, closure upvalues — still requires explicit concurrency coordination.
 
 ---
 
@@ -1011,12 +1022,12 @@ register, roll back, poison, or close the resource again.
 ### Memory Model
 - **Value Types**: Primitives (`int`, `float`, `bool`) are stored directly on the stack.
 - **Heap-Backed Composite Types**: Objects (`struct`, `array`, `map`) are allocated on the heap.
-    - **Variables**: Store a pointer to the heap object.
-    - **Assignment/Casting**: Within the same scope, assigning a composite value copies its pointer, so both variables refer to the same object.
-    - **Function Calls**: A parameter without `ref` receives a **shallow copy** of the top-level composite container. Nested composite values remain shared.
-    - **Reference Parameters**: A parameter declared with `ref` receives access to the caller's original value and no shallow copy is performed.
+    - **Variables**: Store a pointer to the heap object; sharing is managed by the copy-on-write runtime.
+    - **Assignment**: Assigning a composite behaves as an independent deep copy (cloned lazily on first mutation).
+    - **Function Calls**: A parameter without `ref` receives an independent value at any depth (copy-on-write).
+    - **Reference Parameters**: A parameter declared with `ref` shares the caller's slot — the only sharing mechanism.
 
 ---
-*Version: 0.3.0*
+*Version: 0.4.0*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*

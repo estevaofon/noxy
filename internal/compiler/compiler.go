@@ -198,6 +198,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		}
 
+		// CoW: inicializador não-fresco compartilha o composto com a origem
+		if n.Value != nil {
+			c.emitMarkSharedForStore(n.Value, valType)
+		}
+
 		if c.scopeDepth > 0 {
 			// Local variable
 			c.addLocal(n.Name.Value, n.Type)
@@ -294,6 +299,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
+			// CoW: o valor gravado através do ref passa a ter mais de um dono
+			c.emitMarkSharedForStore(n.Value, valType)
+
 			// 4. Emit Store
 			// Stack: [Ref, Val]
 			// OP_STORE_REF consumes both (Val -> *Ref).
@@ -308,6 +316,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+
+			// CoW: reatribuição com RHS não-fresco compartilha o composto
+			c.emitMarkSharedForStore(n.Value, valType)
 
 			// 2. Check and Set Variable
 			if arg, localType := c.resolveLocal(ident.Value); arg != -1 {
@@ -427,15 +438,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// If the container holds References, we are rebinding that slot.
 			// If the container holds Values, we are updating that slot.
 
-			// 1. Compile Array (Left)
-			_, leftType, err := c.Compile(indexExp.Left)
+			// 1. Compile Array (Left) — CoW: cadeia MUT uniciza cada nível
+			// do caminho (inclui OP_DEREF_MUT quando a base é ref)
+			leftType, _, err := c.compileLValueBase(indexExp.Left)
 			if err != nil {
 				return nil, nil, err
-			}
-
-			// Auto-dereference collection if Ref (e.g. ref int[])
-			if _, ok := leftType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
 			}
 
 			// 2. Compile Index
@@ -453,6 +460,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+
+			// CoW: valor composto não-fresco guardado no contêiner
+			c.emitMarkSharedForStore(n.Value, valType)
 
 			// Unwrap RefType
 			if ref, ok := leftType.(*ast.RefType); ok {
@@ -513,15 +523,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// Only REBIND allowed for Ref Fields.
 			// *obj.field = val is handled by PrefixExpression.
 
-			// 1. Compile Object
-			_, leftType, err := c.Compile(memberExp.Left)
+			// 1. Compile Object — CoW: cadeia MUT uniciza cada nível do
+			// caminho (inclui OP_DEREF_MUT quando a base é ref)
+			leftType, baseWasRef, err := c.compileLValueBase(memberExp.Left)
 			if err != nil {
 				return nil, nil, err
 			}
-
-			// Auto-dereference if left is a Ref
-			if _, ok := leftType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
+			// Compatibilidade pré-0.4: com base ref, o checker antigo nunca
+			// resolvia o tipo do campo (a asserção sobre RefType falhava em
+			// silêncio) e o assignment passava sem checagem. Replicado aqui
+			// para não rejeitar programas existentes (ex.: stack.nx).
+			if baseWasRef {
+				leftType = nil
 			}
 
 			// 2. Compile Value
@@ -529,6 +542,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+
+			// CoW: valor composto não-fresco guardado no campo
+			c.emitMarkSharedForStore(n.Value, valType)
 
 			// RESOLVE FIELD TYPE:
 			var fieldType ast.NoxyType
@@ -1855,14 +1871,14 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 		return nil, nil
 	case *ast.MemberAccessExpression:
-		_, owner, err := c.Compile(target.Left)
+		// CoW: um ref para dentro de um contêiner fixa a identidade do
+		// contêiner — a base precisa ser unicizada na criação do ref para a
+		// escrita através dele não vazar em cópias pendentes.
+		owner, _, err := c.compileLValueBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
 		element := c.memberType(owner, target.Member)
-		if _, ok := owner.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-		}
 		name := c.makeConstant(value.NewString(target.Member))
 		if ref, ok := element.(*ast.RefType); ok {
 			c.emitOpWithConstantIndex(chunk.OP_CONTEXT_REF_PROPERTY, name)
@@ -1871,14 +1887,12 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
 		return element, nil
 	case *ast.IndexExpression:
-		_, container, err := c.Compile(target.Left)
+		// CoW: base do ref unicizada na criação (ver caso MemberAccess acima)
+		container, _, err := c.compileLValueBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
 		element := indexElementType(container)
-		if _, ok := container.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-		}
 		_, indexType, err := c.Compile(target.Index)
 		if err != nil {
 			return nil, err
