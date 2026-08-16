@@ -43,9 +43,13 @@
 - **`parse_url` cortava host e path no lugar errado** para autoridade com
   caractere não-ASCII: `http://münchen.de/path` devolvia host `münchen.de/` e
   path `path`.
-- **`net_send` imprimia uma linha de debug em stdout** para um argumento
-  malformado, e **o cliente HTTP imprimia uma linha de debug a cada
-  requisição**, corrompendo a saída de qualquer programa que o usasse.
+- **Saída de debug embarcada foi removida de quatro pontos.** `net_send`
+  imprimia uma linha em stdout para um argumento malformado, e o cliente HTTP
+  imprimia uma linha a cada requisição, corrompendo a saída de qualquer
+  programa que o usasse. Havia ainda dois resquícios mortos: um comentário
+  marcado como debug em `executor.go` e um `printf` de debug comentado em
+  `parser.go`. Um guard de arquitetura agora falha o build se qualquer
+  marcador voltar.
 - **`strings_contains` e `strings_replace` estavam registrados duas vezes**, com
   a segunda cópia inalcançável — uma correção aplicada a ela seria
   silenciosamente descartada.

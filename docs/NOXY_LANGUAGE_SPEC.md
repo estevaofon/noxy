@@ -823,6 +823,8 @@ Uma `string` é indexada por **caractere** (code point Unicode), não por byte.
 mesma unidade, então compõem entre si:
 
 ```noxy
+use strings select *
+
 let nome: string = substring(linha, 0, index_of(linha, ":"))
 ```
 
