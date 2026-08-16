@@ -13,7 +13,33 @@ struct HttpServer
     port: int
     listener: Socket
     running: bool
+    max_header_bytes: int
+    max_body_bytes: int
+    header_timeout_ms: int
+    body_timeout_ms: int
+    write_timeout_ms: int
+    read_chunk_bytes: int
 end
+
+struct HttpLimits
+    max_header_bytes: int
+    max_body_bytes: int
+    header_timeout_ms: int
+    body_timeout_ms: int
+    write_timeout_ms: int
+    read_chunk_bytes: int
+end
+
+// ============================================
+// Defaults
+// ============================================
+
+let HTTP_DEFAULT_MAX_HEADER_BYTES: int = 16384
+let HTTP_DEFAULT_MAX_BODY_BYTES: int = 1048576
+let HTTP_DEFAULT_HEADER_TIMEOUT_MS: int = 5000
+let HTTP_DEFAULT_BODY_TIMEOUT_MS: int = 15000
+let HTTP_DEFAULT_WRITE_TIMEOUT_MS: int = 15000
+let HTTP_DEFAULT_READ_CHUNK_BYTES: int = 8192
 
 // ============================================
 // Factory
@@ -22,40 +48,64 @@ end
 func new_server(host: string, port: int) -> HttpServer
     // Return with invalid socket initially
     let s: Socket = Socket(-1, "", 0, false)
-    return HttpServer(host, port, s, false)
+    let server: HttpServer = HttpServer(host, port, s, false, 0, 0, 0, 0, 0, 0)
+    server.max_header_bytes = HTTP_DEFAULT_MAX_HEADER_BYTES
+    server.max_body_bytes = HTTP_DEFAULT_MAX_BODY_BYTES
+    server.header_timeout_ms = HTTP_DEFAULT_HEADER_TIMEOUT_MS
+    server.body_timeout_ms = HTTP_DEFAULT_BODY_TIMEOUT_MS
+    server.write_timeout_ms = HTTP_DEFAULT_WRITE_TIMEOUT_MS
+    server.read_chunk_bytes = HTTP_DEFAULT_READ_CHUNK_BYTES
+    return server
+end
+
+// Non-positive configuration is a caller mistake, not a request to disable a
+// limit, so it falls back to the default rather than being taken literally.
+func positive_or(candidate: int, fallback: int) -> int
+    if candidate > 0 then
+        return candidate
+    end
+    return fallback
+end
+
+// Normalizes configuration once per serve call. The normalized HttpLimits is
+// what gets passed to each spawned connection routine, so a later mutation of
+// the server struct cannot change the rules applied to a request already in
+// flight.
+func server_limits(server: ref HttpServer) -> HttpLimits
+    let max_header: int = positive_or(server.max_header_bytes, HTTP_DEFAULT_MAX_HEADER_BYTES)
+    let max_body: int = positive_or(server.max_body_bytes, HTTP_DEFAULT_MAX_BODY_BYTES)
+    let header_ms: int = positive_or(server.header_timeout_ms, HTTP_DEFAULT_HEADER_TIMEOUT_MS)
+    let body_ms: int = positive_or(server.body_timeout_ms, HTTP_DEFAULT_BODY_TIMEOUT_MS)
+    let write_ms: int = positive_or(server.write_timeout_ms, HTTP_DEFAULT_WRITE_TIMEOUT_MS)
+    let chunk: int = positive_or(server.read_chunk_bytes, HTTP_DEFAULT_READ_CHUNK_BYTES)
+    if chunk > max_header then
+        chunk = max_header
+    end
+    return HttpLimits(max_header, max_body, header_ms, body_ms, write_ms, chunk)
 end
 
 // ============================================
 // Handler Internal Logic
 // ============================================
 
-// This function runs in a separate routine (spawned)
-func handle_client_connection(client: Socket, user_handler: func)
-    // 1. Read Request
-    // Read request chunk. Note: A production implementation should read continuously until header end.
-    // Blocking read is acceptable here as this runs in a separate routine.
-    
+// This function runs in a separate routine (spawned).
+// Placeholder body: the incremental read loop lands in a later task. For now
+// this only widens the signature to the third argument serve() now passes, so
+// the module keeps compiling while bind_server and server_limits land.
+func handle_client_connection(client: Socket, user_handler: func, limits: HttpLimits)
     let res: NetResult = socket_recv(client, 65536) // 64KB buffer
-    
+
     if !res.ok || res.count == 0 then
         socket_close(client)
         return
     end
-    
-    // 2. Parse
+
     let req: HttpRequest = parse_request(res.data, res.count)
-    
-    // 3. Call User Handler
-    // Dispatch request to user handler. Handler must match expected signature.
-    // Note: Exceptions in handler will terminate this routine.
-    
     let response: HttpResponse = user_handler(req)
-    
-    // 4. Send Response
+
     let resp_bytes: bytes = build_response(response.status_code, response.status_text, response.headers, response.header_count, response.body)
     socket_send(client, resp_bytes)
-    
-    // 5. Close
+
     socket_close(client)
 end
 
@@ -63,27 +113,46 @@ end
 // Server Loop
 // ============================================
 
-func serve(server: ref HttpServer, handler: func) -> void
-    // 1. Listen
+// Binds the listener without entering the accept loop. Separating binding
+// from serve() lets a caller read the actual bound port before accepting --
+// port 0 asks for an ephemeral port, and this is where the real one is
+// written back. Idempotent: a server that is already bound just confirms
+// running and returns, so serve() can call this unconditionally.
+func bind_server(server: ref HttpServer) -> bool
+    if server.listener.open then
+        server.running = true
+        return true
+    end
+
     let s: Socket = listen(server.host, server.port)
     if !s.open then
+        return false
+    end
+
+    server.listener = s
+    server.port = s.port
+    server.running = true
+    return true
+end
+
+func serve(server: ref HttpServer, handler: func) -> void
+    if !bind_server(server) then
         print("Failed to bind to " + server.host + ":" + to_str(server.port))
         return
     end
-    
-    server.listener = s
-    server.running = true
-    
+
+    let limits: HttpLimits = server_limits(server)
+
     print("Server listening on " + server.host + ":" + to_str(server.port))
-    
-    // 2. Accept Loop
+
+    // Accept Loop
     while server.running do
         // Accept blocks until a connection arrives
         let client: Socket = accept(server.listener)
-        
+
         if client.open then
             // Spawn a routine to handle this client
-            spawn(handle_client_connection, client, handler)
+            spawn(handle_client_connection, client, handler, limits)
         else
             // Accept failed (maybe server closed?)
             // Small sleep to avoid cpu spin if it's a transient fail
