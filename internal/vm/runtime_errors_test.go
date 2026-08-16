@@ -102,9 +102,11 @@ func TestNativeValidationErrorPreservesCause(t *testing.T) {
 
 func TestImportRuntimeErrorPreservesModuleCause(t *testing.T) {
 	source := &chunk.Chunk{
-		Code:      []byte{byte(chunk.OP_IMPORT), 0},
+		// OP_IMPORT's constant-pool index is a 16-bit big-endian operand (see
+		// emitOpWithConstantIndex), so constant 0 is two zero bytes, not one.
+		Code:      []byte{byte(chunk.OP_IMPORT), 0, 0},
 		Constants: []value.Value{value.NewString("missing_runtime_error_module")},
-		Lines:     []int{6, 6},
+		Lines:     []int{6, 6, 6},
 		FileName:  "importer.nx",
 	}
 	err := New().Interpret(source)

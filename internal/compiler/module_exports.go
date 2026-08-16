@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"maps"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
@@ -68,6 +69,85 @@ func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDi
 		}
 	}
 	return exports, true
+}
+
+// discoverModuleStructs finds the struct definitions a module makes available
+// by name, so the importing compiler can resolve a field typed as an
+// imported struct (e.g. `listener: Socket` after `use net select *`).
+//
+// `use pkg select *` only ever bound imported names as VALUES
+// (c.globals[name] = nil, erasing the static type at the call site — see
+// predeclareImport). It never taught c.structs, the separate registry
+// runtimeTypeInfoWithStructs walks to resolve a struct FIELD's own field
+// layout, about structs defined in another compilation unit. A local struct
+// embedding an imported struct type therefore built an incomplete
+// ConstructorType (see runtimeTypeInfoWithStructs and runtimeTypeComplete),
+// which made every call to that struct's constructor raise "struct
+// constructor has incomplete runtime type metadata" -- unconditionally, since
+// the incompleteness is baked in at compile time and never resolves itself at
+// runtime. This is exactly HttpServer's shape (`listener: Socket`), so
+// new_server() was unusable before this fix.
+func (c *Compiler) discoverModuleStructs(module string) (map[string]*ast.StructStatement, bool) {
+	// Reuse c.moduleDiscovery exactly like discoverModuleExports does. A fresh
+	// state here would not know a module already being validated (e.g. a
+	// function-body-only `use self select *` self-cycle) is in progress, so
+	// the cycle guard in loadModuleDeclarations would never trip: each
+	// validator compile spawned to check a nested use statement would start
+	// its own independent, equally cycle-blind discovery, recursing without
+	// bound.
+	state := c.moduleDiscovery
+	if state == nil {
+		state = &moduleDiscoveryState{active: make(map[string]bool)}
+	}
+	return c.discoverModuleStructsWithState(module, state)
+}
+
+func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDiscoveryState) (map[string]*ast.StructStatement, bool) {
+	structs := make(map[string]*ast.StructStatement)
+	program, _, ok := c.loadModuleDeclarations(module, state)
+	if !ok {
+		return structs, false
+	}
+	if program == nil {
+		// Directory module: no structs of its own to contribute directly.
+		return structs, true
+	}
+
+	for _, statement := range program.Statements {
+		switch declaration := statement.(type) {
+		case *ast.StructStatement:
+			structs[declaration.Name] = declaration
+		case *ast.UseStmt:
+			if declaration.SelectAll {
+				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
+				if !loadable {
+					return make(map[string]*ast.StructStatement), false
+				}
+				maps.Copy(structs, imported)
+			}
+		}
+	}
+	return structs, true
+}
+
+// importModuleStructs registers struct field layouts for the names a use
+// statement brings into scope, so a locally defined struct can embed one of
+// them as a field. Names is nil for `select *`, meaning every struct the
+// module exports (directly or via its own nested `select *` imports).
+func (c *Compiler) importModuleStructs(module string, names []string) {
+	discovered, loadable := c.discoverModuleStructs(module)
+	if !loadable {
+		return
+	}
+	if names == nil {
+		maps.Copy(c.structs, discovered)
+		return
+	}
+	for _, name := range names {
+		if definition, ok := discovered[name]; ok {
+			c.structs[name] = definition
+		}
+	}
 }
 
 func (c *Compiler) predeclareImport(declaration *ast.UseStmt) {

@@ -316,9 +316,9 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 	case OP_POP:
 		return c.simpleInstruction("OP_POP", offset)
 	case OP_GET_GLOBAL:
-		return c.constantInstruction("OP_GET_GLOBAL", offset)
+		return c.constantLongInstruction("OP_GET_GLOBAL", offset)
 	case OP_SET_GLOBAL:
-		return c.constantInstruction("OP_SET_GLOBAL", offset)
+		return c.constantLongInstruction("OP_SET_GLOBAL", offset)
 	case OP_GET_LOCAL:
 		return c.byteInstruction("OP_GET_LOCAL", offset)
 	case OP_SET_LOCAL:
@@ -380,13 +380,13 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 	case OP_SET_INDEX:
 		return c.simpleInstruction("OP_SET_INDEX", offset)
 	case OP_GET_PROPERTY:
-		return c.constantInstruction("OP_GET_PROPERTY", offset)
+		return c.constantLongInstruction("OP_GET_PROPERTY", offset)
 	case OP_MARK_REF_TARGET_TYPE:
 		return c.constantLongInstruction("OP_MARK_REF_TARGET_TYPE", offset)
 	case OP_MARK_RUNTIME_VALUE_TYPE:
 		return c.constantLongInstruction("OP_MARK_RUNTIME_VALUE_TYPE", offset)
 	case OP_SET_PROPERTY:
-		return c.constantInstruction("OP_SET_PROPERTY", offset)
+		return c.constantLongInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:
 		return c.simpleInstruction("OP_ZEROS", offset)
 	case OP_LEN:
@@ -396,7 +396,7 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 	case OP_MAP:
 		return c.shortInstruction("OP_MAP", offset)
 	case OP_IMPORT:
-		return c.constantInstruction("OP_IMPORT", offset)
+		return c.constantLongInstruction("OP_IMPORT", offset)
 	case OP_IMPORT_FROM_ALL:
 		return c.simpleInstruction("OP_IMPORT_FROM_ALL", offset)
 	case OP_DUP:
@@ -428,13 +428,13 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 	case OP_REF_UPVALUE:
 		return c.byteInstruction("OP_REF_UPVALUE", offset)
 	case OP_REF_GLOBAL:
-		return c.constantInstruction("OP_REF_GLOBAL", offset)
+		return c.constantLongInstruction("OP_REF_GLOBAL", offset)
 	case OP_REF_PROPERTY:
-		return c.constantInstruction("OP_REF_PROPERTY", offset)
+		return c.constantLongInstruction("OP_REF_PROPERTY", offset)
 	case OP_REF_INDEX:
 		return c.simpleInstruction("OP_REF_INDEX", offset)
 	case OP_CONTEXT_REF_PROPERTY:
-		return c.constantInstruction("OP_CONTEXT_REF_PROPERTY", offset)
+		return c.constantLongInstruction("OP_CONTEXT_REF_PROPERTY", offset)
 	case OP_CONTEXT_REF_INDEX:
 		return c.simpleInstruction("OP_CONTEXT_REF_INDEX", offset)
 	case OP_DEREF:
@@ -498,8 +498,8 @@ func (c *Chunk) constantLongInstruction(name string, offset int) int {
 
 func (c *Chunk) closureInstruction(name string, offset int) int {
 	offset++
-	constant := c.Code[offset]
-	offset++
+	constant := uint16(c.Code[offset])<<8 | uint16(c.Code[offset+1])
+	offset += 2
 	fmt.Printf("%-16s %4d ", name, constant)
 	fmt.Print(c.Constants[constant])
 	fmt.Println()
