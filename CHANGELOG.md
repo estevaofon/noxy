@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-16
+
 ### Changed (BREAKING) — Semântica de valor com copy-on-write
 
 Arrays, maps e structs passam a se comportar como **cópias profundas
