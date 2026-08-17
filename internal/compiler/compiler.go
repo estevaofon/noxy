@@ -1293,6 +1293,23 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.patchJump(jumpToExit)
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
 
+		// 13. Patch Break Jumps (mesmo tratamento do while)
+		// O alvo tem de ficar DEPOIS do pop da condicao e ANTES do endScope: no
+		// break a condicao nao esta na pilha (o BreakStmt so estoura os locais
+		// alem de EnclosingLocals, isto e, a variavel do laco e o que o corpo
+		// declarou), entao o break chega aqui com a mesma pilha da saida normal
+		// — [$collection, $index, $len] — e paga os pops do escopo wrapper
+		// junto com ela.
+		for _, jump := range loop.BreakJumps {
+			c.patchJump(jump)
+		}
+
+		// 14. Pop Loop — sem isto o for continua sendo o laco "corrente" depois
+		// do seu fim: um break posterior miraria este laco ja encerrado (jump
+		// nunca patchado, operando 0xffff) e `break` fora de laco deixaria de
+		// ser erro de compilacao.
+		c.loops = c.loops[:len(c.loops)-1]
+
 		c.endScope() // Close Wrapper Scope ($collection, $index, $len)
 
 		return c.currentChunk, nil, nil

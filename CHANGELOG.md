@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `break` dentro de `for ... in` voltou a sair do laço. O branch do
+  `ForStatement` em `internal/compiler/compiler.go` empilhava o laço em
+  `c.loops` mas nunca fazia o pareamento que o `while` já fazia: não patchava
+  os `loop.BreakJumps` nem desempilhava o laço no fim. O jump do `break`
+  ficava com o operando de placeholder (`0xffff`), o `ip` saltava para fora do
+  chunk e o laço principal do executor (`internal/vm/executor.go`, guarda
+  `ip >= len(c.Code)`) retornava sucesso — o programa terminava em silêncio,
+  com exit 0 e saída truncada, em vez de continuar depois do laço. Como o laço
+  também nunca era desempilhado, um `break` posterior mirava o `for` já
+  encerrado (mesmo jump nunca patchado) e `break` fora de qualquer laço deixava
+  de ser erro de compilação. Bug pré-existente (reproduz em 0.4.0 e 0.5.0),
+  descoberto na verificação final do PR #33. `#compiler` @estevaofon
+
+- `if cond then break end` na mesma linha voltou a fechar no `end` correto.
+  `parseBreakStatement` (`internal/parser/parser.go`) avançava um token depois
+  do `break`, violando o contrato dos laços de statement
+  (`ParseProgram`/`parseBlockStatement`/`parseCaseBody` esperam `curToken` no
+  último token do statement e fazem o `nextToken` eles mesmos). Na forma
+  multilinha o `NEWLINE` absorvia o excesso e o bug não aparecia; na forma
+  inline o `end` do `if` era engolido e o bloco só terminava no `end` do laço
+  externo — `SyntaxError: expected 'end' after for loop, found EOF`. Afetava
+  também `while` (o idioma usado nos exemplos de `docs/concurrency.md`).
+  `#parser` @estevaofon
+
 ## [0.5.0] - 2026-08-17
 
 ### Performance
