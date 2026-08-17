@@ -95,7 +95,7 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
 | global (`Environment`) | `SetLocal` | sobrescrita |
 | upvalue (box) | captura/store | sobrescrita; box coletado é irrelevante (GC) |
 | elemento de contêiner | `OP_ARRAY`/`OP_MAP`/`OP_SET_INDEX`/`append`/campo de struct (constructor e `OP_SET_PROPERTY`) | sobrescrita do elemento, `delete`, `pop` |
-| buffer de canal | `chan_send` | `chan_recv` (o valor sai do buffer) |
+| buffer de canal | `chan_send`; `OP_SELECT` com case de send disparado (segundo funil do mesmo par — retain especulativo antes do select, desfeito nos sends não disparados) | `chan_recv`; `OP_SELECT` com case de recv (o valor sai do buffer) |
 | captura de task (`spawn`/`spawn_task`) | preparação dos args | handoff para os slots de parâmetro da task (que fazem seu próprio inc) |
 | captura de `defer` | captura | após execução do defer |
 

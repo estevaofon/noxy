@@ -88,6 +88,21 @@ func (vm *VM) executePreparedTaskCall(call preparedTaskCall) (value.Value, error
 		LocalBase:   0,
 		Environment: call.Closure.Environment,
 	}
+	// RC: parametros sem ref sao vinculos duraveis do frame da task — mesmo
+	// bind que callPreparedClosure faz (spec §4.2, linha da captura de task:
+	// os slots de parametro da task "fazem seu proprio inc"). Sem isto, um
+	// rebind (OP_SET_LOCAL) ou o clone do caminho MUT dentro do corpo da task
+	// dispararia Release(velho) sem retain correspondente (dec a menos), e
+	// releasePreparedArguments em startSupervisedTask soltaria a captura DE
+	// NOVO. O release espelhado destes binds e o funil unico do frame
+	// (finalizeCurrentFrame), tanto no retorno normal quanto no unwind.
+	params := call.Closure.Function.Params
+	for i := range call.Arguments {
+		if i < len(params) && params[i].IsRef {
+			continue
+		}
+		frame.ownSlot(vm, frame.LocalBase+1+i)
+	}
 	vm.frames[0], vm.frameCount, vm.currentFrame = frame, 1, frame
 	if err := vm.run(1, &result); err != nil {
 		return value.NewNull(), err

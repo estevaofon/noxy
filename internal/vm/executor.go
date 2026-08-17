@@ -638,6 +638,17 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			count := int(c.Code[ip])
 			ip++
 			cases := make([]reflect.SelectCase, count)
+			// RC: OP_SELECT e o segundo funil do par do buffer de canal (spec
+			// §4.2): um send que dispara aqui precisa do MESMO retain que
+			// chan_send faz, senao o chan_recv (ou o braco de recv de outro
+			// select) do outro lado libera uma retencao que nunca existiu (dec
+			// a menos). O retain e feito ANTES do reflect.Select — especulativo,
+			// para todos os cases de send — porque um receptor concorrente pode
+			// consumir e liberar o valor assim que o send dispara; retain
+			// tardio abriria janela de contagem furada. Os sends que NAO
+			// dispararem sao desfeitos logo apos o select (retain-antes-de-
+			// release: a contagem nunca passa por zero).
+			sendVals := make([]value.Value, count)
 			// Stack layout: [... Case0_Chan, Case0_Val, Case0_Mode ... CaseN_Chan, CaseN_Val, CaseN_Mode]
 			// Top is CaseN_Mode.
 			// Iterating i from count-1 down to 0:
@@ -653,6 +664,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 						return vm.runtimeError(c, ip, "select case expects channel")
 					}
 					ch := chVal.Obj.(*value.ObjChannel).Chan
+					value.Retain(val) // RC: espelha chan_send (ver comentario acima)
+					sendVals[i] = val
 					cases[i] = reflect.SelectCase{Dir: reflect.SelectSend, Chan: reflect.ValueOf(ch), Send: reflect.ValueOf(val)}
 				} else { // Recv
 					if chVal.Type != value.VAL_CHANNEL {
@@ -665,11 +678,24 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			chosenIndex, recvVal, recvOK := reflect.Select(cases)
 
+			// RC: desfaz o retain especulativo dos cases de send que nao
+			// dispararam. O do case escolhido (se for send) permanece: o buffer
+			// do canal agora e dono duravel, e quem tirar o valor de la
+			// (chan_recv ou recv de select) faz o release espelhado.
+			for i := range cases {
+				if i != chosenIndex && cases[i].Dir == reflect.SelectSend {
+					value.Release(sendVals[i])
+				}
+			}
+
 			vm.push(value.NewInt(int64(chosenIndex)))
 
 			var valToPush value.Value
 			if recvOK {
 				if v, ok := recvVal.Interface().(value.Value); ok {
+					// RC: espelha chan_recv — o valor saiu do buffer do canal,
+					// que era dono duravel dele.
+					value.Release(v)
 					valToPush = v
 				} else {
 					valToPush = value.NewNull()

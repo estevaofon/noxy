@@ -45,9 +45,11 @@
   (contador `Owners` é atômico; o requisito é o mesmo do ARC sob tasks
   paralelas). Custo do bookkeeping: mesmo após a limpeza do bit morto,
   `bench_map_churn` (+10,9%) e `bench_spawn_sum` (+10,4%) seguem acima do
-  gate ≤~5% da suíte intercalada — escrita intensa em map e handoff de
-  argumentos para tasks pagam inc/dec por elemento/argumento em cada
-  operação. Aceito e documentado como o preço do RC nesta fase; as válvulas
+  gate ≤~5% da suíte intercalada — escrita intensa em map paga inc/dec por
+  elemento em cada operação, e os laços quentes dos workers de task pagam a
+  passagem pelos funis de RC no rebind de locais escalares (Retain/Release
+  são no-ops em primitivos; o custo é o funil por iteração, não contagem).
+  Aceito e documentado como o preço do RC nesta fase; as válvulas
   apontadas para quando isso for revisitado: drops precisos da fase 2 e
   elisão de pares inc/dec no mesmo bytecode (spec §8, risco 3), mais um
   fast path para stores de valores escalares apontado na investigação da

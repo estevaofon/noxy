@@ -93,9 +93,14 @@ controller.
 (+10,4%) **seguem acima do gate de ~5% mesmo depois da limpeza do bit sticky
 morto** (Task 8, commit `ae45d8f`) — não é a marcação morta que sobrava, é o
 bookkeeping de RC em si: `map_churn` faz muitas inserções/remoções de chave
-(inc/dec por elemento a cada operação) e `spawn_sum` faz handoff de
-argumentos primitivos para várias goroutines (retain/release pareado no
-preparo da task). Comparado ao round 4 da Task 7 (map_churn +9,8%, spawn_sum
+(inc/dec por elemento a cada operação) e `spawn_sum` paga nos laços quentes
+dos workers, onde cada rebind de local escalar (`s = ...`, `i = ...`) passa
+pelos funis de RC do OP_SET_LOCAL (ownSlot + Release por iteração). Os args
+do bench são primitivos e canal — Retain/Release são no-ops neles, então o
+custo é a passagem pelos funis em si, não contagem; o preparo da task
+(retain de captura + bind de posse dos parâmetros por valor no frame da
+task) roda 4 vezes no bench inteiro e não aparece na conta.
+Comparado ao round 4 da Task 7 (map_churn +9,8%, spawn_sum
 +14,9%, já com o bookkeeping completo mas antes da limpeza do bit sticky), a
 remoção do bit reduziu `spawn_sum` (14,9%→10,4%) e manteve `map_churn` na
 mesma faixa (9,8%→10,9%, dentro do ruído) — a limpeza **não** fecha esses

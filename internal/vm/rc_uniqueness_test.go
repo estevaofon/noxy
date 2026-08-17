@@ -891,12 +891,29 @@ end`); err != nil {
 
 // Task 6 (Step 1): spawn_task retem o argumento na preparacao (captura,
 // sincrona, antes do goroutine da task rodar) e libera quando a task
-// termina (mirror do padrao de defer) — a asserção "durante" tambem nao
-// precisa de sincronizacao porque o retain acontece antes do "go".
+// termina (mirror do padrao de defer) — a asserção pos-Invoke nao precisa
+// de sincronizacao porque o retain de captura acontece antes do "go".
+//
+// Review final (Critical 1): a medida "durante" subiu de before+1 para
+// before+2 — o frame da task passou a fazer o bind de posse dos parametros
+// por valor (ownSlot em executePreparedTaskCall, espelho de
+// callPreparedClosure; spec §4.2, linha da captura de task: os slots de
+// parametro "fazem seu proprio inc"). Captura (+1) e bind do slot de
+// parametro (+1) coexistem enquanto o corpo roda; o gate bloqueia o corpo
+// para a leitura ser deterministica.
 func TestSpawnTaskCapturesArgSynchronouslyAndReleasesWhenTaskCompletes(t *testing.T) {
 	machine := New()
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	machine.DefineNative("task_gate", func(args []value.Value) value.Value {
+		close(started)
+		<-unblock
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "task_gate")
 	if err := interpretVMSource(t, machine, `
 func worker(m: int[])
+    task_gate()
 end`); err != nil {
 		t.Fatal(err)
 	}
@@ -914,9 +931,23 @@ end`); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := value.OwnersCount(m); got != before+1 {
-		t.Fatalf("esperado Owners=%d logo apos spawn_task (captura sincrona em prepareTaskCall), veio %d", before+1, got)
+	// Captura sincrona: pelo menos +1 ja aqui; o bind do parametro (+1)
+	// acontece no goroutine da task e pode ou nao ter rodado ainda.
+	if got := value.OwnersCount(m); got < before+1 || got > before+2 {
+		t.Fatalf("esperado Owners entre %d e %d logo apos spawn_task (captura sincrona em prepareTaskCall), veio %d", before+1, before+2, got)
 	}
+
+	select {
+	case <-started:
+	case <-time.After(statefulBuiltinTimeout):
+		t.Fatal("worker da task nao chegou ao gate")
+	}
+	// Corpo da task parado no gate: captura (+1) e bind do slot de
+	// parametro (+1) estao ambos vivos — leitura deterministica.
+	if got := value.OwnersCount(m); got != before+2 {
+		t.Fatalf("esperado Owners=%d com a task rodando (captura +1, bind do parametro +1), veio %d", before+2, got)
+	}
+	close(unblock)
 
 	taskAwait := requireBuiltin(t, machine, "task_await")
 	if _, err := taskAwait.Invoke(machine, []value.Value{handle}); err != nil {
@@ -931,7 +962,7 @@ end`); err != nil {
 		time.Sleep(time.Millisecond)
 	}
 	if got := value.OwnersCount(m); got != before {
-		t.Fatalf("esperado Owners=%d apos a task terminar (release da captura), veio %d", before, got)
+		t.Fatalf("esperado Owners=%d apos a task terminar (release do bind do frame e da captura), veio %d", before, got)
 	}
 }
 
@@ -2476,5 +2507,410 @@ main()`
 	const want = "1|1|1|1"
 	if reported.Type != value.VAL_OBJ || reported.Obj != want {
 		t.Fatalf("entrada fantasma apos rebind nao-retivel (dec a mais): esperado %q (n1|n2|n3|n4), veio %#v", want, reported.Obj)
+	}
+}
+
+// defineWaitOwnersProbe registra o native de sonda `wait_owners(v, n) -> bool`:
+// espera OwnersCount(v) atingir n E ficar estavel por uma janela curta (o alvo
+// dos testes e sempre um valor TERMINAL da aritmetica correta; a janela de
+// estabilidade descarta coincidencias transitorias de uma aritmetica furada
+// que passa por n a caminho de um valor menor). E a sincronizacao usada pelos
+// testes de `defer spawn_task`, onde o handle da task e descartado pelo defer
+// e nao ha task_await para ancorar a conclusao.
+func defineWaitOwnersProbe(t *testing.T, machine *VM) {
+	t.Helper()
+	machine.DefineNative("wait_owners", func(args []value.Value) value.Value {
+		if len(args) != 2 || args[1].Type != value.VAL_INT {
+			return value.NewBool(false)
+		}
+		want := int32(args[1].AsInt)
+		const hold = 50 * time.Millisecond
+		deadline := time.Now().Add(statefulBuiltinTimeout)
+		for time.Now().Before(deadline) {
+			if value.OwnersCount(args[0]) != want {
+				time.Sleep(time.Millisecond)
+				continue
+			}
+			stable := true
+			holdUntil := time.Now().Add(hold)
+			for time.Now().Before(holdUntil) {
+				if value.OwnersCount(args[0]) != want {
+					stable = false
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if stable {
+				return value.NewBool(true)
+			}
+		}
+		return value.NewBool(false)
+	})
+	markProbeReadonly(t, machine, "wait_owners")
+}
+
+// Review final (Critical 1, aritmetica direta): o frame da task deve reter os
+// parametros por valor (ownSlot em executePreparedTaskCall), como
+// callPreparedClosure faz em qualquer chamada. Sem isso, o rebind
+// (OP_SET_LOCAL) do parametro dentro do corpo da task libera uma retencao que
+// nunca aconteceu (dec a menos) e releasePreparedArguments desconta a captura
+// DE NOVO na conclusao — o composto do chamador perde um dono. Invoca
+// spawn_task direto do Go (rota host, sem o Retain conservador de callValue
+// que mascara a rota de bytecode direta) e usa task_await como ancora: o
+// release da captura roda antes de task.Complete, entao depois do await a
+// aritmetica ja fechou, sem polling.
+func TestTaskFrameParamRebindKeepsCallerOwnersBalanced(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(m: int[]) -> int
+    m = [2]
+    return 0
+end`); err != nil {
+		t.Fatal(err)
+	}
+	workerFn, _ := machine.GetGlobal("worker")
+	m := value.NewArray([]value.Value{value.NewInt(1)})
+	// Dono duravel simulado do chamador (ex.: um global). Sem ele o clamp de
+	// Release em zero mascararia o deficit que este teste fixa.
+	value.Retain(m)
+	before := value.OwnersCount(m)
+
+	spawnTask := requireBuiltin(t, machine, "spawn_task")
+	handle, err := spawnTask.Invoke(machine, []value.Value{workerFn, m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAwait := requireBuiltin(t, machine, "task_await")
+	if _, err := taskAwait.Invoke(machine, []value.Value{handle}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := value.OwnersCount(m); got != before {
+		t.Fatalf("rebind do parametro dentro da task roubou dono do chamador (dec a menos): esperado Owners=%d apos a task, veio %d", before, got)
+	}
+}
+
+// Review final (Critical 1, variante MUT): mesmo cenario, mas o corpo da task
+// muta o parametro (caminho OP_GET_LOCAL_MUT): com mais de um dono o MUT clona
+// e libera o ocupante velho do slot — release que so e pareado se o frame da
+// task tiver feito o bind de posse do parametro.
+func TestTaskFrameParamMutKeepsCallerOwnersBalanced(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(m: int[]) -> int
+    m[0] = 5
+    return 0
+end`); err != nil {
+		t.Fatal(err)
+	}
+	workerFn, _ := machine.GetGlobal("worker")
+	m := value.NewArray([]value.Value{value.NewInt(1)})
+	value.Retain(m) // dono duravel simulado do chamador; ver teste acima
+	before := value.OwnersCount(m)
+
+	spawnTask := requireBuiltin(t, machine, "spawn_task")
+	handle, err := spawnTask.Invoke(machine, []value.Value{workerFn, m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskAwait := requireBuiltin(t, machine, "task_await")
+	if _, err := taskAwait.Invoke(machine, []value.Value{handle}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := value.OwnersCount(m); got != before {
+		t.Fatalf("clone MUT do parametro dentro da task roubou dono do chamador (dec a menos): esperado Owners=%d apos a task, veio %d", before, got)
+	}
+	// O MUT clonou (havia mais de um dono): a mutacao nao pode vazar para o
+	// array do chamador.
+	if got := m.Obj.(*value.ObjArray).Elements[0].AsInt; got != 1 {
+		t.Fatalf("mutacao dentro da task vazou para o chamador: esperado m[0]=1, veio %d", got)
+	}
+}
+
+// Review final (Critical 1, oraculo E2E): `defer spawn_task(...)` roteia por
+// callPreparedValue (branch de native), que NAO faz o Retain conservador de
+// callValue — a rota onde o bug ficava exposto em programa real. Oraculo do
+// baseline (noxy_merged): 1 — a mutacao de gb depois da task ve o composto
+// compartilhado com arr e clona. Com o deficit (sem o bind de parametro no
+// frame da task), gb parecia unico e a escrita vazava para arr[0] (99).
+// wait_owners ancora a conclusao da task (o defer descarta o handle): 2 =
+// global gb + elemento de arr e o valor TERMINAL apos o release da captura.
+func TestDeferredSpawnTaskParamRebindDoesNotStealCallerOwnership(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("report_probe", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "report_probe")
+	defineWaitOwnersProbe(t, machine)
+	src := `
+struct Box
+    v: int
+end
+
+let gb: Box = Box(1)
+let arr: Box[] = [gb]
+let ch: any = make_chan(1)
+
+func worker(m: Box) -> int
+    m = Box(2)
+    chan_send(ch, 1)
+    return 0
+end
+
+func run() -> int
+    defer spawn_task(worker, gb)
+    return 0
+end
+
+func main()
+    let r: int = run()
+    let d: any = chan_recv(ch)
+    if wait_owners(gb, 2) then
+        gb.v = 99
+        report_probe(arr[0].v)
+    else
+        report_probe(0 - 1)
+    end
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+		t.Fatalf("rebind de parametro em task defer'd roubou dono de gb (-1 = wait_owners nao estabilizou em 2; 99 = mutacao vazou para arr): esperado 1, veio %#v", reported)
+	}
+}
+
+// Review final (Critical 1, oraculo E2E — variante MUT): igual ao teste acima,
+// mas o corpo da task muta o parametro (m.v = 5, caminho MUT com clone) em vez
+// de rebindar. Oraculo do baseline: 1.
+func TestDeferredSpawnTaskParamMutDoesNotStealCallerOwnership(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("report_probe", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "report_probe")
+	defineWaitOwnersProbe(t, machine)
+	src := `
+struct Box
+    v: int
+end
+
+let gb: Box = Box(1)
+let arr: Box[] = [gb]
+let ch: any = make_chan(1)
+
+func worker(m: Box) -> int
+    m.v = 5
+    chan_send(ch, 1)
+    return 0
+end
+
+func run() -> int
+    defer spawn_task(worker, gb)
+    return 0
+end
+
+func main()
+    let r: int = run()
+    let d: any = chan_recv(ch)
+    if wait_owners(gb, 2) then
+        gb.v = 99
+        report_probe(arr[0].v)
+    else
+        report_probe(0 - 1)
+    end
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+		t.Fatalf("clone MUT de parametro em task defer'd roubou dono de gb (-1 = wait_owners nao estabilizou em 2; 99 = mutacao vazou para arr): esperado 1, veio %#v", reported)
+	}
+}
+
+// Review final (Critical 1, controle): a rota DIRETA de bytecode
+// (`spawn_task(...)` sem defer) passa por callValue, cujo Retain conservador
+// de native sem assinatura mascarava o deficit. O controle fixa que essa rota
+// imprime 1 tanto antes quanto depois da correcao — e protege contra uma
+// futura auditoria de spawn_task na allowlist readonly reabrir o buraco sem o
+// bind de parametro no frame da task. task_await ancora a conclusao.
+func TestDirectSpawnTaskParamRebindControlKeepsCoW(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("report_probe", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "report_probe")
+	src := `
+struct Box
+    v: int
+end
+
+let gb: Box = Box(1)
+let arr: Box[] = [gb]
+
+func worker(m: Box) -> int
+    m = Box(2)
+    return 0
+end
+
+func main()
+    let t: any = spawn_task(worker, gb)
+    let r: any = task_await(t)
+    gb.v = 99
+    report_probe(arr[0].v)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+		t.Fatalf("controle da rota direta de spawn_task regrediu: esperado 1 (mutacao de gb clona, arr preservado), veio %#v", reported)
+	}
+}
+
+// Review final (Critical 2, direcao send): OP_SELECT e o segundo funil do par
+// do buffer de canal (spec §4.2). Um send disparado pelo select precisa do
+// mesmo Retain de chan_send — senao o chan_recv do outro lado libera uma
+// retencao que nunca existiu (dec a menos) e a mutacao seguinte vaza para o
+// alias. Programa 100% sincrono (canal bufferizado): deterministico nos dois
+// lados. O case do canal morto (unbuffered, sem receptor: nunca pronto) cobre
+// o desfazer do retain especulativo dos sends nao disparados. Oraculo do
+// baseline: report=1; probe_b = probe_a+1 (buffer possui apos o send do
+// select); probe_c = probe_a (chan_recv devolveu a posse).
+func TestSelectSendRetainsForChannelBufferLikeChanSend(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	var ownersA, ownersB, ownersC int32
+	machine.DefineNative("report_probe", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_a", func(args []value.Value) value.Value {
+		ownersA = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_b", func(args []value.Value) value.Value {
+		ownersB = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_c", func(args []value.Value) value.Value {
+		ownersC = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "report_probe")
+	markProbeReadonly(t, machine, "probe_a")
+	markProbeReadonly(t, machine, "probe_b")
+	markProbeReadonly(t, machine, "probe_c")
+	src := `
+struct Box
+    v: int
+end
+
+func main()
+    let b: Box = Box(1)
+    let keep: Box[] = [b]
+    let ch: any = make_chan(1)
+    let dead: any = make_chan()
+    probe_a(b)
+    when
+        case chan_send(dead, b) then
+            let y: int = 1
+        case chan_send(ch, b) then
+            let x: int = 1
+    end
+    probe_b(b)
+    chan_recv(ch)
+    probe_c(b)
+    b.v = 99
+    report_probe(keep[0].v)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersB != ownersA+1 {
+		t.Fatalf("send do select nao deixou o buffer do canal como dono (esperado Owners=%d apos o select, veio %d)", ownersA+1, ownersB)
+	}
+	if ownersC != ownersA {
+		t.Fatalf("par send-do-select/chan_recv nao fechou (esperado Owners=%d apos chan_recv, veio %d)", ownersA, ownersC)
+	}
+	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+		t.Fatalf("send do select sem retain: chan_recv descontou dono alheio e a mutacao vazou para keep: esperado 1, veio %#v", reported)
+	}
+}
+
+// Review final (Critical 2, direcao recv): o braco de recv do select precisa
+// do mesmo Release de chan_recv — o valor sai do buffer do canal, que era dono
+// duravel. Sem ele o buffer "fantasma" segue contando para sempre (leak:
+// direcao segura, mas quebra o par da spec §4.2 e infla a contagem que os
+// demais funis leem). Asserto relativo: o bind do case (got, OP_OWN_LOCAL,
+// +1) substitui exatamente a posse do buffer (-1), entao durante o case a
+// contagem volta ao valor pre-select.
+func TestSelectRecvReleasesChannelBufferOwnership(t *testing.T) {
+	machine := New()
+	var ownersBefore, ownersDuring, ownersAfter int32
+	machine.DefineNative("probe_before", func(args []value.Value) value.Value {
+		ownersBefore = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_during", func(args []value.Value) value.Value {
+		ownersDuring = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_after", func(args []value.Value) value.Value {
+		ownersAfter = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_before")
+	markProbeReadonly(t, machine, "probe_during")
+	markProbeReadonly(t, machine, "probe_after")
+	src := `
+struct Box
+    v: int
+end
+
+func main()
+    let b: Box = Box(1)
+    let keep: Box[] = [b]
+    let ch: any = make_chan(1)
+    chan_send(ch, b)
+    probe_before(b)
+    when
+        case got = chan_recv(ch) then
+            probe_during(got)
+    end
+    probe_after(b)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersDuring != ownersBefore {
+		t.Fatalf("recv do select nao liberou a posse do buffer (bind do case +1 deveria repor o release -1): esperado Owners=%d durante o case, veio %d", ownersBefore, ownersDuring)
+	}
+	if ownersAfter != ownersBefore {
+		t.Fatalf("recv do select deixou posse fantasma do buffer: esperado Owners=%d apos o select, veio %d", ownersBefore, ownersAfter)
 	}
 }
