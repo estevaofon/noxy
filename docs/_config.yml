@@ -20,6 +20,7 @@ exclude:
   - Gemfile.lock
   - node_modules
   - vendor
+  - superpowers
 
 # SEO settings
 author: "Noxy Team"
