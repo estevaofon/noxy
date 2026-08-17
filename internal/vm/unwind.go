@@ -38,6 +38,16 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 		}
 	}
 
+	// RC: solta os vinculos duraveis do frame (retorno normal e unwind
+	// passam ambos por aqui). Le o ocupante ATUAL do slot: sobrescritas
+	// durante a vida do frame ja fizeram seu proprio release/retain.
+	for _, slot := range frame.Owned {
+		if slot < vm.stackTop {
+			value.Release(vm.stack[slot])
+		}
+	}
+	frame.Owned = nil
+
 	ownedTop := vm.stackTop
 	for index := frame.StackBase; index < ownedTop; index++ {
 		vm.closeUpvalue(&vm.stack[index])

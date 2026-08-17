@@ -22,6 +22,10 @@ type CallFrame struct {
 	LocalBase   int // Offset in stack where this frame's locals start
 	Deferred    []PreparedCall
 	Environment *value.GlobalEnvironment
+
+	// Owned: slots absolutos de vm.stack retidos por este frame
+	// (parametros e lets). Liberados em finalizeCurrentFrame.
+	Owned []int
 }
 
 type SharedState struct {

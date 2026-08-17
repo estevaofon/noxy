@@ -126,6 +126,16 @@ func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *ch
 		LocalBase:   vm.stackTop - argCount - 1,
 		Environment: closure.Environment,
 	}
+
+	// RC: parametros sem ref sao vinculos duraveis do frame novo
+	params := closure.Function.Params
+	for i := 0; i < argCount; i++ {
+		if i < len(params) && params[i].IsRef {
+			continue
+		}
+		frame.ownSlot(vm, frame.LocalBase+1+i)
+	}
+
 	// Push new frame
 	vm.frames[vm.frameCount] = frame
 	vm.frameCount++
