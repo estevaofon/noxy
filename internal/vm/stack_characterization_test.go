@@ -81,8 +81,9 @@ func TestUpvalueCaptureAndClose(t *testing.T) {
 	machine.stack[0] = value.NewInt(7)
 	slot := &machine.stack[0]
 
-	first := machine.captureUpvalue(slot)
-	second := machine.captureUpvalue(slot)
+	// slot possuido pelo frame (true): a caixa passa a possuir ao fechar.
+	first := machine.captureUpvalue(slot, true)
+	second := machine.captureUpvalue(slot, true)
 	if first != second {
 		t.Fatal("capturing the same slot returned distinct upvalues")
 	}

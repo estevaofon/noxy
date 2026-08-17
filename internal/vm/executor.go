@@ -252,7 +252,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slot := int(c.Code[ip])
 			ip++
 			// Reference to a stack slot - Capture it!
-			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot])
+			// RC: a caixa herda a condicao do slot (possuido x emprestado).
+			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot], frame.ownsSlotIndex(frame.LocalBase+slot))
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -959,7 +960,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				ip++
 
 				if isLocal == 1 {
-					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[frame.LocalBase+int(index)])
+					// RC: a caixa herda a condicao do slot capturado — slot
+					// `ref` e emprestimo, e a caixa nao passa a possuir.
+					localSlot := frame.LocalBase + int(index)
+					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[localSlot], frame.ownsSlotIndex(localSlot))
 				} else {
 					closure.Upvalues[i] = frame.Closure.Upvalues[index]
 				}
@@ -983,12 +987,21 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "invalid upvalue")
 			}
 			updated := vm.peek(0)
-			// RC: retain-antes-de-release (auto-atribuicao via upvalue)
-			value.Retain(updated)
-			if !frame.Closure.Upvalues[slot].Store(updated) {
-				return vm.runtimeError(c, ip, "invalid upvalue")
+			// RC: retain-antes-de-release (auto-atribuicao via upvalue). Caixa
+			// emprestada (slot `ref` capturado) troca sem contar posse: quem
+			// responde pelo objeto e o dono real, e soltar o velho aqui seria
+			// soltar o que a caixa nunca reteve (dec a menos).
+			if frame.Closure.Upvalues[slot].IsBorrowed() {
+				if !frame.Closure.Upvalues[slot].Store(updated) {
+					return vm.runtimeError(c, ip, "invalid upvalue")
+				}
+			} else {
+				value.Retain(updated)
+				if !frame.Closure.Upvalues[slot].Store(updated) {
+					return vm.runtimeError(c, ip, "invalid upvalue")
+				}
+				value.Release(old)
 			}
-			value.Release(old)
 
 		case chunk.OP_CLOSE_UPVALUE:
 			// RC: a posse so migra para o box se o slot era possuido pelo
@@ -1331,10 +1344,18 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				old := v
 				v = vm.copyValue(v)
 				vm.stack[idx] = v
-				// RC: usa ownSlot (mantem o slot registrado em frame.Owned)
-				// em vez de Retain cru — mesmo padrao do OP_SET_LOCAL.
-				frame.ownSlot(vm, idx)
-				value.Release(old)
+				// RC: so o slot POSSUIDO troca de dono. Um slot de tipo `ref` e
+				// emprestimo (nunca esta em frame.Owned): soltar o velho ali
+				// seria soltar o que este slot nunca reteve (dec a menos), e o
+				// objeto compartilhado passaria a parecer unico. O clone fica
+				// no slot emprestado sem dono — como no comportamento antigo.
+				if frame.ownsSlotIndex(idx) {
+					// ownSlot (nao Retain cru) mantem o slot registrado em
+					// frame.Owned apontando o objeto novo — mesmo padrao do
+					// OP_SET_LOCAL.
+					frame.ownSlot(vm, idx)
+					value.Release(old)
+				}
 			}
 			vm.push(v)
 
@@ -1374,10 +1395,16 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			v, changed := vm.unicize(stored)
 			if changed {
 				// RC: o clone substitui o valor compartilhado no box do
-				// upvalue; retain-antes-de-release em torno da troca.
-				value.Retain(v)
-				value.Release(stored)
-				upv.Store(v)
+				// upvalue; retain-antes-de-release em torno da troca. Caixa
+				// emprestada (slot `ref` capturado) nao possui o que guarda:
+				// soltar o velho ali seria dec a menos.
+				if upv.IsBorrowed() {
+					upv.Store(v)
+				} else {
+					value.Retain(v)
+					value.Release(stored)
+					upv.Store(v)
+				}
 			}
 			vm.push(v)
 

@@ -1262,3 +1262,216 @@ test_report(count(head_a) * 10 + count(head_b))`
 		t.Fatalf("mutacao atraves de emprestimo ref (global / capturado) se perdeu: esperado 22, veio %#v", reported)
 	}
 }
+
+// Task 7 (fallout da chave, round 2 — CRITICO achado em review): um slot `ref`
+// capturado por closure empresta, e a CAIXA do upvalue herda o emprestimo. Sem
+// isso, os funis de escrita da caixa soltavam um objeto que ela nunca reteve
+// (dec a menos): OP_SET_UPVALUE (rebind `u = u.proximo`) e OP_GET_UPVALUE_MUT
+// (mutacao `u.valor = 77`). O mesmo furo existia no OP_GET_LOCAL_MUT sobre um
+// slot local `ref` emprestado.
+//
+// A forma exige DOIS donos reais vivos no no mutado — o campo `proximo` do no
+// anterior E um vinculo por valor (`let second: Node = head.proximo`). Com um
+// dono so, o Release a mais e absorvido pelo clamp em zero de value.Release e
+// o bug fica invisivel (foi exatamente o ponto cego de
+// TestRefGlobalAndCapturedRefLocalAreBorrows). Com dois, o dec a menos leva
+// 2 -> 1, o no passa a parecer unico, `second.valor = 99` muta no lugar em vez
+// de clonar (CoW) e a escrita vaza para head.proximo.
+//
+// Oraculo: o binario do merge-base responde 20 nos tres cenarios (o valor
+// original do no 20 nunca e alterado, porque toda mutacao passa por clone).
+func TestCapturedAndBorrowedRefSlotsNeverReleaseWhatTheyDoNotOwn(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+// A: rebind do upvalue ref (OP_SET_UPVALUE sobre caixa emprestada).
+func repro_a(head: ref Node) -> int
+    let second: Node = head.proximo
+    let u: ref Node = head.proximo
+    let f: func() -> int = func() -> int
+        u = u.proximo
+        return 1
+    end
+    let ignored: int = f()
+    second.valor = 99
+    return head.proximo.valor
+end
+
+// B: mutacao atraves do upvalue ref (OP_GET_UPVALUE_MUT sobre caixa
+// emprestada).
+func repro_b(head: ref Node) -> int
+    let second: Node = head.proximo
+    let u: ref Node = head.proximo
+    let f: func() -> int = func() -> int
+        u.valor = 77
+        return 1
+    end
+    let ignored: int = f()
+    second.valor = 99
+    return head.proximo.valor
+end
+
+// C: mutacao atraves de um local ref emprestado (OP_GET_LOCAL_MUT).
+func repro_c(head: ref Node) -> int
+    let second: Node = head.proximo
+    let u: ref Node = head.proximo
+    u.valor = 77
+    second.valor = 99
+    return head.proximo.valor
+end
+
+func main()
+    let ha: Node = Node(0, null)
+    _append(ha, 20)
+    _append(ha, 30)
+    let a: int = repro_a(ha)
+
+    let hb: Node = Node(0, null)
+    _append(hb, 20)
+    _append(hb, 30)
+    let b: int = repro_b(hb)
+
+    let hc: Node = Node(0, null)
+    _append(hc, 20)
+    _append(hc, 30)
+    let c: int = repro_c(hc)
+
+    test_report(a * 10000 + b * 100 + c)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// 20 / 20 / 20 — exatamente o que o binario do merge-base responde.
+	if reported.Type != value.VAL_INT || reported.AsInt != 202020 {
+		t.Fatalf("escrita vazou por dec a menos em slot/caixa emprestada: esperado 202020 (A=20 B=20 C=20), veio %#v", reported)
+	}
+}
+
+// Task 7 (fallout, round 2): mesma invariante auditada por CONTAGEM, nao por
+// saida — o no compartilhado tem de continuar com os seus dois donos reais
+// depois de um rebind do upvalue emprestado. Antes da correcao caia para 1.
+func TestBorrowedUpvalueRebindKeepsOwnersOfSharedNode(t *testing.T) {
+	machine := New()
+	var before, after int32
+	machine.DefineNative("probe_before", func(args []value.Value) value.Value {
+		before = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_after", func(args []value.Value) value.Value {
+		after = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_before")
+	markProbeReadonly(t, machine, "probe_after")
+
+	src := `
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+func run(head: ref Node) -> int
+    let second: Node = head.proximo
+    probe_before(head.proximo)
+    let u: ref Node = head.proximo
+    let f: func() -> int = func() -> int
+        u = u.proximo
+        return 1
+    end
+    let ignored: int = f()
+    probe_after(head.proximo)
+    return 1
+end
+
+func main()
+    let head: Node = Node(0, null)
+    _append(head, 20)
+    _append(head, 30)
+    let ok: int = run(head)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// campo proximo de head + slot do `let second` = 2 donos reais.
+	if before != 2 {
+		t.Fatalf("esperado Owners(no compartilhado)=2 antes da closure, veio %d", before)
+	}
+	if after != before {
+		t.Fatalf("rebind de upvalue emprestado soltou o que a caixa nunca reteve: Owners %d -> %d", before, after)
+	}
+}
+
+// Task 7 (fallout, round 2 — Important 4): teste Go direto do ramo FALSO do
+// contrato de posse da caixa. Um slot emprestado (nao registrado em
+// frame.Owned) produz uma caixa marcada como emprestada, e fechar essa caixa
+// NAO pode reter — e o que impede o par retain/release da caixa de existir e,
+// por consequencia, o dec a menos nos funis de escrita dela.
+func TestBorrowedUpvalueBoxDoesNotRetainOnClose(t *testing.T) {
+	machine := New()
+
+	// possuido: um dono real em outro lugar (campo, global, slot do chamador).
+	owned := value.NewMap()
+	value.Retain(owned)
+	machine.stack[0] = owned
+	ownedSlot := &machine.stack[0]
+
+	// emprestado: idem, mas o slot nao e dono.
+	borrowed := value.NewMap()
+	value.Retain(borrowed)
+	machine.stack[1] = borrowed
+	borrowedSlot := &machine.stack[1]
+
+	ownedBox := machine.captureUpvalue(ownedSlot, true)
+	borrowedBox := machine.captureUpvalue(borrowedSlot, false)
+
+	if ownedBox.IsBorrowed() {
+		t.Fatal("caixa aberta sobre slot possuido nao pode nascer emprestada")
+	}
+	if !borrowedBox.IsBorrowed() {
+		t.Fatal("caixa aberta sobre slot emprestado tem de nascer emprestada")
+	}
+
+	machine.closeUpvalue(ownedSlot, true)
+	machine.closeUpvalue(borrowedSlot, false)
+
+	// ramo verdadeiro: a posse migra do slot para a caixa (+1; o release do
+	// slot e responsabilidade do frame).
+	if got := value.OwnersCount(owned); got != 2 {
+		t.Fatalf("caixa possuida deveria reter ao fechar: esperado Owners=2, veio %d", got)
+	}
+	// ramo falso: a caixa empresta — nada de retain.
+	if got := value.OwnersCount(borrowed); got != 1 {
+		t.Fatalf("caixa emprestada nao pode reter ao fechar: esperado Owners=1, veio %d", got)
+	}
+}

@@ -190,7 +190,12 @@ func (f *CallFrame) ownsSlotIndex(slot int) bool {
 }
 
 // captureUpvalue finds or creates an open upvalue for the given stack slot.
-func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
+// frameOwnedSlot diz se o slot e um vinculo POSSUIDO do frame; quando nao e
+// (slot de tipo `ref` — empréstimo), a caixa herda a condicao de emprestimo e
+// os funis de escrita dela param de contar posse (ver value.ObjUpvalue.
+// borrowed). A condicao e estatica por slot — decidida pelo tipo declarado, ja
+// resolvida antes de qualquer captura — entao decidir aqui e estavel.
+func (vm *VM) captureUpvalue(local *value.Value, frameOwnedSlot bool) *value.ObjUpvalue {
 	// var prevUpvalue *value.ObjUpvalue // Unused for now
 	upvalue := vm.openUpvalues
 
@@ -200,14 +205,16 @@ func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 		upvalue = upvalue.Next()
 	}
 
-	if upvalue != nil {
-		return upvalue
+	if upvalue == nil {
+		upvalue = value.NewOpenUpvalue(local, vm.openUpvalues)
+		vm.openUpvalues = upvalue
 	}
 
-	createdUpvalue := value.NewOpenUpvalue(local, vm.openUpvalues)
-	vm.openUpvalues = createdUpvalue
+	if !frameOwnedSlot {
+		upvalue.MarkBorrowed()
+	}
 
-	return createdUpvalue
+	return upvalue
 }
 
 // closeUpvalue fecha o box do upvalue aberto sobre o slot. frameOwnedSlot diz
@@ -215,7 +222,9 @@ func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 // nesse caso a posse migra do slot para o box. Um slot de tipo `ref` e
 // EMPRESTIMO (nunca entra em frame.Owned) — reter ao fechar daria um dono a
 // mais ao objeto emprestado e faria a mutacao atraves do empréstimo clonar,
-// perdendo a escrita.
+// perdendo a escrita. A caixa fica marcada como emprestada para que os funis
+// de escrita dela (OP_SET_UPVALUE, OP_GET_UPVALUE_MUT) tambem nao soltem o que
+// ela nunca reteve (dec a menos).
 func (vm *VM) closeUpvalue(slot *value.Value, frameOwnedSlot bool) {
 	var prev *value.ObjUpvalue
 	curr := vm.openUpvalues
@@ -228,6 +237,8 @@ func (vm *VM) closeUpvalue(slot *value.Value, frameOwnedSlot bool) {
 			// libera (o release do slot e responsabilidade do frame).
 			if frameOwnedSlot {
 				value.Retain(*slot)
+			} else {
+				curr.MarkBorrowed()
 			}
 			next := curr.Next()
 			if prev == nil {

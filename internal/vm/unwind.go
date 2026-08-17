@@ -42,10 +42,14 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 	// precisa saber se o slot era possuido (frame.Owned ainda intacto) para
 	// decidir se a posse migra para ele, e retain-antes-de-release mantem a
 	// contagem sem passar por zero. Slots `ref` sao emprestimos e nunca estao
-	// em Owned: o box tambem so os empresta (ver closeUpvalue).
+	// em Owned: o box tambem so os empresta (ver closeUpvalue). O guard de
+	// openUpvalues evita a varredura por slot no caso comum (frame sem nenhuma
+	// captura aberta), que e a esmagadora maioria dos retornos.
 	ownedTop := vm.stackTop
-	for index := frame.StackBase; index < ownedTop; index++ {
-		vm.closeUpvalue(&vm.stack[index], frame.ownsSlotIndex(index))
+	if vm.openUpvalues != nil {
+		for index := frame.StackBase; index < ownedTop; index++ {
+			vm.closeUpvalue(&vm.stack[index], frame.ownsSlotIndex(index))
+		}
 	}
 
 	// RC: solta os vinculos duraveis do frame (retorno normal e unwind

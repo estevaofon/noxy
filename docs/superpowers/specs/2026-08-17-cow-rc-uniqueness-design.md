@@ -103,6 +103,21 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
 - `ref`: um `VAL_REF` aliasa um *slot*, não cria dono novo do objeto; o slot
   já conta. Escrita através do ref = sobrescrita do slot (dec velho, inc
   novo).
+- **Slot de variável de tipo `ref` (empréstimo) — atenção à assimetria:** o
+  empréstimo vale para *slots de variável* — parâmetro `ref`, `let x: ref T`
+  local, global de tipo `ref`, e a **caixa de upvalue aberta sobre um desses
+  slots** (a caixa herda o empréstimo). Nenhum deles é dono: não incrementam
+  ao vincular e, principalmente, **não podem decrementar** ao serem
+  sobrescritos ou ao serem mutados via caminho MUT — soltar o que nunca se
+  reteve é *dec a menos*, que faz um composto realmente compartilhado parecer
+  único e a mutação seguinte acontecer no lugar (escrita vazando para os
+  outros donos). Um **campo de struct de tipo `ref T`**, por outro lado, **é
+  lugar durável e RETÉM** normalmente (linha "elemento de contêiner":
+  construtor e `OP_SET_PROPERTY`): a distinção é *slot de variável* (empresta)
+  × *campo/elemento* (possui), não a presença da palavra `ref` no tipo. É
+  justamente o retain do campo `proximo: ref Node` que sustenta a contagem de
+  uma lista encadeada — remover esse inc para "uniformizar com `ref`" abriria
+  dec a menos em toda a estrutura.
 - Natives da allowlist só-leitura (`cow_natives.go`): empréstimo puro.
 - Natives **com** assinatura: cópia ansiosa mantida (spec CoW §4.6) — fora
   do RC.
