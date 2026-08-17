@@ -16,6 +16,7 @@ plugins:
 # Exclude files
 exclude:
   - README.md
+  - SHOWCASE.md
   - Gemfile
   - Gemfile.lock
   - node_modules

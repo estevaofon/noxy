@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- `docs/SHOWCASE.md`: vitrine dos projetos reais escritos em Noxy, começando
+  pelo [NoxyDB](https://github.com/estevaofon/NoxyDB) — banco de dados
+  documento-chave/valor persistente escrito inteiramente em Noxy. Cada entrada
+  descreve o projeto e mapeia quais áreas da linguagem e da stdlib ele exercita
+  (CoW, JSON nativo, `http_server`, concorrência), com um template no fim para
+  novos projetos. O arquivo entrou no `exclude:` do Jekyll (`docs/_config.yml`):
+  fica no repositório, fora do site publicado.
+
 ### Fixed
 
 - Build do GitHub Pages voltou a passar: `superpowers/` entrou no `exclude:`
