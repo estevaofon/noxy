@@ -40,15 +40,19 @@
   laço de puts por valor caiu de 3 clones/put para O(1) clones no laço
   inteiro (`TestByValueCallLoopClonesO1AfterFlip`: 600 → ≤8 clones em 200
   iterações). Corpus de exemplos 130/130 idêntico em todas as verificações
-  (após o flip e após cada round de correção), `go test ./...` e `-race`
-  verdes. Custo do bookkeeping: mesmo após a limpeza do bit morto,
+  (após o flip e após cada round de correção); `go test ./...` verde,
+  `-race` verde em `internal/value` e na suíte completa de `internal/vm`
+  (contador `Owners` é atômico; o requisito é o mesmo do ARC sob tasks
+  paralelas). Custo do bookkeeping: mesmo após a limpeza do bit morto,
   `bench_map_churn` (+10,9%) e `bench_spawn_sum` (+10,4%) seguem acima do
   gate ≤~5% da suíte intercalada — escrita intensa em map e handoff de
   argumentos para tasks pagam inc/dec por elemento/argumento em cada
   operação. Aceito e documentado como o preço do RC nesta fase; as válvulas
-  (drops precisos da fase 2, elisão de pares inc/dec, fast path para stores
-  escalares — spec §8, risco 3) ficam como otimização futura. Tabela
-  completa e interpretação em `benchmarks/RESULTS.md`.
+  apontadas para quando isso for revisitado: drops precisos da fase 2 e
+  elisão de pares inc/dec no mesmo bytecode (spec §8, risco 3), mais um
+  fast path para stores de valores escalares apontado na investigação da
+  fase 1 (fora do texto da spec). Tabela completa e interpretação em
+  `benchmarks/RESULTS.md`.
 
 ### Changed
 
@@ -117,13 +121,17 @@
   acontece **in-place e é visível** — sob o bit sticky antigo, o bind por
   valor que criava um segundo dono temporário ligava a marca para sempre, e a
   mutação seguinte através do `ref` podia clonar em vez de mutar, perdendo a
-  escrita. Divergência forma-dependente no merge-base: o mesmo programa
-  (lista encadeada, escrita via `setit(ref n, v)` seguida de escrita via
-  `let u: ref Node = ...; u.valor = 77`) imprimia 107 numa forma e 50 na
-  outra, a depender de qual caminho de vínculo tocava o nó por último; com a
-  unicidade por contagem de donos as duas formas imprimem **107**, o valor
-  correto pelo contrato CoW 0.4.0 (§2, regra 6: mutação através de `ref` é
-  sempre visível). Pinado por `TestRefWriteToUniquelyOwnedNodeMutatesInPlace`.
+  escrita. O teste committado pina o valor correto: **107** (antes: 50 —
+  escrita perdida) para o mesmo programa (lista encadeada, escrita via
+  `setit(ref n, v)` seguida de escrita via `let u: ref Node = ...;
+  u.valor = 77`). A investigação da Task 7 confirmou adicionalmente que o
+  comportamento antigo era dependente da forma do vínculo (o próprio
+  merge-base já imprimia 107 quando o mesmo alias era escrito só via
+  parâmetro `ref`, sem a passagem por valor intermediária) — variantes
+  registradas no relatório da task, não na suíte. O resultado correto pelo
+  contrato CoW 0.4.0 é 107 em qualquer forma (§2, regra 6: mutação através
+  de `ref` é sempre visível). Pinado por
+  `TestRefWriteToUniquelyOwnedNodeMutatesInPlace`.
 
 ## [0.4.0] - 2026-08-16
 

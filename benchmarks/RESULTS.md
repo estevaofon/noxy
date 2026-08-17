@@ -12,7 +12,10 @@ Spec: `docs/superpowers/specs/2026-08-17-cow-rc-uniqueness-design.md`.
 **Corpus de exemplos 130/130 idêntico** em todas as verificações — rodado
 após o flip do mecanismo (bit sticky `Shared` → contador `Owners`), após
 cada round de correção relevante e após a limpeza final do bit morto.
-`go test ./...` verde; `-race` verde.
+`go test ./...` verde; `-race` verde em `internal/value` e na suíte completa
+de `internal/vm` (`go test ./internal/value -race`: 1,9s; `go test
+./internal/vm -race`, sem filtro: 150,3s — o contador `Owners` é atômico
+justamente pelo requisito de tasks paralelas).
 
 | bench | perfil | develop_ms | rc_ms | delta | veredito |
 |---|---|---|---|---|---|
@@ -96,10 +99,12 @@ preparo da task). Comparado ao round 4 da Task 7 (map_churn +9,8%, spawn_sum
 +14,9%, já com o bookkeeping completo mas antes da limpeza do bit sticky), a
 remoção do bit reduziu `spawn_sum` (14,9%→10,4%) e manteve `map_churn` na
 mesma faixa (9,8%→10,9%, dentro do ruído) — a limpeza **não** fecha esses
-dois deltas. **Aceito e documentado como o preço do RC nesta fase**; a spec
-(§8, risco 3) nomeia as válvulas para quando isso for revisitado: drops
-precisos da fase 2 (Perceus-lite, §5), elisão de pares inc/dec no mesmo
-bytecode, e um fast path para stores de valores escalares.
+dois deltas. **Aceito e documentado como o preço do RC nesta fase**; as
+válvulas para quando isso for revisitado: drops precisos da fase 2
+(Perceus-lite, §5) e elisão de pares inc/dec no mesmo bytecode (ambas
+nomeadas na spec §8, risco 3), mais um fast path para stores de valores
+escalares apontado na investigação da fase 1 (Task 7), fora do texto da
+spec.
 
 **O que resta:** fase 1 libera locais de bloco mortos só no fim do frame
 (inflação temporária segura, nunca unsound); a fase 1.5 (drops de escopo de
@@ -113,16 +118,26 @@ O(rodadas×n) em qualquer linguagem de semântica de valor.
 ### Divergência corrigida
 
 Escrita através de `ref` para um nó com exatamente um dono durável agora
-acontece in-place e é visível. Sob o bit sticky, o mesmo programa (lista
-encadeada, escrita via `setit(ref n, v)` seguida de escrita via
-`let u: ref Node = ...; u.valor = 77`) respondia 107 numa forma e 50 na
-outra — forma-dependente, porque o bind por valor que criava um segundo
-dono temporário ligava a marca para sempre e a mutação seguinte via `ref`
-clonava em vez de mutar, perdendo a escrita. Com a unicidade por contagem de
-donos as duas formas respondem 107, o valor correto pelo contrato CoW 0.4.0
-(§2, regra 6). Pinado por `TestRefWriteToUniquelyOwnedNodeMutatesInPlace`
-(`internal/vm/rc_uniqueness_test.go`). Nenhum exemplo do corpus muda
-(130/130) — é dead-share, não um caso exercitado pelos exemplos existentes.
+acontece in-place e é visível. O teste committado
+(`TestRefWriteToUniquelyOwnedNodeMutatesInPlace`,
+`internal/vm/rc_uniqueness_test.go`) pina o valor correto para o programa
+(lista encadeada, escrita via `setit(ref n, v)` seguida de escrita via
+`let u: ref Node = ...; u.valor = 77`): **107** com a unicidade por contagem
+de donos, contra **50** no binário pré-chave (bit sticky ligado pelo bind
+por valor intermediário, mutação seguinte via `ref` clonava em vez de
+mutar — escrita perdida).
+
+A investigação da Task 7 (repros à mão, não parte da suíte) confirmou
+adicionalmente que o comportamento antigo era dependente da forma do
+vínculo, não um bug de contagem isolado: o próprio merge-base já respondia
+107 quando o mesmo alias era escrito só via parâmetro `ref` (forma
+canônica, sem a passagem por valor intermediária que liga o bit sticky) —
+variante `rv_h1_paramform`, registrada em
+`.superpowers/sdd/2026-08-17-cow-rc-uniqueness-fase1/task-7-report.md`, não
+na suíte de testes. O 107 é o valor correto pelo contrato CoW 0.4.0 em
+qualquer forma (§2, regra 6: mutação através de `ref` é sempre visível).
+Nenhum exemplo do corpus muda (130/130) — é dead-share, não um caso
+exercitado pelos exemplos existentes.
 
 ## develop (c0a89c9) × validação O(1) pela tag `RuntimeType` (PR #31)
 
