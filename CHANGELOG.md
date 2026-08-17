@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- Suíte de benchmark cross-runtime em `benchmarks/cross_runtime/`, comparando o
+  VM com CPython 3.13, Lua 5.4 e Go nativo na mesma carga. Sete benches
+  (`startup`, `loop_arith`, `map_churn`, `mandelbrot`, `string_ops`,
+  `bubblesort`, `fib`) escritos em Noxy e Python; `startup`, `loop_arith` e
+  `fib` também em Lua e Go, como calibração — o Lua é o comparável direto
+  (bytecode puro, sem JIT, sem inline cache) e o Go é o teto do hospedeiro.
+  Cada implementação imprime a mesma linha `CHECKSUM:` e o harness
+  (`run_cross_runtime.ps1`) aborta se divergirem, então a comparação é sempre
+  da mesma carga. Medição intercalada entre runtimes, mínimo de N execuções em
+  vez de mediana (sob carga a distribuição só tem cauda à direita) e cópia dos
+  fontes para disco local — medir de dentro do repo, que fica em OneDrive,
+  inflava os tempos em ~2x por filtro de sync e antivírus no read. Resultado em
+  `benchmarks/cross_runtime/results/`: descontado o piso de processo, o Noxy
+  está 1,8x a 9,6x atrás do CPython e ~14x a ~15x atrás do Lua, com o custo
+  concentrado em chamada de função, acesso indexado a array e operação de
+  string; o despacho de bytecode puro fica a 1,8x do CPython e o startup ganha
+  dele (63ms contra 94ms). O ranking se repetiu em cinco rodadas; as
+  magnitudes variam, porque o número líquido amplifica ruído do piso de
+  processo. Não altera comportamento da linguagem.
+
 ### Fixed
 
 - `break` dentro de `for ... in` voltou a sair do laço. O branch do

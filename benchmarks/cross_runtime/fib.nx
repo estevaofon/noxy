@@ -1,0 +1,13 @@
+// Recursao pura: custo de chamada de funcao + aritmetica de inteiros.
+func fib(n: int) -> int
+    if n <= 1 then
+        return n
+    end
+    return fib(n - 1) + fib(n - 2)
+end
+
+func main()
+    print(f"CHECKSUM:{fib(30)}")
+end
+
+main()
