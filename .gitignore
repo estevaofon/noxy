@@ -28,5 +28,6 @@ AWS_DEPLOY_GUIDE.md
 SAFE_MODE_PROMPT.md
 vault.key
 .arc/
+.agents/
 .worktrees/
 noxy_libs/github_com/estevaofon/noxy_terminal/
