@@ -687,10 +687,19 @@ main()`
 }
 
 // Task 5 (Step 1): caminho MUT (OP_GET_INDEX_MUT, branch array) — quando
-// a[0] esta Shared (marcado pelo proprio OP_ARRAY), a mutacao a[0].x=9
-// clona o elemento, grava o clone de volta em Elements[0] com retain, e
-// libera a instancia velha. Auditado por contagem na instancia velha
-// (capturada antes da mutacao) e na nova (lida depois).
+// a[0] esta compartilhado, a mutacao a[0].x=9 clona o elemento, grava o clone
+// de volta em Elements[0] com retain, e libera a instancia velha. Auditado
+// por contagem na instancia velha (capturada antes da mutacao) e na nova
+// (lida depois).
+//
+// Task 7: antes da chave bastava `let a: P[] = [P(1)]` — o MarkShared que o
+// OP_ARRAY faz no elemento era suficiente para o caminho de clone disparar.
+// Depois da chave (spec docs/superpowers/specs/
+// 2026-08-17-cow-rc-uniqueness-design.md §3), "compartilhado" e Owners > 1, e
+// um elemento com um unico dono (o proprio array) e unico por definicao —
+// mutar em lugar e correto e nao clona. Para continuar exercitando o caminho
+// de clone, o programa agora da DOIS donos duraveis a instancia: o slot do
+// `let p` e o elemento de `a`.
 func TestMutIndexClonePathRetainsWriteBackReleasesOld(t *testing.T) {
 	machine := New()
 	var oldInst value.Value
@@ -713,7 +722,8 @@ struct P
 end
 
 func main()
-    let a: P[] = [P(1)]
+    let p: P = P(1)
+    let a: P[] = [p]
     probe_before(a[0])
     a[0].x = 9
     probe_after(a[0])
@@ -723,8 +733,8 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	if ownersOldBefore != 1 {
-		t.Fatalf("esperado Owners(a[0])=1 antes da mutacao (retain do elemento no OP_ARRAY), veio %d", ownersOldBefore)
+	if ownersOldBefore != 2 {
+		t.Fatalf("esperado Owners(a[0])=2 antes da mutacao (slot do let p + elemento retido no OP_ARRAY), veio %d", ownersOldBefore)
 	}
 	if got := value.OwnersCount(oldInst); got != 0 {
 		t.Fatalf("esperado Owners(instancia velha)=0 apos o clone gravado de volta em OP_GET_INDEX_MUT, veio %d", got)
@@ -1051,5 +1061,204 @@ test_observe_rc(g)`
 	// permanente do native sem assinatura.
 	if got := value.OwnersCount(captured); got != 2 {
 		t.Fatalf("esperado Owners=2 (1 do global + 1 da retencao permanente do native), veio %d", got)
+	}
+}
+
+// Task 7 (Step 1): teste de aceite da CHAVE — com a unicidade decidida pelo
+// contador de donos (spec §3), um laco que passa um composto POR VALOR a um
+// helper nao pode mais clonar por iteracao. Antes da chave, o bit sticky
+// Shared ligado pelo bind do parametro por valor ficava para sempre: cada
+// put() reclonava db/state/payloads (3 clones por iteracao, ~600 no total, e
+// o clone do map cresce com N => quadratico). Depois da chave, o retain do
+// parametro e liberado no fim do frame do helper, os donos voltam a 1 e as
+// mutacoes seguintes mutam no lugar: O(1) clones no laco inteiro.
+func TestByValueCallLoopClonesO1AfterFlip(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	ResetCloneCount()
+	src := `
+struct State
+    payloads: map[string, string]
+end
+
+struct Db
+    state: State
+end
+
+func helper(db: Db) -> int
+    return 1
+end
+
+func put(db: ref Db, key: string, val: string) -> void
+    let x: int = helper(db)
+    db.state.payloads[key] = val
+end
+
+func main()
+    let payloads: map[string, string] = {}
+    let db: Db = Db(State(payloads))
+    let i: int = 0
+    while i < 200 do
+        put(ref db, f"k{i}", "v")
+        i = i + 1
+    end
+    test_report(length(keys(db.state.payloads)))
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if reported.Type != value.VAL_INT || reported.AsInt != 200 {
+		t.Fatalf("programa incorreto: %#v", reported)
+	}
+	if n := CloneCountValue(); n > 8 {
+		t.Fatalf("laco por-valor deveria clonar O(1); clonou %d", n)
+	}
+}
+
+// Task 7 (fallout da chave): um vinculo de tipo `ref` e um EMPRESTIMO
+// (borrow), nunca um dono duravel. Parametros ref ja eram pulados no bind
+// (callPreparedClosure), mas o `let x: ref T` e o rebind `x = y` de um local
+// ref contavam posse — over-count que so ficou observavel depois da chave: um
+// no de lista alcancado por `current = current.proximo` passava a ter 2 donos
+// (o campo `proximo` do no anterior + o slot ref emprestado), IsShared virava
+// true e a mutacao `current.proximo = null` clonava o no em vez de muta-lo no
+// lugar, perdendo a escrita (noxy_examples/stack.nx e linked_list.nx
+// divergiam do baseline). Este teste e de SEMANTICA: a mutacao atraves do
+// emprestimo tem de ser visivel na lista original.
+func TestRefLocalBindingIsBorrowNotOwner(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+func pop(node: ref Node) -> int
+    let current: ref Node = node
+    while current.proximo.proximo != null do
+        current = current.proximo
+    end
+    let valor: int = current.proximo.valor
+    current.proximo = null
+    return valor
+end
+
+func count(node: ref Node) -> int
+    let n: int = 0
+    let current: ref Node = node
+    while current != null do
+        n = n + 1
+        current = current.proximo
+    end
+    return n
+end
+
+func main()
+    let head: Node = Node(0, null)
+    _append(head, 20)
+    _append(head, 30)
+    let popped: int = pop(head)
+    test_report(count(head) * 100 + popped)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// 2 nos restantes (0, 20) * 100 + valor removido (30).
+	if reported.Type != value.VAL_INT || reported.AsInt != 230 {
+		t.Fatalf("mutacao atraves do emprestimo ref se perdeu (clone indevido): esperado 230, veio %#v", reported)
+	}
+}
+
+// Task 7 (fallout da chave): mesma regra do teste acima nos outros dois
+// funis de vinculo ref — global de tipo ref (OP_SET_GLOBAL_BORROW) e local
+// ref capturado por uma closure que escapa do frame (closeUpvalue so migra a
+// posse quando o slot era possuido). Sem os dois, o objeto emprestado ganhava
+// um dono a mais e a mutacao atraves do emprestimo clonava, perdendo a
+// escrita. Teste de SEMANTICA: a lista original tem de encolher.
+func TestRefGlobalAndCapturedRefLocalAreBorrows(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+func count(node: ref Node) -> int
+    let n: int = 0
+    let cur: ref Node = node
+    while cur != null do
+        n = n + 1
+        cur = cur.proximo
+    end
+    return n
+end
+
+func make_dropper(node: ref Node) -> func() -> int
+    let u: ref Node = node.proximo
+    return func() -> int
+        u.proximo = null
+        return 1
+    end
+end
+
+let head_a: Node = Node(0, null)
+_append(head_a, 20)
+_append(head_a, 30)
+let g: ref Node = head_a.proximo
+g.proximo = null
+
+let head_b: Node = Node(0, null)
+_append(head_b, 20)
+_append(head_b, 30)
+let dropper: func() -> int = make_dropper(head_b)
+let done: int = dropper()
+
+test_report(count(head_a) * 10 + count(head_b))`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// as duas listas encolhem de 3 para 2 nos: 2*10 + 2 = 22.
+	if reported.Type != value.VAL_INT || reported.AsInt != 22 {
+		t.Fatalf("mutacao atraves de emprestimo ref (global / capturado) se perdeu: esperado 22, veio %#v", reported)
 	}
 }

@@ -210,6 +210,17 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			frame.Environment.SetLocal(name, vm.peek(0))
 
+		case chunk.OP_SET_GLOBAL_BORROW:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+			// RC: global de tipo `ref` — empréstimo, não posse. Sem
+			// retain/release: quem responde pelo objeto é o dono real
+			// (campo, outro global, slot do chamador…). Contar aqui daria um
+			// dono a mais e a mutação através do empréstimo clonaria.
+			frame.Environment.SetLocal(name, vm.peek(0))
+
 		case chunk.OP_GET_LOCAL:
 			slot := c.Code[ip]
 			ip++
@@ -225,6 +236,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// RC: retain-antes-de-release (auto-atribuicao x = x)
 			frame.ownSlot(vm, idx)
 			value.Release(old)
+
+		case chunk.OP_SET_LOCAL_BORROW:
+			slot := c.Code[ip]
+			ip++
+			// RC: rebind de local `ref` — empréstimo, não posse. Nada de
+			// retain/release e nada registrado em frame.Owned: quem responde
+			// pelo objeto é o dono real (campo, global, slot do chamador…).
+			vm.stack[frame.LocalBase+int(slot)] = vm.peek(0)
 
 		case chunk.OP_OWN_LOCAL:
 			frame.ownSlot(vm, vm.stackTop-1)
@@ -972,7 +991,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			value.Release(old)
 
 		case chunk.OP_CLOSE_UPVALUE:
-			vm.closeUpvalue(&vm.stack[vm.stackTop-1])
+			// RC: a posse so migra para o box se o slot era possuido pelo
+			// frame; slots `ref` sao emprestimos (ver closeUpvalue).
+			vm.closeUpvalue(&vm.stack[vm.stackTop-1], frame.ownsSlotIndex(vm.stackTop-1))
 			vm.pop()
 
 		case chunk.OP_RETURN:

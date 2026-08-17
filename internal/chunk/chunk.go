@@ -95,6 +95,12 @@ const (
 	OP_DEREF_MUT       // pops ref; uniciza através do slot
 	OP_MARK_SHARED     // marca peek(0) como Shared
 	OP_OWN_LOCAL       // retem peek(0) e registra o slot no frame corrente (RC)
+	// RC: rebind de local de tipo ref — grava no slot SEM contar posse. Um
+	// vínculo `ref` é empréstimo (borrow), não dono: contá-lo daria um dono a
+	// mais ao objeto emprestado e faria a mutação através do empréstimo clonar
+	// (escrita perdida). Espelha o skip de params IsRef em callPreparedClosure.
+	OP_SET_LOCAL_BORROW  // [slot]
+	OP_SET_GLOBAL_BORROW // [const_hi, const_lo]; mesma regra para globais ref
 )
 
 func (op OpCode) String() string {
@@ -155,6 +161,10 @@ func (op OpCode) String() string {
 		return "OP_MARK_SHARED"
 	case OP_OWN_LOCAL:
 		return "OP_OWN_LOCAL"
+	case OP_SET_LOCAL_BORROW:
+		return "OP_SET_LOCAL_BORROW"
+	case OP_SET_GLOBAL_BORROW:
+		return "OP_SET_GLOBAL_BORROW"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -364,6 +374,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_MARK_SHARED", offset)
 	case OP_OWN_LOCAL:
 		return c.simpleInstruction("OP_OWN_LOCAL", offset)
+	case OP_SET_LOCAL_BORROW:
+		return c.byteInstruction("OP_SET_LOCAL_BORROW", offset)
+	case OP_SET_GLOBAL_BORROW:
+		return c.constantLongInstruction("OP_SET_GLOBAL_BORROW", offset)
 	case OP_EQUAL:
 		return c.simpleInstruction("OP_EQUAL", offset)
 	case OP_GREATER:

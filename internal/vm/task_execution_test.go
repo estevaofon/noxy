@@ -64,8 +64,14 @@ func TestRuntimeErrorRemainsTypedThroughImportFailure(t *testing.T) {
 	}
 }
 
-// Contrato CoW: parâmetro por valor de task é marcado Shared — mesmo
+// Contrato CoW: parâmetro por valor de task é capturado sem copiar — mesmo
 // ponteiro, cópia adiada para a primeira mutação (unicize) no bytecode.
+// Depois da chave (spec docs/superpowers/specs/
+// 2026-08-17-cow-rc-uniqueness-design.md §3), o que registra a captura é o
+// contador de donos e não o bit sticky: `outer` é montado fora do bytecode e
+// nasce sem dono, então a captura o leva de 0 para 1 (em código real o dono do
+// chamador já estaria contado, o total passaria de 1 e a primeira mutação
+// dentro da task clonaria).
 func TestPreparedTaskCallMarksValueParameterShared(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `
@@ -77,6 +83,7 @@ end`); err != nil {
 	callable, _ := machine.GetGlobal("worker")
 	nested := value.NewArray([]value.Value{value.NewInt(7)})
 	outer := value.NewArray([]value.Value{nested})
+	ownersBefore := value.OwnersCount(outer)
 
 	call, err := machine.prepareTaskCall(callable, []value.Value{outer})
 	if err != nil {
@@ -87,8 +94,8 @@ end`); err != nil {
 	if gotOuter != wantOuter {
 		t.Fatal("CoW: o arg deve manter o ponteiro (cópia adiada)")
 	}
-	if !value.IsShared(call.Arguments[0]) {
-		t.Fatal("CoW: o arg composto por valor deve estar marcado Shared")
+	if got := value.OwnersCount(call.Arguments[0]); got != ownersBefore+1 {
+		t.Fatalf("CoW: a captura do arg composto por valor deve contar um dono durável: esperado %d, veio %d", ownersBefore+1, got)
 	}
 	if gotOuter.Elements[0].Obj != nested.Obj {
 		t.Fatal("marcação não pode clonar o aninhado")

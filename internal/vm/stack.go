@@ -176,6 +176,19 @@ func (f *CallFrame) ownSlot(vm *VM, slot int) {
 	f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
 }
 
+// ownsSlotIndex informa se o slot e um vinculo POSSUIDO deste frame. Slots de
+// tipo `ref` (params IsRef, `let x: ref T`, rebind de ref) sao emprestimos e
+// nunca aparecem em Owned — e por isso que a posse nao migra para o box do
+// upvalue quando um deles e capturado (ver closeUpvalue).
+func (f *CallFrame) ownsSlotIndex(slot int) bool {
+	for i := range f.Owned {
+		if f.Owned[i].slot == slot {
+			return true
+		}
+	}
+	return false
+}
+
 // captureUpvalue finds or creates an open upvalue for the given stack slot.
 func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 	// var prevUpvalue *value.ObjUpvalue // Unused for now
@@ -197,7 +210,13 @@ func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 	return createdUpvalue
 }
 
-func (vm *VM) closeUpvalue(slot *value.Value) {
+// closeUpvalue fecha o box do upvalue aberto sobre o slot. frameOwnedSlot diz
+// se o slot era um vinculo POSSUIDO do frame (registrado em frame.Owned): so
+// nesse caso a posse migra do slot para o box. Um slot de tipo `ref` e
+// EMPRESTIMO (nunca entra em frame.Owned) — reter ao fechar daria um dono a
+// mais ao objeto emprestado e faria a mutacao atraves do empréstimo clonar,
+// perdendo a escrita.
+func (vm *VM) closeUpvalue(slot *value.Value, frameOwnedSlot bool) {
 	var prev *value.ObjUpvalue
 	curr := vm.openUpvalues
 
@@ -207,7 +226,9 @@ func (vm *VM) closeUpvalue(slot *value.Value) {
 			// finalizeCurrentFrame) para o box do upvalue, que passa a ser
 			// dono duravel independente do frame. So retem aqui - nunca
 			// libera (o release do slot e responsabilidade do frame).
-			value.Retain(*slot)
+			if frameOwnedSlot {
+				value.Retain(*slot)
+			}
 			next := curr.Next()
 			if prev == nil {
 				vm.openUpvalues = next

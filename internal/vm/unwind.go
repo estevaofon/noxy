@@ -38,6 +38,16 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 		}
 	}
 
+	// RC: fecha os upvalues ANTES de soltar os vinculos do frame — o box
+	// precisa saber se o slot era possuido (frame.Owned ainda intacto) para
+	// decidir se a posse migra para ele, e retain-antes-de-release mantem a
+	// contagem sem passar por zero. Slots `ref` sao emprestimos e nunca estao
+	// em Owned: o box tambem so os empresta (ver closeUpvalue).
+	ownedTop := vm.stackTop
+	for index := frame.StackBase; index < ownedTop; index++ {
+		vm.closeUpvalue(&vm.stack[index], frame.ownsSlotIndex(index))
+	}
+
 	// RC: solta os vinculos duraveis do frame (retorno normal e unwind
 	// passam ambos por aqui). Libera o OBJETO GRAVADO em cada entrada —
 	// nunca o ocupante atual do slot, que apos reuso de slot por um
@@ -50,9 +60,7 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 	}
 	frame.Owned = nil
 
-	ownedTop := vm.stackTop
 	for index := frame.StackBase; index < ownedTop; index++ {
-		vm.closeUpvalue(&vm.stack[index])
 		vm.stack[index] = value.Value{}
 	}
 

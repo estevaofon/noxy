@@ -205,8 +205,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		if c.scopeDepth > 0 {
 			// Local variable
-			// RC: o let e um vinculo duravel do frame (spec §4.2)
-			c.emitByte(byte(chunk.OP_OWN_LOCAL))
+			// RC: o let e um vinculo duravel do frame (spec §4.2) — exceto
+			// quando o tipo declarado e `ref T`. Um vinculo ref e EMPRESTIMO
+			// (borrow), nunca dono: conta-lo daria um dono a mais ao objeto
+			// emprestado e a mutacao atraves do emprestimo clonaria (escrita
+			// perdida). Mesma regra dos parametros IsRef, que
+			// callPreparedClosure ja pula. A condicao aqui e exatamente a que
+			// resolveLocal enxerga depois (addLocal guarda este n.Type), entao
+			// o rebind — OP_SET_LOCAL_BORROW — decide igual, e um mesmo slot
+			// nunca mistura escrita contada com escrita emprestada.
+			if _, isRefBinding := n.Type.(*ast.RefType); !isRefBinding {
+				c.emitByte(byte(chunk.OP_OWN_LOCAL))
+			}
 			c.addLocal(n.Name.Value, n.Type)
 			// Do NOT pop. The value stays on stack and becomes the local variable.
 		} else {
@@ -215,7 +225,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.globals[n.Name.Value] = n.Type
 
 			nameConstant := c.makeConstant(value.NewString(n.Name.Value))
-			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
+			// RC: mesma regra do let local — global de tipo `ref T` e
+			// emprestimo, nao dono (ver OP_SET_LOCAL_BORROW). O tipo do global
+			// fica registrado em c.globals, entao o rebind adiante decide
+			// igual e o slot nunca mistura escrita contada com emprestada.
+			if _, isRefBinding := n.Type.(*ast.RefType); isRefBinding {
+				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL_BORROW, nameConstant)
+			} else {
+				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
+			}
 			c.emitByte(byte(chunk.OP_POP))
 		}
 		return c.currentChunk, nil, nil
@@ -353,7 +371,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if err := c.emitRuntimeValueType(localType); err != nil {
 							return nil, nil, err
 						}
-						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+						// RC: rebind de local `ref` e troca de EMPRESTIMO, nao
+						// de posse — grava no slot sem retain/release (o dono
+						// real e o campo/global/slot do chamador apontado).
+						// Contar aqui daria um dono a mais ao objeto e faria a
+						// mutacao atraves do emprestimo clonar.
+						c.emitBytes(byte(chunk.OP_SET_LOCAL_BORROW), byte(arg))
 						c.emitByte(byte(chunk.OP_POP))
 						return c.currentChunk, nil, nil
 					}
@@ -410,7 +433,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							if err := c.emitRuntimeValueType(globalType); err != nil {
 								return nil, nil, err
 							}
-							c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
+							// RC: rebind de global `ref` e troca de
+							// emprestimo, nao de posse (ver
+							// OP_SET_LOCAL_BORROW).
+							c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL_BORROW, nameConstant)
 							c.emitByte(byte(chunk.OP_POP))
 						} else {
 							// User tried `ref = val`. Explicitly FORBID update via name.

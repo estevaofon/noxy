@@ -21,20 +21,14 @@ func MarkShared(v Value) {
 	}
 }
 
-// IsShared informa se o composto está marcado como compartilhado.
+// IsShared informa se o composto tem mais de um dono durável vivo — a
+// unicidade agora é decidida pelo contador Owners, não pelo bit sticky
+// (spec §3: "posse única por contagem de referências duráveis"). O bit
+// Shared continua sendo escrito por MarkShared, mas ninguém mais o lê:
+// virou dead-weight até a Task 8 removê-lo.
 func IsShared(v Value) bool {
-	if v.Type != VAL_OBJ {
-		return false
-	}
-	switch obj := v.Obj.(type) {
-	case *ObjArray:
-		return obj.Shared.Load()
-	case *ObjMap:
-		return obj.Shared.Load()
-	case *ObjInstance:
-		return obj.Shared.Load()
-	}
-	return false
+	owners := ownersOf(v)
+	return owners != nil && owners.Load() > 1
 }
 
 // ownersSaturation impede overflow do contador; acima disso o valor se
