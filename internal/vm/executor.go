@@ -210,7 +210,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_SET_LOCAL:
 			slot := c.Code[ip]
 			ip++
-			vm.stack[frame.LocalBase+int(slot)] = vm.peek(0)
+			idx := frame.LocalBase + int(slot)
+			old := vm.stack[idx]
+			vm.stack[idx] = vm.peek(0)
+			// RC: retain-antes-de-release (auto-atribuicao x = x)
+			frame.ownSlot(vm, idx)
+			value.Release(old)
+
+		case chunk.OP_OWN_LOCAL:
+			frame.ownSlot(vm, vm.stackTop-1)
 
 		case chunk.OP_REF_LOCAL:
 			slot := int(c.Code[ip])

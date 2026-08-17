@@ -94,6 +94,7 @@ const (
 	OP_GET_PROP_MUT    // [const_hi, const_lo]; pops container
 	OP_DEREF_MUT       // pops ref; uniciza através do slot
 	OP_MARK_SHARED     // marca peek(0) como Shared
+	OP_OWN_LOCAL       // retem peek(0) e registra o slot no frame corrente (RC)
 )
 
 func (op OpCode) String() string {
@@ -152,6 +153,8 @@ func (op OpCode) String() string {
 		return "OP_DEREF_MUT"
 	case OP_MARK_SHARED:
 		return "OP_MARK_SHARED"
+	case OP_OWN_LOCAL:
+		return "OP_OWN_LOCAL"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -359,6 +362,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_DEREF_MUT", offset)
 	case OP_MARK_SHARED:
 		return c.simpleInstruction("OP_MARK_SHARED", offset)
+	case OP_OWN_LOCAL:
+		return c.simpleInstruction("OP_OWN_LOCAL", offset)
 	case OP_EQUAL:
 		return c.simpleInstruction("OP_EQUAL", offset)
 	case OP_GREATER:

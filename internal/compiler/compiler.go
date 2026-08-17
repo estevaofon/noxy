@@ -205,6 +205,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		if c.scopeDepth > 0 {
 			// Local variable
+			// RC: o let e um vinculo duravel do frame (spec §4.2)
+			c.emitByte(byte(chunk.OP_OWN_LOCAL))
 			c.addLocal(n.Name.Value, n.Type)
 			// Do NOT pop. The value stays on stack and becomes the local variable.
 		} else {

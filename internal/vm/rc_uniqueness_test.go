@@ -177,3 +177,74 @@ main()`
 		t.Fatalf("apos os dois retornos esperado %d, veio %d", during-2, after)
 	}
 }
+
+// O let e um vinculo duravel do frame (spec §4.2): o slot local retem o
+// composto assim que e criado. probe roda ainda dentro do frame de main,
+// entao Owners deve refletir exatamente o retain do OP_OWN_LOCAL do let.
+func TestLetBindRetainsComposite(t *testing.T) {
+	machine := New()
+	var count int32
+	machine.DefineNative("probe", func(args []value.Value) value.Value {
+		count = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe")
+
+	src := `
+func main()
+    let m: map[string, int] = {"a": 1}
+    probe(m)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("esperado Owners=1 (slot do let), veio %d", count)
+	}
+}
+
+// a = b deve soltar o objeto que ocupava o slot de "a" e reter o objeto de
+// "b" (que passa a ter dois donos: os slots de "a" e "b"). Captura-se o
+// value.Value velho de "a" via native de sonda para medir seu OwnersCount
+// depois da reatribuicao, quando o slot ja nao aponta mais para ele.
+func TestAssignReleasesOldRetainsNew(t *testing.T) {
+	machine := New()
+	var oldA value.Value
+	var ownersA1, ownersA2 int32
+	machine.DefineNative("probe_a1", func(args []value.Value) value.Value {
+		oldA = args[0]
+		ownersA1 = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_a2", func(args []value.Value) value.Value {
+		ownersA2 = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_a1")
+	markProbeReadonly(t, machine, "probe_a2")
+
+	src := `
+func main()
+    let a: map[string, int] = {"x": 1}
+    let b: map[string, int] = {"y": 2}
+    probe_a1(a)
+    a = b
+    probe_a2(a)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersA1 != 1 {
+		t.Fatalf("esperado Owners(a)=1 antes da reatribuicao, veio %d", ownersA1)
+	}
+	if ownersA2 != 2 {
+		t.Fatalf("esperado Owners(b)=2 apos a=b (slots a e b), veio %d", ownersA2)
+	}
+	if got := value.OwnersCount(oldA); got != 0 {
+		t.Fatalf("esperado Owners(objeto velho de a)=0 apos a reatribuicao, veio %d", got)
+	}
+}
