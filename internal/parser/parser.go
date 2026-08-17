@@ -347,13 +347,13 @@ func (p *Parser) parseDeferStatement() ast.Statement {
 }
 
 func (p *Parser) parseBreakStatement() *ast.BreakStmt {
-	stmt := &ast.BreakStmt{Token: p.curToken}
-	p.nextToken() // eat 'break'
-	// Optional newline
-	if p.peekToken.Type == token.NEWLINE {
-		p.nextToken()
-	}
-	return stmt
+	// Nao avanca token nenhum: o contrato de ParseProgram/parseBlockStatement/
+	// parseCaseBody e que parseStatement retorne com curToken no ULTIMO token
+	// do statement — para o break, o proprio 'break' — e o laco chamador faz o
+	// nextToken. Comer o token seguinte aqui engolia o 'end' na forma inline
+	// (`if cond then break end`), fazendo o bloco terminar no 'end' do laco
+	// externo.
+	return &ast.BreakStmt{Token: p.curToken}
 }
 
 func (p *Parser) parseUseStatement() *ast.UseStmt {
