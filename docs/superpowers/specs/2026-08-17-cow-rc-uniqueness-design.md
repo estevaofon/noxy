@@ -158,13 +158,15 @@ real, com a propriedade de segurança de que **dec faltante nunca é unsound**
 - **Fase 1 — granularidade de frame (o alvo real).** Incs completos da
   tabela §4.2; decs centralizados em `finalizeCurrentFrame` (funil único de
   retorno normal E unwind, após os defers). O frame mantém uma lista dos
-  **slots que ele reteve** (`Owned []int`: parâmetros no bind, locais via
-  novo opcode de posse no `let`); o release percorre só essa lista. Varrer a
-  região de slots do frame seria unsound no unwind (temporários nunca
-  retidos seriam liberados — dec a menos); a lista elimina esse risco e
-  dispensa metadado de contagem de locais no compilador. Elimina o caso
-  `database_file(db)` e todo dead-share em forma de chamada, inclusive
-  cross-module.
+  **slots que ele reteve** (lista de pares slot→objeto retido: parâmetros no
+  bind, locais via opcode de posse no let; o release libera o OBJETO
+  GRAVADO — liberar o ocupante atual do slot seria unsound sob reuso de slot
+  por temporários após a morte de locais de bloco); o release percorre só
+  essa lista. Varrer a região de slots do frame seria unsound no unwind
+  (temporários nunca retidos seriam liberados — dec a menos); a lista
+  elimina esse risco e dispensa metadado de contagem de locais no
+  compilador. Elimina o caso `database_file(db)` e todo dead-share em forma
+  de chamada, inclusive cross-module.
 - **Fase 1.5 — escopo de bloco.** Compilador emite drops (dec) na saída de
   blocos para locais compostos que morrem ali (ele conhece tipos e escopos).
   Elimina `do let b = a end; a[i] = x` em laço.

@@ -23,9 +23,18 @@ type CallFrame struct {
 	Deferred    []PreparedCall
 	Environment *value.GlobalEnvironment
 
-	// Owned: slots absolutos de vm.stack retidos por este frame
+	// Owned: vinculos duraveis (slot, objeto) retidos por este frame
 	// (parametros e lets). Liberados em finalizeCurrentFrame.
-	Owned []int
+	Owned []ownedEntry
+}
+
+// ownedEntry registra um vínculo durável do frame: o slot e o OBJETO retido
+// naquele momento. O release do fim do frame libera o objeto gravado — nunca
+// o ocupante atual do slot, que após reuso de slot pode ser um temporário
+// jamais retido (liberá-lo seria dec a menos, proibido pela spec).
+type ownedEntry struct {
+	slot int
+	obj  value.Value
 }
 
 type SharedState struct {

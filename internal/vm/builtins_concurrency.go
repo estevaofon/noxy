@@ -81,7 +81,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		// usar ownSlot aqui — ele retém de novo (double-retain).
 		for i := range threadArgs {
 			if value.OwnersCount(threadArgs[i]) >= 0 {
-				frame.Owned = append(frame.Owned, 1+i)
+				frame.Owned = append(frame.Owned, ownedEntry{slot: 1 + i, obj: threadArgs[i]})
 			}
 		}
 

@@ -155,23 +155,25 @@ func (vm *VM) peek(distance int) value.Value {
 	return vm.stack[vm.stackTop-1-distance]
 }
 
-// ownSlot retém o composto no slot e o registra para release no fim do
-// frame. Idempotente por slot: duplicata causaria release dobrado (dec a
-// menos — proibido pela spec §8.2).
+// ownSlot retém o composto no slot e o registra (slot, objeto) para release
+// no fim do frame. O release do fim do frame libera o objeto GRAVADO aqui,
+// nunca o ocupante atual do slot no momento do release — reuso de slot por
+// temporários nunca retidos (locais de bloco mortos, ex.: OP_POP sem drop)
+// tornaria o release por índice unsound (dec a menos, proibido pela spec).
 func (f *CallFrame) ownSlot(vm *VM, slot int) {
 	v := vm.stack[slot]
 	if !value.Retain(v) {
 		return
 	}
-	for _, existing := range f.Owned {
-		if existing == slot {
-			// Slot ja possuido: o retain acima cobre o ocupante novo; o
-			// release do ocupante velho e responsabilidade do site que
-			// sobrescreveu (Task 3+). Nao registrar de novo.
+	for i := range f.Owned {
+		if f.Owned[i].slot == slot {
+			// Sobrescrita do slot: o site ja liberou o ocupante velho; a
+			// entrada passa a apontar o objeto novo (retido acima).
+			f.Owned[i].obj = v
 			return
 		}
 	}
-	f.Owned = append(f.Owned, slot)
+	f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
 }
 
 // captureUpvalue finds or creates an open upvalue for the given stack slot.

@@ -134,6 +134,56 @@ func TestParamReleaseOnUnwindDirect(t *testing.T) {
 	}
 }
 
+// TestFrameReleaseTargetsRecordedObjectNotSlotOccupant reproduz o cenario
+// unsound do desenho por indice (Owned []int + release lendo vm.stack[slot]):
+// um local de bloco possuido "morre" sem drop (OP_POP simples no fim do
+// while/if) e o slot e reusado por um temporario NUNCA retido (ex.:
+// OP_GET_LOCAL de outra variavel). O release do fim do frame nao pode tocar
+// o ocupante atual do slot — so o objeto que ele de fato reteve.
+func TestFrameReleaseTargetsRecordedObjectNotSlotOccupant(t *testing.T) {
+	machine := New()
+	blockLocal := value.NewArray([]value.Value{value.NewInt(1)})
+	bystander := value.NewMap()
+	value.Retain(bystander) // dono duravel em outro lugar (ex.: global)
+
+	fn := &value.ObjFunction{
+		Name:   "boom",
+		Arity:  1,
+		Params: []value.ParamInfo{{IsRef: false, TypeName: "int[]"}},
+	}
+	closure := &value.ObjClosure{Function: fn}
+
+	// Monta a pilha manualmente: [callee, arg] como um OP_CALL deixaria.
+	// O param bind chama ownSlot internamente (callPreparedClosure), que
+	// registra blockLocal como o objeto possuido no slot do parametro —
+	// exatamente como um `let` de bloco registraria via OP_OWN_LOCAL.
+	machine.push(value.Value{Type: value.VAL_FUNCTION, Obj: closure})
+	machine.push(blockLocal)
+
+	if ok, err := machine.callPreparedClosure(closure, 1, nil, 0); !ok {
+		t.Fatalf("callPreparedClosure falhou: %v", err)
+	}
+
+	if got := value.OwnersCount(blockLocal); got != 1 {
+		t.Fatalf("apos o bind esperado Owners=1 para blockLocal, veio %d", got)
+	}
+
+	// Simula o fim do bloco (OP_POP sem drop) seguido de reuso do slot por
+	// um temporario nunca retido — sobrescrita crua de vm.stack, sem passar
+	// por ownSlot (e assim sem atualizar/duplicar a entrada em Owned).
+	slot := machine.currentFrame.LocalBase + 1
+	machine.stack[slot] = bystander
+
+	machine.unwindTo(0, frameOutcome{Err: fmt.Errorf("erro forcado para testar unwind")})
+
+	if got := value.OwnersCount(bystander); got != 1 {
+		t.Fatalf("temporario nunca retido foi liberado (dec a menos): Owners=%d, esperado 1", got)
+	}
+	if got := value.OwnersCount(blockLocal); got != 0 {
+		t.Fatalf("objeto gravado deveria ter sido liberado no fim do frame: Owners=%d", got)
+	}
+}
+
 // f(m) chama g(m) chama probe_during(m); apos tudo, probe_after. during >= 2
 // (dois frames retendo, um por chamada aninhada); after == during - 2.
 func TestNestedByValueCallsStackAndUnstack(t *testing.T) {
@@ -435,8 +485,15 @@ main()`
 	if ownersOldBefore != 2 {
 		t.Fatalf("esperado Owners(x)=2 antes de arr[0]=y (slot x + elemento), veio %d", ownersOldBefore)
 	}
-	if got := value.OwnersCount(oldVal); got != 1 {
-		t.Fatalf("esperado Owners(x)=1 apos arr[0]=y (elemento liberado, slot x permanece), veio %d", got)
+	// Task 2b: esta leitura acontece apos interpretVMSource retornar, ou
+	// seja, apos main() ja ter retornado e seu frame ja ter sido liberado.
+	// Antes da Task 2b, o slot do "let x" ficava preso (guard `slot <
+	// vm.stackTop` pulava o release por indice apos o OP_POP de fim de
+	// escopo do compilador) — agora o release e do objeto gravado, sem esse
+	// guard, entao o slot de x tambem libera no fim do frame e so resta o
+	// release do elemento (ja contado acima): total 0.
+	if got := value.OwnersCount(oldVal); got != 0 {
+		t.Fatalf("esperado Owners(x)=0 apos arr[0]=y liberar o elemento E main() retornar (Task 2b libera o slot do let no fim do frame), veio %d", got)
 	}
 	if ownersNewAfter != 2 {
 		t.Fatalf("esperado Owners(y)=2 apos arr[0]=y (slot y + elemento), veio %d", ownersNewAfter)
@@ -479,8 +536,12 @@ main()`
 	if ownersOldBefore != 2 {
 		t.Fatalf(`esperado Owners(x)=2 antes de m["k"]=y (slot x + valor no map), veio %d`, ownersOldBefore)
 	}
-	if got := value.OwnersCount(oldVal); got != 1 {
-		t.Fatalf(`esperado Owners(x)=1 apos m["k"]=y (valor liberado do map, slot x permanece), veio %d`, got)
+	// Task 2b: mesma observacao de TestArraySetIndexReleasesOldRetainsNew —
+	// esta leitura acontece apos main() ja ter retornado; o slot do "let x"
+	// tambem libera no fim do frame agora (sem o guard de stackTop), entao
+	// so resta o release do valor do map (ja contado acima): total 0.
+	if got := value.OwnersCount(oldVal); got != 0 {
+		t.Fatalf(`esperado Owners(x)=0 apos m["k"]=y liberar o valor E main() retornar (Task 2b libera o slot do let no fim do frame), veio %d`, got)
 	}
 	if ownersNewAfter != 2 {
 		t.Fatalf(`esperado Owners(y)=2 apos m["k"]=y (slot y + valor no map), veio %d`, ownersNewAfter)
@@ -533,8 +594,19 @@ main()`
 	if ownersOldBefore != 2 {
 		t.Fatalf("esperado Owners(y1)=2 apos a 1a atribuicao (slot + campo), veio %d", ownersOldBefore)
 	}
-	if got := value.OwnersCount(oldFieldVal); got != 1 {
-		t.Fatalf("esperado Owners(y1)=1 apos a 2a atribuicao liberar o campo, veio %d", got)
+	// Task 2b: esta leitura acontece apos interpretVMSource retornar, ou
+	// seja, apos main() ja ter retornado por completo — o release em massa
+	// de finalizeCurrentFrame ja rodou para o frame de main. Antes da Task
+	// 2b, o guard `slot < vm.stackTop` fazia esse release pular TODOS os
+	// locais de main (o epilogo de fim de escopo do compilador ja tinha
+	// poppado x/y1/y2/box do stack antes do OP_RETURN, entao seus slots
+	// pareciam "mortos" para o guard) — o retain do "let y1" ficava preso
+	// para sempre (Owners=1 residual). A Task 2b libera por OBJETO GRAVADO,
+	// sem esse guard, entao o slot do "let y1" agora e devidamente liberado
+	// no fim do frame de main: so resta o release do campo (ja contado
+	// acima), e o total cai a 0.
+	if got := value.OwnersCount(oldFieldVal); got != 0 {
+		t.Fatalf("esperado Owners(y1)=0 apos a 2a atribuicao liberar o campo E main() retornar (Task 2b libera o slot do let no fim do frame), veio %d", got)
 	}
 	if ownersNewAfter != 2 {
 		t.Fatalf("esperado Owners(y2)=2 apos a 2a atribuicao (slot + campo), veio %d", ownersNewAfter)
@@ -928,18 +1000,20 @@ main()`
 		t.Fatalf("esperado Owners=3 durante o defer, veio %d", duringOwners)
 	}
 	// Apos outer() retornar totalmente, o par do defer (captura +1 / release
-	// -1) ja fechou em zero. Mas sobra 1: o proprio "let m" de outer nunca
-	// solta seu retain original, porque o OP_POP de fim de bloco que o
-	// compilador emite para locais (BlockStatement.endScope) roda ANTES do
-	// release em massa de frame.Owned em finalizeCurrentFrame — o slot ja
-	// nao esta mais "vivo" (stackTop) quando o loop de release olha para
-	// ele, entao o release e pulado. Isso e um gap pre-existente da Task 3
-	// (locais), fora do escopo desta tarefa (fronteiras); nao mexemos em
-	// endScope()/frame.Owned aqui. O que este teste isola e exatamente que o
-	// PAR do defer em si fecha em zero: o total final e so esse +1 preso do
-	// let de outer, nada alem disso.
-	if got := value.OwnersCount(capturedM); got != 1 {
-		t.Fatalf("esperado Owners=1 (so o let de outer preso pelo gap pre-existente da Task 3; o par do defer fecha em zero), veio %d", got)
+	// -1) ja fechou em zero. Antes da Task 2b, sobrava 1: o proprio "let m"
+	// de outer nunca soltava seu retain original, porque o OP_POP de fim de
+	// bloco que o compilador emite para locais (BlockStatement.endScope)
+	// roda ANTES do release em massa de finalizeCurrentFrame — sob o desenho
+	// antigo (guard `slot < vm.stackTop`, release por INDICE), o slot ja nao
+	// estava mais "vivo" quando o loop de release olhava para ele, entao o
+	// release era pulado (gap pre-existente da Task 3, documentado como fora
+	// do escopo daquela tarefa). A Task 2b fecha esse gap como consequencia
+	// direta de trocar o release por indice por release do OBJETO GRAVADO
+	// (sem guard de stackTop): o slot do "let m" de outer agora libera
+	// normalmente no fim do frame, entao o total final e 0 — nao sobra mais
+	// nada preso.
+	if got := value.OwnersCount(capturedM); got != 0 {
+		t.Fatalf("esperado Owners=0 (Task 2b libera o slot do let de outer no fim do frame, fechando o gap pre-existente da Task 3; o par do defer tambem fecha em zero), veio %d", got)
 	}
 }
 
@@ -948,16 +1022,16 @@ main()`
 // TestUnlistedNativeStillMarksArgs (que audita so o Shared bit/clone), este
 // teste audita o contador Owners.
 //
-// Usamos um GLOBAL (nao um "let" local) de proposito: um "let" local dentro
-// de uma funcao e liberado por dois mecanismos concorrentes — o OP_POP de
-// fim de bloco que o compilador emite (BlockStatement.endScope, sem RC) e o
-// release em massa de frame.Owned em finalizeCurrentFrame (Task 3, com RC).
-// O OP_POP roda ANTES do finalizeCurrentFrame (fora do escopo desta tarefa,
-// gap pre-existente da Task 3), entao o retain original do "let" fica preso
-// e contaminaria a leitura "so a retencao do native". Um global evita isso:
-// seu retain nunca passa por frame.Owned (funil proprio via OP_SET_GLOBAL,
-// Task 4), entao o baseline e estavel e conhecido (1, igual
-// TestGlobalLetRetainsCompositeAndReassignmentSwaps).
+// Usamos um GLOBAL (nao um "let" local) de proposito: um global nunca passa
+// por frame.Owned (funil proprio via OP_SET_GLOBAL, Task 4), entao o
+// baseline e estavel e conhecido (1, igual
+// TestGlobalLetRetainsCompositeAndReassignmentSwaps) sem depender de quando
+// a funcao ao redor retorna. (Ate a Task 2b, um "let" local tambem exigia
+// esse cuidado: o OP_POP de fim de bloco emitido pelo compilador rodava
+// ANTES do release em massa de finalizeCurrentFrame, e o guard por indice
+// entao vigente pulava o release do slot — gap pre-existente da Task 3,
+// fechado pela Task 2b ao trocar o release por indice por release do objeto
+// gravado.)
 func TestUnlistedNativeRetainsArgPermanently(t *testing.T) {
 	machine := New()
 	var captured value.Value

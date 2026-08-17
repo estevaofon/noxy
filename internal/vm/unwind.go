@@ -39,12 +39,14 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 	}
 
 	// RC: solta os vinculos duraveis do frame (retorno normal e unwind
-	// passam ambos por aqui). Le o ocupante ATUAL do slot: sobrescritas
-	// durante a vida do frame ja fizeram seu proprio release/retain.
-	for _, slot := range frame.Owned {
-		if slot < vm.stackTop {
-			value.Release(vm.stack[slot])
-		}
+	// passam ambos por aqui). Libera o OBJETO GRAVADO em cada entrada —
+	// nunca o ocupante atual do slot, que apos reuso de slot por um
+	// temporario nunca retido (locais de bloco mortos sem drop) poderia ser
+	// um valor diferente do que foi retido. Sites de sobrescrita ja liberam
+	// o velho e atualizam a entrada (ownSlot); nao ha guard de stackTop
+	// porque o release agora e por objeto, nao por leitura de vm.stack.
+	for _, entry := range frame.Owned {
+		value.Release(entry.obj)
 	}
 	frame.Owned = nil
 
