@@ -24,6 +24,17 @@
 
 ### Added
 
+- Site publicado (`docs/index.html`) ganhou a seção **What's New in v0.4.0**
+  (`#whats-new`, com link no menu e badge no hero): seis cartões de migração
+  com o antes/depois de cada breaking change da semântica de valor —
+  atribuição não aliasa, leitura de contêiner copia, mutação aninhada não
+  vaza, `==` estrutural, `spawn` sem exceção de identidade e `append`
+  guardando valor independente. Entraram também um cartão de feature
+  (*Value Semantics*), um cartão de sintaxe (*Value Semantics & ref*) e uma
+  aba de exemplo executável, além de links para spec, `REF_SEMANTICS.md`,
+  guia de concorrência e CHANGELOG no rodapé (que apontavam para `#`).
+  Todos os números citados nos cartões foram medidos rodando os trechos.
+
 - `docs/SHOWCASE.md`: vitrine dos projetos reais escritos em Noxy, começando
   pelo [NoxyDB](https://github.com/estevaofon/NoxyDB) — banco de dados
   documento-chave/valor persistente escrito inteiramente em Noxy. Cada entrada
@@ -33,6 +44,20 @@
   fica no repositório, fora do site publicado.
 
 ### Fixed
+
+- Exemplos do site voltaram a compilar na 0.4.0. Quatro dos oito exemplos da
+  landing page estavam quebrados — não era regressão da CoW, mas código que
+  nunca foi reexecutado depois da semântica de referência: *Binary Tree*
+  (`cannot assign Node to ref Node`), *Linked List* (`ref Node(...)` não é
+  endereçável), *HashMap* (`...` literal no array e o mesmo `ref` de
+  temporário) e *HTTP Server* (`expected ref HttpServer, got object` em
+  runtime, faltava `ref server`). O exemplo de *Concurrency* definia `main()`
+  sem nunca chamar e imprimia nada, e o cartão *Self-Referencing* repetia o
+  `ref` de temporário. Todos foram reescritos no idioma 0.4.0 (campos de
+  struct por valor, travessia por `ref`, `ref current.next` para o cursor) e
+  verificados executando cada trecho extraído do HTML: dos 27 blocos, os 23
+  que são programa completo rodam e os 4 restantes são fragmentos ilustrativos
+  de cartão (sem struct/função ao redor, por design).
 
 - Build do GitHub Pages voltou a passar: `superpowers/` entrou no `exclude:`
   do Jekyll (`docs/_config.yml`). Os planos internos em

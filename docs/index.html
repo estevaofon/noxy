@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Noxy - Statically Typed Programming Language</title>
     <meta name="description"
-        content="Noxy is a statically typed programming language with a stack-based VM written in Go, created by Estêvão Fonseca. Mascot: a purple owl symbolizing wisdom and code elegance.">
+        content="Noxy is a statically typed programming language with a stack-based VM written in Go, created by Estêvão Fonseca. Version 0.4.0 introduces copy-on-write value semantics: arrays, maps and structs are independent values, and ref is the only sharing mechanism.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -37,6 +37,7 @@
                 <a href="#features" class="nav-link">Features</a>
                 <a href="#syntax" class="nav-link">Syntax</a>
                 <a href="#examples" class="nav-link">Examples</a>
+                <a href="#whats-new" class="nav-link">v0.4.0</a>
                 <a href="#installation" class="nav-link">Installation</a>
 
             </div>
@@ -52,6 +53,11 @@
     <section id="home" class="hero">
         <div class="hero-container">
             <div class="hero-content">
+                <a href="#whats-new" class="version-badge">
+                    <span class="version-badge-tag">v0.4.0</span>
+                    Copy-on-write value semantics
+                    <i class="fas fa-arrow-right"></i>
+                </a>
                 <h1 class="hero-title">
                     <span class="gradient-text">Noxy</span>
                     <br>Statically Typed Programming Language
@@ -60,6 +66,10 @@
                     A powerful statically typed language with a high-performance stack-based Virtual Machine
                     written in Go, created by Estêvão Fonseca.
                     Supports primitives, structs, dynamic arrays, maps, and much more.
+                    <br><br>
+                    Since 0.4.0, arrays, maps and structs behave as <strong>independent values</strong> at any
+                    depth — <code>ref</code> is the only sharing mechanism, and copy-on-write keeps the copies
+                    lazy.
                     <br><br>
                     <span class="mascot-description">🦉 <strong>Mascot:</strong> Our purple owl symbolizes
                         wisdom and elegance in software development.</span>
@@ -115,6 +125,15 @@ print("Product: " + product.name)</code></pre>
             <div class="features-grid">
                 <div class="feature-card">
                     <div class="feature-icon">
+                        <i class="fas fa-clone"></i>
+                    </div>
+                    <h3>Value Semantics <span class="feature-tag">0.4.0</span></h3>
+                    <p>Arrays, maps and structs are independent values at any depth. Nothing is copied on the
+                        binding: copy-on-write clones lazily, one level at a time, on the first write to a shared
+                        value.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">
                         <i class="fas fa-shield-alt"></i>
                     </div>
                     <h3>Static Type System</h3>
@@ -145,8 +164,9 @@ print("Product: " + product.name)</code></pre>
                     <div class="feature-icon">
                         <i class="fas fa-link"></i>
                     </div>
-                    <h3>Self-Referencing</h3>
-                    <p>Self-referencing structs using the ref operator to create recursive data structures.</p>
+                    <h3>Explicit Sharing with ref</h3>
+                    <p>Recursive data structures and in-place mutation through <code>ref</code> — the single,
+                        explicit mechanism for sharing storage across calls, channels and routines.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">
@@ -160,7 +180,8 @@ print("Product: " + product.name)</code></pre>
                         <i class="fas fa-network-wired"></i>
                     </div>
                     <h3>Concurrency</h3>
-                    <p>Go-style concurrency with spawn and channels for parallel execution on multiple cores.</p>
+                    <p>Go-style concurrency with spawn and channels for parallel execution on multiple cores.
+                        Since 0.4.0, data sent by argument or channel is race-free by construction.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">
@@ -174,11 +195,126 @@ print("Product: " + product.name)</code></pre>
         </div>
     </section>
 
+    <!-- What's new in 0.4.0 -->
+    <section id="whats-new" class="whats-new">
+        <div class="container">
+            <h2 class="section-title">What's New in v0.4.0</h2>
+            <p class="section-intro">
+                Composite values became <strong>independent deep copies at every binding without
+                    <code>ref</code></strong> — assignment, calls, container reads and writes, channels,
+                <code>spawn</code>/<code>spawn_task</code> and <code>defer</code> capture. The runtime implements
+                the contract with copy-on-write: nothing is copied on the binding, and the clone happens lazily on
+                the first mutation of a shared value. These are breaking changes; the migration for each one is
+                below.
+            </p>
+            <div class="syntax-grid">
+                <div class="syntax-card">
+                    <h3>Assignment no longer aliases</h3>
+                    <pre><code class="language-go">let a: int[] = [1, 2, 3]
+let b: int[] = a
+b[0] = 99
+
+print(a[0]) // 0.3.x: 99  |  0.4.0: 1
+
+// Migration: use ref to keep sharing
+let alias: ref int[] = ref a
+alias[0] = 99
+print(a[0]) // 99</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Reading from a container copies</h3>
+                    <pre><code class="language-go">let people: Person[] = [Person("Ana", 30)]
+
+let p: Person = people[0]
+p.age = 31
+print(people[0].age) // 0.4.0: 30
+
+// Migration: mutate through the path...
+people[0].age = 31
+// ...or borrow the slot with ref
+let slot: ref Person = ref people[0]
+slot.age = 32</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>Nested mutation no longer leaks</h3>
+                    <pre><code class="language-go">// Without ref the parameter is independent
+// at ANY depth (the old shallow copy only
+// protected the outer container).
+func touch(box: Box)
+    box.values[0] = 99   // caller unaffected
+end
+
+// Migration: declare the parameter as ref
+func bump(box: ref Box)
+    box.values[0] = 99   // caller sees it
+end</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>== on composites is structural</h3>
+                    <pre><code class="language-go">print([1, 2] == [1, 2])
+// 0.3.x: false (pointer identity)
+// 0.4.0: true  (compared by content)
+
+// refs still compare by slot identity
+// and are not dereferenced.
+
+// Migration for identity checks:
+// compare refs, or compare a key of
+// your own.</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>spawn lost its identity exception</h3>
+                    <pre><code class="language-go">// Arguments now follow the same value
+// semantics as a normal call, and
+// chan_send delivers an independent value.
+spawn(worker, data)   // worker gets a copy
+
+// Migration for shared mutable state:
+// a coordinated global, or channels.</code></pre>
+                </div>
+                <div class="syntax-card">
+                    <h3>append stores an independent value</h3>
+                    <pre><code class="language-go">let item: int[] = [1]
+let dest: int[][] = []
+append(dest, item)
+item[0] = 99
+
+print(dest[0][0]) // 0.4.0: 1
+
+// append/pop/delete clone a shared target
+// before mutating it (CoW through the slot).</code></pre>
+                </div>
+            </div>
+            <p class="section-note">
+                Full list of breaking changes and migrations in the
+                <a href="https://github.com/estevaofon/noxy/blob/main/CHANGELOG.md" target="_blank">CHANGELOG</a>.
+                The contract is specified in
+                <a href="https://github.com/estevaofon/noxy/blob/main/docs/NOXY_LANGUAGE_SPEC.md#value-semantics-copy-on-write"
+                    target="_blank">the language spec §2.2</a>, and the sharing rules in
+                <a href="https://github.com/estevaofon/noxy/blob/main/docs/REF_SEMANTICS.md"
+                    target="_blank">reference semantics</a>.
+            </p>
+        </div>
+    </section>
+
     <!-- Syntax Section -->
     <section id="syntax" class="syntax">
         <div class="container">
             <h2 class="section-title">Language Syntax</h2>
             <div class="syntax-grid">
+                <div class="syntax-card">
+                    <h3>Value Semantics &amp; ref</h3>
+                    <pre><code class="language-go">// Composites are values: no aliasing
+let a: int[] = [1, 2, 3]
+let b: int[] = a
+b[0] = 99
+print(a[0])   // 1
+
+// ref is the only sharing mechanism
+let alias: ref int[] = ref a
+alias[0] = 99
+print(a[0])   // 99</code></pre>
+                </div>
                 <div class="syntax-card">
                     <h3>Variable Declaration</h3>
                     <pre><code class="language-go">let x: int = 42
@@ -255,12 +391,16 @@ end</code></pre>
                     <h3>Self-Referencing</h3>
                     <pre><code class="language-go">struct TreeNode
     value: int,
-    left: ref TreeNode,
-    right: ref TreeNode
+    left: TreeNode,
+    right: TreeNode
 end
 
 let root: TreeNode = TreeNode(50, null, null)
-root.left = ref TreeNode(25, null, null)</code></pre>
+root.left = TreeNode(25, null, null)
+
+// ref borrows the slot instead of copying
+let node: ref TreeNode = ref root.left
+node.value = 26</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Imports & Modules</h3>
@@ -298,6 +438,7 @@ let msg: int = chan_recv(c)</code></pre>
             <h2 class="section-title">Practical Examples</h2>
             <div class="examples-nav">
                 <button class="tab-btn active" data-tab="hello">Hello World</button>
+                <button class="tab-btn" data-tab="value-semantics">Value Semantics</button>
                 <button class="tab-btn" data-tab="binary-tree">Binary Tree</button>
                 <button class="tab-btn" data-tab="linked-list">Linked List</button>
                 <button class="tab-btn" data-tab="hashmap">HashMap</button>
@@ -309,7 +450,9 @@ let msg: int = chan_recv(c)</code></pre>
             <div class="examples-content">
                 <div class="example-tab" id="concurrency">
                     <h3>Concurrency (Producer-Consumer)</h3>
-                    <p>Using channels to communicate between concurrent routines.</p>
+                    <p>Using channels to communicate between concurrent routines. Since v0.4.0, arguments to
+                        <code>spawn</code> and values sent over a channel are independent values — data handed to
+                        another routine is race-free by construction.</p>
                     <pre><code class="language-go">use time
 
 func worker(id: int, c: chan string)
@@ -321,11 +464,13 @@ func main()
     let c: chan string = make_chan(0)
     spawn(worker, 1, c)
     spawn(worker, 2, c)
-    
+
     // Receive 2 messages
     print(chan_recv(c))
     print(chan_recv(c))
-end</code></pre>
+end
+
+main()</code></pre>
                 </div>
                 <div class="example-tab active" id="hello">
                     <h3>Hello World</h3>
@@ -349,13 +494,47 @@ let product: Product = Product(1, "Laptop", 2500.50)
 print("Product: ")
 print(product.name)</code></pre>
                 </div>
+                <div class="example-tab" id="value-semantics">
+                    <h3>Value Semantics (v0.4.0)</h3>
+                    <p>Arrays, maps and structs are independent values at any depth. <code>ref</code> is the only
+                        way to share storage, and copy-on-write means the copy costs nothing until someone
+                        writes.</p>
+                    <pre><code class="language-go">struct Counter
+    hits: int[]
+end
+
+// No 'ref': the callee gets an independent value at any depth.
+func touch(c: Counter)
+    c.hits[0] = 999
+end
+
+// With 'ref': the callee shares the caller's storage.
+func bump(c: ref Counter)
+    c.hits[0] = c.hits[0] + 1
+end
+
+let counter: Counter = Counter([1, 2, 3])
+
+touch(counter)
+print(counter.hits[0])   // 1 - the copy was mutated, not the original
+
+bump(counter)
+print(counter.hits[0])   // 2 - ref shares the original
+
+let backup: Counter = counter
+bump(counter)
+print(backup.hits[0])    // 2 - assignment already copied
+
+print([1, 2] == [1, 2])  // true - composites compare by content</code></pre>
+                </div>
                 <div class="example-tab" id="binary-tree">
                     <h3>Binary Tree</h3>
-                    <p>Implementation of a binary tree with pre-order traversal.</p>
+                    <p>Implementation of a binary tree with pre-order traversal. The nodes are plain values; the
+                        traversal borrows each node with <code>ref</code> so no subtree is copied.</p>
                     <pre><code class="language-go">struct Node
-  data: int,
-  left: ref Node,
-  right: ref Node
+    data: int,
+    left: Node,
+    right: Node
 end
 
 // Create binary tree
@@ -366,77 +545,99 @@ root.left.left = Node(4, null, null)
 root.left.right = Node(5, null, null)
 
 func pre_order(node: ref Node)
-  if node != null then
-    print(to_str(node.data))
-    pre_order(node.left)
-    pre_order(node.right)
-  end
+    if node != null then
+        print(to_str(node.data))
+        pre_order(node.left)
+        pre_order(node.right)
+    end
 end
 
-pre_order(root)</code></pre>
+pre_order(root)   // 1 2 4 5 3</code></pre>
                 </div>
                 <div class="example-tab" id="linked-list">
                     <h3>Linked List</h3>
-                    <p>Implementation of a linked list with insertion and printing operations.</p>
+                    <p>Implementation of a linked list with insertion and printing operations. Every function that
+                        must reach the caller's list takes it by <code>ref</code>; <code>ref current.next</code>
+                        rebinds the cursor to the next slot without copying the tail.</p>
                     <pre><code class="language-go">struct Node
     value: int,
-    next: ref Node
+    next: Node
 end
 
-func append(node: ref Node, value: int)
+// 'ref' shares the caller's node; without it the callee gets a copy.
+func push_back(node: ref Node, value: int)
     if node.next == null then
-        node.next = ref Node(value, null)
+        node.next = Node(value, null)
     else
-        append(node.next, value)
+        push_back(node.next, value)
     end
 end
 
 func print_list(node: ref Node)
-    while node != null do
-        print(to_str(node.value))
-        node = node.next
+    let current: ref Node = node
+    while current != null do
+        print(to_str(current.value))
+        current = ref current.next
     end
 end
 
 let list: Node = Node(10, null)
-append(list, 20)
-append(list, 30)
-print_list(list)</code></pre>
+push_back(list, 20)
+push_back(list, 30)
+print_list(list)   // 10 20 30</code></pre>
                 </div>
                 <div class="example-tab" id="hashmap">
                     <h3>HashMap</h3>
-                    <p>Implementation of a hashmap with string keys using a polynomial hash function.</p>
-                    <pre><code class="language-go">struct Node
+                    <p>Implementation of a hashmap with string keys using a polynomial hash function. Walking a
+                        bucket chain through <code>ref</code> keeps the traversal free of copies — reading a slot
+                        into a plain variable would give you a copy to mutate.</p>
+                    <pre><code class="language-go">struct Entry
     key: string,
     value: string,
-    next: ref Node
+    next: Entry
 end
 
-let buckets: Node[16] = [null, null, null, null, ...]
+let buckets: Entry[16]
 
 func hash(key: string, size: int) -> int
     let hash_value: int = 0
     let i: int = 0
-    while i < strlen(key) do
+    while i < length(key) do
         hash_value = (hash_value * 31 + ord(key[i])) % size
         i = i + 1
     end
     return hash_value
 end
 
-func push(key: string, value: string)
+func put(key: string, value: string)
     let index: int = hash(key, 16)
     if buckets[index] == null then
-        buckets[index] = Node(key, value, null)
-    else
-        // Add to linked list
-        let node: Node = buckets[index]
-        while node.next != null do
-            node = node.next
-        end
-        node.next = ref Node(key, value, null)
+        buckets[index] = Entry(key, value, null)
+        return
     end
-end</code></pre>
+    // Walk the chain through a ref: no copy, we mutate in place.
+    let node: ref Entry = ref buckets[index]
+    while node.next != null do
+        node = ref node.next
+    end
+    node.next = Entry(key, value, null)
+end
+
+func get(key: string) -> string
+    let node: ref Entry = ref buckets[hash(key, 16)]
+    while node != null do
+        if node.key == key then
+            return node.value
+        end
+        node = ref node.next
+    end
+    return ""
+end
+
+put("owl", "purple")
+put("lang", "noxy")
+print(get("owl"))    // purple
+print(get("lang"))   // noxy</code></pre>
                 </div>
                 <div class="example-tab" id="safe-division">
                     <h3>Safe Division</h3>
@@ -504,7 +705,10 @@ end
 // Create and start server
 let server: HttpServer = http_server.new_server("127.0.0.1", 8080)
 print("Server running on http://127.0.0.1:8080")
-http_server.serve(server, handler)</code></pre>
+
+// 'ref server' is required: the module boundary erases the exact
+// signature, so the compiler cannot borrow the variable for you.
+http_server.serve(ref server, handler)</code></pre>
                 </div>
             </div>
         </div>
@@ -573,18 +777,22 @@ go run ./cmd/noxy/main.go program.nx</code></pre>
                     <h4>Development</h4>
                     <ul>
                         <li><a href="#installation">Installation</a></li>
-                        <li><a href="#examples">Examples</a></li>
+                        <li><a href="#whats-new">What's New in v0.4.0</a></li>
                         <li><a href="https://github.com/estevaofon/noxy" target="_blank">GitHub</a></li>
-                        <li><a href="#">Issues</a></li>
+                        <li><a href="https://github.com/estevaofon/noxy/issues" target="_blank">Issues</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Community</h4>
+                    <h4>Documentation</h4>
                     <ul>
-                        <li><a href="#">Discussions</a></li>
-                        <li><a href="#">Contribute</a></li>
-                        <li><a href="#">Changelog</a></li>
-                        <li><a href="#">License</a></li>
+                        <li><a href="https://github.com/estevaofon/noxy/blob/main/docs/NOXY_LANGUAGE_SPEC.md"
+                                target="_blank">Language Spec</a></li>
+                        <li><a href="https://github.com/estevaofon/noxy/blob/main/docs/REF_SEMANTICS.md"
+                                target="_blank">Reference Semantics</a></li>
+                        <li><a href="https://github.com/estevaofon/noxy/blob/main/docs/concurrency.md"
+                                target="_blank">Concurrency Guide</a></li>
+                        <li><a href="https://github.com/estevaofon/noxy/blob/main/CHANGELOG.md"
+                                target="_blank">Changelog</a></li>
                     </ul>
                 </div>
             </div>

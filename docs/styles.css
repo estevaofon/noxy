@@ -162,6 +162,40 @@ body {
     font-weight: 700;
 }
 
+.version-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.9rem 0.4rem 0.4rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+.version-badge:hover {
+    border-color: var(--primary-color);
+    color: var(--text-primary);
+}
+
+.version-badge i {
+    font-size: 0.75rem;
+    color: var(--primary-color);
+}
+
+.version-badge-tag {
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+}
+
 .hero-description {
     font-size: 1.25rem;
     color: var(--text-secondary);
@@ -354,6 +388,62 @@ body {
 .feature-card p {
     color: var(--text-secondary);
     line-height: 1.6;
+}
+
+/* What's New Section */
+.whats-new {
+    padding: 80px 0;
+    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+}
+
+.section-intro {
+    max-width: 820px;
+    margin: -1.5rem auto 3rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    line-height: 1.7;
+}
+
+.section-note {
+    margin-top: 2rem;
+    text-align: center;
+    color: var(--text-light);
+    font-size: 0.95rem;
+}
+
+.section-note a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.section-note a:hover {
+    text-decoration: underline;
+}
+
+/* Inline code inside prose */
+.hero-description code,
+.section-intro code,
+.feature-card p code,
+.example-tab p code {
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-color);
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.875em;
+    color: var(--secondary-color);
+}
+
+.feature-tag {
+    margin-left: 0.5rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    background: var(--primary-color);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    vertical-align: middle;
 }
 
 /* Syntax Section */
