@@ -1,0 +1,36 @@
+// Chamada tipada in-module com map grande atras de ref, em laco de mutacao.
+// Sem a validacao O(1) por tag, cada chamada tipada varria o map inteiro
+// (O(N) por chamada -> O(N^2) no laco); com a tag aceita, o custo e O(1).
+// Padrao real: NoxyDB put/get com helper in-module recebendo ref Database.
+struct State
+    payloads: map[string, string]
+end
+
+struct Db
+    state: State
+end
+
+func check(db: ref Db, key: string) -> bool
+    return has_key(db.state.payloads, key)
+end
+
+func put(db: ref Db, key: string, val: string) -> void
+    db.state.payloads[key] = val
+end
+
+func main()
+    let payloads: map[string, string] = {}
+    let db: Db = Db(State(payloads))
+    let hits: int = 0
+    let i: int = 0
+    while i < 2500 do
+        put(ref db, f"key{i}", "value")
+        if check(db, f"key{i}") then
+            hits = hits + 1
+        end
+        i = i + 1
+    end
+    print(f"CHECKSUM:{hits}")
+end
+
+main()

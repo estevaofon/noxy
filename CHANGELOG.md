@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Performance
+
+- Validação de tipos em runtime passou a confiar na tag `RuntimeType` em O(1)
+  (`internal/vm/runtime_type_validation.go`). Antes, toda chamada com
+  assinatura estaticamente conhecida varria o contêiner inteiro do argumento a
+  cada chamada — duas vezes (prova + aplicação), inclusive através de `ref` e
+  em funções que só leem — o que tornava O(N²) qualquer laço quente que
+  passasse um map/array grande para função tipada do mesmo módulo. Era o custo
+  que mascarava o ganho do `ref` no NoxyDB: corrigido o CoW, o laço de puts
+  continuava quadrático pela varredura. Agora, tag presente e aceita vale como
+  prova (os elementos foram validados quando a tag foi gravada e as escritas
+  tipadas validam na entrada); a primeira marcação (tag ausente) continua
+  varrendo tudo antes de gravar a tag, e conflito de tag continua rejeitado.
+  Medido no repro (struct→struct→map, helper `ref` chamado antes de cada put):
+  N=4000 caiu de 6.715ms para 157ms — de quadrático para flat. Benchmark novo
+  `benchmarks/bench_typed_call_map.nx` ancora o padrão (2.689ms → 145ms a
+  N=2500, checksums idênticos); contrato fixado em
+  `internal/vm/runtime_type_validation_test.go` (confiança na tag, primeira
+  marcação ainda varre, conflito rejeitado).
+
 ### Added
 
 - `docs/SHOWCASE.md`: vitrine dos projetos reais escritos em Noxy, começando
