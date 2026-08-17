@@ -22,6 +22,34 @@
   `internal/vm/runtime_type_validation_test.go` (confiança na tag, primeira
   marcação ainda varre, conflito rejeitado).
 
+- Unicidade de arrays/maps/instâncias passou a ser decidida por um contador
+  `Owners` de referências duráveis (`internal/value/cow.go`,
+  `IsShared = Owners > 1`) no lugar do bit sticky `Shared`, que só ligava e
+  nunca desligava — qualquer passagem por valor condenava o contêiner a
+  clonar para sempre, mesmo depois de o alias que motivou a marca deixar de
+  existir (compartilhamento morto). O clone agora só acontece quando existe
+  um segundo dono vivo no momento da mutação; o modelo é o CoW do Swift
+  adaptado a bytecode com GC (spec
+  `docs/superpowers/specs/2026-08-17-cow-rc-uniqueness-design.md`, fase 1).
+  Caso emblemático (NoxyDB): um helper `database_file(db)` chamado por valor
+  dentro do laço de puts marcava `db`/`state`/o map de payloads como
+  compartilhados para sempre — 3 clones por put, O(N²). Benchmark novo
+  `benchmarks/bench_value_call_mutate.nx` ancora o padrão do NoxyDB (helper
+  por valor em laço de mutação com map crescendo): **−93,5%** na intercalada
+  final (mediana de 9), de quadrático para flat (~1,5s → ~100ms a N=2500); o
+  laço de puts por valor caiu de 3 clones/put para O(1) clones no laço
+  inteiro (`TestByValueCallLoopClonesO1AfterFlip`: 600 → ≤8 clones em 200
+  iterações). Corpus de exemplos 130/130 idêntico em todas as verificações
+  (após o flip e após cada round de correção), `go test ./...` e `-race`
+  verdes. Custo do bookkeeping: mesmo após a limpeza do bit morto,
+  `bench_map_churn` (+10,9%) e `bench_spawn_sum` (+10,4%) seguem acima do
+  gate ≤~5% da suíte intercalada — escrita intensa em map e handoff de
+  argumentos para tasks pagam inc/dec por elemento/argumento em cada
+  operação. Aceito e documentado como o preço do RC nesta fase; as válvulas
+  (drops precisos da fase 2, elisão de pares inc/dec, fast path para stores
+  escalares — spec §8, risco 3) ficam como otimização futura. Tabela
+  completa e interpretação em `benchmarks/RESULTS.md`.
+
 ### Changed
 
 - `benchmarks/RESULTS.md` virou registro corrido de comparações (mais recente
@@ -84,6 +112,18 @@
   clones (`TestHasKeyThenWriteDoesNotClone`, `TestKeysThenWriteDoesNotClone`),
   com caso negativo garantindo o default conservador para natives fora da
   allowlist (`TestUnlistedNativeStillMarksArgs`).
+
+- Escrita através de `ref` para um nó com exatamente um dono durável agora
+  acontece **in-place e é visível** — sob o bit sticky antigo, o bind por
+  valor que criava um segundo dono temporário ligava a marca para sempre, e a
+  mutação seguinte através do `ref` podia clonar em vez de mutar, perdendo a
+  escrita. Divergência forma-dependente no merge-base: o mesmo programa
+  (lista encadeada, escrita via `setit(ref n, v)` seguida de escrita via
+  `let u: ref Node = ...; u.valor = 77`) imprimia 107 numa forma e 50 na
+  outra, a depender de qual caminho de vínculo tocava o nó por último; com a
+  unicidade por contagem de donos as duas formas imprimem **107**, o valor
+  correto pelo contrato CoW 0.4.0 (§2, regra 6: mutação através de `ref` é
+  sempre visível). Pinado por `TestRefWriteToUniquelyOwnedNodeMutatesInPlace`.
 
 ## [0.4.0] - 2026-08-16
 

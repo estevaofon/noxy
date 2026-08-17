@@ -1,10 +1,12 @@
 # Posse Única por Contagem de Referências Duráveis (RC-uniqueness)
 
-**Data:** 2026-08-17 · **Branch:** `perf/cow-uniqueness-rc` · **Status:** proposta
+**Data:** 2026-08-17 · **Branch:** `perf/cow-uniqueness-rc` · **Status:** implementada (fase 1)
 **Relação:** evolução da implementação da spec
 `2026-08-16-cow-value-semantics-design.md` (CoW 0.4.0). O contrato semântico
 daquela spec permanece integralmente válido; esta spec troca só o mecanismo
 que decide *quando clonar*.
+**Resultados:** `benchmarks/RESULTS.md`, seção "develop (fac7542) ×
+RC-uniqueness fase 1 (perf/cow-uniqueness-rc)".
 
 ## 1. Objetivo
 
