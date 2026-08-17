@@ -156,11 +156,15 @@ real, com a propriedade de segurança de que **dec faltante nunca é unsound**
 (só custa uma cópia):
 
 - **Fase 1 — granularidade de frame (o alvo real).** Incs completos da
-  tabela §4.2; decs centralizados em `finishFrame` (retorno e unwind)
-  varrendo os slots de locais do frame (requer metadado de contagem de
-  locais por função no compilador — hoje o frame não sabe onde os locais
-  terminam e os temporários começam). Elimina o caso `database_file(db)` e
-  todo dead-share em forma de chamada, inclusive cross-module.
+  tabela §4.2; decs centralizados em `finalizeCurrentFrame` (funil único de
+  retorno normal E unwind, após os defers). O frame mantém uma lista dos
+  **slots que ele reteve** (`Owned []int`: parâmetros no bind, locais via
+  novo opcode de posse no `let`); o release percorre só essa lista. Varrer a
+  região de slots do frame seria unsound no unwind (temporários nunca
+  retidos seriam liberados — dec a menos); a lista elimina esse risco e
+  dispensa metadado de contagem de locais no compilador. Elimina o caso
+  `database_file(db)` e todo dead-share em forma de chamada, inclusive
+  cross-module.
 - **Fase 1.5 — escopo de bloco.** Compilador emite drops (dec) na saída de
   blocos para locais compostos que morrem ali (ele conhece tipos e escopos).
   Elimina `do let b = a end; a[i] = x` em laço.
@@ -214,9 +218,10 @@ Critérios globais (mesmo arnês do PR #31):
    completos primeiro; decs só nos funis centrais da fase 1), arnês de
    independência já existente, corpus de 130 programas com diff de saída, e
    revisão caso-a-caso de qualquer teste de clones que mude.
-2. **Metadado de locais.** O frame precisa saber a fronteira locais/
-   temporários para o dec central. Trabalho de compilador (contagem de
-   locais por função) — pré-requisito da fase 1.
+2. **Slots duplicados na lista `Owned`.** O mesmo slot listado duas vezes
+   causaria release dobrado do ocupante final (dec a menos — unsound).
+   Mitigação: inserção com verificação de presença (lista é pequena,
+   varredura linear) e teste dedicado de reatribuição sobre slot possuído.
 3. **Overhead do inc/dec.** O(compostos vinculados) por chamada; julgado
    pelo critério ≤ ~5% nos benches neutros. Se estourar, fase 2 (drops
    precisos) e elisão de pares inc/dec no mesmo bytecode são as válvulas.
