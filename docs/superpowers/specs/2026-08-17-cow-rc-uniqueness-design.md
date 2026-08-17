@@ -118,10 +118,21 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
   justamente o retain do campo `proximo: ref Node` que sustenta a contagem de
   uma lista encadeada — remover esse inc para "uniformizar com `ref`" abriria
   dec a menos em toda a estrutura.
-- **A condição de empréstimo é ESTÁTICA — decidida pelo compilador a partir do
-  tipo declarado do slot, nunca inferida em runtime.** Cada funil que trocaria
-  posse num slot `ref` tem um gêmeo de empréstimo emitido pelo lowering
-  (`OP_SET_LOCAL_BORROW`, `OP_SET_GLOBAL_BORROW`, `OP_GET_LOCAL_MUT_BORROW`, e
+- **A pergunta certa é "este slot RETÉM o que guarda?", não "o tipo declarado é
+  `ref T`?".** Não-possuidor é estritamente mais largo: além dos slots `ref`,
+  dois vínculos colocam um valor no slot **sem inc e sem tipo declarado** — a
+  variável de `for ... in` e o binding de `case` do `select`/`when`. Tratá-los
+  como possuidores faz o caminho MUT soltar um objeto que o slot nunca reteve
+  (dec a menos, o elemento do contêiner passa a parecer único). O compilador
+  carrega um flag `Owns` por vínculo local, marcado **exatamente onde o inc é
+  emitido** (`OP_OWN_LOCAL` do `let`; retain de parâmetro sem `ref` no bind da
+  chamada), e é esse flag — não o tipo — que escolhe o gêmeo. Default `false`:
+  a direção segura para o caminho MUT (no máximo deixa um dono a mais, custando
+  uma cópia).
+- **A condição de empréstimo é ESTÁTICA — decidida pelo compilador, nunca
+  inferida em runtime.** Cada funil que trocaria posse tem um gêmeo de
+  empréstimo emitido pelo lowering (`OP_SET_LOCAL_BORROW`,
+  `OP_SET_GLOBAL_BORROW`, `OP_GET_LOCAL_MUT_BORROW`, `OP_REF_LOCAL_BORROW` e
   `OP_MARK_UPVALUE_BORROW` para a caixa de upvalue). Tentar deduzir "este slot
   é empréstimo?" perguntando à lista de slots possuídos do frame erra nas duas
   direções: (i) um slot **possuído** cujo ocupante era `null`/escalar no
@@ -133,6 +144,14 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
   genuinamente emprestado parecer possuído — o dec indevido volta (**dec a
   menos**). A lista de possuídos serve para o release de fim de frame, não como
   oráculo de tipo.
+- **Escrita através de ref para um slot possuído tem de reapontar a entrada de
+  posse do frame.** O funil de escrita via ref faz retain(novo)/release(velho)
+  porque o slot passa a possuir o valor novo; se a entrada `(slot, objeto)` do
+  frame continuar nomeando o objeto **velho**, o release em massa do fim do
+  frame o solta uma segunda vez (**dec a mais** — o objeto velho, ainda vivo em
+  outro dono, passa a parecer único). A entrada é reapontada para o valor novo
+  na própria escrita, de modo que o velho é pago pelo funil e o novo pelo fim do
+  frame.
 - Natives da allowlist só-leitura (`cow_natives.go`): empréstimo puro.
 - Natives **com** assinatura: cópia ansiosa mantida (spec CoW §4.6) — fora
   do RC.

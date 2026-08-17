@@ -111,6 +111,7 @@ const (
 	OP_GET_LOCAL_MUT_BORROW // [slot]; uniciza sem contar posse (slot ref)
 	OP_MARK_UPVALUE_BORROW  // [upvalue_index]; marca a caixa de peek(0) como
 	// emprestada (emitido logo após OP_CLOSURE, um por upvalue de tipo ref)
+	OP_REF_LOCAL_BORROW // [slot]; ref para slot não-possuidor (caixa emprestada)
 )
 
 func (op OpCode) String() string {
@@ -179,6 +180,8 @@ func (op OpCode) String() string {
 		return "OP_GET_LOCAL_MUT_BORROW"
 	case OP_MARK_UPVALUE_BORROW:
 		return "OP_MARK_UPVALUE_BORROW"
+	case OP_REF_LOCAL_BORROW:
+		return "OP_REF_LOCAL_BORROW"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -396,6 +399,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.byteInstruction("OP_GET_LOCAL_MUT_BORROW", offset)
 	case OP_MARK_UPVALUE_BORROW:
 		return c.byteInstruction("OP_MARK_UPVALUE_BORROW", offset)
+	case OP_REF_LOCAL_BORROW:
+		return c.byteInstruction("OP_REF_LOCAL_BORROW", offset)
 	case OP_EQUAL:
 		return c.simpleInstruction("OP_EQUAL", offset)
 	case OP_GREATER:

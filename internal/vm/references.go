@@ -146,6 +146,51 @@ func refStorageBorrows(ref *value.ObjRef) bool {
 	return ref != nil && ref.RefType == value.REF_UPVALUE && ref.Upvalue.IsBorrowed()
 }
 
+// retargetOwnedSlot mantém honesta a lista de posse do frame quando uma escrita
+// ATRAVÉS DE UM REF troca o ocupante de um slot de pilha POSSUÍDO.
+//
+// O funil de escrita faz retain(novo)/release(velho) porque o slot passa a
+// possuir o valor novo — mas a entrada (slot, objeto) do frame continuava
+// nomeando o objeto VELHO, e o release em massa do fim do frame o soltava DE
+// NOVO: dec a mais, direção insegura (o objeto velho, ainda vivo em outro dono,
+// passava a parecer único e a mutação seguinte acontecia no lugar). Reapontar a
+// entrada para o valor novo fecha a conta: o release do velho é pago agora pelo
+// funil, e o do novo pelo fim do frame.
+//
+// Devolve true quando encontrou (e reapontou) a entrada. Só varre as listas de
+// posse dos frames vivos — pequenas — e só para refs que apontam para slot de
+// pilha; os demais tipos de ref saem no primeiro teste.
+func (vm *VM) retargetOwnedSlot(ref *value.ObjRef, updated value.Value) bool {
+	if ref == nil || (ref.RefType != value.REF_UPVALUE && ref.RefType != value.REF_PTR) {
+		return false
+	}
+	for i := 0; i < vm.frameCount; i++ {
+		frame := vm.frames[i]
+		if frame == nil {
+			continue
+		}
+		for j := range frame.Owned {
+			slot := frame.Owned[j].slot
+			if slot < 0 || slot >= len(vm.stack) {
+				continue
+			}
+			occupant := &vm.stack[slot]
+			if ref.RefType == value.REF_UPVALUE {
+				// PointsTo é falso para caixa já fechada — nesse caso o valor não
+				// mora mais no slot e não há entrada a reapontar.
+				if !ref.Upvalue.PointsTo(occupant) {
+					continue
+				}
+			} else if ref.Ptr != occupant {
+				continue
+			}
+			frame.Owned[j].obj = updated
+			return true
+		}
+	}
+	return false
+}
+
 func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
 	stored, _, _, err := vm.referenceStorage(ref)
 	return stored, err
@@ -182,6 +227,10 @@ func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error 
 	// que apenas empresta (caixa de upvalue emprestada) troca sem contar.
 	if !refStorageBorrows(ref) {
 		value.Retain(updated)
+		// Se o destino e um slot de pilha possuido, a entrada de posse do frame
+		// tem de passar a nomear o valor novo — senao o fim do frame soltaria o
+		// velho uma segunda vez (dec a mais).
+		vm.retargetOwnedSlot(ref, updated)
 		value.Release(stored)
 	}
 	store(updated)

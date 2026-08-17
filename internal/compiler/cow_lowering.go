@@ -19,14 +19,16 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 	case *ast.Identifier:
 		var t ast.NoxyType
 		if arg, localType := c.resolveLocal(n.Value); arg != -1 {
-			// RC: slot de tipo `ref` e EMPRESTIMO — a unicizacao no caminho de
-			// mutacao nao pode trocar posse ali (nem retain do clone, nem
-			// release do velho: o slot nunca reteve nada). A decisao e estatica,
-			// pelo tipo declarado, igual a do OP_SET_LOCAL_BORROW.
-			if _, isRefBinding := localType.(*ast.RefType); isRefBinding {
-				c.emitBytes(byte(chunk.OP_GET_LOCAL_MUT_BORROW), byte(arg))
-			} else {
+			// RC: a pergunta e "este slot RETEM o que guarda?" (Local.Owns), nao
+			// "o tipo declarado e `ref T`?". Nao-possuidor e estritamente mais
+			// largo: alem dos slots `ref`, a variavel de for-each e o binding de
+			// case do select recebem um valor sem inc e sem tipo declarado.
+			// Emitir o gemeo possuidor neles fazia o caminho MUT soltar um
+			// objeto que o slot nunca reteve (dec a menos).
+			if c.localOwns(arg) {
 				c.emitBytes(byte(chunk.OP_GET_LOCAL_MUT), byte(arg))
+			} else {
+				c.emitBytes(byte(chunk.OP_GET_LOCAL_MUT_BORROW), byte(arg))
 			}
 			t = localType
 		} else if arg, upvalueType := c.resolveUpvalue(n.Value); arg != -1 {

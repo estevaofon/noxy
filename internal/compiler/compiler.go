@@ -15,6 +15,19 @@ type Local struct {
 	Type       ast.NoxyType
 	IsCaptured bool
 	IsParam    bool
+	// Owns diz que o SLOT deste vinculo RETEM o composto que guarda — ou seja,
+	// que existe um inc pareado com o release de fim de frame (OP_OWN_LOCAL no
+	// `let`, ou o retain de parametro sem `ref` em callPreparedClosure). E a
+	// unica pergunta que os funis de escrita precisam responder, e ela e mais
+	// estreita do que "o tipo declarado e `ref T`?": ha vinculos que colocam um
+	// valor no slot SEM reter e SEM tipo declarado (variavel de for-each,
+	// binding de case do select). Tratar esses como possuidores fazia o caminho
+	// MUT soltar um objeto que o slot nunca reteve (dec a menos).
+	//
+	// O default e false — a direcao segura para o gemeo MUT (no maximo deixa um
+	// dono a mais, custando uma copia; nunca solta o que nao reteve). Marque
+	// true exatamente onde o inc e emitido.
+	Owns bool
 }
 
 type Loop struct {
@@ -216,8 +229,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// nunca mistura escrita contada com escrita emprestada.
 			if _, isRefBinding := n.Type.(*ast.RefType); !isRefBinding {
 				c.emitByte(byte(chunk.OP_OWN_LOCAL))
+				c.addOwnedLocal(n.Name.Value, n.Type)
+			} else {
+				c.addLocal(n.Name.Value, n.Type)
 			}
-			c.addLocal(n.Name.Value, n.Type)
 			// Do NOT pop. The value stays on stack and becomes the local variable.
 		} else {
 			// Global
@@ -394,7 +409,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if err := c.emitRuntimeValueType(localType); err != nil {
 						return nil, nil, err
 					}
-					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+					// RC: mesma pergunta do gemeo MUT — so slot POSSUIDOR troca
+					// posse. Um slot nao-possuidor sem tipo `ref` existe (ex.:
+					// `item = outro` dentro de um for-each): contar ali soltaria
+					// o elemento do contêiner, que este slot nunca reteve.
+					if c.localOwns(arg) {
+						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+					} else {
+						c.emitBytes(byte(chunk.OP_SET_LOCAL_BORROW), byte(arg))
+					}
 					c.emitByte(byte(chunk.OP_POP))
 				}
 			} else if arg, upvalueType := c.resolveUpvalue(ident.Value); arg != -1 {
@@ -1858,7 +1881,15 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
 				return ref.ElementType, nil
 			}
-			c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			// RC: a caixa aberta sobre o slot herda a condicao do slot. Slot
+			// nao-possuidor (variavel de for-each, binding de case do select)
+			// produz caixa EMPRESTADA, para que a escrita via esse ref nao solte
+			// o que o slot nunca reteve (dec a menos no elemento do contêiner).
+			if c.localOwns(slot) {
+				c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			} else {
+				c.emitBytes(byte(chunk.OP_REF_LOCAL_BORROW), byte(slot))
+			}
 			c.locals[slot].IsCaptured = true
 			return declared, nil
 		}
@@ -2070,8 +2101,26 @@ func (c *Compiler) endScope() {
 	}
 }
 
+// addLocal declara um vinculo local que NAO retem o que guarda (Owns=false — o
+// default seguro). Vinculos que retem devem usar addOwnedLocal.
 func (c *Compiler) addLocal(name string, t ast.NoxyType) {
 	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t})
+}
+
+// addOwnedLocal declara um vinculo local cujo slot RETEM o composto que guarda
+// — usar somente onde o inc correspondente e de fato emitido (OP_OWN_LOCAL) ou
+// feito pelo runtime (retain de parametro sem `ref`).
+func (c *Compiler) addOwnedLocal(name string, t ast.NoxyType) {
+	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t, Owns: true})
+}
+
+// localOwns responde a pergunta que os funis de escrita fazem: este slot retem
+// o que guarda? Indice fora de faixa responde false (direcao segura).
+func (c *Compiler) localOwns(index int) bool {
+	if index < 0 || index >= len(c.locals) {
+		return false
+	}
+	return c.locals[index].Owns
 }
 
 func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
@@ -2283,12 +2332,19 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 
 	paramsInfo := []value.ParamInfo{}
 	for _, param := range params {
-		fnCompiler.addLocal(param.Name, param.Type)
-		fnCompiler.locals[len(fnCompiler.locals)-1].IsParam = true // Mark as param
 		isRef := false
 		if _, ok := param.Type.(*ast.RefType); ok {
 			isRef = true
 		}
+		// RC: callPreparedClosure retem (e registra em frame.Owned) o slot de
+		// cada parametro SEM `ref`; parametro `ref` e emprestimo e e pulado la.
+		// O flag Owns aqui espelha exatamente essa decisao do runtime.
+		if isRef {
+			fnCompiler.addLocal(param.Name, param.Type)
+		} else {
+			fnCompiler.addOwnedLocal(param.Name, param.Type)
+		}
+		fnCompiler.locals[len(fnCompiler.locals)-1].IsParam = true // Mark as param
 		paramsInfo = append(paramsInfo, value.ParamInfo{
 			IsRef:    isRef,
 			TypeName: param.Type.String(),

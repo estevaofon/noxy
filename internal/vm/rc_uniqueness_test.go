@@ -1731,3 +1731,201 @@ main()`
 		t.Fatalf("escrita via ref para no de dono unico deveria mutar no lugar (soma 107), veio %#v", reported)
 	}
 }
+
+// Task 7 (fallout da chave, round 4 — CRITICO achado em review): o predicado
+// estatico do round 3 perguntava "o tipo declarado do slot e `ref T`?", mas a
+// pergunta que os funis de escrita precisam responder e "este slot RETEM o que
+// guarda?". Nao-possuidor e ESTRITAMENTE MAIS LARGO: dois bind sites do
+// compilador colocam um valor no slot sem inc, sem entrada em frame.Owned e com
+// tipo declarado NIL — a variavel de for-each (addLocal(ident, nil) depois de um
+// OP_GET_INDEX, sem OP_OWN_LOCAL) e o binding de case do select (valor vindo do
+// $sel_val). Com tipo nil o teste antigo escolhia o gemeo POSSUIDOR, e
+// `item.v = 99` fazia ownSlot + Release(velho) sobre um objeto que aquele slot
+// nunca reteve: dec a menos, o elemento do array passava a parecer unico e a
+// escrita seguinte em `b` vazava para arr[0].
+//
+// Agora o compilador carrega Local.Owns, marcado exatamente onde o inc e
+// emitido (OP_OWN_LOCAL do let / retain de parametro sem ref no
+// callPreparedClosure), e os tres consumidores decidem por ele:
+// OP_GET_LOCAL_MUT(_BORROW), OP_SET_LOCAL(_BORROW) e OP_REF_LOCAL(_BORROW).
+//
+// Oraculo de todos os cenarios, conferido no binario do merge-base: 1.
+func TestNonOwningLocalBindsNeverReleaseWhatTheyNeverRetained(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+func setit(n: ref Box, w: Box)
+    *n = w
+end
+
+// A: variavel de for-each no caminho MUT (o cenario do review).
+func a_foreach_mut() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    for item in arr do
+        item.v = 99
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+// B: controle — o loop existe mas so le a variavel.
+func b_foreach_readonly() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    let acc: int = 0
+    for item in arr do
+        acc = acc + item.v
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+// C: controle — sem loop nenhum.
+func c_no_loop() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    b.v = 55
+    return arr[0].v
+end
+
+// D: rebind da propria variavel de for-each (OP_SET_LOCAL sobre slot
+// nao-possuidor soltaria o elemento do array).
+func d_foreach_rebind() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    let other: Box = Box(2)
+    for item in arr do
+        item = other
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+// E: ref para a variavel de for-each, escrito via *n = w (a caixa aberta sobre
+// um slot nao-possuidor tem de nascer emprestada).
+func e_ref_to_foreach_var() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    for item in arr do
+        setit(ref item, Box(9))
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+// F: binding de case do select mutado no corpo do case.
+func f_select_binding_mut() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    let ch: any = make_chan(1)
+    chan_send(ch, arr[0])
+    when
+        case got = chan_recv(ch) then
+            got.v = 99
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+func main()
+    let a: string = to_str(a_foreach_mut())
+    let b: string = to_str(b_foreach_readonly())
+    let c: string = to_str(c_no_loop())
+    let d: string = to_str(d_foreach_rebind())
+    let e: string = to_str(e_ref_to_foreach_var())
+    let f: string = to_str(f_select_binding_mut())
+    test_report(a + "|" + b + "|" + c + "|" + d + "|" + e + "|" + f)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "1|1|1|1|1|1"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("independencia quebrada por dec a menos em slot nao-possuidor: esperado %q (a|b|c|d|e|f), veio %#v", want, reported.Obj)
+	}
+}
+
+// Task 7 (round 4 — CRITICO 2, pre-existente e confirmado observavel): a escrita
+// ATRAVES DE UM REF para um slot de pilha POSSUIDO soltava o ocupante velho no
+// funil (references.go) mas deixava a entrada (slot, objeto) do frame nomeando o
+// objeto VELHO — o release em massa do fim do frame o soltava DE NOVO. Dec a
+// mais e a direcao insegura: o objeto velho, ainda vivo em outro dono (aqui dois
+// globais), passava a parecer unico e a mutacao seguinte acontecia no lugar,
+// vazando para o outro dono.
+//
+// Correcao (opcao (a) do review): retargetOwnedSlot reaponta a entrada do frame
+// para o valor novo, entao o release do velho e pago agora pelo funil e o do
+// novo pelo fim do frame — conta fechada, sem inflacao.
+//
+// Oraculo do merge-base: 1 (a escrita em ga[0] nao pode aparecer em gb[0]).
+func TestRefWriteToOwnedSlotRetargetsFrameOwnedEntry(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+let ga: Box[] = []
+let gb: Box[] = []
+let ha: Box[] = []
+let hb: Box[] = []
+
+func setit(n: ref Box, w: Box)
+    *n = w
+end
+
+// escreve via ref no slot possuido de y depois de compartilhar y com dois
+// globais: a entrada de posse do frame precisa passar a nomear o valor novo.
+func build_with_ref_write()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    setit(ref y, Box(9))
+end
+
+// controle: mesmo compartilhamento, sem a escrita via ref.
+func build_plain()
+    let y: Box = Box(1)
+    ha = [y]
+    hb = [y]
+end
+
+func main()
+    build_with_ref_write()
+    ga[0].v = 55
+
+    build_plain()
+    ha[0].v = 55
+
+    test_report(to_str(gb[0].v) + "|" + to_str(hb[0].v))
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "1|1"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("dec a mais pela entrada de posse obsoleta: esperado %q (com escrita via ref | controle), veio %#v", want, reported.Obj)
+	}
+}

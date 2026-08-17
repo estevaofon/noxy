@@ -46,7 +46,7 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 				// opcode e dessincroniza, perdendo a contagem dos opcodes
 				// seguintes.
 				chunk.OP_SET_LOCAL_BORROW, chunk.OP_GET_LOCAL_MUT_BORROW,
-				chunk.OP_MARK_UPVALUE_BORROW:
+				chunk.OP_MARK_UPVALUE_BORROW, chunk.OP_REF_LOCAL_BORROW:
 				offset++
 			case chunk.OP_CONSTANT_LONG:
 				offset += 3
