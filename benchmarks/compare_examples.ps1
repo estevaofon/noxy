@@ -18,6 +18,7 @@ $exclude = @(
     "cli_example.nx", "fibonacci_spinner.nx", "space_invaders.nx",
     "space_invaders2.nx", "conway.nx", "conway_random.nx", "langtons_ant.nx",
     "time_demo.nx", "benchmark_parallel.nx", "supervised_tasks.nx",
+    "quicksort_in_place.nx", # imprime o proprio tempo de execucao em ms
     # saída aleatória
     "rand_demo.nx", "password_generator.nx", "uuid_demo.nx",
     "test_crypto_aes.nx", "test_crypto_debug.nx", "test_crytpo.nx",

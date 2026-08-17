@@ -93,6 +93,15 @@ func validStructConstructorType(definition *value.ObjStruct) (*value.RuntimeType
 	return schema, true
 }
 
+
+// runtimeTagAccepted informa, em O(profundidade do tipo), se uma tag de
+// runtime existente satisfaz o esquema esperado. Tag aceita vale como prova
+// do conteudo: os elementos foram validados quando a tag foi gravada e as
+// escritas tipadas validam na entrada.
+func runtimeTagAccepted(expected, actual *value.RuntimeTypeInfo) bool {
+	return actual != nil && runtimeTypeComplete(actual, make(map[*value.RuntimeTypeInfo]bool)) && runtimeTypeAccepts(expected, actual, make(map[runtimeTypePair]bool))
+}
+
 func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.RuntimeTypeInfo) bool {
 	if expected == nil {
 		return false
@@ -127,10 +136,9 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		}
 		actualType := array.RuntimeType.Load()
 		if actualType != nil {
-			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool)) {
-				return false
-			}
-		} else if expected.Size > 0 || len(array.Elements) == 0 {
+			return runtimeTagAccepted(expected, actualType)
+		}
+		if expected.Size > 0 || len(array.Elements) == 0 {
 			return false
 		}
 		for _, element := range array.Elements {
@@ -146,10 +154,9 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		}
 		actualType := mapping.RuntimeType.Load()
 		if actualType != nil {
-			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(expected, actualType, make(map[runtimeTypePair]bool)) {
-				return false
-			}
-		} else if mapping.Len() == 0 {
+			return runtimeTagAccepted(expected, actualType)
+		}
+		if mapping.Len() == 0 {
 			return false
 		}
 		for key, element := range mapping.Snapshot() {
@@ -313,22 +320,16 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		if runtimeValueTypeSeen(array, schema, seen) {
 			return true
 		}
-		effectiveSchema := schema
 		actualType := array.RuntimeType.Load()
 		if actualType != nil {
-			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
-				return false
-			}
-			effectiveSchema = actualType
-		} else if apply && !array.RuntimeType.CompareAndSwap(nil, schema) {
-			actualType = array.RuntimeType.Load()
-			if actualType == nil || !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
-				return false
-			}
-			effectiveSchema = actualType
+			return runtimeTagAccepted(schema, actualType)
+		}
+		if apply && !array.RuntimeType.CompareAndSwap(nil, schema) {
+			// Perdeu a corrida de marcação: o vencedor validou o conteúdo.
+			return runtimeTagAccepted(schema, array.RuntimeType.Load())
 		}
 		for _, element := range array.Elements {
-			if !vm.walkRuntimeValueType(element, effectiveSchema.Element, apply, seen) {
+			if !vm.walkRuntimeValueType(element, schema.Element, apply, seen) {
 				return false
 			}
 		}
@@ -341,22 +342,16 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		if runtimeValueTypeSeen(mapping, schema, seen) {
 			return true
 		}
-		effectiveSchema := schema
 		actualType := mapping.RuntimeType.Load()
 		if actualType != nil {
-			if !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
-				return false
-			}
-			effectiveSchema = actualType
-		} else if apply && !mapping.RuntimeType.CompareAndSwap(nil, schema) {
-			actualType = mapping.RuntimeType.Load()
-			if actualType == nil || !runtimeTypeComplete(actualType, make(map[*value.RuntimeTypeInfo]bool)) || !runtimeTypeAccepts(schema, actualType, make(map[runtimeTypePair]bool)) {
-				return false
-			}
-			effectiveSchema = actualType
+			return runtimeTagAccepted(schema, actualType)
+		}
+		if apply && !mapping.RuntimeType.CompareAndSwap(nil, schema) {
+			// Perdeu a corrida de marcação: o vencedor validou o conteúdo.
+			return runtimeTagAccepted(schema, mapping.RuntimeType.Load())
 		}
 		for key, element := range mapping.Snapshot() {
-			if !runtimeMapKeyMatchesType(key, effectiveSchema.Key) || !vm.walkRuntimeValueType(element, effectiveSchema.Value, apply, seen) {
+			if !runtimeMapKeyMatchesType(key, schema.Key) || !vm.walkRuntimeValueType(element, schema.Value, apply, seen) {
 				return false
 			}
 		}
