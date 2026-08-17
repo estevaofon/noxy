@@ -248,3 +248,123 @@ main()`
 		t.Fatalf("esperado Owners(objeto velho de a)=0 apos a reatribuicao, veio %d", got)
 	}
 }
+
+// Task 4 (Step 1): let global de composto retem 1 dono; reatribuicao do
+// global (g = h, ambos globais) solta o velho e o novo passa a ter 2 donos
+// (os slots globais g e h).
+func TestGlobalLetRetainsCompositeAndReassignmentSwaps(t *testing.T) {
+	machine := New()
+	var ownersG1, ownersG2 int32
+	var oldG value.Value
+	machine.DefineNative("probe_g1", func(args []value.Value) value.Value {
+		oldG = args[0]
+		ownersG1 = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_g2", func(args []value.Value) value.Value {
+		ownersG2 = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_g1")
+	markProbeReadonly(t, machine, "probe_g2")
+
+	src := `
+let g: map[string, int] = {"a": 1}
+probe_g1(g)
+let h: map[string, int] = {"b": 2}
+g = h
+probe_g2(g)`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersG1 != 1 {
+		t.Fatalf("esperado Owners(g)=1 apos let global, veio %d", ownersG1)
+	}
+	if ownersG2 != 2 {
+		t.Fatalf("esperado Owners(g)=2 apos g=h (globais g e h), veio %d", ownersG2)
+	}
+	if got := value.OwnersCount(oldG); got != 0 {
+		t.Fatalf("esperado Owners(objeto velho de g)=0 apos a reatribuicao, veio %d", got)
+	}
+}
+
+// Task 4 (Step 1): funcao com parametro ref escreve no composto do
+// chamador via *target = novo. O velho deve ser liberado, o novo retido.
+func TestWriteViaRefReleasesOldRetainsNew(t *testing.T) {
+	machine := New()
+	var before, after int32
+	var oldM value.Value
+	machine.DefineNative("probe_before", func(args []value.Value) value.Value {
+		oldM = args[0]
+		before = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_after", func(args []value.Value) value.Value {
+		after = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_before")
+	markProbeReadonly(t, machine, "probe_after")
+
+	src := `
+func write_via_ref(target: ref map[string, int]) -> void
+    *target = {"z": 9}
+end
+
+func main()
+    let m: map[string, int] = {"a": 1}
+    probe_before(m)
+    write_via_ref(ref m)
+    probe_after(m)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if before != 1 {
+		t.Fatalf("esperado Owners(m)=1 antes da escrita via ref, veio %d", before)
+	}
+	if got := value.OwnersCount(oldM); got != 0 {
+		t.Fatalf("esperado Owners(objeto velho de m)=0 apos escrita via ref, veio %d", got)
+	}
+	if after != 1 {
+		t.Fatalf("esperado Owners(novo valor de m)=1 apos escrita via ref, veio %d", after)
+	}
+}
+
+// Task 4 (Step 1): closure que captura um composto local sobrevive ao
+// retorno do frame externo — o box do upvalue precisa reter o valor ao
+// fechar (closeUpvalue), senao o retorno do frame externo (que solta o
+// slot local) deixaria Owners em 0 enquanto a closure ainda vive.
+func TestClosureCaptureSurvivesFrameReturn(t *testing.T) {
+	machine := New()
+	var owners int32
+	machine.DefineNative("probe", func(args []value.Value) value.Value {
+		owners = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe")
+
+	src := `
+func make_holder() -> func() -> map[string, int]
+    let m: map[string, int] = {"a": 1}
+    return func() -> map[string, int]
+        probe(m)
+        return m
+    end
+end
+
+func main()
+    let holder: func() -> map[string, int] = make_holder()
+    holder()
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if owners < 1 {
+		t.Fatalf("esperado Owners(capturado) >= 1 apos retorno do frame externo (box retem), veio %d", owners)
+	}
+}

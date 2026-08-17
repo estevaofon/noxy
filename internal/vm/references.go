@@ -159,10 +159,14 @@ func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error 
 	if err != nil {
 		return err
 	}
-	_, _, store, err := vm.referenceStorage(ref)
+	stored, _, store, err := vm.referenceStorage(ref)
 	if err != nil {
 		return err
 	}
+	// RC: funil unico para OP_STORE_REF / OP_STORE_VIA_REF /
+	// OP_SET_PROPERTY_DEREF - retain-antes-de-release em torno da troca.
+	value.Retain(updated)
+	value.Release(stored)
 	store(updated)
 	return nil
 }

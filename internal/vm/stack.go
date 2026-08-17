@@ -201,6 +201,11 @@ func (vm *VM) closeUpvalue(slot *value.Value) {
 
 	for curr != nil {
 		if curr.Close(slot) {
+			// RC: o valor migra do slot do frame (liberado por
+			// finalizeCurrentFrame) para o box do upvalue, que passa a ser
+			// dono duravel independente do frame. So retem aqui - nunca
+			// libera (o release do slot e responsabilidade do frame).
+			value.Retain(*slot)
 			next := curr.Next()
 			if prev == nil {
 				vm.openUpvalues = next

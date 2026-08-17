@@ -36,6 +36,10 @@ func (vm *VM) unicizeThroughRefValue(refArg value.Value) (value.Value, error) {
 	}
 	v, changed := vm.unicize(stored)
 	if changed {
+		// RC: o clone substitui o ocupante velho no destino apontado pelo
+		// ref; retain-antes-de-release em torno da troca.
+		value.Retain(v)
+		value.Release(stored)
 		store(v)
 	}
 	return v, nil

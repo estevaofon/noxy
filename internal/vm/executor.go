@@ -199,6 +199,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
+			// RC: troca contada no ambiente (retain-antes-de-release; slots
+			// globais nunca sao liberados por finalizeCurrentFrame, entao a
+			// bookkeeping precisa acontecer aqui, no proprio funil de escrita).
+			if old, ok := frame.Environment.GetLocal(name); ok {
+				value.Retain(vm.peek(0))
+				value.Release(old)
+			} else {
+				value.Retain(vm.peek(0))
+			}
 			frame.Environment.SetLocal(name, vm.peek(0))
 
 		case chunk.OP_GET_LOCAL:
@@ -950,9 +959,17 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_SET_UPVALUE:
 			slot := c.Code[ip]
 			ip++
-			if !frame.Closure.Upvalues[slot].Store(vm.peek(0)) {
+			old, ok := frame.Closure.Upvalues[slot].Load()
+			if !ok {
 				return vm.runtimeError(c, ip, "invalid upvalue")
 			}
+			updated := vm.peek(0)
+			// RC: retain-antes-de-release (auto-atribuicao via upvalue)
+			value.Retain(updated)
+			if !frame.Closure.Upvalues[slot].Store(updated) {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
+			value.Release(old)
 
 		case chunk.OP_CLOSE_UPVALUE:
 			vm.closeUpvalue(&vm.stack[vm.stackTop-1])
@@ -1289,6 +1306,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			v, changed := vm.unicize(stored)
 			if changed {
+				// RC: o clone substitui o valor compartilhado no global;
+				// retain-antes-de-release em torno da troca.
+				value.Retain(v)
+				value.Release(stored)
 				owner.SetLocal(name, v)
 			}
 			vm.push(v)
@@ -1306,6 +1327,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			v, changed := vm.unicize(stored)
 			if changed {
+				// RC: o clone substitui o valor compartilhado no box do
+				// upvalue; retain-antes-de-release em torno da troca.
+				value.Retain(v)
+				value.Release(stored)
 				upv.Store(v)
 			}
 			vm.push(v)
