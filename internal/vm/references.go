@@ -159,11 +159,20 @@ func refStorageBorrows(ref *value.ObjRef) bool {
 // Devolve true quando encontrou (e reapontou) a entrada. Só varre as listas de
 // posse dos frames vivos — pequenas — e só para refs que apontam para slot de
 // pilha; os demais tipos de ref saem no primeiro teste.
+//
+// A varredura é de DENTRO PARA FORA (frame mais interno primeiro): índices
+// absolutos de slot são reusados — a região de pilha de um frame chamado
+// sobrepõe os índices onde blocos irmãos mortos do CHAMADOR deixaram entradas
+// nunca podadas. Varrer de fora para dentro casava a entrada MORTA do chamador
+// (mesmo endereço) e deixava a entrada VIVA do frame interno nomeando o objeto
+// velho — solto duas vezes no fim do frame (dec a mais). A direção inversa é
+// segura: as entradas de um frame interno são todas >= seu LocalBase, então
+// nenhuma entrada interna pode aliasar um slot vivo de um frame externo.
 func (vm *VM) retargetOwnedSlot(ref *value.ObjRef, updated value.Value) bool {
 	if ref == nil || (ref.RefType != value.REF_UPVALUE && ref.RefType != value.REF_PTR) {
 		return false
 	}
-	for i := 0; i < vm.frameCount; i++ {
+	for i := vm.frameCount - 1; i >= 0; i-- {
 		frame := vm.frames[i]
 		if frame == nil {
 			continue
@@ -199,12 +208,15 @@ func (vm *VM) retargetOwnedSlot(ref *value.ObjRef, updated value.Value) bool {
 // direcao insegura: o velho, ainda vivo em outro dono, passa a parecer unico).
 // Caixa fechada: PointsTo e falso para qualquer slot de pilha (o valor mora no
 // proprio box) e nao ha entrada a reapontar. O guard de openUpvalues zera o
-// custo no caso comum (nenhuma captura aberta).
+// custo no caso comum (nenhuma captura aberta). Varredura de DENTRO PARA FORA
+// pela mesma razao do retargetOwnedSlot: uma entrada morta do chamador num
+// indice reusado casaria primeiro e deixaria a entrada viva do frame interno
+// obsoleta (dec a mais no fim do frame).
 func (vm *VM) retargetOwnedSlotForUpvalue(upv *value.ObjUpvalue, updated value.Value) bool {
 	if upv == nil || vm.openUpvalues == nil {
 		return false
 	}
-	for i := 0; i < vm.frameCount; i++ {
+	for i := vm.frameCount - 1; i >= 0; i-- {
 		frame := vm.frames[i]
 		if frame == nil {
 			continue

@@ -255,10 +255,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip++
 			// Reference to a stack slot - Capture it!
 			// RC: a caixa nasce possuidora; o gemeo _BORROW (emitido quando o
-			// slot capturado NAO retem o que guarda — variavel de for-each,
-			// binding de case do select) a marca como emprestada, e os funis de
-			// escrita via ref param de contar posse nela. Decisao estatica: nada
-			// de consultar frame.Owned.
+			// slot capturado NAO retem o que guarda — hoje, apenas slot de tipo
+			// `ref`) a marca como emprestada, e os funis de escrita via ref
+			// param de contar posse nela. Decisao estatica: nada de consultar
+			// frame.Owned.
 			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot])
 			if instruction == chunk.OP_REF_LOCAL_BORROW {
 				upvalue.MarkBorrowed()

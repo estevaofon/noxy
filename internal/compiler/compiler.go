@@ -17,12 +17,13 @@ type Local struct {
 	IsParam    bool
 	// Owns diz que o SLOT deste vinculo RETEM o composto que guarda — ou seja,
 	// que existe um inc pareado com o release de fim de frame (OP_OWN_LOCAL no
-	// `let`, ou o retain de parametro sem `ref` em callPreparedClosure). E a
-	// unica pergunta que os funis de escrita precisam responder, e ela e mais
-	// estreita do que "o tipo declarado e `ref T`?": ha vinculos que colocam um
-	// valor no slot SEM reter e SEM tipo declarado (variavel de for-each,
-	// binding de case do select). Tratar esses como possuidores fazia o caminho
-	// MUT soltar um objeto que o slot nunca reteve (dec a menos).
+	// `let`, na variavel de for-each e no binding de case do select, ou o
+	// retain de parametro sem `ref` em callPreparedClosure). E a unica pergunta
+	// que os funis de escrita precisam responder. Com todo local nomeado
+	// nao-`ref` possuidor desde o nascimento (spec §4.2), Owns coincide com "o
+	// tipo declarado nao e `ref T`" — os nao-possuidores restantes sao os slots
+	// `ref` (emprestimo) e os slots ocultos da maquinaria ($collection/$map/
+	// $sel_*, que emprestam de proposito e sao inalcancaveis pelos funis).
 	//
 	// O default e false — a direcao segura para o gemeo MUT (no maximo deixa um
 	// dono a mais, custando uma copia; nunca solta o que nao reteve). Marque

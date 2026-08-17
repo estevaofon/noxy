@@ -2226,3 +2226,255 @@ main()`
 		t.Fatalf("apos o retorno esperado Owners %d (cada elemento: 1 retain, 1 release), veio %d", before, after)
 	}
 }
+
+// Task 7 (round 5 — CRITICO 1, pre-existente): os dois helpers de reaponte
+// varriam os frames de FORA PARA DENTRO e devolviam o primeiro match por
+// endereco. Indices absolutos de slot sao reusados: a regiao de pilha do frame
+// chamado sobrepoe os indices onde um bloco irmao MORTO do chamador deixou
+// entradas nunca podadas — a entrada morta do chamador casava primeiro, era
+// reapontada no lugar da entrada VIVA do frame interno, e o fim do frame
+// soltava o objeto velho uma segunda vez (dec a mais: vivo em dois globais,
+// parecia unico, a mutacao seguinte vazava). O alinhamento depende do offset do
+// bloco morto (rr_alias: D0/D1 escapavam, D2+ mordiam). Correcao: varrer de
+// DENTRO PARA FORA — entradas de um frame interno sao todas >= seu LocalBase,
+// entao nenhuma entrada interna pode aliasar um slot vivo de frame externo.
+//
+// Cobre os DOIS funis: caixa de upvalue aberta (retargetOwnedSlotForUpvalue,
+// cenarios A*) e escrita via ref (retargetOwnedSlot, cenarios B*), cada um com
+// controle sem bloco morto. Oraculo do merge-base: 1 em todos.
+func TestRetargetScansFramesInnermostFirst(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+let ga: Box[] = []
+let gb: Box[] = []
+
+func setit(n: ref Box, w: Box)
+    *n = w
+end
+
+// funil da caixa de upvalue aberta (OP_SET_UPVALUE)
+func upv_build()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    let f: func = func() -> void
+        y = Box(9)
+    end
+    f()
+end
+
+// funil da escrita via ref (storeReferenceValue)
+func ref_build()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    setit(ref y, Box(9))
+end
+
+// A0/B0: controles sem bloco morto no chamador.
+func a0() -> int
+    upv_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+func b0() -> int
+    ref_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+// A2/B2: bloco irmao morto deixa entradas possuidoras do CHAMADOR em indices
+// que o frame chamado reusa (o offset 2 e o primeiro que morde no rr_alias).
+func a2() -> int
+    if true then
+        let d0: Box = Box(90)
+        let d1: Box = Box(91)
+        d0.v = d1.v
+    end
+    upv_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+func b2() -> int
+    if true then
+        let d0: Box = Box(90)
+        let d1: Box = Box(91)
+        d0.v = d1.v
+    end
+    ref_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+// A3/B3: um slot morto a mais (outro alinhamento que mordia).
+func a3() -> int
+    if true then
+        let d0: Box = Box(90)
+        let d1: Box = Box(91)
+        let d2: Box = Box(92)
+        d0.v = d1.v + d2.v
+    end
+    upv_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+func b3() -> int
+    if true then
+        let d0: Box = Box(90)
+        let d1: Box = Box(91)
+        let d2: Box = Box(92)
+        d0.v = d1.v + d2.v
+    end
+    ref_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+func main()
+    let ra0: string = to_str(a0())
+    let ra2: string = to_str(a2())
+    let ra3: string = to_str(a3())
+    let rb0: string = to_str(b0())
+    let rb2: string = to_str(b2())
+    let rb3: string = to_str(b3())
+    test_report(ra0 + "|" + ra2 + "|" + ra3 + "|" + rb0 + "|" + rb2 + "|" + rb3)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "1|1|1|1|1|1"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("reaponte casou entrada morta do chamador (dec a mais): esperado %q (a0|a2|a3|b0|b2|b3), veio %#v", want, reported.Obj)
+	}
+}
+
+// Task 7 (round 5 — CRITICO 2, pre-existente): quando o valor novo de um
+// OP_SET_LOCAL nao e retivel (ex.: `z = null` num slot possuidor), o site ja
+// liberou o ocupante velho, mas o ownSlot fazia early-return no Retain falho e
+// a entrada (slot, objeto) continuava nomeando o objeto JA PAGO — entrada
+// fantasma. Quem a honrasse (fim do frame, ou o bindOwnedSlot da iteracao
+// seguinte) soltava o objeto de novo: dec a mais, vivo em dois globais ele
+// parecia unico e a mutacao vazava. Correcao: ownSlot remove a entrada do slot
+// (swap-remove) quando o ocupante novo nao e retivel — mesma disciplina do
+// bindOwnedSlot.
+//
+// Oraculo do merge-base: 1 em todos (N4 e o controle sem rebind para null;
+// N3 cobre o rebind para null da variavel de for-each).
+func TestOwnSlotDropsEntryOnNonRetainableRebind(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+let ga: Box[] = []
+let gb: Box[] = []
+
+// N1: rebind de slot possuidor para null; a entrada fantasma seria honrada
+// pelo release em massa do fim do frame.
+func n1_build()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    let z: Box = y
+    z = null
+end
+
+func n1() -> int
+    n1_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+// N2: o mesmo dentro de um laco — a entrada fantasma seria honrada pelo
+// bindOwnedSlot da iteracao seguinte, antes do fim do frame.
+func n2_build()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    let i: int = 0
+    while i < 3 do
+        let z: Box = y
+        z = null
+        i = i + 1
+    end
+end
+
+func n2() -> int
+    n2_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+// N3: variavel de for-each rebindada para null.
+func n3_build(arr: Box[])
+    for item in arr do
+        item = null
+    end
+end
+
+func n3() -> int
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    let arr: Box[] = [y, y, y]
+    n3_build(arr)
+    ga[0].v = 55
+    return gb[0].v
+end
+
+// N4: controle — sem rebind para null.
+func n4_build()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    let z: Box = y
+    z.v = z.v
+end
+
+func n4() -> int
+    n4_build()
+    ga[0].v = 55
+    return gb[0].v
+end
+
+func main()
+    let r1: string = to_str(n1())
+    let r2: string = to_str(n2())
+    let r3: string = to_str(n3())
+    let r4: string = to_str(n4())
+    test_report(r1 + "|" + r2 + "|" + r3 + "|" + r4)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "1|1|1|1"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("entrada fantasma apos rebind nao-retivel (dec a mais): esperado %q (n1|n2|n3|n4), veio %#v", want, reported.Obj)
+	}
+}

@@ -160,20 +160,32 @@ func (vm *VM) peek(distance int) value.Value {
 // nunca o ocupante atual do slot no momento do release — reuso de slot por
 // temporários nunca retidos (locais de bloco mortos, ex.: OP_POP sem drop)
 // tornaria o release por índice unsound (dec a menos, proibido pela spec).
+//
+// Ocupante novo NÃO-retível (null/escalar): a entrada do slot, se existir, é
+// REMOVIDA — o site já liberou o ocupante velho (é o contrato deste helper),
+// então mantê-la seria uma reivindicação FANTASMA sobre um objeto já pago, e
+// o fim do frame (ou o bindOwnedSlot de uma iteração seguinte) o soltaria uma
+// segunda vez (dec a mais, direção insegura).
 func (f *CallFrame) ownSlot(vm *VM, slot int) {
 	v := vm.stack[slot]
-	if !value.Retain(v) {
-		return
-	}
+	retained := value.Retain(v)
 	for i := range f.Owned {
 		if f.Owned[i].slot == slot {
-			// Sobrescrita do slot: o site ja liberou o ocupante velho; a
-			// entrada passa a apontar o objeto novo (retido acima).
-			f.Owned[i].obj = v
+			if retained {
+				// Sobrescrita do slot: o site ja liberou o ocupante velho; a
+				// entrada passa a apontar o objeto novo (retido acima).
+				f.Owned[i].obj = v
+			} else {
+				last := len(f.Owned) - 1
+				f.Owned[i] = f.Owned[last]
+				f.Owned = f.Owned[:last]
+			}
 			return
 		}
 	}
-	f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
+	if retained {
+		f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
+	}
 }
 
 // bindOwnedSlot e o OP_OWN_LOCAL: um vinculo NOVO nasce no slot (let, variavel
