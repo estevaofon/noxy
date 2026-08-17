@@ -55,6 +55,7 @@ func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk
 			for i := 0; i < argCount; i++ {
 				arg := vm.peek(argCount - 1 - i)
 				value.MarkShared(arg) // CoW: o chamador ainda referencia o arg
+				value.Retain(arg)     // RC: campo e dono duravel
 				instObj.Fields[structDef.Fields[i]] = arg
 			}
 			vm.stackTop -= argCount + 1
@@ -156,6 +157,7 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		copy(newElems, obj.Elements)
 		for _, el := range newElems {
 			value.MarkShared(el)
+			value.Retain(el) // RC: filho ganha dono duravel no clone
 		}
 		copied := value.NewArray(newElems)
 		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
@@ -165,6 +167,7 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		newData := obj.Snapshot()
 		for _, val := range newData {
 			value.MarkShared(val)
+			value.Retain(val) // RC: filho ganha dono duravel no clone
 		}
 		copied := value.NewMap()
 		copiedMap := copied.Obj.(*value.ObjMap)
@@ -176,6 +179,7 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		newFields := make(map[string]value.Value)
 		for k, val := range obj.Fields {
 			value.MarkShared(val)
+			value.Retain(val) // RC: filho ganha dono duravel no clone
 			newFields[k] = val
 		}
 		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjInstance{Struct: obj.Struct, Fields: newFields}}

@@ -1002,7 +1002,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			for i := count - 1; i >= 0; i-- {
 				elements[i] = vm.pop()
 				// CoW: o elemento pode continuar referenciado pela origem
-				value.MarkShared(elements[i])
+				value.MarkShared(elements[i]) // sticky: sai na Task 8
+				value.Retain(elements[i])     // RC: elemento e dono duravel
 			}
 			vm.push(value.NewArray(elements))
 
@@ -1031,7 +1032,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
 				// CoW: o valor pode continuar referenciado pela origem
-				value.MarkShared(val)
+				value.MarkShared(val) // sticky: sai na Task 8
+				value.Retain(val)     // RC: elemento e dono duravel
 				mapping.Set(key, val)
 			}
 			vm.push(mapObj)
@@ -1150,7 +1152,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
+					// RC: retain-antes-de-release (elemento e dono duravel)
+					old := arr.Elements[idx]
+					value.Retain(val)
 					arr.Elements[idx] = val
+					value.Release(old)
 					vm.push(val) // Assignment expression result
 					continue
 				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
@@ -1166,7 +1172,16 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					} else {
 						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
-					mapObj.Set(key, val)
+					// RC: so libera o velho se a chave ja existia (dec a
+					// menos e proibido); retain-antes-de-release quando existe.
+					if old, exists := mapObj.Get(key); exists {
+						value.Retain(val)
+						mapObj.Set(key, val)
+						value.Release(old)
+					} else {
+						value.Retain(val)
+						mapObj.Set(key, val)
+					}
 					vm.push(val)
 					continue
 				}
@@ -1238,7 +1253,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "only instances have properties")
 			}
 
+			// RC: retain-antes-de-release (campo e dono duravel); Release
+			// em campo inexistente (Value{} zero) e no-op (nao e VAL_OBJ)
+			old := instance.Fields[name]
+			value.Retain(val)
 			instance.Fields[name] = val
+			value.Release(old)
 			vm.push(val)
 
 		case chunk.OP_SET_PROPERTY_DEREF:
@@ -1287,8 +1307,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			idx := frame.LocalBase + int(slot)
 			v := vm.stack[idx]
 			if value.IsShared(v) {
+				old := v
 				v = vm.copyValue(v)
 				vm.stack[idx] = v
+				// RC: usa ownSlot (mantem o slot registrado em frame.Owned)
+				// em vez de Retain cru — mesmo padrao do OP_SET_LOCAL.
+				frame.ownSlot(vm, idx)
+				value.Release(old)
 			}
 			vm.push(v)
 
@@ -1356,8 +1381,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 					v := arr.Elements[idx]
 					if value.IsShared(v) {
+						old := v
 						v = vm.copyValue(v)
+						// RC: retain-antes-de-release em torno da troca
+						value.Retain(v)
 						arr.Elements[idx] = v
+						value.Release(old)
 					}
 					vm.push(v)
 					continue
@@ -1373,7 +1402,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 					v, changed := vm.unicize(stored)
 					if changed {
+						// RC: retain-antes-de-release em torno da troca
+						value.Retain(v)
 						mapObj.Set(key, v)
+						value.Release(stored)
 					}
 					vm.push(v)
 					continue
@@ -1402,8 +1434,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					return vm.runtimeError(c, ip, "undefined property '%s'", name)
 				}
 				if value.IsShared(fieldVal) {
+					old := fieldVal
 					fieldVal = vm.copyValue(fieldVal)
+					// RC: retain-antes-de-release em torno da troca
+					value.Retain(fieldVal)
 					instance.Fields[name] = fieldVal
+					value.Release(old)
 				}
 				vm.push(fieldVal)
 			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
@@ -1414,7 +1450,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				}
 				v, changed := vm.unicize(stored)
 				if changed {
+					// RC: retain-antes-de-release em torno da troca
+					value.Retain(v)
 					mapObj.Set(name, v)
+					value.Release(stored)
 				}
 				vm.push(v)
 			} else {

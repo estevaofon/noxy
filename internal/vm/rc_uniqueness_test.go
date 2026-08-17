@@ -368,3 +368,295 @@ main()`
 		t.Fatalf("esperado Owners(capturado) >= 1 apos retorno do frame externo (box retem), veio %d", owners)
 	}
 }
+
+// Task 5 (Step 1): OP_ARRAY retem cada elemento como dono duravel (ao lado
+// do MarkShared existente, que fica ate a Task 8). x tem dois donos apos
+// virar elemento de arr: o slot do let e o elemento do array.
+func TestArrayLiteralRetainsSharedElement(t *testing.T) {
+	machine := New()
+	var owners int32
+	machine.DefineNative("probe", func(args []value.Value) value.Value {
+		owners = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe")
+
+	src := `
+func main()
+    let x: map[string, int] = {"a": 1}
+    let arr: map[string, int][] = [x]
+    probe(x)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if owners != 2 {
+		t.Fatalf("esperado Owners(x)=2 (slot de x + elemento do array), veio %d", owners)
+	}
+}
+
+// Task 5 (Step 1): OP_SET_INDEX (array) libera o elemento velho e retem o
+// novo. arr nao esta compartilhado (literal fresco), entao OP_GET_LOCAL_MUT
+// nao clona — o teste isola exatamente o par retain/release do proprio
+// OP_SET_INDEX.
+func TestArraySetIndexReleasesOldRetainsNew(t *testing.T) {
+	machine := New()
+	var oldVal value.Value
+	var ownersOldBefore, ownersNewAfter int32
+	machine.DefineNative("probe_old", func(args []value.Value) value.Value {
+		oldVal = args[0]
+		ownersOldBefore = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_new", func(args []value.Value) value.Value {
+		ownersNewAfter = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_old")
+	markProbeReadonly(t, machine, "probe_new")
+
+	src := `
+func main()
+    let x: map[string, int] = {"a": 1}
+    let y: map[string, int] = {"b": 2}
+    let arr: map[string, int][] = [x]
+    probe_old(x)
+    arr[0] = y
+    probe_new(y)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersOldBefore != 2 {
+		t.Fatalf("esperado Owners(x)=2 antes de arr[0]=y (slot x + elemento), veio %d", ownersOldBefore)
+	}
+	if got := value.OwnersCount(oldVal); got != 1 {
+		t.Fatalf("esperado Owners(x)=1 apos arr[0]=y (elemento liberado, slot x permanece), veio %d", got)
+	}
+	if ownersNewAfter != 2 {
+		t.Fatalf("esperado Owners(y)=2 apos arr[0]=y (slot y + elemento), veio %d", ownersNewAfter)
+	}
+}
+
+// Task 5 (Step 1): OP_SET_INDEX (map) sobre chave existente libera o valor
+// velho e retem o novo. m nao esta compartilhado, entao GET_LOCAL_MUT nao
+// clona — isola o par retain/release do proprio OP_SET_INDEX (branch map).
+func TestMapSetIndexReleasesOldOnExistingKey(t *testing.T) {
+	machine := New()
+	var oldVal value.Value
+	var ownersOldBefore, ownersNewAfter int32
+	machine.DefineNative("probe_old", func(args []value.Value) value.Value {
+		oldVal = args[0]
+		ownersOldBefore = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_new", func(args []value.Value) value.Value {
+		ownersNewAfter = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_old")
+	markProbeReadonly(t, machine, "probe_new")
+
+	src := `
+func main()
+    let x: map[string, int] = {"a": 1}
+    let y: map[string, int] = {"b": 2}
+    let m: map[string, map[string, int]] = {"k": x}
+    probe_old(x)
+    m["k"] = y
+    probe_new(y)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersOldBefore != 2 {
+		t.Fatalf(`esperado Owners(x)=2 antes de m["k"]=y (slot x + valor no map), veio %d`, ownersOldBefore)
+	}
+	if got := value.OwnersCount(oldVal); got != 1 {
+		t.Fatalf(`esperado Owners(x)=1 apos m["k"]=y (valor liberado do map, slot x permanece), veio %d`, got)
+	}
+	if ownersNewAfter != 2 {
+		t.Fatalf(`esperado Owners(y)=2 apos m["k"]=y (slot y + valor no map), veio %d`, ownersNewAfter)
+	}
+}
+
+// Task 5 (Step 1): OP_SET_PROPERTY libera o campo velho e retem o novo. A
+// 1a atribuicao clona box (Box(x) nao e reconhecido como "fresco" pelo
+// compilador — so array/map/zeros literal sao — entao o let marca o
+// resultado do construtor Shared, e a base "box" e clonada via
+// OP_GET_LOCAL_MUT). A 2a atribuicao roda com box ja unshared (o clone
+// nasce sem o bit ligado), isolando o par retain/release do proprio
+// OP_SET_PROPERTY sem a clonagem do caminho MUT interferir na contagem.
+func TestSetPropertyReleasesOldRetainsNew(t *testing.T) {
+	machine := New()
+	var oldFieldVal value.Value
+	var ownersOldBefore, ownersNewAfter int32
+	machine.DefineNative("probe_old", func(args []value.Value) value.Value {
+		oldFieldVal = args[0]
+		ownersOldBefore = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_new", func(args []value.Value) value.Value {
+		ownersNewAfter = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_old")
+	markProbeReadonly(t, machine, "probe_new")
+
+	src := `
+struct Box
+    value: map[string, int]
+end
+
+func main()
+    let x: map[string, int] = {"a": 1}
+    let y1: map[string, int] = {"y1": 1}
+    let y2: map[string, int] = {"y2": 2}
+    let box: Box = Box(x)
+    box.value = y1
+    probe_old(y1)
+    box.value = y2
+    probe_new(y2)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersOldBefore != 2 {
+		t.Fatalf("esperado Owners(y1)=2 apos a 1a atribuicao (slot + campo), veio %d", ownersOldBefore)
+	}
+	if got := value.OwnersCount(oldFieldVal); got != 1 {
+		t.Fatalf("esperado Owners(y1)=1 apos a 2a atribuicao liberar o campo, veio %d", got)
+	}
+	if ownersNewAfter != 2 {
+		t.Fatalf("esperado Owners(y2)=2 apos a 2a atribuicao (slot + campo), veio %d", ownersNewAfter)
+	}
+}
+
+// Task 5 (Step 1): construtor de struct (callPreparedValue) retem cada
+// argumento ao lado do MarkShared existente — o campo e um slot duravel.
+func TestStructConstructorRetainsFieldArgument(t *testing.T) {
+	machine := New()
+	var owners int32
+	machine.DefineNative("probe", func(args []value.Value) value.Value {
+		owners = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe")
+
+	src := `
+struct Box
+    value: map[string, int]
+end
+
+func main()
+    let m: map[string, int] = {"a": 1}
+    let box: Box = Box(m)
+    probe(m)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if owners != 2 {
+		t.Fatalf("esperado Owners(m)=2 (slot de m + campo do struct), veio %d", owners)
+	}
+}
+
+// Task 5 (Step 1): copyValue retem cada filho clonado (ao lado do
+// MarkShared existente). arr e compartilhado via alias; arr[1]=repl forca o
+// clone de arr (OP_GET_LOCAL_MUT) mas so sobrescreve o indice 1 — "child"
+// (indice 0) fica intocado e deve ganhar exatamente +1 dono vindo do clone.
+func TestCloneOnMutationRetainsUntouchedChild(t *testing.T) {
+	machine := New()
+	var before, after int32
+	machine.DefineNative("probe_before", func(args []value.Value) value.Value {
+		before = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_after", func(args []value.Value) value.Value {
+		after = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_before")
+	markProbeReadonly(t, machine, "probe_after")
+
+	src := `
+func main()
+    let child: map[string, int] = {"a": 1}
+    let other: map[string, int] = {"b": 2}
+    let arr: map[string, int][] = [child, other]
+    let alias: map[string, int][] = arr
+    probe_before(child)
+    let repl: map[string, int] = {"c": 3}
+    arr[1] = repl
+    probe_after(child)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if before != 2 {
+		t.Fatalf("esperado Owners(child)=2 antes do clone (slot + elemento), veio %d", before)
+	}
+	if after != before+1 {
+		t.Fatalf("esperado Owners(child) crescer +1 apos o clone de arr (filho intocado herda dono do clone), before=%d after=%d", before, after)
+	}
+}
+
+// Task 5 (Step 1): caminho MUT (OP_GET_INDEX_MUT, branch array) — quando
+// a[0] esta Shared (marcado pelo proprio OP_ARRAY), a mutacao a[0].x=9
+// clona o elemento, grava o clone de volta em Elements[0] com retain, e
+// libera a instancia velha. Auditado por contagem na instancia velha
+// (capturada antes da mutacao) e na nova (lida depois).
+func TestMutIndexClonePathRetainsWriteBackReleasesOld(t *testing.T) {
+	machine := New()
+	var oldInst value.Value
+	var ownersOldBefore, ownersNewAfter int32
+	machine.DefineNative("probe_before", func(args []value.Value) value.Value {
+		oldInst = args[0]
+		ownersOldBefore = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_after", func(args []value.Value) value.Value {
+		ownersNewAfter = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_before")
+	markProbeReadonly(t, machine, "probe_after")
+
+	src := `
+struct P
+    x: int
+end
+
+func main()
+    let a: P[] = [P(1)]
+    probe_before(a[0])
+    a[0].x = 9
+    probe_after(a[0])
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if ownersOldBefore != 1 {
+		t.Fatalf("esperado Owners(a[0])=1 antes da mutacao (retain do elemento no OP_ARRAY), veio %d", ownersOldBefore)
+	}
+	if got := value.OwnersCount(oldInst); got != 0 {
+		t.Fatalf("esperado Owners(instancia velha)=0 apos o clone gravado de volta em OP_GET_INDEX_MUT, veio %d", got)
+	}
+	if ownersNewAfter != 1 {
+		t.Fatalf("esperado Owners(clone gravado em a[0])=1 apos a mutacao, veio %d", ownersNewAfter)
+	}
+}
