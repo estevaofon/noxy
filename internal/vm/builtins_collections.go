@@ -85,7 +85,14 @@ func (vm *VM) defineCollectionBuiltins() {
 					}
 				}
 				if key != nil {
+					// RC: busca o valor velho antes de remover; so libera se
+					// a chave de fato existia (chave ausente nao mexe em
+					// Owners).
+					old, existed := m.Get(key)
 					m.Delete(key)
+					if existed {
+						value.Release(old)
+					}
 				}
 			}
 		}
@@ -118,6 +125,7 @@ func (vm *VM) defineCollectionBuiltins() {
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				value.MarkShared(item) // o chamador ainda segura um ponteiro para o item
+				value.Retain(item)     // RC: o array e dono duravel do item anexado
 				arr.Elements = append(arr.Elements, item)
 			}
 		}
@@ -149,6 +157,7 @@ func (vm *VM) defineCollectionBuiltins() {
 				}
 				val := arr.Elements[len(arr.Elements)-1]
 				arr.Elements = arr.Elements[:len(arr.Elements)-1]
+				value.Release(val) // RC: o array solta a posse duravel do elemento removido
 				return val, nil
 			}
 		}

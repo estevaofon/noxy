@@ -38,8 +38,12 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 		} else if !native.ReadonlyArgs {
 			// CoW: native sem assinatura pode reter/mutar args — marca todos
 			// os compostos (conservador; allowlist só-leitura pula isto)
+			// RC: retenção permanente e conservadora — não sabemos se o
+			// native guarda o valor além da chamada, então assumimos que sim
+			// e nunca soltamos (sem release em lugar nenhum; até a Task 8).
 			for i := range args {
 				value.MarkShared(args[i])
+				value.Retain(args[i])
 			}
 		}
 		return vm.callNative(native, args, argCount, c, ip)

@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/value"
 )
@@ -658,5 +659,323 @@ main()`
 	}
 	if ownersNewAfter != 1 {
 		t.Fatalf("esperado Owners(clone gravado em a[0])=1 apos a mutacao, veio %d", ownersNewAfter)
+	}
+}
+
+// Task 6 (Step 1): append retem o item ao lado do MarkShared existente; pop
+// libera o elemento removido depois de tira-lo do array.
+func TestAppendRetainsItemPopReleasesRemoved(t *testing.T) {
+	machine := New()
+	item := value.NewMap()
+	storedArray := value.NewArray(nil)
+	arrayRef := pointerReference(&storedArray)
+
+	before := value.OwnersCount(item)
+	callBuiltin(t, machine, "append", arrayRef, item)
+	if got := value.OwnersCount(item); got != before+1 {
+		t.Fatalf("esperado Owners=%d apos append, veio %d", before+1, got)
+	}
+
+	popped := callBuiltin(t, machine, "pop", arrayRef)
+	if popped.Obj != item.Obj {
+		t.Fatalf("pop retornou objeto diferente do item empilhado")
+	}
+	if got := value.OwnersCount(item); got != before {
+		t.Fatalf("esperado Owners=%d apos pop remover o elemento, veio %d", before, got)
+	}
+}
+
+// Task 6 (Step 1): delete busca o valor velho antes de remover a chave e so
+// libera se a chave de fato existia (chave ausente nao mexe em Owners).
+func TestDeleteReleasesValueOnlyWhenKeyExisted(t *testing.T) {
+	machine := New()
+	oldVal := value.NewMap()
+	// simula a retencao duravel que o proprio mapa ja teria feito ao guardar
+	// oldVal (Task 5 / OP_MAP) — aqui construimos o mapa via helper de teste
+	// (fora do bytecode), entao retemos manualmente para ter algo para o
+	// delete soltar.
+	value.Retain(oldVal)
+
+	storedMap := value.NewMap()
+	mapObject := storedMap.Obj.(*value.ObjMap)
+	setTestMap(mapObject, "k", oldVal)
+	mapRef := pointerReference(&storedMap)
+
+	before := value.OwnersCount(oldVal)
+	callBuiltin(t, machine, "delete", mapRef, value.NewString("k"))
+	if got := value.OwnersCount(oldVal); got != before-1 {
+		t.Fatalf("esperado Owners=%d apos delete da chave existente, veio %d", before-1, got)
+	}
+
+	missing := value.NewMap()
+	value.Retain(missing)
+	beforeMissing := value.OwnersCount(missing)
+	setTestMap(mapObject, "other", missing)
+	afterSet := value.OwnersCount(missing)
+	callBuiltin(t, machine, "delete", mapRef, value.NewString("chave-inexistente"))
+	if got := value.OwnersCount(missing); got != afterSet {
+		t.Fatalf("delete de chave ausente nao deveria alterar Owners de outro valor: antes=%d depois=%d", beforeMissing, got)
+	}
+}
+
+// Task 6 (Step 1): chan_send retem o valor ao lado do MarkShared existente
+// (o buffer e durave); chan_recv libera apos um recebimento bem-sucedido —
+// o valor saiu do buffer.
+func TestChanSendRetainsChanRecvReleasesOnSuccess(t *testing.T) {
+	machine := New()
+	item := value.NewMap()
+	ch := value.NewChannel(1)
+
+	before := value.OwnersCount(item)
+	callBuiltin(t, machine, "chan_send", ch, item)
+	if got := value.OwnersCount(item); got != before+1 {
+		t.Fatalf("esperado Owners=%d apos chan_send, veio %d", before+1, got)
+	}
+
+	got := callBuiltin(t, machine, "chan_recv", ch)
+	if got.Obj != item.Obj {
+		t.Fatalf("chan_recv retornou valor diferente do enviado")
+	}
+	if got := value.OwnersCount(item); got != before {
+		t.Fatalf("esperado Owners=%d apos chan_recv receber com sucesso, veio %d", before, got)
+	}
+}
+
+// Task 6 (Step 1): o caminho !ok de chan_recv (canal fechado e vazio) nao
+// pode liberar nada — nao ha valor recebido para soltar.
+func TestChanRecvOnClosedEmptyChannelDoesNotRelease(t *testing.T) {
+	machine := New()
+	item := value.NewMap()
+	ch := value.NewChannel(1)
+	callBuiltin(t, machine, "chan_send", ch, item)
+	first := callBuiltin(t, machine, "chan_recv", ch)
+	if first.Obj != item.Obj {
+		t.Fatalf("primeiro recv nao retornou o item esperado")
+	}
+	afterFirstRecv := value.OwnersCount(item)
+
+	chObj := ch.Obj.(*value.ObjChannel)
+	chObj.Lock.Lock()
+	close(chObj.Chan)
+	chObj.Closed = true
+	chObj.Lock.Unlock()
+
+	second := callBuiltin(t, machine, "chan_recv", ch)
+	if second.Type != value.VAL_NULL {
+		t.Fatalf("esperado null ao receber de canal fechado e vazio, veio %#v", second)
+	}
+	if got := value.OwnersCount(item); got != afterFirstRecv {
+		t.Fatalf("recv em canal fechado/vazio nao deveria alterar Owners: antes=%d depois=%d", afterFirstRecv, got)
+	}
+}
+
+// Task 6 (Step 1): spawn e a excecao onde retain e registro no frame.Owned
+// ficam em pontos separados do codigo (o retain acontece no loop de push,
+// sincrono, antes do goroutine ser lancado; o registro no frame manual da
+// thread e o que causa o release quando aquele frame termina). Como o
+// retain+registro sao sincronos (rodam dentro do proprio native "spawn",
+// antes do "go func(){...}()"), medimos logo apos spawn.Invoke retornar —
+// sem precisar sincronizar com a goroutine para a medida "durante".
+func TestSpawnRetainsArgSynchronouslyAndReleasesWhenThreadFrameEnds(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(m: map[string, int])
+end`); err != nil {
+		t.Fatal(err)
+	}
+	workerFn, _ := machine.GetGlobal("worker")
+	m := value.NewMap()
+	before := value.OwnersCount(m)
+
+	spawn := requireBuiltin(t, machine, "spawn")
+	if _, err := spawn.Invoke(machine, []value.Value{workerFn, m}); err != nil {
+		t.Fatal(err)
+	}
+	if got := value.OwnersCount(m); got != before+1 {
+		t.Fatalf("esperado Owners=%d logo apos spawn (retain sincrono no push), veio %d", before+1, got)
+	}
+
+	deadline := time.Now().Add(statefulBuiltinTimeout)
+	for time.Now().Before(deadline) {
+		if value.OwnersCount(m) == before {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := value.OwnersCount(m); got != before {
+		t.Fatalf("esperado Owners=%d apos a thread da spawn terminar (frame.Owned liberado), veio %d", before, got)
+	}
+}
+
+// Task 6 (Step 1): spawn_task retem o argumento na preparacao (captura,
+// sincrona, antes do goroutine da task rodar) e libera quando a task
+// termina (mirror do padrao de defer) — a asserção "durante" tambem nao
+// precisa de sincronizacao porque o retain acontece antes do "go".
+func TestSpawnTaskCapturesArgSynchronouslyAndReleasesWhenTaskCompletes(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func worker(m: int[])
+end`); err != nil {
+		t.Fatal(err)
+	}
+	workerFn, _ := machine.GetGlobal("worker")
+	// array (nao map): prepareTaskCall valida RuntimeType contra a
+	// assinatura da funcao, e um value.NewMap() cru nao carrega o
+	// RuntimeType que o checker exige para map[K,V]; um array construido
+	// fora do bytecode passa nessa validacao (mesmo padrao usado em
+	// TestPreparedTaskCallMarksValueParameterShared).
+	m := value.NewArray([]value.Value{value.NewInt(1)})
+	before := value.OwnersCount(m)
+
+	spawnTask := requireBuiltin(t, machine, "spawn_task")
+	handle, err := spawnTask.Invoke(machine, []value.Value{workerFn, m})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.OwnersCount(m); got != before+1 {
+		t.Fatalf("esperado Owners=%d logo apos spawn_task (captura sincrona em prepareTaskCall), veio %d", before+1, got)
+	}
+
+	taskAwait := requireBuiltin(t, machine, "task_await")
+	if _, err := taskAwait.Invoke(machine, []value.Value{handle}); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(statefulBuiltinTimeout)
+	for time.Now().Before(deadline) {
+		if value.OwnersCount(m) == before {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := value.OwnersCount(m); got != before {
+		t.Fatalf("esperado Owners=%d apos a task terminar (release da captura), veio %d", before, got)
+	}
+}
+
+// Task 6 (Step 1): defer captura o composto (+1) ao preparar a chamada
+// adiada; depois que o defer roda (fim da funcao externa, invokePreparedCall
+// completo), a captura e liberada (-1) — teste direto e isolado, sem
+// misturar com o retain do proprio frame da funcao externa.
+func TestDeferCapturesCompositeThenReleasesAfterInvocation(t *testing.T) {
+	machine := New()
+	if err := interpretVMSource(t, machine, `
+func cleanup(m: map[string, int]) -> void
+end`); err != nil {
+		t.Fatal(err)
+	}
+	callee, ok := machine.GetGlobal("cleanup")
+	if !ok {
+		t.Fatal("global 'cleanup' nao encontrado")
+	}
+	m := value.NewMap()
+	before := value.OwnersCount(m)
+
+	prepared, err := machine.prepareDeferredCall(callee, []value.Value{m}, SourceLocation{})
+	if err != nil {
+		t.Fatalf("prepareDeferredCall: %v", err)
+	}
+	if got := value.OwnersCount(m); got != before+1 {
+		t.Fatalf("esperado Owners=%d apos a captura do defer, veio %d", before+1, got)
+	}
+
+	if err := machine.invokePreparedCall(prepared); err != nil {
+		t.Fatalf("invokePreparedCall: %v", err)
+	}
+	if got := value.OwnersCount(m); got != before {
+		t.Fatalf("esperado Owners=%d apos o defer rodar (release da captura), veio %d", before, got)
+	}
+}
+
+// Task 6 (Step 1): mesmo cenario acima, mas de ponta a ponta via programa
+// Noxy real — confirma que o release da captura acontece junto com o
+// unwind normal do frame externo (defer registrado, funcao externa
+// retorna, defer roda, captura e liberada).
+func TestDeferCaptureEndToEndReleasesAfterOuterFunctionReturns(t *testing.T) {
+	machine := New()
+	var capturedM value.Value
+	var duringOwners int32
+	machine.DefineNative("probe_during", func(args []value.Value) value.Value {
+		capturedM = args[0]
+		duringOwners = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_during")
+
+	src := `
+func cleanup(m: map[string, int]) -> void
+    probe_during(m)
+end
+
+func outer() -> void
+    let m: map[string, int] = {"a": 1}
+    defer cleanup(m)
+end
+
+func main()
+    outer()
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// durante a execucao do defer: slot do let em outer (ainda vivo — o
+	// Deferred roda antes do release do frame.Owned de outer) + captura do
+	// defer + parametro de cleanup (proprio frame retido via
+	// callPreparedClosure) = 3.
+	if duringOwners != 3 {
+		t.Fatalf("esperado Owners=3 durante o defer, veio %d", duringOwners)
+	}
+	// Apos outer() retornar totalmente, o par do defer (captura +1 / release
+	// -1) ja fechou em zero. Mas sobra 1: o proprio "let m" de outer nunca
+	// solta seu retain original, porque o OP_POP de fim de bloco que o
+	// compilador emite para locais (BlockStatement.endScope) roda ANTES do
+	// release em massa de frame.Owned em finalizeCurrentFrame — o slot ja
+	// nao esta mais "vivo" (stackTop) quando o loop de release olha para
+	// ele, entao o release e pulado. Isso e um gap pre-existente da Task 3
+	// (locais), fora do escopo desta tarefa (fronteiras); nao mexemos em
+	// endScope()/frame.Owned aqui. O que este teste isola e exatamente que o
+	// PAR do defer em si fecha em zero: o total final e so esse +1 preso do
+	// let de outer, nada alem disso.
+	if got := value.OwnersCount(capturedM); got != 1 {
+		t.Fatalf("esperado Owners=1 (so o let de outer preso pelo gap pre-existente da Task 3; o par do defer fecha em zero), veio %d", got)
+	}
+}
+
+// Task 6 (Step 1): native sem assinatura fora da allowlist retem
+// permanentemente (conservador) — sem release em lugar nenhum. Diferente de
+// TestUnlistedNativeStillMarksArgs (que audita so o Shared bit/clone), este
+// teste audita o contador Owners.
+//
+// Usamos um GLOBAL (nao um "let" local) de proposito: um "let" local dentro
+// de uma funcao e liberado por dois mecanismos concorrentes — o OP_POP de
+// fim de bloco que o compilador emite (BlockStatement.endScope, sem RC) e o
+// release em massa de frame.Owned em finalizeCurrentFrame (Task 3, com RC).
+// O OP_POP roda ANTES do finalizeCurrentFrame (fora do escopo desta tarefa,
+// gap pre-existente da Task 3), entao o retain original do "let" fica preso
+// e contaminaria a leitura "so a retencao do native". Um global evita isso:
+// seu retain nunca passa por frame.Owned (funil proprio via OP_SET_GLOBAL,
+// Task 4), entao o baseline e estavel e conhecido (1, igual
+// TestGlobalLetRetainsCompositeAndReassignmentSwaps).
+func TestUnlistedNativeRetainsArgPermanently(t *testing.T) {
+	machine := New()
+	var captured value.Value
+	machine.DefineNative("test_observe_rc", func(args []value.Value) value.Value {
+		captured = args[0]
+		return value.NewNull()
+	})
+	// Sem markProbeReadonly de proposito: queremos o comportamento default
+	// (native fora da allowlist, ReadonlyArgs=false).
+	src := `
+let g: map[string, int] = {"a": 1}
+test_observe_rc(g)`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// 1 do retain do global (permanece pelo programa todo) + 1 da retencao
+	// permanente do native sem assinatura.
+	if got := value.OwnersCount(captured); got != 2 {
+		t.Fatalf("esperado Owners=2 (1 do global + 1 da retencao permanente do native), veio %d", got)
 	}
 }
