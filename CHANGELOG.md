@@ -22,6 +22,15 @@
   `internal/vm/runtime_type_validation_test.go` (confiança na tag, primeira
   marcação ainda varre, conflito rejeitado).
 
+### Changed
+
+- `benchmarks/RESULTS.md` virou registro corrido de comparações (mais recente
+  primeiro): ganhou a seção da validação O(1) pela tag (PR #31) com a tabela
+  intercalada develop × candidato — `bench_call_light` −97,1%,
+  `bench_typed_call_map` −94,3% (mediana de 5 intercaladas), `share_mutate`
+  −65,7%, sem regressões — e o "achado colateral" da seção CoW foi anotado
+  como resolvido, apontando para a seção nova.
+
 ### Added
 
 - `docs/SHOWCASE.md`: vitrine dos projetos reais escritos em Noxy, começando
