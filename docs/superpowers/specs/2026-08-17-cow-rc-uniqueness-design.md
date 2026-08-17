@@ -118,17 +118,29 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
   justamente o retain do campo `proximo: ref Node` que sustenta a contagem de
   uma lista encadeada — remover esse inc para "uniformizar com `ref`" abriria
   dec a menos em toda a estrutura.
-- **A pergunta certa é "este slot RETÉM o que guarda?", não "o tipo declarado é
-  `ref T`?".** Não-possuidor é estritamente mais largo: além dos slots `ref`,
-  dois vínculos colocam um valor no slot **sem inc e sem tipo declarado** — a
-  variável de `for ... in` e o binding de `case` do `select`/`when`. Tratá-los
-  como possuidores faz o caminho MUT soltar um objeto que o slot nunca reteve
-  (dec a menos, o elemento do contêiner passa a parecer único). O compilador
-  carrega um flag `Owns` por vínculo local, marcado **exatamente onde o inc é
-  emitido** (`OP_OWN_LOCAL` do `let`; retain de parâmetro sem `ref` no bind da
-  chamada), e é esse flag — não o tipo — que escolhe o gêmeo. Default `false`:
-  a direção segura para o caminho MUT (no máximo deixa um dono a mais, custando
-  uma cópia).
+- **A pergunta certa é "este slot RETÉM o que guarda?", e TODO vínculo local
+  nomeado sem `ref` retém — inclusive a variável de `for ... in` e o binding de
+  `case` do `select`/`when`.** A linha "slot de local" da tabela sempre cobriu
+  esses binds ("TODO composto"); deixá-los sem inc era violação da tabela, não
+  design, e abria as duas direções de erro: servi-los pelos gêmeos possuidores
+  solta um objeto que o slot nunca reteve (dec a menos no elemento do
+  contêiner), e servi-los pelos gêmeos de empréstimo deixa o slot segurando
+  duravelmente um valor com um dono a menos — o rebind (`item = outro`,
+  `setit(ref item, ...)`, case do select) muta depois "no lugar" e vaza para o
+  dono real. O `OP_OWN_LOCAL` desses binds roda **a cada iteração/entrada**:
+  cada elemento recebe exatamente um retain no bind e um release no bind
+  seguinte do mesmo slot (o vínculo anterior morreu — índices são reusados) ou
+  no fim do frame. O compilador continua carregando o flag `Owns` por vínculo,
+  marcado **exatamente onde o inc é emitido**, e é esse flag — não o tipo — que
+  escolhe o gêmeo; com a classe fechada, `Owns == (tipo declarado não é
+  ref T)` vale para todo local nomeado, o que torna correta por construção a
+  marca de empréstimo da caixa de upvalue (que é por tipo). Os únicos slots
+  não-possuidores restantes são os `ref` (empréstimo) e os slots **ocultos** da
+  maquinaria (`$collection`/`$map`/`$sel_*`): esses emprestam de propósito —
+  possuir a coleção iterada faria `arr[i] = x` dentro do laço clonar e a
+  iteração continuar no array velho, divergindo do contrato — e o empréstimo
+  neles é sound porque nenhum funil de escrita, captura ou `ref` os alcança
+  (nomes com espaço são inalcançáveis por identificador).
 - **A condição de empréstimo é ESTÁTICA — decidida pelo compilador, nunca
   inferida em runtime.** Cada funil que trocaria posse tem um gêmeo de
   empréstimo emitido pelo lowering (`OP_SET_LOCAL_BORROW`,
@@ -151,7 +163,11 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
   frame o solta uma segunda vez (**dec a mais** — o objeto velho, ainda vivo em
   outro dono, passa a parecer único). A entrada é reapontada para o valor novo
   na própria escrita, de modo que o velho é pago pelo funil e o novo pelo fim do
-  frame.
+  frame. **A mesma regra vale para a caixa de upvalue ABERTA**: enquanto aberta,
+  `OP_SET_UPVALUE` e `OP_GET_UPVALUE_MUT` (caixa possuidora) escrevem num slot
+  de pilha possuído — são o store contado daquele slot — e reapontam a entrada
+  do frame dono do mesmo jeito; caixa fechada guarda o valor em si mesma e não
+  tem entrada a reapontar.
 - Natives da allowlist só-leitura (`cow_natives.go`): empréstimo puro.
 - Natives **com** assinatura: cópia ansiosa mantida (spec CoW §4.6) — fora
   do RC.

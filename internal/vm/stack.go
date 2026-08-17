@@ -176,6 +176,40 @@ func (f *CallFrame) ownSlot(vm *VM, slot int) {
 	f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
 }
 
+// bindOwnedSlot e o OP_OWN_LOCAL: um vinculo NOVO nasce no slot (let, variavel
+// de for-each, binding de case do select). Retem o ocupante e, se o frame ja
+// tinha entrada para este indice, o vinculo que a criou MORREU (indices de slot
+// sao reusados entre iteracoes de laco e blocos irmaos, e a lista nao e podada
+// no fim do escopo) — o objeto gravado nela e pago AGORA, fechando o par
+// retain/release daquele vinculo: e assim que cada elemento de um for-each
+// recebe exatamente um retain (no bind da iteracao) e um release (no bind da
+// iteracao seguinte, ou no fim do frame para o ultimo). Retain-antes-de-
+// release: rebind do mesmo objeto (elemento repetido) nao passa por zero.
+// Ocupante nao-composto (Retain falha) com entrada anterior: a entrada e
+// removida depois de paga — deixa-la nomearia um objeto que um proximo
+// OP_SET_LOCAL substituiria sem release (retain orfao, over-count).
+func (f *CallFrame) bindOwnedSlot(vm *VM, slot int) {
+	v := vm.stack[slot]
+	retained := value.Retain(v)
+	for i := range f.Owned {
+		if f.Owned[i].slot != slot {
+			continue
+		}
+		value.Release(f.Owned[i].obj)
+		if retained {
+			f.Owned[i].obj = v
+		} else {
+			last := len(f.Owned) - 1
+			f.Owned[i] = f.Owned[last]
+			f.Owned = f.Owned[:last]
+		}
+		return
+	}
+	if retained {
+		f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
+	}
+}
+
 // captureUpvalue finds or creates an open upvalue for the given stack slot.
 //
 // RC: a caixa nasce POSSUIDORA. Quem a marca como emprestada e exclusivamente

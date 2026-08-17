@@ -1732,22 +1732,17 @@ main()`
 	}
 }
 
-// Task 7 (fallout da chave, round 4 — CRITICO achado em review): o predicado
-// estatico do round 3 perguntava "o tipo declarado do slot e `ref T`?", mas a
-// pergunta que os funis de escrita precisam responder e "este slot RETEM o que
-// guarda?". Nao-possuidor e ESTRITAMENTE MAIS LARGO: dois bind sites do
-// compilador colocam um valor no slot sem inc, sem entrada em frame.Owned e com
-// tipo declarado NIL — a variavel de for-each (addLocal(ident, nil) depois de um
-// OP_GET_INDEX, sem OP_OWN_LOCAL) e o binding de case do select (valor vindo do
-// $sel_val). Com tipo nil o teste antigo escolhia o gemeo POSSUIDOR, e
-// `item.v = 99` fazia ownSlot + Release(velho) sobre um objeto que aquele slot
-// nunca reteve: dec a menos, o elemento do array passava a parecer unico e a
-// escrita seguinte em `b` vazava para arr[0].
-//
-// Agora o compilador carrega Local.Owns, marcado exatamente onde o inc e
-// emitido (OP_OWN_LOCAL do let / retain de parametro sem ref no
-// callPreparedClosure), e os tres consumidores decidem por ele:
-// OP_GET_LOCAL_MUT(_BORROW), OP_SET_LOCAL(_BORROW) e OP_REF_LOCAL(_BORROW).
+// Task 7 (fallout da chave, rounds 3-4): a pergunta dos funis de escrita e
+// "este slot RETEM o que guarda?" (Local.Owns, marcado exatamente onde o inc e
+// emitido), e os tres consumidores decidem por ela: OP_GET_LOCAL_MUT(_BORROW),
+// OP_SET_LOCAL(_BORROW) e OP_REF_LOCAL(_BORROW). No round 3 a variavel de
+// for-each e o binding de case do select eram slots NAO-possuidores servidos
+// pelos gemeos de emprestimo; o round 4 fechou a classe: esses binds agora
+// RETEM desde o nascimento (OP_OWN_LOCAL por iteracao, spec §4.2 — "TODO
+// composto"), e os nao-possuidores nomeados voltaram a ser exatamente os slots
+// `ref`. Estes cenarios permanecem como ancoras de INDEPENDENCIA: nenhum
+// caminho pode soltar o elemento do array que o slot nao retem (round 3) nem
+// deixar de reter o que o slot guarda duravelmente (round 4).
 //
 // Oraculo de todos os cenarios, conferido no binario do merge-base: 1.
 func TestNonOwningLocalBindsNeverReleaseWhatTheyNeverRetained(t *testing.T) {
@@ -1812,8 +1807,8 @@ func d_foreach_rebind() -> int
     return arr[0].v
 end
 
-// E: ref para a variavel de for-each, escrito via *n = w (a caixa aberta sobre
-// um slot nao-possuidor tem de nascer emprestada).
+// E: ref para a variavel de for-each, escrito via *n = w (round 4: o slot
+// possui, a caixa nasce possuidora e o funil reaponta a entrada do frame).
 func e_ref_to_foreach_var() -> int
     let b: Box = Box(1)
     let arr: Box[] = [b]
@@ -1927,5 +1922,307 @@ main()`
 	const want = "1|1"
 	if reported.Type != value.VAL_OBJ || reported.Obj != want {
 		t.Fatalf("dec a mais pela entrada de posse obsoleta: esperado %q (com escrita via ref | controle), veio %#v", want, reported.Obj)
+	}
+}
+
+// Task 7 (round 4 — CRITICO 2 do re-review): os binds de for-each e de case do
+// select agora RETEM (spec §4.2: "slot de local ... TODO composto"), entao o
+// rebind durável do slot passa pelo store CONTADO. Antes, `item = other` (e as
+// formas via ref e via select) gravava o objeto de `other` no slot SEM inc
+// (gemeo de emprestimo): o slot segurava o objeto duravelmente com um dono a
+// menos, a mutacao seguinte via Owners==1 e escrevia NO LUGAR — vazando para o
+// dono real (candidato respondia 7; o merge-base e o proprio `let` respondem 2).
+//
+// Oraculo do merge-base para os cinco cenarios: 2 (independencia por valor).
+func TestForEachAndSelectBindingsOwnFromBirth(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+func setit(n: ref Box, w: Box)
+    *n = w
+end
+
+// U1: rebind da variavel de for-each com valor de outro dono vivo + mutacao.
+func u1_rebind_then_mut() -> int
+    let other: Box = Box(2)
+    let arr: Box[] = [Box(1)]
+    for item in arr do
+        item = other
+        item.v = 7
+    end
+    return other.v
+end
+
+// U2: escrita via ref para a variavel de for-each + mutacao.
+func u2_refwrite_then_mut() -> int
+    let other: Box = Box(2)
+    let arr: Box[] = [Box(1)]
+    for item in arr do
+        setit(ref item, other)
+        item.v = 7
+    end
+    return other.v
+end
+
+// U3: o mesmo padrao no binding de case do select.
+func u3_select_rebind_then_mut() -> int
+    let other: Box = Box(2)
+    let ch: any = make_chan(1)
+    chan_send(ch, Box(1))
+    when
+        case got = chan_recv(ch) then
+            got = other
+            got.v = 7
+    end
+    return other.v
+end
+
+// W1: referencia de semantica — o MESMO padrao num let (sempre respondeu 2).
+func w1_let_rebind_then_mut() -> int
+    let other: Box = Box(2)
+    let x: Box = Box(1)
+    x = other
+    x.v = 7
+    return other.v
+end
+
+// W3: o valor rebindado tambem vive num terceiro dono (elemento de array).
+func w3_foreach_rebind_leak_to_array() -> int
+    let other: Box = Box(2)
+    let keep: Box[] = [other]
+    let arr: Box[] = [Box(1)]
+    for item in arr do
+        item = other
+        item.v = 7
+    end
+    return keep[0].v
+end
+
+func main()
+    let u1: string = to_str(u1_rebind_then_mut())
+    let u2: string = to_str(u2_refwrite_then_mut())
+    let u3: string = to_str(u3_select_rebind_then_mut())
+    let w1: string = to_str(w1_let_rebind_then_mut())
+    let w3: string = to_str(w3_foreach_rebind_leak_to_array())
+    test_report(u1 + "|" + u2 + "|" + u3 + "|" + w1 + "|" + w3)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "2|2|2|2|2"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("rebind duravel sem retain (under-count) em bind de for-each/select: esperado %q (u1|u2|u3|w1|w3), veio %#v", want, reported.Obj)
+	}
+}
+
+// Task 7 (round 4 — CRITICO 1 do re-review): a marca de emprestimo da caixa de
+// upvalue e por TIPO DECLARADO (emitClosureUpvalues), e a variavel de for-each
+// tem tipo nil — a caixa nasce POSSUIDORA. Enquanto o slot nao retinha, a
+// closure que o capturava soltava (OP_SET_UPVALUE) ou trocava com release
+// (OP_GET_UPVALUE_MUT) um elemento de array que ninguem reteve: dec a menos, o
+// elemento parecia unico e a escrita em `b` vazava para arr[0] (candidato
+// respondia 55|55). Com o slot possuidor desde o nascimento a marca por tipo
+// fica correta POR CONSTRUCAO — sem mecanismo novo.
+//
+// Oraculo do merge-base: 1|1.
+func TestCapturedForEachItemKeepsContainerElementIndependent(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+// A: closure captura a variavel de for-each e muta via OP_GET_UPVALUE_MUT.
+func a_closure_mut_foreach() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    for item in arr do
+        let f: func = func() -> void
+            item.v = 99
+        end
+        f()
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+// B: closure captura a variavel de for-each e REBINDA via OP_SET_UPVALUE.
+func b_closure_rebind_foreach() -> int
+    let b: Box = Box(1)
+    let arr: Box[] = [b]
+    let other: Box = Box(2)
+    for item in arr do
+        let f: func = func() -> void
+            item = other
+        end
+        f()
+    end
+    b.v = 55
+    return arr[0].v
+end
+
+func main()
+    test_report(to_str(a_closure_mut_foreach()) + "|" + to_str(b_closure_rebind_foreach()))
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "1|1"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("caixa possuidora sobre slot de for-each soltou o que ninguem reteve: esperado %q (mut|rebind), veio %#v", want, reported.Obj)
+	}
+}
+
+// Task 7 (round 4): escrita ATRAVES DA CAIXA DE UPVALUE ABERTA sobre um slot
+// possuido e um store contado no slot — a entrada (slot, objeto) do frame dono
+// tem de passar a nomear o valor novo, exatamente como na escrita via ref
+// (retargetOwnedSlot). Sem o reaponte, o fim do frame soltava o objeto velho
+// uma SEGUNDA vez (dec a mais): vivo em dois globais, ele parecia unico e a
+// mutacao seguinte vazava de ga[0] para gb[0] (candidato respondia 55|55 —
+// bug PRE-EXISTENTE em `let` capturado, exposto de vez pelos itens de for-each
+// possuidores e capturaveis).
+//
+// Oraculo do merge-base: 1|1.
+func TestOpenUpvalueWriteRetargetsFrameOwnedEntry(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Box
+    v: int
+end
+
+let ga: Box[] = []
+let gb: Box[] = []
+let ha: Box[] = []
+let hb: Box[] = []
+
+// V1: rebind de um let possuidor pela caixa ABERTA (OP_SET_UPVALUE).
+func v1_build()
+    let y: Box = Box(1)
+    ga = [y]
+    gb = [y]
+    let f: func = func() -> void
+        y = Box(9)
+    end
+    f()
+end
+
+// V2: mutacao do let possuidor pela caixa ABERTA (OP_GET_UPVALUE_MUT).
+func v2_build()
+    let y: Box = Box(1)
+    ha = [y]
+    hb = [y]
+    let f: func = func() -> void
+        y.v = 3
+    end
+    f()
+end
+
+func main()
+    v1_build()
+    ga[0].v = 55
+    v2_build()
+    ha[0].v = 55
+    test_report(to_str(gb[0].v) + "|" + to_str(hb[0].v))
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	const want = "1|1"
+	if reported.Type != value.VAL_OBJ || reported.Obj != want {
+		t.Fatalf("entrada de posse obsoleta apos escrita pela caixa aberta (dec a mais): esperado %q (set_upvalue|get_upvalue_mut), veio %#v", want, reported.Obj)
+	}
+}
+
+// Task 7 (round 4): aritmetica exata do laco — cada elemento recebe UM retain
+// no bind da iteracao (OP_OWN_LOCAL roda dentro do corpo) e UM release no bind
+// da iteracao seguinte (bindOwnedSlot paga a entrada anterior do slot) ou no
+// fim do frame (ultimo elemento). O mesmo objeto em tres posicoes: durante o
+// laco Owners sobe exatamente 1 (o vinculo do item), e depois do retorno da
+// funcao que iterou volta EXATAMENTE ao valor de antes — sem o pagamento da
+// entrada anterior o replace vazaria um retain por iteracao (Owners inflaria
+// para before+2 aqui).
+func TestForEachItemRetainReleasePairsPerElement(t *testing.T) {
+	machine := New()
+	var before, during, after int32
+	machine.DefineNative("probe_before", func(args []value.Value) value.Value {
+		before = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_during", func(args []value.Value) value.Value {
+		during = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	machine.DefineNative("probe_after", func(args []value.Value) value.Value {
+		after = value.OwnersCount(args[0])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "probe_before")
+	markProbeReadonly(t, machine, "probe_during")
+	markProbeReadonly(t, machine, "probe_after")
+	src := `
+struct Box
+    v: int
+end
+
+func loop_over(arr: Box[])
+    for item in arr do
+        probe_during(item)
+    end
+end
+
+func main()
+    let b: Box = Box(1)
+    let arr: Box[] = [b, b, b]
+    probe_before(b)
+    loop_over(arr)
+    probe_after(b)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// slot do let b (1) + tres elementos do array (3)
+	if before != 4 {
+		t.Fatalf("precondicao: esperado Owners 4 antes do laco (let + 3 elementos), veio %d", before)
+	}
+	// dentro do laco: +1 do vinculo do item — em TODAS as iteracoes (o release
+	// da entrada anterior acompanha o retain da seguinte)
+	if during != before+1 {
+		t.Fatalf("durante o laco esperado Owners %d (bind do item retem), veio %d", before+1, during)
+	}
+	// depois do retorno: conta fechada, um release por retain
+	if after != before {
+		t.Fatalf("apos o retorno esperado Owners %d (cada elemento: 1 retain, 1 release), veio %d", before, after)
 	}
 }

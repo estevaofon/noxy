@@ -135,13 +135,12 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 // refStorageBorrows informa que o lugar apontado pelo ref NAO possui o que
 // guarda, e portanto a troca ali nao pode contar posse (soltar o que nunca se
 // reteve e dec a menos). Hoje o unico lugar assim e a caixa de upvalue marcada
-// como emprestada — caixa aberta sobre um slot de tipo `ref`.
+// como emprestada — caixa aberta sobre um slot que nao retem o que guarda.
 //
-// Defesa em profundidade: pelo caminho do compilador esse caso e inalcancavel,
-// porque OP_REF_LOCAL (o unico produtor de REF_UPVALUE) so e emitido para
-// local de tipo NAO-ref — um `ref u` com u ja de tipo `ref T` reempilha o
-// proprio ref via OP_GET_LOCAL, sem capturar nada. O consulta fica aqui para
-// que uma mudanca futura no lowering nao reabra o dec a menos em silencio.
+// Caminho VIVO desde o OP_REF_LOCAL_BORROW: `ref` para um slot nao-possuidor
+// (hoje, slot de tipo `ref T`) cria uma caixa REF_UPVALUE marcada emprestada,
+// e a escrita atraves dela cai exatamente aqui. E a consulta que impede
+// `setit(ref x, ...)` de soltar um objeto que o slot x nunca reteve.
 func refStorageBorrows(ref *value.ObjRef) bool {
 	return ref != nil && ref.RefType == value.REF_UPVALUE && ref.Upvalue.IsBorrowed()
 }
@@ -182,6 +181,40 @@ func (vm *VM) retargetOwnedSlot(ref *value.ObjRef, updated value.Value) bool {
 					continue
 				}
 			} else if ref.Ptr != occupant {
+				continue
+			}
+			frame.Owned[j].obj = updated
+			return true
+		}
+	}
+	return false
+}
+
+// retargetOwnedSlotForUpvalue e o mesmo reaponte do retargetOwnedSlot para os
+// funis que escrevem ATRAVES DA CAIXA DE UPVALUE (OP_SET_UPVALUE e
+// OP_GET_UPVALUE_MUT em caixa possuidora): enquanto a caixa esta ABERTA a
+// escrita alcanca um slot de pilha, e se aquele slot e possuido a entrada
+// (slot, objeto) do frame dono tem de passar a nomear o valor novo — senao o
+// release em massa do fim do frame solta o velho uma SEGUNDA vez (dec a mais,
+// direcao insegura: o velho, ainda vivo em outro dono, passa a parecer unico).
+// Caixa fechada: PointsTo e falso para qualquer slot de pilha (o valor mora no
+// proprio box) e nao ha entrada a reapontar. O guard de openUpvalues zera o
+// custo no caso comum (nenhuma captura aberta).
+func (vm *VM) retargetOwnedSlotForUpvalue(upv *value.ObjUpvalue, updated value.Value) bool {
+	if upv == nil || vm.openUpvalues == nil {
+		return false
+	}
+	for i := 0; i < vm.frameCount; i++ {
+		frame := vm.frames[i]
+		if frame == nil {
+			continue
+		}
+		for j := range frame.Owned {
+			slot := frame.Owned[j].slot
+			if slot < 0 || slot >= len(vm.stack) {
+				continue
+			}
+			if !upv.PointsTo(&vm.stack[slot]) {
 				continue
 			}
 			frame.Owned[j].obj = updated

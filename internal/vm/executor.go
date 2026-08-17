@@ -246,7 +246,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.stack[frame.LocalBase+int(slot)] = vm.peek(0)
 
 		case chunk.OP_OWN_LOCAL:
-			frame.ownSlot(vm, vm.stackTop-1)
+			// RC: vinculo NOVO no slot — paga a entrada anterior do indice, se
+			// houver (reuso entre iteracoes/blocos irmaos); ver bindOwnedSlot.
+			frame.bindOwnedSlot(vm, vm.stackTop-1)
 
 		case chunk.OP_REF_LOCAL, chunk.OP_REF_LOCAL_BORROW:
 			slot := int(c.Code[ip])
@@ -1017,6 +1019,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				}
 			} else {
 				value.Retain(updated)
+				// Caixa ABERTA escreve num slot de pilha possuido: a entrada
+				// (slot, objeto) do frame dono tem de passar a nomear o valor
+				// novo — o velho e pago aqui pelo funil, o novo pelo fim do
+				// frame (spec §4.2, mesma regra da escrita via ref).
+				vm.retargetOwnedSlotForUpvalue(frame.Closure.Upvalues[slot], updated)
 				if !frame.Closure.Upvalues[slot].Store(updated) {
 					return vm.runtimeError(c, ip, "invalid upvalue")
 				}
@@ -1431,6 +1438,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					upv.Store(v)
 				} else {
 					value.Retain(v)
+					// Mesma regra do OP_SET_UPVALUE: caixa aberta alcanca um
+					// slot de pilha possuido — reaponta a entrada do frame dono
+					// antes de soltar o velho (spec §4.2).
+					vm.retargetOwnedSlotForUpvalue(upv, v)
 					value.Release(stored)
 					upv.Store(v)
 				}

@@ -410,9 +410,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						return nil, nil, err
 					}
 					// RC: mesma pergunta do gemeo MUT — so slot POSSUIDOR troca
-					// posse. Um slot nao-possuidor sem tipo `ref` existe (ex.:
-					// `item = outro` dentro de um for-each): contar ali soltaria
-					// o elemento do contêiner, que este slot nunca reteve.
+					// posse. Com for-each e select possuidores desde o
+					// nascimento, os nao-possuidores nomeados sao exatamente os
+					// slots `ref`; o flag Owns segue decidindo.
 					if c.localOwns(arg) {
 						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
 					} else {
@@ -1215,6 +1215,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		if isMap {
+			// RC: o slot oculto $map EMPRESTA (sem OP_OWN_LOCAL) — ver a nota
+			// do $collection abaixo; a mesma paridade vale para mutar o map
+			// durante a iteracao pelas chaves.
 			c.addLocal(" $map", colType) // Consumes Map from stack
 
 			// Get 'keys' global
@@ -1230,6 +1233,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		// 3. Store Collection in Local ($collection)
+		// RC: decisao deliberada — $collection (e $map) EMPRESTAM, nao possuem.
+		// Possuir daria Owners+1 a colecao durante o laco, e `arr[i] = x` no
+		// corpo passaria a CLONAR: a iteracao continuaria no array VELHO,
+		// divergindo do merge-base (conferido no binario: a mutacao durante a
+		// iteracao E observada pelos itens seguintes). O emprestimo aqui e
+		// sound: slots ocultos (nome com espaco) sao inalcancaveis por
+		// identificador do usuario — nenhum funil de escrita, captura ou `ref`
+		// os alcanca, entao nunca ha release sobre eles (a maquinaria do laco
+		// so LE estes slots). Escalares ($index/$len) seriam indiferentes
+		// (Retain e no-op), mas ficam no mesmo regime por consistencia.
 		c.addLocal(" $collection", nil)
 
 		// 4. Init Index ($index = 0)
@@ -1262,7 +1275,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		// Body Scope
 		c.beginScope()
-		c.addLocal(n.Identifier, nil) // User variable (consumes Item from stack)
+		// RC (spec §4.2): TODO vinculo local de composto retem — a variavel de
+		// for-each nao e excecao. O bind roda DENTRO do corpo, entao o
+		// OP_OWN_LOCAL executa a cada iteracao: cada elemento recebe exatamente
+		// um retain aqui, e o release e pago pelo bind da iteracao seguinte
+		// (bindOwnedSlot solta o objeto da entrada anterior do slot) ou pelo
+		// fim do frame (ultimo elemento). Colecao vazia: o bind nunca roda —
+		// nem retain, nem entrada, nem release. Com o slot possuidor desde o
+		// nascimento, a captura por closure produz caixa possuidora e o rebind
+		// usa o store contado — Owns volta a coincidir com "tipo nao-ref".
+		c.emitByte(byte(chunk.OP_OWN_LOCAL))
+		c.addOwnedLocal(n.Identifier, nil) // User variable (consumes Item from stack)
 
 		// 9. Compile Body
 		_, _, err = c.Compile(n.Body)
@@ -1394,6 +1417,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		c.beginScope()
 		// Determine types? Dynamic.
+		// RC: slots ocultos do select EMPRESTAM (mesma nota do $collection do
+		// for-each): inalcancaveis pelo usuario, apenas lidos pela maquinaria.
+		// O binding de case (visivel) e quem retem, via OP_OWN_LOCAL abaixo.
 		c.addLocal(" $sel_idx", &ast.PrimitiveType{Name: "int"}) // Stack[-3] -> local 0
 		c.addLocal(" $sel_val", nil)                             // Stack[-2] -> local 1
 		c.addLocal(" $sel_ok", &ast.PrimitiveType{Name: "bool"}) // Stack[-1] -> local 2
@@ -1421,7 +1447,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				ident := assign.Target.(*ast.Identifier)
 				// Create local with value from $sel_val
 				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(valSlot))
-				c.addLocal(ident.Value, nil) // Bind local
+				// RC (spec §4.2): o binding de case retem como qualquer let —
+				// um `when` dentro de laco reexecuta o bind, e o bindOwnedSlot
+				// paga a entrada anterior do slot (mesma mecanica do for-each).
+				c.emitByte(byte(chunk.OP_OWN_LOCAL))
+				c.addOwnedLocal(ident.Value, nil) // Bind local
 			}
 
 			// Compile Block
@@ -1882,9 +1912,9 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 				return ref.ElementType, nil
 			}
 			// RC: a caixa aberta sobre o slot herda a condicao do slot. Slot
-			// nao-possuidor (variavel de for-each, binding de case do select)
-			// produz caixa EMPRESTADA, para que a escrita via esse ref nao solte
-			// o que o slot nunca reteve (dec a menos no elemento do contêiner).
+			// nao-possuidor (hoje, apenas os de tipo `ref`) produz caixa
+			// EMPRESTADA, para que a escrita via esse ref nao solte o que o
+			// slot nunca reteve (dec a menos).
 			if c.localOwns(slot) {
 				c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
 			} else {

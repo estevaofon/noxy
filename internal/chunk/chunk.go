@@ -94,7 +94,7 @@ const (
 	OP_GET_PROP_MUT    // [const_hi, const_lo]; pops container
 	OP_DEREF_MUT       // pops ref; uniciza através do slot
 	OP_MARK_SHARED     // marca peek(0) como Shared
-	OP_OWN_LOCAL       // retem peek(0) e registra o slot no frame corrente (RC)
+	OP_OWN_LOCAL       // vinculo novo: retem peek(0), registra o slot no frame e paga a entrada anterior do indice, se houver (RC)
 	// RC: rebind de local de tipo ref — grava no slot SEM contar posse. Um
 	// vínculo `ref` é empréstimo (borrow), não dono: contá-lo daria um dono a
 	// mais ao objeto emprestado e faria a mutação através do empréstimo clonar
@@ -102,12 +102,15 @@ const (
 	OP_SET_LOCAL_BORROW  // [slot]
 	OP_SET_GLOBAL_BORROW // [const_hi, const_lo]; mesma regra para globais ref
 	// RC: gêmeos de EMPRÉSTIMO dos funis que trocariam posse. O compilador
-	// decide qual emitir pelo TIPO DECLARADO do slot (`ref T` = empréstimo) —
-	// a resposta é estática. Nunca inferir empréstimo em runtime a partir da
-	// lista de slots possuídos do frame: um slot possuído cujo ocupante era
-	// null/escalar na captura não aparece nela (Retain falha em não-composto)
-	// e índices de slot são reusados entre blocos irmãos sem poda da lista, de
-	// modo que a resposta dinâmica erra nas duas direções.
+	// decide qual emitir pela POSSE do vínculo (Local.Owns, marcado exatamente
+	// onde o inc é emitido) — resposta estática. Com todo local não-ref
+	// possuidor desde o nascimento (let, parâmetro sem ref, variável de
+	// for-each, binding de case do select), Owns coincide com "tipo declarado
+	// não é `ref T`" para locais nomeados. Nunca inferir empréstimo em runtime
+	// a partir da lista de slots possuídos do frame: um slot possuído cujo
+	// ocupante era null/escalar na captura não aparece nela (Retain falha em
+	// não-composto) e índices de slot são reusados entre blocos irmãos sem
+	// poda da lista, de modo que a resposta dinâmica erra nas duas direções.
 	OP_GET_LOCAL_MUT_BORROW // [slot]; uniciza sem contar posse (slot ref)
 	OP_MARK_UPVALUE_BORROW  // [upvalue_index]; marca a caixa de peek(0) como
 	// emprestada (emitido logo após OP_CLOSURE, um por upvalue de tipo ref)
