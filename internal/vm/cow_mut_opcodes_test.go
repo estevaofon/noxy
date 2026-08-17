@@ -15,7 +15,7 @@ func TestGetLocalMutClonesSharedAndWritesBack(t *testing.T) {
 	machine := New()
 	arr := value.NewArray([]value.Value{value.NewInt(10)})
 	// spec §3: a precondição "compartilhado" é Owners > 1 (dois donos
-	// duráveis), não mais o bit sticky que value.MarkShared liga.
+	// duráveis), não mais o antigo bit sticky (removido na Task 8).
 	shareByOwners(arr)
 
 	code := &chunk.Chunk{}
@@ -161,27 +161,10 @@ func TestDerefMutUnicizesThroughGlobalSlot(t *testing.T) {
 	}
 }
 
-func TestMarkSharedOpcode(t *testing.T) {
-	machine := New()
-	arr := value.NewArray([]value.Value{value.NewInt(1)})
-
-	code := &chunk.Chunk{}
-	constIdx := code.AddConstant(arr)
-	code.Write(byte(chunk.OP_CONSTANT), 1)
-	code.Write(byte(constIdx), 1)
-	code.Write(byte(chunk.OP_MARK_SHARED), 1)
-
-	if err := machine.Interpret(code); err != nil {
-		t.Fatalf("vm error: %v", err)
-	}
-	// spec §3: depois da chave, value.IsShared lê Owners — o bit sticky virou
-	// dead-weight (ninguém mais o lê) e só será removido na Task 8. Enquanto o
-	// opcode existir, auditamos exatamente o que ele ainda faz: ligar o bit no
-	// objeto do topo da pilha.
-	if !arr.Obj.(*value.ObjArray).Shared.Load() {
-		t.Fatal("OP_MARK_SHARED deve ligar o bit do topo da pilha")
-	}
-	if value.IsShared(arr) {
-		t.Fatal("o bit não decide mais unicidade: sem donos duráveis, o valor é único")
-	}
-}
+// NOTA (Task 8): havia aqui um teste que auditava o antigo bit sticky de
+// compartilhamento que OP_MARK_SHARED ligava no composto, e confirmava que
+// value.IsShared já não o lia mais. O bit sticky foi removido do struct e o
+// compilador não emite mais o opcode (case removido do switch do executor —
+// vira no-op se algum bytecode antigo o contiver). Não há mais bit para
+// auditar; a cobertura de unicidade por Owners segue nos testes de unicize
+// em cow_test.go (via shareByOwners) e em rc_uniqueness_test.go.

@@ -72,7 +72,7 @@ func TestRuntimeErrorRemainsTypedThroughImportFailure(t *testing.T) {
 // nasce sem dono, então a captura o leva de 0 para 1 (em código real o dono do
 // chamador já estaria contado, o total passaria de 1 e a primeira mutação
 // dentro da task clonaria).
-func TestPreparedTaskCallMarksValueParameterShared(t *testing.T) {
+func TestPreparedTaskCallRetainsValueParameter(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `
 func worker(values: int[][]) -> int

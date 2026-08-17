@@ -212,11 +212,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		}
 
-		// CoW: inicializador não-fresco compartilha o composto com a origem
-		if n.Value != nil {
-			c.emitMarkSharedForStore(n.Value, valType)
-		}
-
 		if c.scopeDepth > 0 {
 			// Local variable
 			// RC: o let e um vinculo duravel do frame (spec §4.2) — exceto
@@ -335,9 +330,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			// CoW: o valor gravado através do ref passa a ter mais de um dono
-			c.emitMarkSharedForStore(n.Value, valType)
-
 			// 4. Emit Store
 			// Stack: [Ref, Val]
 			// OP_STORE_REF consumes both (Val -> *Ref).
@@ -352,9 +344,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-
-			// CoW: reatribuição com RHS não-fresco compartilha o composto
-			c.emitMarkSharedForStore(n.Value, valType)
 
 			// 2. Check and Set Variable
 			if arg, localType := c.resolveLocal(ident.Value); arg != -1 {
@@ -513,9 +502,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			// CoW: valor composto não-fresco guardado no contêiner
-			c.emitMarkSharedForStore(n.Value, valType)
-
 			// Unwrap RefType
 			if ref, ok := leftType.(*ast.RefType); ok {
 				leftType = ref.ElementType
@@ -594,9 +580,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-
-			// CoW: valor composto não-fresco guardado no campo
-			c.emitMarkSharedForStore(n.Value, valType)
 
 			// RESOLVE FIELD TYPE:
 			var fieldType ast.NoxyType

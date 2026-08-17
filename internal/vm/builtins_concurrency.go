@@ -59,7 +59,6 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		// RC: retain aqui, sincrono, antes do goroutine ser lançado — a nova
 		// thread passa a ser dona durável de cada composto empurrado.
 		for _, arg := range threadArgs {
-			value.MarkShared(arg)
 			value.Retain(arg)
 			threadVM.push(arg)
 		}
@@ -123,8 +122,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			return value.NewNull()
 		}
 		ch := args[0].Obj.(*value.ObjChannel).Chan
-		value.MarkShared(args[1]) // CoW: canal transporta valor, não identidade
-		value.Retain(args[1])     // RC: o buffer do canal é dono durável enquanto o valor está nele
+		value.Retain(args[1]) // RC: o buffer do canal é dono durável enquanto o valor está nele
 		ch <- args[1]
 		return args[1]
 	})

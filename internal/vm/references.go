@@ -236,20 +236,6 @@ func (vm *VM) retargetOwnedSlotForUpvalue(upv *value.ObjUpvalue, updated value.V
 	return false
 }
 
-func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
-	stored, _, _, err := vm.referenceStorage(ref)
-	return stored, err
-}
-
-func (vm *VM) storeGlobalReferenceValue(ref *value.ObjRef, updated value.Value) error {
-	_, _, store, err := vm.referenceStorage(ref)
-	if err != nil {
-		return err
-	}
-	store(updated)
-	return nil
-}
-
 func (vm *VM) lookupReferenceValue(ref *value.ObjRef) (value.Value, error) {
 	stored, _, _, err := vm.referenceStorage(ref)
 	return stored, err

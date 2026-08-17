@@ -420,9 +420,9 @@ main()`
 	}
 }
 
-// Task 5 (Step 1): OP_ARRAY retem cada elemento como dono duravel (ao lado
-// do MarkShared existente, que fica ate a Task 8). x tem dois donos apos
-// virar elemento de arr: o slot do let e o elemento do array.
+// Task 5 (Step 1): OP_ARRAY retem cada elemento como dono duravel (a antiga
+// marcacao sticky que rodava ao lado foi removida na Task 8). x tem dois
+// donos apos virar elemento de arr: o slot do let e o elemento do array.
 func TestArrayLiteralRetainsSharedElement(t *testing.T) {
 	machine := New()
 	var owners int32
@@ -614,7 +614,7 @@ main()`
 }
 
 // Task 5 (Step 1): construtor de struct (callPreparedValue) retem cada
-// argumento ao lado do MarkShared existente — o campo e um slot duravel.
+// argumento — o campo e um slot duravel.
 func TestStructConstructorRetainsFieldArgument(t *testing.T) {
 	machine := New()
 	var owners int32
@@ -644,10 +644,10 @@ main()`
 	}
 }
 
-// Task 5 (Step 1): copyValue retem cada filho clonado (ao lado do
-// MarkShared existente). arr e compartilhado via alias; arr[1]=repl forca o
-// clone de arr (OP_GET_LOCAL_MUT) mas so sobrescreve o indice 1 — "child"
-// (indice 0) fica intocado e deve ganhar exatamente +1 dono vindo do clone.
+// Task 5 (Step 1): copyValue retem cada filho clonado. arr e compartilhado
+// via alias; arr[1]=repl forca o clone de arr (OP_GET_LOCAL_MUT) mas so
+// sobrescreve o indice 1 — "child" (indice 0) fica intocado e deve ganhar
+// exatamente +1 dono vindo do clone.
 func TestCloneOnMutationRetainsUntouchedChild(t *testing.T) {
 	machine := New()
 	var before, after int32
@@ -692,8 +692,9 @@ main()`
 // por contagem na instancia velha (capturada antes da mutacao) e na nova
 // (lida depois).
 //
-// Task 7: antes da chave bastava `let a: P[] = [P(1)]` — o MarkShared que o
-// OP_ARRAY faz no elemento era suficiente para o caminho de clone disparar.
+// Task 7: antes da chave bastava `let a: P[] = [P(1)]` — a marcacao sticky
+// que o OP_ARRAY fazia no elemento era suficiente para o caminho de clone
+// disparar.
 // Depois da chave (spec docs/superpowers/specs/
 // 2026-08-17-cow-rc-uniqueness-design.md §3), "compartilhado" e Owners > 1, e
 // um elemento com um unico dono (o proprio array) e unico por definicao —
@@ -744,8 +745,8 @@ main()`
 	}
 }
 
-// Task 6 (Step 1): append retem o item ao lado do MarkShared existente; pop
-// libera o elemento removido depois de tira-lo do array.
+// Task 6 (Step 1): append retem o item; pop libera o elemento removido
+// depois de tira-lo do array.
 func TestAppendRetainsItemPopReleasesRemoved(t *testing.T) {
 	machine := New()
 	item := value.NewMap()
@@ -800,9 +801,8 @@ func TestDeleteReleasesValueOnlyWhenKeyExisted(t *testing.T) {
 	}
 }
 
-// Task 6 (Step 1): chan_send retem o valor ao lado do MarkShared existente
-// (o buffer e durave); chan_recv libera apos um recebimento bem-sucedido —
-// o valor saiu do buffer.
+// Task 6 (Step 1): chan_send retem o valor (o buffer e durave); chan_recv
+// libera apos um recebimento bem-sucedido — o valor saiu do buffer.
 func TestChanSendRetainsChanRecvReleasesOnSuccess(t *testing.T) {
 	machine := New()
 	item := value.NewMap()
@@ -905,7 +905,7 @@ end`); err != nil {
 	// assinatura da funcao, e um value.NewMap() cru nao carrega o
 	// RuntimeType que o checker exige para map[K,V]; um array construido
 	// fora do bytecode passa nessa validacao (mesmo padrao usado em
-	// TestPreparedTaskCallMarksValueParameterShared).
+	// TestPreparedTaskCallRetainsValueParameter).
 	m := value.NewArray([]value.Value{value.NewInt(1)})
 	before := value.OwnersCount(m)
 

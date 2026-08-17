@@ -132,34 +132,10 @@ end`)
 	}
 }
 
-func TestMarkSharedOnAliasingLet(t *testing.T) {
-	code := compileSource(t, `func f()
-    let a: int[] = [1]
-    let b: int[] = a
-end`)
-	ops := collectOpcodes(t, code)
-	if ops[chunk.OP_MARK_SHARED] == 0 {
-		t.Fatal("let b = a deve emitir OP_MARK_SHARED")
-	}
-}
-
-func TestNoMarkSharedOnFreshLiteralLet(t *testing.T) {
-	code := compileSource(t, `func f()
-    let b: int[] = [1, 2]
-end`)
-	ops := collectOpcodes(t, code)
-	if ops[chunk.OP_MARK_SHARED] != 0 {
-		t.Fatal("let b = [literal] não deve emitir OP_MARK_SHARED")
-	}
-}
-
-func TestNoMarkSharedOnScalarAssignment(t *testing.T) {
-	code := compileSource(t, `func f()
-    let i: int = 0
-    i = i + 1
-end`)
-	ops := collectOpcodes(t, code)
-	if ops[chunk.OP_MARK_SHARED] != 0 {
-		t.Fatal("atribuição escalar não deve emitir OP_MARK_SHARED (custo em hot loop)")
-	}
-}
+// NOTA (Task 8): havia aqui três testes que auditavam quando o compilador
+// emitia (ou deixava de emitir) o antigo opcode de marcação sticky —
+// aliasing de let devia emitir, literal fresco e atribuição escalar não
+// deviam. O compilador não emite mais esse opcode em nenhum caso (a
+// unicidade é decidida em runtime pelo contador Owners), então os três
+// testes ficaram sem objeto: testavam a emissão de uma máquina removida,
+// não um comportamento observável. Removidos junto com a Task 8.

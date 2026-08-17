@@ -6,18 +6,18 @@ import (
 	"noxy-vm/internal/value"
 )
 
-// shareByOwners estabelece a precondição "compartilhado" pelo mecanismo novo
-// (spec docs/superpowers/specs/2026-08-17-cow-rc-uniqueness-design.md §3): a
-// unicidade passou a ser decidida por Owners > 1, não mais pelo bit sticky
-// Shared. Os testes de mecanismo abaixo antes forjavam o estado com
-// value.MarkShared; agora registram os dois donos duráveis que o bytecode
-// real registraria (ex.: slot de um `let` + elemento de um contêiner).
+// shareByOwners estabelece a precondição "compartilhado" pelo mecanismo de
+// posse por contagem (spec docs/superpowers/specs/
+// 2026-08-17-cow-rc-uniqueness-design.md §3): a unicidade é decidida por
+// Owners > 1. Os testes de mecanismo abaixo registram os dois donos
+// duráveis que o bytecode real registraria (ex.: slot de um `let` +
+// elemento de um contêiner).
 func shareByOwners(v value.Value) {
 	value.Retain(v)
 	value.Retain(v)
 }
 
-func TestMarkSharedAndUnicize(t *testing.T) {
+func TestShareByOwnersAndUnicize(t *testing.T) {
 	machine := New()
 	inner := value.NewArray([]value.Value{value.NewInt(1)})
 	outer := value.NewArray([]value.Value{inner})
@@ -55,11 +55,15 @@ func TestMarkSharedAndUnicize(t *testing.T) {
 	}
 }
 
-func TestMarkSharedIgnoresScalars(t *testing.T) {
+// NOTA (Task 8): havia aqui um teste que confirmava que a função de marcação
+// (bit sticky, aposentada nesta task) era no-op em escalares. O mesmo
+// invariante para escalares — IsShared sempre false — segue coberto abaixo;
+// Retain/Release/OwnersCount também são no-op/-1 em escalares (ver
+// rc_uniqueness_test.go).
+func TestIsSharedFalseForScalars(t *testing.T) {
 	n := value.NewInt(7)
-	value.MarkShared(n) // não deve entrar em pânico
 	if value.IsShared(n) {
-		t.Fatal("escalares nunca são Shared")
+		t.Fatal("escalares nunca são compartilhados (sem contador de donos)")
 	}
 }
 

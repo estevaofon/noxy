@@ -36,13 +36,12 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 			vm.copyPreparedArguments(callArgs, params)
 			args = callArgs
 		} else if !native.ReadonlyArgs {
-			// CoW: native sem assinatura pode reter/mutar args — marca todos
-			// os compostos (conservador; allowlist só-leitura pula isto)
-			// RC: retenção permanente e conservadora — não sabemos se o
-			// native guarda o valor além da chamada, então assumimos que sim
-			// e nunca soltamos (sem release em lugar nenhum; até a Task 8).
+			// RC: native sem assinatura pode reter/mutar args — retém todos
+			// os compostos (conservador; allowlist só-leitura pula isto).
+			// Retenção permanente e conservadora — não sabemos se o native
+			// guarda o valor além da chamada, então assumimos que sim e
+			// nunca soltamos (sem release em lugar nenhum).
 			for i := range args {
-				value.MarkShared(args[i])
 				value.Retain(args[i])
 			}
 		}
@@ -58,8 +57,7 @@ func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk
 			instObj := instance.Obj.(*value.ObjInstance)
 			for i := 0; i < argCount; i++ {
 				arg := vm.peek(argCount - 1 - i)
-				value.MarkShared(arg) // CoW: o chamador ainda referencia o arg
-				value.Retain(arg)     // RC: campo e dono duravel
+				value.Retain(arg) // RC: campo e dono duravel
 				instObj.Fields[structDef.Fields[i]] = arg
 			}
 			vm.stackTop -= argCount + 1
@@ -106,16 +104,9 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 	if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
 		return false, vm.runtimeError(c, ip, "%s", err)
 	}
-	for i := 0; i < argCount; i++ {
-		if i < len(fn.Params) {
-			param := fn.Params[i]
-			if !param.IsRef {
-				// CoW: fronteira de valor — marca em vez de copiar; a cópia
-				// só acontece se alguém mutar (unicize)
-				value.MarkShared(vm.stack[baseArgs+i])
-			}
-		}
-	}
+	// RC: fronteira de valor para parametros nao-ref nao precisa de marcacao
+	// aqui — a copia so acontece se alguem mutar (unicize), e a posse do
+	// slot novo e decidida por ownSlot/Retain dentro de callPreparedClosure.
 	return vm.callPreparedClosure(closure, argCount, c, ip)
 }
 
@@ -148,8 +139,8 @@ func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *ch
 	return true, nil
 }
 
-// copyValue é o clone raso do CoW: o contêiner novo nasce unshared, e os
-// filhos imediatos compostos ficam marcados Shared (passam a ter dois donos).
+// copyValue é o clone raso do CoW: o contêiner novo nasce com Owners=0, e os
+// filhos imediatos compostos ganham Retain (passam a ter dois donos duráveis).
 func (vm *VM) copyValue(v value.Value) value.Value {
 	if v.Type != value.VAL_OBJ {
 		return v
@@ -160,7 +151,6 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		newElems := make([]value.Value, len(obj.Elements))
 		copy(newElems, obj.Elements)
 		for _, el := range newElems {
-			value.MarkShared(el)
 			value.Retain(el) // RC: filho ganha dono duravel no clone
 		}
 		copied := value.NewArray(newElems)
@@ -170,7 +160,6 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		cloneCount.Add(1)
 		newData := obj.Snapshot()
 		for _, val := range newData {
-			value.MarkShared(val)
 			value.Retain(val) // RC: filho ganha dono duravel no clone
 		}
 		copied := value.NewMap()
@@ -182,7 +171,6 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		cloneCount.Add(1)
 		newFields := make(map[string]value.Value)
 		for k, val := range obj.Fields {
-			value.MarkShared(val)
 			value.Retain(val) // RC: filho ganha dono duravel no clone
 			newFields[k] = val
 		}

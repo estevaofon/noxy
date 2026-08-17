@@ -93,7 +93,7 @@ const (
 	OP_GET_INDEX_MUT   // pops index + container
 	OP_GET_PROP_MUT    // [const_hi, const_lo]; pops container
 	OP_DEREF_MUT       // pops ref; uniciza através do slot
-	OP_MARK_SHARED     // marca peek(0) como Shared
+	OP_MARK_SHARED     // morto pos-RC (Task 8), mantido para nao renumerar; compilador nao emite mais
 	OP_OWN_LOCAL       // vinculo novo: retem peek(0), registra o slot no frame e paga a entrada anterior do indice, se houver (RC)
 	// RC: rebind de local de tipo ref — grava no slot SEM contar posse. Um
 	// vínculo `ref` é empréstimo (borrow), não dono: contá-lo daria um dono a

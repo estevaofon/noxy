@@ -67,20 +67,11 @@ func (vm *VM) prepareTaskCall(callable value.Value, arguments []value.Value) (pr
 
 	preparedArguments := make([]value.Value, len(arguments))
 	copy(preparedArguments, arguments)
-	for i, parameter := range function.Params {
-		if i >= len(preparedArguments) {
-			break
-		}
-		if !parameter.IsRef {
-			// CoW: fronteira de valor — marca em vez de copiar
-			value.MarkShared(preparedArguments[i])
-			// RC: retain de captura (mesmo padrao do defer/markPreparedArguments)
-			// — a preparacao roda sincrona, antes do goroutine da task ser
-			// lancado; os args ficam "guardados" em preparedTaskCall.Arguments
-			// ate a task terminar. Release espelhado em startSupervisedTask.
-			value.Retain(preparedArguments[i])
-		}
-	}
+	// RC: retain de captura, mesmo padrao/funcao do defer (retainPreparedArguments)
+	// — a preparacao roda sincrona, antes do goroutine da task ser lancado; os
+	// args ficam "guardados" em preparedTaskCall.Arguments ate a task terminar.
+	// Release espelhado em startSupervisedTask.
+	vm.retainPreparedArguments(preparedArguments, function.Params)
 	return preparedTaskCall{Callable: callable, Closure: closure, Arguments: preparedArguments}, nil
 }
 

@@ -124,8 +124,7 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
-				value.MarkShared(item) // o chamador ainda segura um ponteiro para o item
-				value.Retain(item)     // RC: o array e dono duravel do item anexado
+				value.Retain(item) // RC: o array e dono duravel do item anexado
 				arr.Elements = append(arr.Elements, item)
 			}
 		}

@@ -5,27 +5,10 @@ import (
 	"sync/atomic"
 )
 
-// MarkShared liga o bit sticky de compartilhamento em compostos (CoW).
-// No-op para escalares e demais tipos.
-func MarkShared(v Value) {
-	if v.Type != VAL_OBJ {
-		return
-	}
-	switch obj := v.Obj.(type) {
-	case *ObjArray:
-		obj.Shared.Store(true)
-	case *ObjMap:
-		obj.Shared.Store(true)
-	case *ObjInstance:
-		obj.Shared.Store(true)
-	}
-}
-
 // IsShared informa se o composto tem mais de um dono durável vivo — a
-// unicidade agora é decidida pelo contador Owners, não pelo bit sticky
-// (spec §3: "posse única por contagem de referências duráveis"). O bit
-// Shared continua sendo escrito por MarkShared, mas ninguém mais o lê:
-// virou dead-weight até a Task 8 removê-lo.
+// unicidade é decidida pelo contador Owners (spec §3: "posse única por
+// contagem de referências duráveis"). O antigo bit sticky Shared foi
+// removido na Task 8; Owners é a única fonte de verdade.
 func IsShared(v Value) bool {
 	owners := ownersOf(v)
 	return owners != nil && owners.Load() > 1
