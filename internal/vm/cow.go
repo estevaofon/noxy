@@ -36,6 +36,17 @@ func (vm *VM) unicizeThroughRefValue(refArg value.Value) (value.Value, error) {
 	}
 	v, changed := vm.unicize(stored)
 	if changed {
+		// RC: o clone substitui o ocupante velho no destino apontado pelo
+		// ref; retain-antes-de-release em torno da troca. Lugar que apenas
+		// empresta (caixa de upvalue emprestada) troca sem contar posse.
+		if !refStorageBorrows(ref) {
+			value.Retain(v)
+			// mesma correcao do storeReferenceValue: a entrada de posse do frame
+			// passa a nomear o clone, senao o fim do frame soltaria o valor
+			// velho uma segunda vez (dec a mais).
+			vm.retargetOwnedSlot(ref, v)
+			value.Release(stored)
+		}
 		store(v)
 	}
 	return v, nil

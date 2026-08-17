@@ -93,7 +93,28 @@ const (
 	OP_GET_INDEX_MUT   // pops index + container
 	OP_GET_PROP_MUT    // [const_hi, const_lo]; pops container
 	OP_DEREF_MUT       // pops ref; uniciza através do slot
-	OP_MARK_SHARED     // marca peek(0) como Shared
+	OP_MARK_SHARED     // morto pos-RC (Task 8), mantido para nao renumerar; compilador nao emite mais
+	OP_OWN_LOCAL       // vinculo novo: retem peek(0), registra o slot no frame e paga a entrada anterior do indice, se houver (RC)
+	// RC: rebind de local de tipo ref — grava no slot SEM contar posse. Um
+	// vínculo `ref` é empréstimo (borrow), não dono: contá-lo daria um dono a
+	// mais ao objeto emprestado e faria a mutação através do empréstimo clonar
+	// (escrita perdida). Espelha o skip de params IsRef em callPreparedClosure.
+	OP_SET_LOCAL_BORROW  // [slot]
+	OP_SET_GLOBAL_BORROW // [const_hi, const_lo]; mesma regra para globais ref
+	// RC: gêmeos de EMPRÉSTIMO dos funis que trocariam posse. O compilador
+	// decide qual emitir pela POSSE do vínculo (Local.Owns, marcado exatamente
+	// onde o inc é emitido) — resposta estática. Com todo local não-ref
+	// possuidor desde o nascimento (let, parâmetro sem ref, variável de
+	// for-each, binding de case do select), Owns coincide com "tipo declarado
+	// não é `ref T`" para locais nomeados. Nunca inferir empréstimo em runtime
+	// a partir da lista de slots possuídos do frame: um slot possuído cujo
+	// ocupante era null/escalar na captura não aparece nela (Retain falha em
+	// não-composto) e índices de slot são reusados entre blocos irmãos sem
+	// poda da lista, de modo que a resposta dinâmica erra nas duas direções.
+	OP_GET_LOCAL_MUT_BORROW // [slot]; uniciza sem contar posse (slot ref)
+	OP_MARK_UPVALUE_BORROW  // [upvalue_index]; marca a caixa de peek(0) como
+	// emprestada (emitido logo após OP_CLOSURE, um por upvalue de tipo ref)
+	OP_REF_LOCAL_BORROW // [slot]; ref para slot não-possuidor (caixa emprestada)
 )
 
 func (op OpCode) String() string {
@@ -152,6 +173,18 @@ func (op OpCode) String() string {
 		return "OP_DEREF_MUT"
 	case OP_MARK_SHARED:
 		return "OP_MARK_SHARED"
+	case OP_OWN_LOCAL:
+		return "OP_OWN_LOCAL"
+	case OP_SET_LOCAL_BORROW:
+		return "OP_SET_LOCAL_BORROW"
+	case OP_SET_GLOBAL_BORROW:
+		return "OP_SET_GLOBAL_BORROW"
+	case OP_GET_LOCAL_MUT_BORROW:
+		return "OP_GET_LOCAL_MUT_BORROW"
+	case OP_MARK_UPVALUE_BORROW:
+		return "OP_MARK_UPVALUE_BORROW"
+	case OP_REF_LOCAL_BORROW:
+		return "OP_REF_LOCAL_BORROW"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -359,6 +392,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_DEREF_MUT", offset)
 	case OP_MARK_SHARED:
 		return c.simpleInstruction("OP_MARK_SHARED", offset)
+	case OP_OWN_LOCAL:
+		return c.simpleInstruction("OP_OWN_LOCAL", offset)
+	case OP_SET_LOCAL_BORROW:
+		return c.byteInstruction("OP_SET_LOCAL_BORROW", offset)
+	case OP_SET_GLOBAL_BORROW:
+		return c.constantLongInstruction("OP_SET_GLOBAL_BORROW", offset)
+	case OP_GET_LOCAL_MUT_BORROW:
+		return c.byteInstruction("OP_GET_LOCAL_MUT_BORROW", offset)
+	case OP_MARK_UPVALUE_BORROW:
+		return c.byteInstruction("OP_MARK_UPVALUE_BORROW", offset)
+	case OP_REF_LOCAL_BORROW:
+		return c.byteInstruction("OP_REF_LOCAL_BORROW", offset)
 	case OP_EQUAL:
 		return c.simpleInstruction("OP_EQUAL", offset)
 	case OP_GREATER:

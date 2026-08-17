@@ -1,33 +1,74 @@
 package value
 
-// MarkShared liga o bit sticky de compartilhamento em compostos (CoW).
-// No-op para escalares e demais tipos.
-func MarkShared(v Value) {
+import (
+	"math"
+	"sync/atomic"
+)
+
+// IsShared informa se o composto tem mais de um dono durável vivo — a
+// unicidade é decidida pelo contador Owners (spec §3: "posse única por
+// contagem de referências duráveis"). O antigo bit sticky Shared foi
+// removido na Task 8; Owners é a única fonte de verdade.
+func IsShared(v Value) bool {
+	owners := ownersOf(v)
+	return owners != nil && owners.Load() > 1
+}
+
+// ownersSaturation impede overflow do contador; acima disso o valor se
+// comporta como permanentemente compartilhado (equivalente ao sticky).
+const ownersSaturation = math.MaxInt32 / 2
+
+func ownersOf(v Value) *atomic.Int32 {
 	if v.Type != VAL_OBJ {
-		return
+		return nil
 	}
 	switch obj := v.Obj.(type) {
 	case *ObjArray:
-		obj.Shared.Store(true)
+		return &obj.Owners
 	case *ObjMap:
-		obj.Shared.Store(true)
+		return &obj.Owners
 	case *ObjInstance:
-		obj.Shared.Store(true)
+		return &obj.Owners
+	}
+	return nil
+}
+
+// Retain registra um dono durável novo. Retorna true se o valor é um
+// composto rastreável (chamador decide se registra o slot para release).
+func Retain(v Value) bool {
+	owners := ownersOf(v)
+	if owners == nil {
+		return false
+	}
+	if owners.Load() < ownersSaturation {
+		owners.Add(1)
+	}
+	return true
+}
+
+// Release solta um dono durável. Nunca desce abaixo de zero (dec a mais é
+// proibido por design; o clamp protege contra funis duplicados).
+func Release(v Value) {
+	owners := ownersOf(v)
+	if owners == nil {
+		return
+	}
+	for {
+		current := owners.Load()
+		if current <= 0 || current >= ownersSaturation {
+			return
+		}
+		if owners.CompareAndSwap(current, current-1) {
+			return
+		}
 	}
 }
 
-// IsShared informa se o composto está marcado como compartilhado.
-func IsShared(v Value) bool {
-	if v.Type != VAL_OBJ {
-		return false
+// OwnersCount é introspecção para testes; -1 para não-compostos.
+func OwnersCount(v Value) int32 {
+	owners := ownersOf(v)
+	if owners == nil {
+		return -1
 	}
-	switch obj := v.Obj.(type) {
-	case *ObjArray:
-		return obj.Shared.Load()
-	case *ObjMap:
-		return obj.Shared.Load()
-	case *ObjInstance:
-		return obj.Shared.Load()
-	}
-	return false
+	return owners.Load()
 }

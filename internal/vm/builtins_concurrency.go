@@ -56,8 +56,10 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		// Push Args
 		// CoW: a exceção legada do spawn (encaminhar identidade) foi removida;
 		// args compostos são valores como em qualquer outra fronteira.
+		// RC: retain aqui, sincrono, antes do goroutine ser lançado — a nova
+		// thread passa a ser dona durável de cada composto empurrado.
 		for _, arg := range threadArgs {
-			value.MarkShared(arg)
+			value.Retain(arg)
 			threadVM.push(arg)
 		}
 
@@ -68,6 +70,18 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			StackBase:   0,
 			LocalBase:   0,
 			Environment: closure.Environment,
+		}
+
+		// RC: registra os slots retidos acima no frame manual (spawn não passa
+		// por callPreparedClosure, que faria isso via frame.ownSlot — aqui é o
+		// ÚNICO lugar onde retain e registro ficam separados: o retain já
+		// aconteceu no loop de push; aqui só registramos o slot para que
+		// finalizeCurrentFrame libere quando o frame da thread terminar. NÃO
+		// usar ownSlot aqui — ele retém de novo (double-retain).
+		for i := range threadArgs {
+			if value.OwnersCount(threadArgs[i]) >= 0 {
+				frame.Owned = append(frame.Owned, ownedEntry{slot: 1 + i, obj: threadArgs[i]})
+			}
 		}
 
 		threadVM.frames[0] = frame
@@ -108,7 +122,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			return value.NewNull()
 		}
 		ch := args[0].Obj.(*value.ObjChannel).Chan
-		value.MarkShared(args[1]) // CoW: canal transporta valor, não identidade
+		value.Retain(args[1]) // RC: o buffer do canal é dono durável enquanto o valor está nele
 		ch <- args[1]
 		return args[1]
 	})
@@ -157,8 +171,11 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		ch := args[0].Obj.(*value.ObjChannel).Chan
 		val, ok := <-ch
 		if !ok {
+			// canal fechado e vazio: nao ha valor recebido, entao nao ha o
+			// que liberar aqui.
 			return value.NewNull()
 		}
+		value.Release(val) // RC: o valor saiu do buffer do canal (que era dono durável)
 		return val
 	})
 

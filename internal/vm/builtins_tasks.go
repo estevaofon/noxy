@@ -121,6 +121,10 @@ func stopAndDrainTaskTimer(timer *time.Timer) {
 func (vm *VM) startSupervisedTask(task *value.ObjTask, call preparedTaskCall) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			// RC: espelha o release de invokePreparedCall (defer.go) — a
+			// captura feita em prepareTaskCall sai de escopo aqui tambem no
+			// caminho de panico, antes de sinalizar conclusao da task.
+			vm.releasePreparedArguments(call.Arguments, call.Closure.Function.Params)
 			task.Complete(value.TaskOutcome{Failure: &value.TaskFailure{
 				Kind:    "panic",
 				Message: fmt.Sprint(recovered),
@@ -130,6 +134,11 @@ func (vm *VM) startSupervisedTask(task *value.ObjTask, call preparedTaskCall) {
 	}()
 
 	result, err := vm.executePreparedTaskCall(call)
+	// RC: solta a retencao de captura de prepareTaskCall assim que a
+	// execucao termina (sucesso ou erro) — espelha o release pos-invocacao
+	// de invokePreparedCall (defer.go). Chamado antes de task.Complete para
+	// que quem sincroniza via task_await ja veja o release feito.
+	vm.releasePreparedArguments(call.Arguments, call.Closure.Function.Params)
 	if err != nil {
 		task.Complete(value.TaskOutcome{Failure: &value.TaskFailure{
 			Kind:    "runtime",

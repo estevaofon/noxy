@@ -32,7 +32,7 @@ func (vm *VM) prepareDeferredCall(callee value.Value, args []value.Value, regist
 		if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
 			return PreparedCall{}, err
 		}
-		vm.markPreparedArguments(prepared.Arguments, fn.Params)
+		vm.retainPreparedArguments(prepared.Arguments, fn.Params)
 		return prepared, nil
 
 	case value.VAL_NATIVE:
@@ -91,16 +91,36 @@ func nativeParameters(native *value.ObjNative, argCount int) ([]value.ParamInfo,
 	return params, nil
 }
 
-// markPreparedArguments implementa a fronteira de valor do CoW para código
-// Noxy (closures, tasks): em vez de copiar ansiosamente, marca os compostos
-// não-ref como Shared — a cópia só acontece se alguém mutar (unicize).
-func (vm *VM) markPreparedArguments(args []value.Value, params []value.ParamInfo) {
+// retainPreparedArguments implementa a fronteira de valor do CoW para código
+// Noxy (closures, tasks): em vez de copiar ansiosamente, retém os compostos
+// não-ref — a cópia só acontece se alguém mutar (unicize). A captura
+// (PreparedCall.Arguments, ou o array espelho em preparedTaskCall) é uma
+// posse durável entre o registro (defer/task) e a invocação (janela em que
+// os args ficam "guardados" fora da pilha); releasePreparedArguments desfaz
+// isso depois que a invocação roda.
+func (vm *VM) retainPreparedArguments(args []value.Value, params []value.ParamInfo) {
 	for i, param := range params {
 		if i >= len(args) {
 			break
 		}
 		if !param.IsRef {
-			value.MarkShared(args[i])
+			value.Retain(args[i])
+		}
+	}
+}
+
+// releasePreparedArguments desfaz exatamente o retain de captura feito por
+// retainPreparedArguments, usando a mesma condição (!IsRef) para não soltar
+// argumentos ref que nunca foram retidos aqui. Chamado depois que a
+// invocação preparada (defer ou task) já rodou — a posse durável passou a
+// ser a do binding de parâmetro do frame instanciado pela chamada.
+func (vm *VM) releasePreparedArguments(args []value.Value, params []value.ParamInfo) {
+	for i, param := range params {
+		if i >= len(args) {
+			break
+		}
+		if !param.IsRef {
+			value.Release(args[i])
 		}
 	}
 }
@@ -134,6 +154,19 @@ func (vm *VM) invokePreparedCall(call PreparedCall) (err error) {
 			vm.stack[i] = value.Value{}
 		}
 		vm.stackTop = base
+
+		// RC: solta a retenção de captura feita em retainPreparedArguments —
+		// a invocação já rodou (sucesso ou erro, este é um defer do Go: sempre
+		// executa) e já retomou posse durável via callPreparedClosure (frame
+		// próprio da closure chamada). Só se aplica a callee VAL_FUNCTION,
+		// que é o único caso em que retainPreparedArguments reteve na captura
+		// (native usa cópia ansiosa via copyPreparedArguments; struct não
+		// retém nada aqui).
+		if call.Callee.Type == value.VAL_FUNCTION {
+			if closure, ok := call.Callee.Obj.(*value.ObjClosure); ok && closure != nil && closure.Function != nil {
+				vm.releasePreparedArguments(call.Arguments, closure.Function.Params)
+			}
+		}
 	}()
 
 	ownerFrameCount := vm.frameCount

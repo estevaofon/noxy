@@ -87,6 +87,7 @@ func TestUpvalueCaptureAndClose(t *testing.T) {
 		t.Fatal("capturing the same slot returned distinct upvalues")
 	}
 
+	// caixa nao marcada como emprestada: a posse migra do slot para ela.
 	machine.closeUpvalue(slot)
 	machine.stack[0] = value.NewInt(42)
 	if first.PointsTo(slot) {

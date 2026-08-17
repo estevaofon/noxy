@@ -19,7 +19,18 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 	case *ast.Identifier:
 		var t ast.NoxyType
 		if arg, localType := c.resolveLocal(n.Value); arg != -1 {
-			c.emitBytes(byte(chunk.OP_GET_LOCAL_MUT), byte(arg))
+			// RC: a pergunta e "este slot RETEM o que guarda?" (Local.Owns),
+			// marcado exatamente onde o inc e emitido. Com todo local nao-ref
+			// possuidor desde o nascimento (let, parametro sem ref, variavel de
+			// for-each, binding de case do select — spec §4.2), Owns coincide
+			// com "tipo declarado nao e `ref T`" para locais nomeados; o flag
+			// continua sendo a fonte de verdade para nao reabrir o dec a menos
+			// se um bind site futuro esquecer o inc.
+			if c.localOwns(arg) {
+				c.emitBytes(byte(chunk.OP_GET_LOCAL_MUT), byte(arg))
+			} else {
+				c.emitBytes(byte(chunk.OP_GET_LOCAL_MUT_BORROW), byte(arg))
+			}
 			t = localType
 		} else if arg, upvalueType := c.resolveUpvalue(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_UPVALUE_MUT), byte(arg))
@@ -90,44 +101,10 @@ func (c *Compiler) derefMutIfRef(t ast.NoxyType) (ast.NoxyType, bool) {
 	return t, false
 }
 
-// isFreshComposite reconhece expressões que produzem um composto novo em
-// folha — literais e zeros — cujo resultado não precisa de OP_MARK_SHARED
-// ao ser armazenado.
-func isFreshComposite(expr ast.Expression) bool {
-	switch expr.(type) {
-	case *ast.ArrayLiteral, *ast.MapLiteral, *ast.ZerosLiteral:
-		return true
-	}
-	return false
-}
-
-// typeNeedsSharedMark decide se um valor do tipo estático dado pode ser um
-// composto CoW (array, map, struct ou desconhecido/any) e portanto precisa
-// de OP_MARK_SHARED ao ser armazenado em um slot.
-func (c *Compiler) typeNeedsSharedMark(t ast.NoxyType) bool {
-	switch tt := t.(type) {
-	case nil:
-		return true // desconhecido: conservador
-	case *ast.ArrayType, *ast.MapType:
-		return true
-	case *ast.PrimitiveType:
-		if _, isStruct := c.structs[tt.Name]; isStruct {
-			return true
-		}
-		return tt.Name == "any"
-	default:
-		return false
-	}
-}
-
-// emitMarkSharedForStore emite OP_MARK_SHARED para o valor no topo da pilha
-// quando ele pode ser um composto que passa a ter mais de um dono.
-func (c *Compiler) emitMarkSharedForStore(valueExpr ast.Expression, valType ast.NoxyType) {
-	if valueExpr != nil && isFreshComposite(valueExpr) {
-		return
-	}
-	if !c.typeNeedsSharedMark(valType) {
-		return
-	}
-	c.emitByte(byte(chunk.OP_MARK_SHARED))
-}
+// NOTA (Task 8): havia aqui um trio de funções (reconhecimento de composto
+// fresco, checagem de tipo marcável e emissão condicional) que decidia
+// quando emitir OP_MARK_SHARED, o antigo opcode de marcação sticky. A
+// unicidade agora é decidida em runtime pelo contador Owners (RC) — o
+// compilador não emite mais esse opcode. Removidas junto com as 5 call
+// sites em compiler.go; o opcode segue definido em chunk.go só para não
+// renumerar.

@@ -6,15 +6,16 @@ import (
 	"noxy-vm/internal/value"
 )
 
-// newMarkingVM registra um native test_mark_shared que marca o composto como
-// Shared (simulando um segundo dono) e captura o ponteiro original.
+// newMarkingVM registra um native test_mark_shared que retém o composto
+// (spec §3: Owners > 1 é a unicidade — simula um segundo dono durável) e
+// captura o ponteiro original.
 func newMarkingVM() (*VM, *value.Value) {
 	machine := New()
 	captured := &value.Value{}
 	machine.DefineNative("test_mark_shared", func(args []value.Value) value.Value {
 		if len(args) == 1 {
 			*captured = args[0]
-			value.MarkShared(args[0])
+			value.Retain(args[0])
 		}
 		return value.NewNull()
 	})

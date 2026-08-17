@@ -107,14 +107,14 @@ func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
 	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "answer", GlobalOwner: environment}
 	machine := New()
 
-	got, err := machine.lookupGlobalReferenceValue(ref)
+	got, err := machine.lookupReferenceValue(ref)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Type != value.VAL_INT || got.AsInt != 41 {
 		t.Fatalf("lookup=%v, want 41", got)
 	}
-	if err := machine.storeGlobalReferenceValue(ref, value.NewInt(42)); err != nil {
+	if err := machine.storeReferenceValue(value.Value{Type: value.VAL_REF, Obj: ref}, value.NewInt(42)); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := environment.GetLocal("answer"); got.Type != value.VAL_INT || got.AsInt != 42 {
@@ -138,10 +138,10 @@ func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := machine.lookupGlobalReferenceValue(tt.ref); err == nil || err.Error() != tt.want {
+			if _, err := machine.lookupReferenceValue(tt.ref); err == nil || err.Error() != tt.want {
 				t.Fatalf("lookup error=%v, want %q", err, tt.want)
 			}
-			if err := machine.storeGlobalReferenceValue(tt.ref, value.NewInt(42)); err == nil || err.Error() != tt.want {
+			if err := machine.storeReferenceValue(value.Value{Type: value.VAL_REF, Obj: tt.ref}, value.NewInt(42)); err == nil || err.Error() != tt.want {
 				t.Fatalf("store error=%v, want %q", err, tt.want)
 			}
 		})

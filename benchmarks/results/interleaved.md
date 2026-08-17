@@ -1,11 +1,13 @@
 | bench | baseline_ms | cow_ms | delta |
 |---|---|---|---|
-| bench_bubblesort.nx | 7258.2 | 6987.5 | -3.7% |
-| bench_call_light.nx | 4269 | 121.7 | -97.1% |
-| bench_call_readonly.nx | 2814.5 | 2528.6 | -10.2% |
-| bench_call_ref.nx | 7287.2 | 6898.4 | -5.3% |
-| bench_conway.nx | 4373.5 | 4269.9 | -2.4% |
-| bench_map_churn.nx | 691.8 | 665.1 | -3.9% |
-| bench_path_update.nx | 976.7 | 959.5 | -1.8% |
-| bench_share_mutate.nx | 1104.8 | 379 | -65.7% |
-| bench_spawn_sum.nx | 1395.4 | 1411 | 1.1% |
+| bench_bubblesort.nx | 6045.6 | 6285.7 | 4% |
+| bench_call_light.nx | 100.3 | 105.4 | 5.1% |
+| bench_call_readonly.nx | 2362.8 | 2519.8 | 6.6% |
+| bench_call_ref.nx | 6139.3 | 6447.3 | 5% |
+| bench_conway.nx | 3734.1 | 3861.5 | 3.4% |
+| bench_map_churn.nx | 601.8 | 667.5 | 10.9% |
+| bench_path_update.nx | 880.4 | 943.2 | 7.1% |
+| bench_share_mutate.nx | 322 | 332 | 3.1% |
+| bench_spawn_sum.nx | 1325.9 | 1463.5 | 10.4% |
+| bench_typed_call_map.nx | 110.7 | 109.9 | -0.7% |
+| bench_value_call_mutate.nx | 1558.5 | 101.6 | -93.5% |

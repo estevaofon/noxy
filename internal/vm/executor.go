@@ -199,6 +199,26 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip += 2
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
+			// RC: troca contada no ambiente (retain-antes-de-release; slots
+			// globais nunca sao liberados por finalizeCurrentFrame, entao a
+			// bookkeeping precisa acontecer aqui, no proprio funil de escrita).
+			if old, ok := frame.Environment.GetLocal(name); ok {
+				value.Retain(vm.peek(0))
+				value.Release(old)
+			} else {
+				value.Retain(vm.peek(0))
+			}
+			frame.Environment.SetLocal(name, vm.peek(0))
+
+		case chunk.OP_SET_GLOBAL_BORROW:
+			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			nameVal := c.Constants[index]
+			name := nameVal.Obj.(string)
+			// RC: global de tipo `ref` — empréstimo, não posse. Sem
+			// retain/release: quem responde pelo objeto é o dono real
+			// (campo, outro global, slot do chamador…). Contar aqui daria um
+			// dono a mais e a mutação através do empréstimo clonaria.
 			frame.Environment.SetLocal(name, vm.peek(0))
 
 		case chunk.OP_GET_LOCAL:
@@ -210,13 +230,39 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_SET_LOCAL:
 			slot := c.Code[ip]
 			ip++
+			idx := frame.LocalBase + int(slot)
+			old := vm.stack[idx]
+			vm.stack[idx] = vm.peek(0)
+			// RC: retain-antes-de-release (auto-atribuicao x = x)
+			frame.ownSlot(vm, idx)
+			value.Release(old)
+
+		case chunk.OP_SET_LOCAL_BORROW:
+			slot := c.Code[ip]
+			ip++
+			// RC: rebind de local `ref` — empréstimo, não posse. Nada de
+			// retain/release e nada registrado em frame.Owned: quem responde
+			// pelo objeto é o dono real (campo, global, slot do chamador…).
 			vm.stack[frame.LocalBase+int(slot)] = vm.peek(0)
 
-		case chunk.OP_REF_LOCAL:
+		case chunk.OP_OWN_LOCAL:
+			// RC: vinculo NOVO no slot — paga a entrada anterior do indice, se
+			// houver (reuso entre iteracoes/blocos irmaos); ver bindOwnedSlot.
+			frame.bindOwnedSlot(vm, vm.stackTop-1)
+
+		case chunk.OP_REF_LOCAL, chunk.OP_REF_LOCAL_BORROW:
 			slot := int(c.Code[ip])
 			ip++
 			// Reference to a stack slot - Capture it!
+			// RC: a caixa nasce possuidora; o gemeo _BORROW (emitido quando o
+			// slot capturado NAO retem o que guarda — hoje, apenas slot de tipo
+			// `ref`) a marca como emprestada, e os funis de escrita via ref
+			// param de contar posse nela. Decisao estatica: nada de consultar
+			// frame.Owned.
 			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot])
+			if instruction == chunk.OP_REF_LOCAL_BORROW {
+				upvalue.MarkBorrowed()
+			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -592,6 +638,17 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			count := int(c.Code[ip])
 			ip++
 			cases := make([]reflect.SelectCase, count)
+			// RC: OP_SELECT e o segundo funil do par do buffer de canal (spec
+			// §4.2): um send que dispara aqui precisa do MESMO retain que
+			// chan_send faz, senao o chan_recv (ou o braco de recv de outro
+			// select) do outro lado libera uma retencao que nunca existiu (dec
+			// a menos). O retain e feito ANTES do reflect.Select — especulativo,
+			// para todos os cases de send — porque um receptor concorrente pode
+			// consumir e liberar o valor assim que o send dispara; retain
+			// tardio abriria janela de contagem furada. Os sends que NAO
+			// dispararem sao desfeitos logo apos o select (retain-antes-de-
+			// release: a contagem nunca passa por zero).
+			sendVals := make([]value.Value, count)
 			// Stack layout: [... Case0_Chan, Case0_Val, Case0_Mode ... CaseN_Chan, CaseN_Val, CaseN_Mode]
 			// Top is CaseN_Mode.
 			// Iterating i from count-1 down to 0:
@@ -607,6 +664,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 						return vm.runtimeError(c, ip, "select case expects channel")
 					}
 					ch := chVal.Obj.(*value.ObjChannel).Chan
+					value.Retain(val) // RC: espelha chan_send (ver comentario acima)
+					sendVals[i] = val
 					cases[i] = reflect.SelectCase{Dir: reflect.SelectSend, Chan: reflect.ValueOf(ch), Send: reflect.ValueOf(val)}
 				} else { // Recv
 					if chVal.Type != value.VAL_CHANNEL {
@@ -619,11 +678,24 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			chosenIndex, recvVal, recvOK := reflect.Select(cases)
 
+			// RC: desfaz o retain especulativo dos cases de send que nao
+			// dispararam. O do case escolhido (se for send) permanece: o buffer
+			// do canal agora e dono duravel, e quem tirar o valor de la
+			// (chan_recv ou recv de select) faz o release espelhado.
+			for i := range cases {
+				if i != chosenIndex && cases[i].Dir == reflect.SelectSend {
+					value.Release(sendVals[i])
+				}
+			}
+
 			vm.push(value.NewInt(int64(chosenIndex)))
 
 			var valToPush value.Value
 			if recvOK {
 				if v, ok := recvVal.Interface().(value.Value); ok {
+					// RC: espelha chan_recv — o valor saiu do buffer do canal,
+					// que era dono duravel dele.
+					value.Release(v)
 					valToPush = v
 				} else {
 					valToPush = value.NewNull()
@@ -923,12 +995,28 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				ip++
 
 				if isLocal == 1 {
+					// RC: a caixa nasce possuidora; os
+					// OP_MARK_UPVALUE_BORROW que o compilador emite logo
+					// depois desta tabela marcam as de slot `ref`.
 					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[frame.LocalBase+int(index)])
 				} else {
 					closure.Upvalues[i] = frame.Closure.Upvalues[index]
 				}
 			}
 			vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: closure})
+
+		case chunk.OP_MARK_UPVALUE_BORROW:
+			upvalueIndex := int(c.Code[ip])
+			ip++
+			// RC: marca estatica emitida pelo compilador logo apos o
+			// OP_CLOSURE — a caixa deste upvalue foi aberta sobre um slot de
+			// tipo `ref` e portanto EMPRESTA o que guarda (nao retem ao fechar,
+			// nao solta ao ser sobrescrita).
+			marked, ok := vm.peek(0).Obj.(*value.ObjClosure)
+			if !ok || marked == nil || upvalueIndex >= len(marked.Upvalues) {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
+			marked.Upvalues[upvalueIndex].MarkBorrowed()
 
 		case chunk.OP_GET_UPVALUE:
 			slot := c.Code[ip]
@@ -942,11 +1030,35 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_SET_UPVALUE:
 			slot := c.Code[ip]
 			ip++
-			if !frame.Closure.Upvalues[slot].Store(vm.peek(0)) {
+			old, ok := frame.Closure.Upvalues[slot].Load()
+			if !ok {
 				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
+			updated := vm.peek(0)
+			// RC: retain-antes-de-release (auto-atribuicao via upvalue). Caixa
+			// emprestada (slot `ref` capturado) troca sem contar posse: quem
+			// responde pelo objeto e o dono real, e soltar o velho aqui seria
+			// soltar o que a caixa nunca reteve (dec a menos).
+			if frame.Closure.Upvalues[slot].IsBorrowed() {
+				if !frame.Closure.Upvalues[slot].Store(updated) {
+					return vm.runtimeError(c, ip, "invalid upvalue")
+				}
+			} else {
+				value.Retain(updated)
+				// Caixa ABERTA escreve num slot de pilha possuido: a entrada
+				// (slot, objeto) do frame dono tem de passar a nomear o valor
+				// novo — o velho e pago aqui pelo funil, o novo pelo fim do
+				// frame (spec §4.2, mesma regra da escrita via ref).
+				vm.retargetOwnedSlotForUpvalue(frame.Closure.Upvalues[slot], updated)
+				if !frame.Closure.Upvalues[slot].Store(updated) {
+					return vm.runtimeError(c, ip, "invalid upvalue")
+				}
+				value.Release(old)
 			}
 
 		case chunk.OP_CLOSE_UPVALUE:
+			// RC: a propria caixa sabe se empresta (marca estatica); a posse
+			// so migra para ela quando nao empresta (ver closeUpvalue).
 			vm.closeUpvalue(&vm.stack[vm.stackTop-1])
 			vm.pop()
 
@@ -976,8 +1088,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			elements := make([]value.Value, count)
 			for i := count - 1; i >= 0; i-- {
 				elements[i] = vm.pop()
-				// CoW: o elemento pode continuar referenciado pela origem
-				value.MarkShared(elements[i])
+				// RC: elemento pode continuar referenciado pela origem
+				value.Retain(elements[i]) // elemento e dono duravel
 			}
 			vm.push(value.NewArray(elements))
 
@@ -1005,8 +1117,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				} else {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
-				// CoW: o valor pode continuar referenciado pela origem
-				value.MarkShared(val)
+				// RC: valor pode continuar referenciado pela origem
+				value.Retain(val) // elemento e dono duravel
 				mapping.Set(key, val)
 			}
 			vm.push(mapObj)
@@ -1125,7 +1237,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
+					// RC: retain-antes-de-release (elemento e dono duravel)
+					old := arr.Elements[idx]
+					value.Retain(val)
 					arr.Elements[idx] = val
+					value.Release(old)
 					vm.push(val) // Assignment expression result
 					continue
 				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
@@ -1141,7 +1257,16 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					} else {
 						return vm.runtimeError(c, ip, "map key must be int or string")
 					}
-					mapObj.Set(key, val)
+					// RC: so libera o velho se a chave ja existia (dec a
+					// menos e proibido); retain-antes-de-release quando existe.
+					if old, exists := mapObj.Get(key); exists {
+						value.Retain(val)
+						mapObj.Set(key, val)
+						value.Release(old)
+					} else {
+						value.Retain(val)
+						mapObj.Set(key, val)
+					}
 					vm.push(val)
 					continue
 				}
@@ -1213,7 +1338,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "only instances have properties")
 			}
 
+			// RC: retain-antes-de-release (campo e dono duravel); Release
+			// em campo inexistente (Value{} zero) e no-op (nao e VAL_OBJ)
+			old := instance.Fields[name]
+			value.Retain(val)
 			instance.Fields[name] = val
+			value.Release(old)
 			vm.push(val)
 
 		case chunk.OP_SET_PROPERTY_DEREF:
@@ -1262,6 +1392,28 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			idx := frame.LocalBase + int(slot)
 			v := vm.stack[idx]
 			if value.IsShared(v) {
+				old := v
+				v = vm.copyValue(v)
+				vm.stack[idx] = v
+				// RC: usa ownSlot (mantem o slot registrado em frame.Owned)
+				// em vez de Retain cru — mesmo padrao do OP_SET_LOCAL.
+				frame.ownSlot(vm, idx)
+				value.Release(old)
+			}
+			vm.push(v)
+
+		case chunk.OP_GET_LOCAL_MUT_BORROW:
+			slot := c.Code[ip]
+			ip++
+			// RC: gemeo de EMPRESTIMO do acima, emitido quando o tipo declarado
+			// do local e `ref T`. O slot nao possui o que guarda: nao pode
+			// reter o clone nem soltar o velho (soltar o que nunca se reteve e
+			// dec a menos, e faria o objeto compartilhado parecer unico). O
+			// clone fica no slot emprestado sem dono — a mutacao adiante vai
+			// para o clone, exatamente como no comportamento pre-RC.
+			idx := frame.LocalBase + int(slot)
+			v := vm.stack[idx]
+			if value.IsShared(v) {
 				v = vm.copyValue(v)
 				vm.stack[idx] = v
 			}
@@ -1281,6 +1433,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			v, changed := vm.unicize(stored)
 			if changed {
+				// RC: o clone substitui o valor compartilhado no global;
+				// retain-antes-de-release em torno da troca.
+				value.Retain(v)
+				value.Release(stored)
 				owner.SetLocal(name, v)
 			}
 			vm.push(v)
@@ -1298,7 +1454,21 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			v, changed := vm.unicize(stored)
 			if changed {
-				upv.Store(v)
+				// RC: o clone substitui o valor compartilhado no box do
+				// upvalue; retain-antes-de-release em torno da troca. Caixa
+				// emprestada (slot `ref` capturado) nao possui o que guarda:
+				// soltar o velho ali seria dec a menos.
+				if upv.IsBorrowed() {
+					upv.Store(v)
+				} else {
+					value.Retain(v)
+					// Mesma regra do OP_SET_UPVALUE: caixa aberta alcanca um
+					// slot de pilha possuido — reaponta a entrada do frame dono
+					// antes de soltar o velho (spec §4.2).
+					vm.retargetOwnedSlotForUpvalue(upv, v)
+					value.Release(stored)
+					upv.Store(v)
+				}
 			}
 			vm.push(v)
 
@@ -1323,8 +1493,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 					v := arr.Elements[idx]
 					if value.IsShared(v) {
+						old := v
 						v = vm.copyValue(v)
+						// RC: retain-antes-de-release em torno da troca
+						value.Retain(v)
 						arr.Elements[idx] = v
+						value.Release(old)
 					}
 					vm.push(v)
 					continue
@@ -1340,7 +1514,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 					v, changed := vm.unicize(stored)
 					if changed {
+						// RC: retain-antes-de-release em torno da troca
+						value.Retain(v)
 						mapObj.Set(key, v)
+						value.Release(stored)
 					}
 					vm.push(v)
 					continue
@@ -1369,8 +1546,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					return vm.runtimeError(c, ip, "undefined property '%s'", name)
 				}
 				if value.IsShared(fieldVal) {
+					old := fieldVal
 					fieldVal = vm.copyValue(fieldVal)
+					// RC: retain-antes-de-release em torno da troca
+					value.Retain(fieldVal)
 					instance.Fields[name] = fieldVal
+					value.Release(old)
 				}
 				vm.push(fieldVal)
 			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
@@ -1381,7 +1562,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				}
 				v, changed := vm.unicize(stored)
 				if changed {
+					// RC: retain-antes-de-release em torno da troca
+					value.Retain(v)
 					mapObj.Set(name, v)
+					value.Release(stored)
 				}
 				vm.push(v)
 			} else {
@@ -1404,8 +1588,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			vm.push(v)
 
-		case chunk.OP_MARK_SHARED:
-			value.MarkShared(vm.peek(0))
+		// OP_MARK_SHARED morto pos-RC (Task 8): compilador nao emite mais;
+		// case removido do switch (sem default, opcode nao tratado e no-op).
 
 		case chunk.OP_SWAP:
 			// Swap top two stack elements: [a, b] -> [b, a]
@@ -1415,9 +1599,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.push(a)
 
 		case chunk.OP_COPY:
-			// CoW: deref para contexto de valor marca em vez de copiar
+			// CoW: deref para contexto de valor passa o valor adiante sem
+			// copiar; unicidade e decidida por Owners (RC), nao por marcacao.
 			val := vm.pop()
-			value.MarkShared(val)
 			vm.push(val)
 		}
 	}

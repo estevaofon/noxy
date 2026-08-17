@@ -38,9 +38,32 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 		}
 	}
 
+	// RC: fecha os upvalues ANTES de soltar os vinculos do frame —
+	// retain-antes-de-release mantem a contagem sem passar por zero na
+	// migracao slot -> caixa. Cada caixa decide sozinha se assume a posse
+	// (ela sabe, estaticamente, se empresta; ver closeUpvalue). O guard de
+	// openUpvalues evita percorrer os slots no caso comum (frame sem nenhuma
+	// captura aberta), que e a esmagadora maioria dos retornos.
 	ownedTop := vm.stackTop
+	if vm.openUpvalues != nil {
+		for index := frame.StackBase; index < ownedTop; index++ {
+			vm.closeUpvalue(&vm.stack[index])
+		}
+	}
+
+	// RC: solta os vinculos duraveis do frame (retorno normal e unwind
+	// passam ambos por aqui). Libera o OBJETO GRAVADO em cada entrada —
+	// nunca o ocupante atual do slot, que apos reuso de slot por um
+	// temporario nunca retido (locais de bloco mortos sem drop) poderia ser
+	// um valor diferente do que foi retido. Sites de sobrescrita ja liberam
+	// o velho e atualizam a entrada (ownSlot); nao ha guard de stackTop
+	// porque o release agora e por objeto, nao por leitura de vm.stack.
+	for _, entry := range frame.Owned {
+		value.Release(entry.obj)
+	}
+	frame.Owned = nil
+
 	for index := frame.StackBase; index < ownedTop; index++ {
-		vm.closeUpvalue(&vm.stack[index])
 		vm.stack[index] = value.Value{}
 	}
 

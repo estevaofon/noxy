@@ -186,11 +186,20 @@ func TestPrepareDeferredCallUsesCallableCaptureSemantics(t *testing.T) {
 	closureValue := value.NewFunction("cleanup", 1, 0, []value.ParamInfo{{TypeName: "int[]"}}, chunk.New(), machine.shared.Root)
 	closure := &value.ObjClosure{Function: closureValue.Obj.(*value.ObjFunction), Environment: machine.shared.Root}
 
-	// Contrato CoW: closure defer captura por valor via marcação Shared —
-	// mesmo ponteiro, cópia adiada para a primeira mutação (unicize).
+	// Contrato CoW: closure defer captura por valor sem copiar — mesmo
+	// ponteiro, cópia adiada para a primeira mutação (unicize). Depois da
+	// chave (spec §3), o que registra a captura é o contador de donos, não o
+	// bit sticky: aqui `array` nasce sem dono nenhum (montado fora do
+	// bytecode), então a captura o leva de 0 para 1 — em código real o dono do
+	// chamador já estaria contado e o total passaria de 1, disparando o CoW na
+	// primeira mutação.
+	ownersBefore := value.OwnersCount(array)
 	prepared, err := machine.prepareDeferredCall(value.Value{Type: value.VAL_FUNCTION, Obj: closure}, []value.Value{array}, SourceLocation{})
-	if err != nil || prepared.Arguments[0].Obj != array.Obj || !value.IsShared(prepared.Arguments[0]) {
-		t.Fatalf("closure defer deve marcar o arg composto como Shared (captura CoW)")
+	if err != nil || prepared.Arguments[0].Obj != array.Obj {
+		t.Fatalf("closure defer deve capturar o arg composto sem copiar: err=%v", err)
+	}
+	if got := value.OwnersCount(prepared.Arguments[0]); got != ownersBefore+1 {
+		t.Fatalf("captura do defer deve contar um dono durável: esperado %d, veio %d", ownersBefore+1, got)
 	}
 
 	reference := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_GLOBAL, Name: "items", GlobalOwner: machine.shared.Root}}

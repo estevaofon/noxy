@@ -155,7 +155,81 @@ func (vm *VM) peek(distance int) value.Value {
 	return vm.stack[vm.stackTop-1-distance]
 }
 
+// ownSlot retém o composto no slot e o registra (slot, objeto) para release
+// no fim do frame. O release do fim do frame libera o objeto GRAVADO aqui,
+// nunca o ocupante atual do slot no momento do release — reuso de slot por
+// temporários nunca retidos (locais de bloco mortos, ex.: OP_POP sem drop)
+// tornaria o release por índice unsound (dec a menos, proibido pela spec).
+//
+// Ocupante novo NÃO-retível (null/escalar): a entrada do slot, se existir, é
+// REMOVIDA — o site já liberou o ocupante velho (é o contrato deste helper),
+// então mantê-la seria uma reivindicação FANTASMA sobre um objeto já pago, e
+// o fim do frame (ou o bindOwnedSlot de uma iteração seguinte) o soltaria uma
+// segunda vez (dec a mais, direção insegura).
+func (f *CallFrame) ownSlot(vm *VM, slot int) {
+	v := vm.stack[slot]
+	retained := value.Retain(v)
+	for i := range f.Owned {
+		if f.Owned[i].slot == slot {
+			if retained {
+				// Sobrescrita do slot: o site ja liberou o ocupante velho; a
+				// entrada passa a apontar o objeto novo (retido acima).
+				f.Owned[i].obj = v
+			} else {
+				last := len(f.Owned) - 1
+				f.Owned[i] = f.Owned[last]
+				f.Owned = f.Owned[:last]
+			}
+			return
+		}
+	}
+	if retained {
+		f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
+	}
+}
+
+// bindOwnedSlot e o OP_OWN_LOCAL: um vinculo NOVO nasce no slot (let, variavel
+// de for-each, binding de case do select). Retem o ocupante e, se o frame ja
+// tinha entrada para este indice, o vinculo que a criou MORREU (indices de slot
+// sao reusados entre iteracoes de laco e blocos irmaos, e a lista nao e podada
+// no fim do escopo) — o objeto gravado nela e pago AGORA, fechando o par
+// retain/release daquele vinculo: e assim que cada elemento de um for-each
+// recebe exatamente um retain (no bind da iteracao) e um release (no bind da
+// iteracao seguinte, ou no fim do frame para o ultimo). Retain-antes-de-
+// release: rebind do mesmo objeto (elemento repetido) nao passa por zero.
+// Ocupante nao-composto (Retain falha) com entrada anterior: a entrada e
+// removida depois de paga — deixa-la nomearia um objeto que um proximo
+// OP_SET_LOCAL substituiria sem release (retain orfao, over-count).
+func (f *CallFrame) bindOwnedSlot(vm *VM, slot int) {
+	v := vm.stack[slot]
+	retained := value.Retain(v)
+	for i := range f.Owned {
+		if f.Owned[i].slot != slot {
+			continue
+		}
+		value.Release(f.Owned[i].obj)
+		if retained {
+			f.Owned[i].obj = v
+		} else {
+			last := len(f.Owned) - 1
+			f.Owned[i] = f.Owned[last]
+			f.Owned = f.Owned[:last]
+		}
+		return
+	}
+	if retained {
+		f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
+	}
+}
+
 // captureUpvalue finds or creates an open upvalue for the given stack slot.
+//
+// RC: a caixa nasce POSSUIDORA. Quem a marca como emprestada e exclusivamente
+// o OP_MARK_UPVALUE_BORROW que o compilador emite depois do OP_CLOSURE, pelo
+// TIPO DECLARADO do slot capturado — a condicao e estatica. Inferi-la aqui a
+// partir de frame.Owned seria errado nas duas direcoes (slot possuido com
+// ocupante null/escalar na captura nao esta na lista; indice de slot reusado
+// entre blocos irmaos deixa entrada morta na lista).
 func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 	// var prevUpvalue *value.ObjUpvalue // Unused for now
 	upvalue := vm.openUpvalues
@@ -176,12 +250,25 @@ func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 	return createdUpvalue
 }
 
+// closeUpvalue fecha o box do upvalue aberto sobre o slot. A decisao de posse
+// vem da PROPRIA CAIXA (marcada estaticamente pelo compilador via
+// OP_MARK_UPVALUE_BORROW quando o slot capturado tem tipo `ref`): caixa
+// possuidora assume a posse que o slot tinha; caixa emprestada nao retem —
+// reter daria um dono a mais ao objeto emprestado e faria a mutacao atraves do
+// empréstimo clonar, perdendo a escrita.
 func (vm *VM) closeUpvalue(slot *value.Value) {
 	var prev *value.ObjUpvalue
 	curr := vm.openUpvalues
 
 	for curr != nil {
 		if curr.Close(slot) {
+			// RC: o valor migra do slot do frame (liberado por
+			// finalizeCurrentFrame) para o box do upvalue, que passa a ser
+			// dono duravel independente do frame. So retem aqui - nunca
+			// libera (o release do slot e responsabilidade do frame).
+			if !curr.IsBorrowed() {
+				value.Retain(*slot)
+			}
 			next := curr.Next()
 			if prev == nil {
 				vm.openUpvalues = next

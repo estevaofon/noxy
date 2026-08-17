@@ -14,7 +14,9 @@ import (
 func TestGetLocalMutClonesSharedAndWritesBack(t *testing.T) {
 	machine := New()
 	arr := value.NewArray([]value.Value{value.NewInt(10)})
-	value.MarkShared(arr)
+	// spec §3: a precondição "compartilhado" é Owners > 1 (dois donos
+	// duráveis), não mais o antigo bit sticky (removido na Task 8).
+	shareByOwners(arr)
 
 	code := &chunk.Chunk{}
 	constIdx := code.AddConstant(arr)
@@ -29,10 +31,10 @@ func TestGetLocalMutClonesSharedAndWritesBack(t *testing.T) {
 
 	slotVal := machine.stack[1]
 	if slotVal.Obj == arr.Obj {
-		t.Fatal("slot deveria conter o clone, não o original Shared")
+		t.Fatal("slot deveria conter o clone, não o original compartilhado")
 	}
 	if value.IsShared(slotVal) {
-		t.Fatal("clone no slot deve estar unshared")
+		t.Fatal("clone no slot deve ter um único dono (o próprio slot)")
 	}
 	if machine.stack[2].Obj != slotVal.Obj {
 		t.Fatal("valor empilhado deve ser o mesmo clone gravado no slot")
@@ -61,8 +63,10 @@ func TestGetLocalMutLeavesUnsharedAlone(t *testing.T) {
 func TestGetIndexMutClonesSharedChild(t *testing.T) {
 	machine := New()
 	child := value.NewArray([]value.Value{value.NewInt(5)})
-	value.MarkShared(child)
 	parent := value.NewArray([]value.Value{child})
+	// spec §3: dois donos duráveis (o elemento de parent, que o OP_ARRAY real
+	// teria retido, mais um alias qualquer) em vez do bit sticky.
+	shareByOwners(child)
 
 	code := &chunk.Chunk{}
 	parentIdx := code.AddConstant(parent)
@@ -79,23 +83,25 @@ func TestGetIndexMutClonesSharedChild(t *testing.T) {
 
 	parentObj := parent.Obj.(*value.ObjArray)
 	if parentObj.Elements[0].Obj == child.Obj {
-		t.Fatal("filho Shared deveria ter sido clonado e gravado de volta em Elements[0]")
+		t.Fatal("filho compartilhado deveria ter sido clonado e gravado de volta em Elements[0]")
 	}
 	if machine.stack[1].Obj != parentObj.Elements[0].Obj {
 		t.Fatal("valor empilhado deve ser o clone gravado no pai")
 	}
 	if value.IsShared(parentObj.Elements[0]) {
-		t.Fatal("clone deve estar unshared")
+		t.Fatal("clone deve ter um único dono (o elemento do pai)")
 	}
 }
 
 func TestGetPropMutClonesSharedField(t *testing.T) {
 	machine := New()
 	field := value.NewArray([]value.Value{value.NewInt(5)})
-	value.MarkShared(field)
 	structDef := &value.ObjStruct{Name: "Box", Fields: []string{"data"}}
 	inst := value.NewInstance(structDef)
 	inst.Obj.(*value.ObjInstance).Fields["data"] = field
+	// spec §3: dois donos duráveis (o campo da instância, que o construtor
+	// real teria retido, mais um alias qualquer) em vez do bit sticky.
+	shareByOwners(field)
 
 	code := &chunk.Chunk{}
 	instIdx := code.AddConstant(inst)
@@ -112,7 +118,7 @@ func TestGetPropMutClonesSharedField(t *testing.T) {
 
 	instObj := inst.Obj.(*value.ObjInstance)
 	if instObj.Fields["data"].Obj == field.Obj {
-		t.Fatal("campo Shared deveria ter sido clonado e gravado de volta")
+		t.Fatal("campo compartilhado deveria ter sido clonado e gravado de volta")
 	}
 	if machine.stack[1].Obj != instObj.Fields["data"].Obj {
 		t.Fatal("valor empilhado deve ser o clone gravado no campo")
@@ -122,9 +128,11 @@ func TestGetPropMutClonesSharedField(t *testing.T) {
 func TestDerefMutUnicizesThroughGlobalSlot(t *testing.T) {
 	machine := New()
 	arr := value.NewArray([]value.Value{value.NewInt(3)})
-	value.MarkShared(arr)
 	env := machine.shared.Root
 	env.SetLocal("g", arr)
+	// spec §3: dois donos duráveis (o slot global g, que o OP_SET_GLOBAL real
+	// teria retido, mais um alias qualquer) em vez do bit sticky.
+	shareByOwners(arr)
 	refVal := value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{
 		RefType:     value.REF_GLOBAL,
 		Name:        "g",
@@ -146,27 +154,17 @@ func TestDerefMutUnicizesThroughGlobalSlot(t *testing.T) {
 		t.Fatal("global g sumiu")
 	}
 	if stored.Obj == arr.Obj {
-		t.Fatal("composto Shared atrás do ref deveria ter sido clonado no slot")
+		t.Fatal("composto compartilhado atrás do ref deveria ter sido clonado no slot")
 	}
 	if machine.stack[1].Obj != stored.Obj {
 		t.Fatal("valor empilhado deve ser o clone gravado no slot global")
 	}
 }
 
-func TestMarkSharedOpcode(t *testing.T) {
-	machine := New()
-	arr := value.NewArray([]value.Value{value.NewInt(1)})
-
-	code := &chunk.Chunk{}
-	constIdx := code.AddConstant(arr)
-	code.Write(byte(chunk.OP_CONSTANT), 1)
-	code.Write(byte(constIdx), 1)
-	code.Write(byte(chunk.OP_MARK_SHARED), 1)
-
-	if err := machine.Interpret(code); err != nil {
-		t.Fatalf("vm error: %v", err)
-	}
-	if !value.IsShared(arr) {
-		t.Fatal("OP_MARK_SHARED deve ligar o bit do topo da pilha")
-	}
-}
+// NOTA (Task 8): havia aqui um teste que auditava o antigo bit sticky de
+// compartilhamento que OP_MARK_SHARED ligava no composto, e confirmava que
+// value.IsShared já não o lia mais. O bit sticky foi removido do struct e o
+// compilador não emite mais o opcode (case removido do switch do executor —
+// vira no-op se algum bytecode antigo o contiver). Não há mais bit para
+// auditar; a cobertura de unicidade por Owners segue nos testes de unicize
+// em cow_test.go (via shareByOwners) e em rc_uniqueness_test.go.

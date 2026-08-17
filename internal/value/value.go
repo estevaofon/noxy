@@ -147,10 +147,38 @@ type ObjUpvalue struct {
 	location *Value
 	closed   Value
 	next     *ObjUpvalue
+	// borrowed marca que a caixa foi aberta sobre um slot EMPRESTADO (slot de
+	// tipo `ref`, que nunca é dono durável — spec §4.2). Uma caixa emprestada
+	// não retém o que guarda, então os funis de escrita que trocam o conteúdo
+	// (OP_SET_UPVALUE, OP_GET_UPVALUE_MUT) também não podem soltar o valor
+	// velho: soltar o que nunca se reteve é dec a menos e faria o objeto
+	// parecer único, mutando no lugar algo compartilhado.
+	borrowed bool
 }
 
 func NewOpenUpvalue(location *Value, next *ObjUpvalue) *ObjUpvalue {
 	return &ObjUpvalue{location: location, next: next}
+}
+
+// MarkBorrowed registra que a caixa empresta (não possui) o que guarda. É
+// idempotente: capturas repetidas do mesmo slot chegam à mesma conclusão.
+func (upvalue *ObjUpvalue) MarkBorrowed() {
+	if upvalue == nil {
+		return
+	}
+	upvalue.mu.Lock()
+	defer upvalue.mu.Unlock()
+	upvalue.borrowed = true
+}
+
+// IsBorrowed informa se a caixa empresta o valor em vez de possuí-lo.
+func (upvalue *ObjUpvalue) IsBorrowed() bool {
+	if upvalue == nil {
+		return false
+	}
+	upvalue.mu.RLock()
+	defer upvalue.mu.RUnlock()
+	return upvalue.borrowed
 }
 
 func (upvalue *ObjUpvalue) IsValid() bool {
@@ -257,7 +285,10 @@ func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 type ObjArray struct {
 	Elements    []Value
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
-	Shared      atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
+	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17);
+	// é a única fonte de unicidade — o antigo bit sticky Shared foi
+	// removido na Task 8.
+	Owners atomic.Int32
 }
 
 func (oa *ObjArray) String() string {
@@ -297,7 +328,10 @@ type ObjMap struct {
 	store       *bindingStore
 	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
-	Shared      atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
+	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17);
+	// é a única fonte de unicidade — o antigo bit sticky Shared foi
+	// removido na Task 8.
+	Owners atomic.Int32
 }
 
 func (om *ObjMap) String() string {
@@ -351,7 +385,10 @@ func (os *ObjStruct) Format(f fmt.State, verb rune) {
 type ObjInstance struct {
 	Struct *ObjStruct
 	Fields map[string]Value
-	Shared atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
+	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17);
+	// é a única fonte de unicidade — o antigo bit sticky Shared foi
+	// removido na Task 8.
+	Owners atomic.Int32
 }
 
 func (oi *ObjInstance) String() string {

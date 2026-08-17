@@ -1,0 +1,37 @@
+// Laco de mutacao onde um helper recebe o agregado POR VALOR a cada volta.
+// Sob o bit sticky Shared, o bind do parametro por valor marcava db (e, via
+// clone raso, state e payloads) como compartilhado para sempre: cada put()
+// reclonava os tres, e o clone do map cresce com N -> O(N^2) no laco.
+// Com a unicidade por contagem de donos, o retain do parametro morre com o
+// frame do helper, os donos voltam a 1 e as mutacoes seguintes mutam no
+// lugar: O(1) clones no laco inteiro.
+// Padrao real: NoxyDB put chamando um helper de validacao por valor.
+struct State
+    payloads: map[string, string]
+end
+
+struct Db
+    state: State
+end
+
+func helper(db: Db) -> int
+    return 1
+end
+
+func put(db: ref Db, key: string, val: string) -> void
+    let x: int = helper(db)
+    db.state.payloads[key] = val
+end
+
+func main()
+    let payloads: map[string, string] = {}
+    let db: Db = Db(State(payloads))
+    let i: int = 0
+    while i < 2500 do
+        put(ref db, f"key{i}", "value")
+        i = i + 1
+    end
+    print(f"CHECKSUM:{length(keys(db.state.payloads))}")
+end
+
+main()

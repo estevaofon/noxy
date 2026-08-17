@@ -132,18 +132,108 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 	}
 }
 
-func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
-	stored, _, _, err := vm.referenceStorage(ref)
-	return stored, err
+// refStorageBorrows informa que o lugar apontado pelo ref NAO possui o que
+// guarda, e portanto a troca ali nao pode contar posse (soltar o que nunca se
+// reteve e dec a menos). Hoje o unico lugar assim e a caixa de upvalue marcada
+// como emprestada — caixa aberta sobre um slot que nao retem o que guarda.
+//
+// Caminho VIVO desde o OP_REF_LOCAL_BORROW: `ref` para um slot nao-possuidor
+// (hoje, slot de tipo `ref T`) cria uma caixa REF_UPVALUE marcada emprestada,
+// e a escrita atraves dela cai exatamente aqui. E a consulta que impede
+// `setit(ref x, ...)` de soltar um objeto que o slot x nunca reteve.
+func refStorageBorrows(ref *value.ObjRef) bool {
+	return ref != nil && ref.RefType == value.REF_UPVALUE && ref.Upvalue.IsBorrowed()
 }
 
-func (vm *VM) storeGlobalReferenceValue(ref *value.ObjRef, updated value.Value) error {
-	_, _, store, err := vm.referenceStorage(ref)
-	if err != nil {
-		return err
+// retargetOwnedSlot mantém honesta a lista de posse do frame quando uma escrita
+// ATRAVÉS DE UM REF troca o ocupante de um slot de pilha POSSUÍDO.
+//
+// O funil de escrita faz retain(novo)/release(velho) porque o slot passa a
+// possuir o valor novo — mas a entrada (slot, objeto) do frame continuava
+// nomeando o objeto VELHO, e o release em massa do fim do frame o soltava DE
+// NOVO: dec a mais, direção insegura (o objeto velho, ainda vivo em outro dono,
+// passava a parecer único e a mutação seguinte acontecia no lugar). Reapontar a
+// entrada para o valor novo fecha a conta: o release do velho é pago agora pelo
+// funil, e o do novo pelo fim do frame.
+//
+// Devolve true quando encontrou (e reapontou) a entrada. Só varre as listas de
+// posse dos frames vivos — pequenas — e só para refs que apontam para slot de
+// pilha; os demais tipos de ref saem no primeiro teste.
+//
+// A varredura é de DENTRO PARA FORA (frame mais interno primeiro): índices
+// absolutos de slot são reusados — a região de pilha de um frame chamado
+// sobrepõe os índices onde blocos irmãos mortos do CHAMADOR deixaram entradas
+// nunca podadas. Varrer de fora para dentro casava a entrada MORTA do chamador
+// (mesmo endereço) e deixava a entrada VIVA do frame interno nomeando o objeto
+// velho — solto duas vezes no fim do frame (dec a mais). A direção inversa é
+// segura: as entradas de um frame interno são todas >= seu LocalBase, então
+// nenhuma entrada interna pode aliasar um slot vivo de um frame externo.
+func (vm *VM) retargetOwnedSlot(ref *value.ObjRef, updated value.Value) bool {
+	if ref == nil || (ref.RefType != value.REF_UPVALUE && ref.RefType != value.REF_PTR) {
+		return false
 	}
-	store(updated)
-	return nil
+	for i := vm.frameCount - 1; i >= 0; i-- {
+		frame := vm.frames[i]
+		if frame == nil {
+			continue
+		}
+		for j := range frame.Owned {
+			slot := frame.Owned[j].slot
+			if slot < 0 || slot >= len(vm.stack) {
+				continue
+			}
+			occupant := &vm.stack[slot]
+			if ref.RefType == value.REF_UPVALUE {
+				// PointsTo é falso para caixa já fechada — nesse caso o valor não
+				// mora mais no slot e não há entrada a reapontar.
+				if !ref.Upvalue.PointsTo(occupant) {
+					continue
+				}
+			} else if ref.Ptr != occupant {
+				continue
+			}
+			frame.Owned[j].obj = updated
+			return true
+		}
+	}
+	return false
+}
+
+// retargetOwnedSlotForUpvalue e o mesmo reaponte do retargetOwnedSlot para os
+// funis que escrevem ATRAVES DA CAIXA DE UPVALUE (OP_SET_UPVALUE e
+// OP_GET_UPVALUE_MUT em caixa possuidora): enquanto a caixa esta ABERTA a
+// escrita alcanca um slot de pilha, e se aquele slot e possuido a entrada
+// (slot, objeto) do frame dono tem de passar a nomear o valor novo — senao o
+// release em massa do fim do frame solta o velho uma SEGUNDA vez (dec a mais,
+// direcao insegura: o velho, ainda vivo em outro dono, passa a parecer unico).
+// Caixa fechada: PointsTo e falso para qualquer slot de pilha (o valor mora no
+// proprio box) e nao ha entrada a reapontar. O guard de openUpvalues zera o
+// custo no caso comum (nenhuma captura aberta). Varredura de DENTRO PARA FORA
+// pela mesma razao do retargetOwnedSlot: uma entrada morta do chamador num
+// indice reusado casaria primeiro e deixaria a entrada viva do frame interno
+// obsoleta (dec a mais no fim do frame).
+func (vm *VM) retargetOwnedSlotForUpvalue(upv *value.ObjUpvalue, updated value.Value) bool {
+	if upv == nil || vm.openUpvalues == nil {
+		return false
+	}
+	for i := vm.frameCount - 1; i >= 0; i-- {
+		frame := vm.frames[i]
+		if frame == nil {
+			continue
+		}
+		for j := range frame.Owned {
+			slot := frame.Owned[j].slot
+			if slot < 0 || slot >= len(vm.stack) {
+				continue
+			}
+			if !upv.PointsTo(&vm.stack[slot]) {
+				continue
+			}
+			frame.Owned[j].obj = updated
+			return true
+		}
+	}
+	return false
 }
 
 func (vm *VM) lookupReferenceValue(ref *value.ObjRef) (value.Value, error) {
@@ -159,9 +249,20 @@ func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error 
 	if err != nil {
 		return err
 	}
-	_, _, store, err := vm.referenceStorage(ref)
+	stored, _, store, err := vm.referenceStorage(ref)
 	if err != nil {
 		return err
+	}
+	// RC: funil unico para OP_STORE_REF / OP_STORE_VIA_REF /
+	// OP_SET_PROPERTY_DEREF - retain-antes-de-release em torno da troca. Lugar
+	// que apenas empresta (caixa de upvalue emprestada) troca sem contar.
+	if !refStorageBorrows(ref) {
+		value.Retain(updated)
+		// Se o destino e um slot de pilha possuido, a entrada de posse do frame
+		// tem de passar a nomear o valor novo — senao o fim do frame soltaria o
+		// velho uma segunda vez (dec a mais).
+		vm.retargetOwnedSlot(ref, updated)
+		value.Release(stored)
 	}
 	store(updated)
 	return nil

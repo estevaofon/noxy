@@ -66,7 +66,7 @@ func TestModuleGlobalReferenceRetainsResolvedEnvironment(t *testing.T) {
 	machine := New()
 	machine.shared.Root = root
 	ref := &value.ObjRef{RefType: value.REF_GLOBAL, Name: "module", GlobalOwner: module}
-	if err := machine.storeGlobalReferenceValue(ref, value.NewInt(3)); err != nil {
+	if err := machine.storeReferenceValue(value.Value{Type: value.VAL_REF, Obj: ref}, value.NewInt(3)); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := module.GetLocal("module")

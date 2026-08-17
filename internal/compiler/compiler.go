@@ -15,6 +15,20 @@ type Local struct {
 	Type       ast.NoxyType
 	IsCaptured bool
 	IsParam    bool
+	// Owns diz que o SLOT deste vinculo RETEM o composto que guarda — ou seja,
+	// que existe um inc pareado com o release de fim de frame (OP_OWN_LOCAL no
+	// `let`, na variavel de for-each e no binding de case do select, ou o
+	// retain de parametro sem `ref` em callPreparedClosure). E a unica pergunta
+	// que os funis de escrita precisam responder. Com todo local nomeado
+	// nao-`ref` possuidor desde o nascimento (spec §4.2), Owns coincide com "o
+	// tipo declarado nao e `ref T`" — os nao-possuidores restantes sao os slots
+	// `ref` (emprestimo) e os slots ocultos da maquinaria ($collection/$map/
+	// $sel_*, que emprestam de proposito e sao inalcancaveis pelos funis).
+	//
+	// O default e false — a direcao segura para o gemeo MUT (no maximo deixa um
+	// dono a mais, custando uma copia; nunca solta o que nao reteve). Marque
+	// true exatamente onde o inc e emitido.
+	Owns bool
 }
 
 type Loop struct {
@@ -198,14 +212,23 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		}
 
-		// CoW: inicializador não-fresco compartilha o composto com a origem
-		if n.Value != nil {
-			c.emitMarkSharedForStore(n.Value, valType)
-		}
-
 		if c.scopeDepth > 0 {
 			// Local variable
-			c.addLocal(n.Name.Value, n.Type)
+			// RC: o let e um vinculo duravel do frame (spec §4.2) — exceto
+			// quando o tipo declarado e `ref T`. Um vinculo ref e EMPRESTIMO
+			// (borrow), nunca dono: conta-lo daria um dono a mais ao objeto
+			// emprestado e a mutacao atraves do emprestimo clonaria (escrita
+			// perdida). Mesma regra dos parametros IsRef, que
+			// callPreparedClosure ja pula. A condicao aqui e exatamente a que
+			// resolveLocal enxerga depois (addLocal guarda este n.Type), entao
+			// o rebind — OP_SET_LOCAL_BORROW — decide igual, e um mesmo slot
+			// nunca mistura escrita contada com escrita emprestada.
+			if _, isRefBinding := n.Type.(*ast.RefType); !isRefBinding {
+				c.emitByte(byte(chunk.OP_OWN_LOCAL))
+				c.addOwnedLocal(n.Name.Value, n.Type)
+			} else {
+				c.addLocal(n.Name.Value, n.Type)
+			}
 			// Do NOT pop. The value stays on stack and becomes the local variable.
 		} else {
 			// Global
@@ -213,7 +236,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.globals[n.Name.Value] = n.Type
 
 			nameConstant := c.makeConstant(value.NewString(n.Name.Value))
-			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
+			// RC: mesma regra do let local — global de tipo `ref T` e
+			// emprestimo, nao dono (ver OP_SET_LOCAL_BORROW). O tipo do global
+			// fica registrado em c.globals, entao o rebind adiante decide
+			// igual e o slot nunca mistura escrita contada com emprestada.
+			if _, isRefBinding := n.Type.(*ast.RefType); isRefBinding {
+				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL_BORROW, nameConstant)
+			} else {
+				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
+			}
 			c.emitByte(byte(chunk.OP_POP))
 		}
 		return c.currentChunk, nil, nil
@@ -299,9 +330,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			// CoW: o valor gravado através do ref passa a ter mais de um dono
-			c.emitMarkSharedForStore(n.Value, valType)
-
 			// 4. Emit Store
 			// Stack: [Ref, Val]
 			// OP_STORE_REF consumes both (Val -> *Ref).
@@ -316,9 +344,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-
-			// CoW: reatribuição com RHS não-fresco compartilha o composto
-			c.emitMarkSharedForStore(n.Value, valType)
 
 			// 2. Check and Set Variable
 			if arg, localType := c.resolveLocal(ident.Value); arg != -1 {
@@ -351,7 +376,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if err := c.emitRuntimeValueType(localType); err != nil {
 							return nil, nil, err
 						}
-						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+						// RC: rebind de local `ref` e troca de EMPRESTIMO, nao
+						// de posse — grava no slot sem retain/release (o dono
+						// real e o campo/global/slot do chamador apontado).
+						// Contar aqui daria um dono a mais ao objeto e faria a
+						// mutacao atraves do emprestimo clonar.
+						c.emitBytes(byte(chunk.OP_SET_LOCAL_BORROW), byte(arg))
 						c.emitByte(byte(chunk.OP_POP))
 						return c.currentChunk, nil, nil
 					}
@@ -369,7 +399,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if err := c.emitRuntimeValueType(localType); err != nil {
 						return nil, nil, err
 					}
-					c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+					// RC: mesma pergunta do gemeo MUT — so slot POSSUIDOR troca
+					// posse. Com for-each e select possuidores desde o
+					// nascimento, os nao-possuidores nomeados sao exatamente os
+					// slots `ref`; o flag Owns segue decidindo.
+					if c.localOwns(arg) {
+						c.emitBytes(byte(chunk.OP_SET_LOCAL), byte(arg))
+					} else {
+						c.emitBytes(byte(chunk.OP_SET_LOCAL_BORROW), byte(arg))
+					}
 					c.emitByte(byte(chunk.OP_POP))
 				}
 			} else if arg, upvalueType := c.resolveUpvalue(ident.Value); arg != -1 {
@@ -408,7 +446,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							if err := c.emitRuntimeValueType(globalType); err != nil {
 								return nil, nil, err
 							}
-							c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
+							// RC: rebind de global `ref` e troca de
+							// emprestimo, nao de posse (ver
+							// OP_SET_LOCAL_BORROW).
+							c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL_BORROW, nameConstant)
 							c.emitByte(byte(chunk.OP_POP))
 						} else {
 							// User tried `ref = val`. Explicitly FORBID update via name.
@@ -460,9 +501,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-
-			// CoW: valor composto não-fresco guardado no contêiner
-			c.emitMarkSharedForStore(n.Value, valType)
 
 			// Unwrap RefType
 			if ref, ok := leftType.(*ast.RefType); ok {
@@ -542,9 +580,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-
-			// CoW: valor composto não-fresco guardado no campo
-			c.emitMarkSharedForStore(n.Value, valType)
 
 			// RESOLVE FIELD TYPE:
 			var fieldType ast.NoxyType
@@ -1164,6 +1199,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		if isMap {
+			// RC: o slot oculto $map EMPRESTA (sem OP_OWN_LOCAL) — ver a nota
+			// do $collection abaixo; a mesma paridade vale para mutar o map
+			// durante a iteracao pelas chaves.
 			c.addLocal(" $map", colType) // Consumes Map from stack
 
 			// Get 'keys' global
@@ -1179,6 +1217,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		// 3. Store Collection in Local ($collection)
+		// RC: decisao deliberada — $collection (e $map) EMPRESTAM, nao possuem.
+		// Possuir daria Owners+1 a colecao durante o laco, e `arr[i] = x` no
+		// corpo passaria a CLONAR: a iteracao continuaria no array VELHO,
+		// divergindo do merge-base (conferido no binario: a mutacao durante a
+		// iteracao E observada pelos itens seguintes). O emprestimo aqui e
+		// sound: slots ocultos (nome com espaco) sao inalcancaveis por
+		// identificador do usuario — nenhum funil de escrita, captura ou `ref`
+		// os alcanca, entao nunca ha release sobre eles (a maquinaria do laco
+		// so LE estes slots). Escalares ($index/$len) seriam indiferentes
+		// (Retain e no-op), mas ficam no mesmo regime por consistencia.
 		c.addLocal(" $collection", nil)
 
 		// 4. Init Index ($index = 0)
@@ -1211,7 +1259,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		// Body Scope
 		c.beginScope()
-		c.addLocal(n.Identifier, nil) // User variable (consumes Item from stack)
+		// RC (spec §4.2): TODO vinculo local de composto retem — a variavel de
+		// for-each nao e excecao. O bind roda DENTRO do corpo, entao o
+		// OP_OWN_LOCAL executa a cada iteracao: cada elemento recebe exatamente
+		// um retain aqui, e o release e pago pelo bind da iteracao seguinte
+		// (bindOwnedSlot solta o objeto da entrada anterior do slot) ou pelo
+		// fim do frame (ultimo elemento). Colecao vazia: o bind nunca roda —
+		// nem retain, nem entrada, nem release. Com o slot possuidor desde o
+		// nascimento, a captura por closure produz caixa possuidora e o rebind
+		// usa o store contado — Owns volta a coincidir com "tipo nao-ref".
+		c.emitByte(byte(chunk.OP_OWN_LOCAL))
+		c.addOwnedLocal(n.Identifier, nil) // User variable (consumes Item from stack)
 
 		// 9. Compile Body
 		_, _, err = c.Compile(n.Body)
@@ -1343,6 +1401,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		c.beginScope()
 		// Determine types? Dynamic.
+		// RC: slots ocultos do select EMPRESTAM (mesma nota do $collection do
+		// for-each): inalcancaveis pelo usuario, apenas lidos pela maquinaria.
+		// O binding de case (visivel) e quem retem, via OP_OWN_LOCAL abaixo.
 		c.addLocal(" $sel_idx", &ast.PrimitiveType{Name: "int"}) // Stack[-3] -> local 0
 		c.addLocal(" $sel_val", nil)                             // Stack[-2] -> local 1
 		c.addLocal(" $sel_ok", &ast.PrimitiveType{Name: "bool"}) // Stack[-1] -> local 2
@@ -1370,7 +1431,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				ident := assign.Target.(*ast.Identifier)
 				// Create local with value from $sel_val
 				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(valSlot))
-				c.addLocal(ident.Value, nil) // Bind local
+				// RC (spec §4.2): o binding de case retem como qualquer let —
+				// um `when` dentro de laco reexecuta o bind, e o bindOwnedSlot
+				// paga a entrada anterior do slot (mesma mecanica do for-each).
+				c.emitByte(byte(chunk.OP_OWN_LOCAL))
+				c.addOwnedLocal(ident.Value, nil) // Bind local
 			}
 
 			// Compile Block
@@ -1538,16 +1603,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		funcIndex := c.makeConstant(fnObj)
 		c.emitOpWithConstantIndex(chunk.OP_CLOSURE, funcIndex)
-
-		// Emit upvalue bytes
-		for _, up := range fnCompiler.upvalues {
-			isLocal := byte(0)
-			if up.IsLocal {
-				isLocal = 1
-			}
-			c.emitByte(isLocal)
-			c.emitByte(up.Index)
-		}
+		c.emitClosureUpvalues(fnCompiler)
 
 		nameConst := c.makeConstant(value.NewString(n.Name))
 		c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
@@ -1573,15 +1629,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		funcIndex := c.makeConstant(fnObj)
 		c.emitOpWithConstantIndex(chunk.OP_CLOSURE, funcIndex)
-
-		for _, up := range fnCompiler.upvalues {
-			isLocal := byte(0)
-			if up.IsLocal {
-				isLocal = 1
-			}
-			c.emitByte(isLocal)
-			c.emitByte(up.Index)
-		}
+		c.emitClosureUpvalues(fnCompiler)
 
 		return c.currentChunk, newFunctionType(n.Parameters, n.ReturnType), nil
 
@@ -1847,7 +1895,15 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
 				return ref.ElementType, nil
 			}
-			c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			// RC: a caixa aberta sobre o slot herda a condicao do slot. Slot
+			// nao-possuidor (hoje, apenas os de tipo `ref`) produz caixa
+			// EMPRESTADA, para que a escrita via esse ref nao solte o que o
+			// slot nunca reteve (dec a menos).
+			if c.localOwns(slot) {
+				c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			} else {
+				c.emitBytes(byte(chunk.OP_REF_LOCAL_BORROW), byte(slot))
+			}
 			c.locals[slot].IsCaptured = true
 			return declared, nil
 		}
@@ -2059,8 +2115,26 @@ func (c *Compiler) endScope() {
 	}
 }
 
+// addLocal declara um vinculo local que NAO retem o que guarda (Owns=false — o
+// default seguro). Vinculos que retem devem usar addOwnedLocal.
 func (c *Compiler) addLocal(name string, t ast.NoxyType) {
 	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t})
+}
+
+// addOwnedLocal declara um vinculo local cujo slot RETEM o composto que guarda
+// — usar somente onde o inc correspondente e de fato emitido (OP_OWN_LOCAL) ou
+// feito pelo runtime (retain de parametro sem `ref`).
+func (c *Compiler) addOwnedLocal(name string, t ast.NoxyType) {
+	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t, Owns: true})
+}
+
+// localOwns responde a pergunta que os funis de escrita fazem: este slot retem
+// o que guarda? Indice fora de faixa responde false (direcao segura).
+func (c *Compiler) localOwns(index int) bool {
+	if index < 0 || index >= len(c.locals) {
+		return false
+	}
+	return c.locals[index].Owns
 }
 
 func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
@@ -2228,6 +2302,37 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool, upvalueType ast.NoxyTyp
 	return len(c.upvalues) - 1
 }
 
+// emitClosureUpvalues emite a tabela de descritores de upvalue do OP_CLOSURE
+// (pares [is_local, index], encoding intocado) e, em seguida, um
+// OP_MARK_UPVALUE_BORROW para cada upvalue cujo TIPO DECLARADO e `ref T`.
+//
+// RC: a caixa de um upvalue aberto sobre um slot `ref` empresta — nao possui —
+// o que guarda, e essa condicao tem de vir do compilador (estatica), nunca de
+// uma inspecao da lista de slots possuidos do frame em runtime: um slot
+// possuido cujo ocupante era null/escalar na hora da captura nao esta na lista
+// (Retain falha em nao-composto) e seria marcado emprestado por engano (retain
+// devido pulado = under-count), e indices de slot sao reusados entre blocos
+// irmaos sem poda da lista, entao a entrada morta de um irmao faria um slot
+// realmente emprestado parecer possuido (release indevido = dec a menos).
+// As marcas saem depois dos descritores e antes de qualquer uso do valor: o
+// corpo da closure so roda quando ela e chamada, e o fechamento da caixa
+// acontece no fim do escopo/frame — os dois depois daqui.
+func (c *Compiler) emitClosureUpvalues(fnCompiler *Compiler) {
+	for _, up := range fnCompiler.upvalues {
+		isLocal := byte(0)
+		if up.IsLocal {
+			isLocal = 1
+		}
+		c.emitByte(isLocal)
+		c.emitByte(up.Index)
+	}
+	for i, up := range fnCompiler.upvalues {
+		if _, isRefBinding := up.Type.(*ast.RefType); isRefBinding {
+			c.emitBytes(byte(chunk.OP_MARK_UPVALUE_BORROW), byte(i))
+		}
+	}
+}
+
 func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {
 	restoreBindings := c.applyProgramBindings()
 	defer restoreBindings()
@@ -2241,12 +2346,19 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 
 	paramsInfo := []value.ParamInfo{}
 	for _, param := range params {
-		fnCompiler.addLocal(param.Name, param.Type)
-		fnCompiler.locals[len(fnCompiler.locals)-1].IsParam = true // Mark as param
 		isRef := false
 		if _, ok := param.Type.(*ast.RefType); ok {
 			isRef = true
 		}
+		// RC: callPreparedClosure retem (e registra em frame.Owned) o slot de
+		// cada parametro SEM `ref`; parametro `ref` e emprestimo e e pulado la.
+		// O flag Owns aqui espelha exatamente essa decisao do runtime.
+		if isRef {
+			fnCompiler.addLocal(param.Name, param.Type)
+		} else {
+			fnCompiler.addOwnedLocal(param.Name, param.Type)
+		}
+		fnCompiler.locals[len(fnCompiler.locals)-1].IsParam = true // Mark as param
 		paramsInfo = append(paramsInfo, value.ParamInfo{
 			IsRef:    isRef,
 			TypeName: param.Type.String(),

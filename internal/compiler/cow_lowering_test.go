@@ -40,7 +40,13 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 				chunk.OP_GET_UPVALUE, chunk.OP_SET_UPVALUE, chunk.OP_CALL,
 				chunk.OP_DEFER, chunk.OP_REF_LOCAL, chunk.OP_REF_UPVALUE,
 				chunk.OP_GET_LOCAL_MUT, chunk.OP_GET_UPVALUE_MUT,
-				chunk.OP_SET_PROPERTY_DEREF, chunk.OP_INVOKE:
+				chunk.OP_SET_PROPERTY_DEREF, chunk.OP_INVOKE,
+				// RC (Task 7): gemeos de emprestimo e a marca de upvalue —
+				// operando de 1 byte. Sem eles aqui o walker le o operando como
+				// opcode e dessincroniza, perdendo a contagem dos opcodes
+				// seguintes.
+				chunk.OP_SET_LOCAL_BORROW, chunk.OP_GET_LOCAL_MUT_BORROW,
+				chunk.OP_MARK_UPVALUE_BORROW, chunk.OP_REF_LOCAL_BORROW:
 				offset++
 			case chunk.OP_CONSTANT_LONG:
 				offset += 3
@@ -50,7 +56,8 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 				chunk.OP_REF_GLOBAL, chunk.OP_REF_PROPERTY, chunk.OP_CONTEXT_REF_PROPERTY,
 				chunk.OP_IMPORT, chunk.OP_IMPORT_FROM_ALL, chunk.OP_SELECT,
 				chunk.OP_GET_GLOBAL_MUT, chunk.OP_GET_PROP_MUT,
-				chunk.OP_MARK_REF_TARGET_TYPE, chunk.OP_MARK_RUNTIME_VALUE_TYPE:
+				chunk.OP_MARK_REF_TARGET_TYPE, chunk.OP_MARK_RUNTIME_VALUE_TYPE,
+				chunk.OP_SET_GLOBAL_BORROW:
 				offset += 2
 			case chunk.OP_CLOSURE:
 				// [const_index] [upvalue_count] ([is_local, index])*
@@ -125,34 +132,10 @@ end`)
 	}
 }
 
-func TestMarkSharedOnAliasingLet(t *testing.T) {
-	code := compileSource(t, `func f()
-    let a: int[] = [1]
-    let b: int[] = a
-end`)
-	ops := collectOpcodes(t, code)
-	if ops[chunk.OP_MARK_SHARED] == 0 {
-		t.Fatal("let b = a deve emitir OP_MARK_SHARED")
-	}
-}
-
-func TestNoMarkSharedOnFreshLiteralLet(t *testing.T) {
-	code := compileSource(t, `func f()
-    let b: int[] = [1, 2]
-end`)
-	ops := collectOpcodes(t, code)
-	if ops[chunk.OP_MARK_SHARED] != 0 {
-		t.Fatal("let b = [literal] não deve emitir OP_MARK_SHARED")
-	}
-}
-
-func TestNoMarkSharedOnScalarAssignment(t *testing.T) {
-	code := compileSource(t, `func f()
-    let i: int = 0
-    i = i + 1
-end`)
-	ops := collectOpcodes(t, code)
-	if ops[chunk.OP_MARK_SHARED] != 0 {
-		t.Fatal("atribuição escalar não deve emitir OP_MARK_SHARED (custo em hot loop)")
-	}
-}
+// NOTA (Task 8): havia aqui três testes que auditavam quando o compilador
+// emitia (ou deixava de emitir) o antigo opcode de marcação sticky —
+// aliasing de let devia emitir, literal fresco e atribuição escalar não
+// deviam. O compilador não emite mais esse opcode em nenhum caso (a
+// unicidade é decidida em runtime pelo contador Owners), então os três
+// testes ficaram sem objeto: testavam a emissão de uma máquina removida,
+// não um comportamento observável. Removidos junto com a Task 8.
