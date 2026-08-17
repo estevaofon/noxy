@@ -258,6 +258,9 @@ type ObjArray struct {
 	Elements    []Value
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 	Shared      atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
+	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17).
+	// Durante a migração convive com Shared; a chave vira no fim da fase 1.
+	Owners atomic.Int32
 }
 
 func (oa *ObjArray) String() string {
@@ -298,6 +301,9 @@ type ObjMap struct {
 	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
 	Shared      atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
+	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17).
+	// Durante a migração convive com Shared; a chave vira no fim da fase 1.
+	Owners atomic.Int32
 }
 
 func (om *ObjMap) String() string {
@@ -352,6 +358,9 @@ type ObjInstance struct {
 	Struct *ObjStruct
 	Fields map[string]Value
 	Shared atomic.Bool // CoW: sticky, ligado quando existe mais de um dono
+	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17).
+	// Durante a migração convive com Shared; a chave vira no fim da fase 1.
+	Owners atomic.Int32
 }
 
 func (oi *ObjInstance) String() string {
