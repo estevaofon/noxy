@@ -1432,11 +1432,17 @@ main()`
 	}
 }
 
-// Task 7 (fallout, round 2 — Important 4): teste Go direto do ramo FALSO do
-// contrato de posse da caixa. Um slot emprestado (nao registrado em
-// frame.Owned) produz uma caixa marcada como emprestada, e fechar essa caixa
-// NAO pode reter — e o que impede o par retain/release da caixa de existir e,
-// por consequencia, o dec a menos nos funis de escrita dela.
+// Task 7 (fallout, round 2 — Important 4): teste Go direto dos DOIS ramos do
+// contrato de posse da caixa. Toda caixa nasce POSSUIDORA; so o
+// OP_MARK_UPVALUE_BORROW (marca estatica emitida pelo compilador para slot de
+// tipo `ref`) a torna emprestada, e fechar uma caixa emprestada NAO pode reter
+// — e o que impede o par retain/release da caixa de existir e, por
+// consequencia, o dec a menos nos funis de escrita dela.
+//
+// Round 3: a condicao NAO vem mais de frame.Owned. Ela errava nas duas
+// direcoes — slot possuido com ocupante null/escalar na captura nao aparece na
+// lista (retain devido pulado) e indice de slot reusado entre blocos irmaos
+// deixa entrada morta (release indevido).
 func TestBorrowedUpvalueBoxDoesNotRetainOnClose(t *testing.T) {
 	machine := New()
 
@@ -1446,24 +1452,29 @@ func TestBorrowedUpvalueBoxDoesNotRetainOnClose(t *testing.T) {
 	machine.stack[0] = owned
 	ownedSlot := &machine.stack[0]
 
-	// emprestado: idem, mas o slot nao e dono.
+	// emprestado: idem, mas o slot so empresta.
 	borrowed := value.NewMap()
 	value.Retain(borrowed)
 	machine.stack[1] = borrowed
 	borrowedSlot := &machine.stack[1]
 
-	ownedBox := machine.captureUpvalue(ownedSlot, true)
-	borrowedBox := machine.captureUpvalue(borrowedSlot, false)
+	ownedBox := machine.captureUpvalue(ownedSlot)
+	borrowedBox := machine.captureUpvalue(borrowedSlot)
 
-	if ownedBox.IsBorrowed() {
-		t.Fatal("caixa aberta sobre slot possuido nao pode nascer emprestada")
+	if ownedBox.IsBorrowed() || borrowedBox.IsBorrowed() {
+		t.Fatal("toda caixa nasce possuidora — o emprestimo e marcado explicitamente")
 	}
+	// o que o OP_MARK_UPVALUE_BORROW faz, pelo tipo declarado do slot:
+	borrowedBox.MarkBorrowed()
 	if !borrowedBox.IsBorrowed() {
-		t.Fatal("caixa aberta sobre slot emprestado tem de nascer emprestada")
+		t.Fatal("a marca de emprestimo deveria ter pegado")
+	}
+	if ownedBox.IsBorrowed() {
+		t.Fatal("marcar uma caixa nao pode contaminar a outra")
 	}
 
-	machine.closeUpvalue(ownedSlot, true)
-	machine.closeUpvalue(borrowedSlot, false)
+	machine.closeUpvalue(ownedSlot)
+	machine.closeUpvalue(borrowedSlot)
 
 	// ramo verdadeiro: a posse migra do slot para a caixa (+1; o release do
 	// slot e responsabilidade do frame).
@@ -1473,5 +1484,250 @@ func TestBorrowedUpvalueBoxDoesNotRetainOnClose(t *testing.T) {
 	// ramo falso: a caixa empresta — nada de retain.
 	if got := value.OwnersCount(borrowed); got != 1 {
 		t.Fatalf("caixa emprestada nao pode reter ao fechar: esperado Owners=1, veio %d", got)
+	}
+}
+
+// Task 7 (fallout da chave, round 3 — CRITICO achado em review): a condicao de
+// EMPRESTIMO tem de ser ESTATICA (tipo declarado do slot, decidida pelo
+// compilador). O round 2 a inferia em runtime varrendo frame.Owned
+// (ownsSlotIndex), e essa resposta erra nas DUAS direcoes:
+//
+//   (a) under-count: um slot POSSUIDO (`let x: Node = null`) cujo ocupante era
+//       null/escalar na hora da captura nunca entrou em frame.Owned (Retain
+//       falha em nao-composto) — a caixa do upvalue era marcada emprestada por
+//       engano e o retain que ela devia ao fechar/gravar era PULADO. O no ficava
+//       com um dono a menos, parecia unico, e `picked.valor = 99` mutava no
+//       lugar: a escrita vazava para head.proximo, quebrando a independencia do
+//       vinculo por valor.
+//   (b) dec a menos: indices de slot sao REUSADOS entre blocos irmaos e
+//       frame.Owned nao e podado no fim do escopo — a entrada morta de um irmao
+//       fazia um slot realmente emprestado parecer possuido, e o guard do
+//       OP_GET_LOCAL_MUT era derrotado (release indevido, o bug original).
+//
+// Agora quem decide e o compilador: OP_GET_LOCAL_MUT_BORROW para local `ref` e
+// OP_MARK_UPVALUE_BORROW (emitido apos o OP_CLOSURE) para upvalue `ref`.
+// Oraculo dos dois cenarios, conferido no binario do merge-base: 20.
+func TestBorrowConditionIsStaticNotInferredFromOwnedList(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+func get_second(h: ref Node) -> Node
+    return h.proximo
+end
+
+// (a) slot POSSUIDO que estava null na captura, escrito de dentro da closure
+// por OP_SET_UPVALUE. A caixa possui: o retain e devido.
+func repro_e(head: ref Node) -> int
+    let picked: Node = null
+    let f: func() -> int = func() -> int
+        picked = get_second(head)
+        return 1
+    end
+    let ignored: int = f()
+    picked.valor = 99
+    return head.proximo.valor
+end
+
+// (a2) controle: mesmo cenario com o slot ja composto na captura (entrada em
+// frame.Owned existe). Antes e depois da correcao responde 20 — isola a causa.
+func repro_e2(head: ref Node) -> int
+    let picked: Node = Node(1, null)
+    let f: func() -> int = func() -> int
+        picked = get_second(head)
+        return 1
+    end
+    let ignored: int = f()
+    picked.valor = 99
+    return head.proximo.valor
+end
+
+// (b) reuso de indice de slot entre blocos irmaos: o primeiro bloco registra o
+// indice em frame.Owned, o segundo reaproveita o MESMO indice para um
+// emprestimo (let u: ref Node).
+func repro_f(head: ref Node) -> int
+    let second: Node = head.proximo
+    if 1 == 1 then
+        let dead: Node = Node(7, null)
+        let touch: int = dead.valor
+    end
+    if 1 == 1 then
+        let u: ref Node = head.proximo
+        u.valor = 77
+    end
+    second.valor = 99
+    return head.proximo.valor
+end
+
+// (b2) controle: sem o bloco irmao morto, o indice nunca foi possuido.
+func repro_f2(head: ref Node) -> int
+    let second: Node = head.proximo
+    if 1 == 1 then
+        let u: ref Node = head.proximo
+        u.valor = 77
+    end
+    second.valor = 99
+    return head.proximo.valor
+end
+
+func main()
+    let ha: Node = Node(0, null)
+    _append(ha, 20)
+    _append(ha, 30)
+    let a: int = repro_e(ha)
+
+    let hb: Node = Node(0, null)
+    _append(hb, 20)
+    _append(hb, 30)
+    let b: int = repro_e2(hb)
+
+    let hc: Node = Node(0, null)
+    _append(hc, 20)
+    _append(hc, 30)
+    let c: int = repro_f(hc)
+
+    let hd: Node = Node(0, null)
+    _append(hd, 20)
+    _append(hd, 30)
+    let d: int = repro_f2(hd)
+
+    test_report(a * 1000000 + b * 10000 + c * 100 + d)
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	// 20 / 20 / 20 / 20 — os quatro cenarios respondem o oraculo do merge-base.
+	if reported.Type != value.VAL_INT || reported.AsInt != 20202020 {
+		t.Fatalf("condicao de emprestimo saiu errada (esperado 20202020 = e/e2/f/f2 todos 20), veio %#v", reported)
+	}
+}
+
+// Task 7 (round 3): contrapartida do teste acima — a escrita ATRAVES DE UM REF
+// para um no com um UNICO dono duravel acontece NO LUGAR, e nao num clone. E o
+// mesmo principio que torna as escritas via `ref Db` visiveis para o chamador
+// (bench_typed_call_map / NoxyDB) e que faz o `pop` de lista encadeada
+// funcionar; clonar ali seria justamente a escrita perdida corrigida nos
+// rounds anteriores.
+//
+// Este teste ancora o RASTRO DE CONTAGEM, que e a invariante defensavel:
+//
+//   p1 = 1  o campo `proximo` do no anterior e o unico dono
+//   p2 = 2  `*n = v` grava o no no slot por valor `x` — dois donos reais
+//   p3 = 1  `x.valor = 99` clona por independencia (CoW): `x` passa a apontar o
+//           clone e o no volta a ter um dono
+//   p4 = 1  `u.valor = 77` atravessa um emprestimo e muta no lugar; nenhum dono
+//           entra ou sai
+//
+// NOTA DE DIVERGENCIA CONSCIENTE: o binario pre-chave responde 50 aqui (soma
+// 0+20+30), porque o `*n = v` ligava o bit sticky do no PARA SEMPRE e a
+// mutacao via `u` clonava, perdendo a escrita. Com a unicidade por contagem o
+// resultado e 107 (0+77+30). Nao e bug de contagem — o rastro acima foi medido
+// e esta correto em todos os pontos; e exatamente o dead-share que a spec §3
+// se propoe a eliminar (a mesma razao do ganho de 13x no
+// bench_value_call_mutate). Nenhum exemplo do corpus muda (130/130).
+func TestRefWriteToUniquelyOwnedNodeMutatesInPlace(t *testing.T) {
+	machine := New()
+	counts := map[string]int32{}
+	for _, name := range []string{"p1", "p2", "p3", "p4"} {
+		probeName := name
+		machine.DefineNative("probe_"+probeName, func(args []value.Value) value.Value {
+			counts[probeName] = value.OwnersCount(args[0])
+			return value.NewNull()
+		})
+		markProbeReadonly(t, machine, "probe_"+probeName)
+	}
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+struct Node
+    valor: int
+    proximo: ref Node
+end
+
+func _append(node: ref Node, valor: int)
+    if node.proximo == null then
+        node.proximo = Node(valor, null)
+    else
+        _append(node.proximo, valor)
+    end
+end
+
+func get_second(h: ref Node) -> Node
+    return h.proximo
+end
+
+func setit(n: ref Node, v: Node)
+    *n = v
+end
+
+func sum_list(head: ref Node) -> int
+    let total: int = 0
+    let cur: ref Node = head
+    while cur != null do
+        total = total + cur.valor
+        cur = cur.proximo
+    end
+    return total
+end
+
+func run(head: ref Node) -> int
+    let x: Node = null
+    probe_p1(head.proximo)
+    setit(ref x, get_second(head))
+    probe_p2(head.proximo)
+    x.valor = 99
+    probe_p3(head.proximo)
+    let u: ref Node = head.proximo
+    u.valor = 77
+    probe_p4(head.proximo)
+    return sum_list(head)
+end
+
+func main()
+    let h: Node = Node(0, null)
+    _append(h, 20)
+    _append(h, 30)
+    test_report(run(h))
+end
+
+main()`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	want := map[string]int32{"p1": 1, "p2": 2, "p3": 1, "p4": 1}
+	for _, name := range []string{"p1", "p2", "p3", "p4"} {
+		if counts[name] != want[name] {
+			t.Fatalf("rastro de donos errado: %s=%d, esperado %d (rastro completo: p1=%d p2=%d p3=%d p4=%d)",
+				name, counts[name], want[name], counts["p1"], counts["p2"], counts["p3"], counts["p4"])
+		}
+	}
+	// 0 + 77 + 30: a escrita via ref alcancou o no da lista.
+	if reported.Type != value.VAL_INT || reported.AsInt != 107 {
+		t.Fatalf("escrita via ref para no de dono unico deveria mutar no lugar (soma 107), veio %#v", reported)
 	}
 }

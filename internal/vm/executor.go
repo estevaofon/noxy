@@ -252,8 +252,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slot := int(c.Code[ip])
 			ip++
 			// Reference to a stack slot - Capture it!
-			// RC: a caixa herda a condicao do slot (possuido x emprestado).
-			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot], frame.ownsSlotIndex(frame.LocalBase+slot))
+			// RC: a caixa nasce possuidora, e aqui isso e sempre correto: o
+			// compilador so emite OP_REF_LOCAL para local de tipo NAO-ref (o
+			// caso `ref T` sai antes, reempilhando o proprio ref com
+			// OP_GET_LOCAL). Nada de consultar frame.Owned.
+			upvalue := vm.captureUpvalue(&vm.stack[frame.LocalBase+slot])
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -960,15 +963,28 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				ip++
 
 				if isLocal == 1 {
-					// RC: a caixa herda a condicao do slot capturado — slot
-					// `ref` e emprestimo, e a caixa nao passa a possuir.
-					localSlot := frame.LocalBase + int(index)
-					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[localSlot], frame.ownsSlotIndex(localSlot))
+					// RC: a caixa nasce possuidora; os
+					// OP_MARK_UPVALUE_BORROW que o compilador emite logo
+					// depois desta tabela marcam as de slot `ref`.
+					closure.Upvalues[i] = vm.captureUpvalue(&vm.stack[frame.LocalBase+int(index)])
 				} else {
 					closure.Upvalues[i] = frame.Closure.Upvalues[index]
 				}
 			}
 			vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: closure})
+
+		case chunk.OP_MARK_UPVALUE_BORROW:
+			upvalueIndex := int(c.Code[ip])
+			ip++
+			// RC: marca estatica emitida pelo compilador logo apos o
+			// OP_CLOSURE — a caixa deste upvalue foi aberta sobre um slot de
+			// tipo `ref` e portanto EMPRESTA o que guarda (nao retem ao fechar,
+			// nao solta ao ser sobrescrita).
+			marked, ok := vm.peek(0).Obj.(*value.ObjClosure)
+			if !ok || marked == nil || upvalueIndex >= len(marked.Upvalues) {
+				return vm.runtimeError(c, ip, "invalid upvalue")
+			}
+			marked.Upvalues[upvalueIndex].MarkBorrowed()
 
 		case chunk.OP_GET_UPVALUE:
 			slot := c.Code[ip]
@@ -1004,9 +1020,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 		case chunk.OP_CLOSE_UPVALUE:
-			// RC: a posse so migra para o box se o slot era possuido pelo
-			// frame; slots `ref` sao emprestimos (ver closeUpvalue).
-			vm.closeUpvalue(&vm.stack[vm.stackTop-1], frame.ownsSlotIndex(vm.stackTop-1))
+			// RC: a propria caixa sabe se empresta (marca estatica); a posse
+			// so migra para ela quando nao empresta (ver closeUpvalue).
+			vm.closeUpvalue(&vm.stack[vm.stackTop-1])
 			vm.pop()
 
 		case chunk.OP_RETURN:
@@ -1344,18 +1360,27 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				old := v
 				v = vm.copyValue(v)
 				vm.stack[idx] = v
-				// RC: so o slot POSSUIDO troca de dono. Um slot de tipo `ref` e
-				// emprestimo (nunca esta em frame.Owned): soltar o velho ali
-				// seria soltar o que este slot nunca reteve (dec a menos), e o
-				// objeto compartilhado passaria a parecer unico. O clone fica
-				// no slot emprestado sem dono — como no comportamento antigo.
-				if frame.ownsSlotIndex(idx) {
-					// ownSlot (nao Retain cru) mantem o slot registrado em
-					// frame.Owned apontando o objeto novo — mesmo padrao do
-					// OP_SET_LOCAL.
-					frame.ownSlot(vm, idx)
-					value.Release(old)
-				}
+				// RC: usa ownSlot (mantem o slot registrado em frame.Owned)
+				// em vez de Retain cru — mesmo padrao do OP_SET_LOCAL.
+				frame.ownSlot(vm, idx)
+				value.Release(old)
+			}
+			vm.push(v)
+
+		case chunk.OP_GET_LOCAL_MUT_BORROW:
+			slot := c.Code[ip]
+			ip++
+			// RC: gemeo de EMPRESTIMO do acima, emitido quando o tipo declarado
+			// do local e `ref T`. O slot nao possui o que guarda: nao pode
+			// reter o clone nem soltar o velho (soltar o que nunca se reteve e
+			// dec a menos, e faria o objeto compartilhado parecer unico). O
+			// clone fica no slot emprestado sem dono — a mutacao adiante vai
+			// para o clone, exatamente como no comportamento pre-RC.
+			idx := frame.LocalBase + int(slot)
+			v := vm.stack[idx]
+			if value.IsShared(v) {
+				v = vm.copyValue(v)
+				vm.stack[idx] = v
 			}
 			vm.push(v)
 

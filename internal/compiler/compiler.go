@@ -1566,16 +1566,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		funcIndex := c.makeConstant(fnObj)
 		c.emitOpWithConstantIndex(chunk.OP_CLOSURE, funcIndex)
-
-		// Emit upvalue bytes
-		for _, up := range fnCompiler.upvalues {
-			isLocal := byte(0)
-			if up.IsLocal {
-				isLocal = 1
-			}
-			c.emitByte(isLocal)
-			c.emitByte(up.Index)
-		}
+		c.emitClosureUpvalues(fnCompiler)
 
 		nameConst := c.makeConstant(value.NewString(n.Name))
 		c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
@@ -1601,15 +1592,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		funcIndex := c.makeConstant(fnObj)
 		c.emitOpWithConstantIndex(chunk.OP_CLOSURE, funcIndex)
-
-		for _, up := range fnCompiler.upvalues {
-			isLocal := byte(0)
-			if up.IsLocal {
-				isLocal = 1
-			}
-			c.emitByte(isLocal)
-			c.emitByte(up.Index)
-		}
+		c.emitClosureUpvalues(fnCompiler)
 
 		return c.currentChunk, newFunctionType(n.Parameters, n.ReturnType), nil
 
@@ -2254,6 +2237,37 @@ func (c *Compiler) addUpvalue(index uint8, isLocal bool, upvalueType ast.NoxyTyp
 
 	c.upvalues = append(c.upvalues, Upvalue{Index: index, IsLocal: isLocal, Type: upvalueType})
 	return len(c.upvalues) - 1
+}
+
+// emitClosureUpvalues emite a tabela de descritores de upvalue do OP_CLOSURE
+// (pares [is_local, index], encoding intocado) e, em seguida, um
+// OP_MARK_UPVALUE_BORROW para cada upvalue cujo TIPO DECLARADO e `ref T`.
+//
+// RC: a caixa de um upvalue aberto sobre um slot `ref` empresta — nao possui —
+// o que guarda, e essa condicao tem de vir do compilador (estatica), nunca de
+// uma inspecao da lista de slots possuidos do frame em runtime: um slot
+// possuido cujo ocupante era null/escalar na hora da captura nao esta na lista
+// (Retain falha em nao-composto) e seria marcado emprestado por engano (retain
+// devido pulado = under-count), e indices de slot sao reusados entre blocos
+// irmaos sem poda da lista, entao a entrada morta de um irmao faria um slot
+// realmente emprestado parecer possuido (release indevido = dec a menos).
+// As marcas saem depois dos descritores e antes de qualquer uso do valor: o
+// corpo da closure so roda quando ela e chamada, e o fechamento da caixa
+// acontece no fim do escopo/frame — os dois depois daqui.
+func (c *Compiler) emitClosureUpvalues(fnCompiler *Compiler) {
+	for _, up := range fnCompiler.upvalues {
+		isLocal := byte(0)
+		if up.IsLocal {
+			isLocal = 1
+		}
+		c.emitByte(isLocal)
+		c.emitByte(up.Index)
+	}
+	for i, up := range fnCompiler.upvalues {
+		if _, isRefBinding := up.Type.(*ast.RefType); isRefBinding {
+			c.emitBytes(byte(chunk.OP_MARK_UPVALUE_BORROW), byte(i))
+		}
+	}
 }
 
 func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {

@@ -118,6 +118,21 @@ corrente; **decrementa** quando esse lugar morre ou é sobrescrito.
   justamente o retain do campo `proximo: ref Node` que sustenta a contagem de
   uma lista encadeada — remover esse inc para "uniformizar com `ref`" abriria
   dec a menos em toda a estrutura.
+- **A condição de empréstimo é ESTÁTICA — decidida pelo compilador a partir do
+  tipo declarado do slot, nunca inferida em runtime.** Cada funil que trocaria
+  posse num slot `ref` tem um gêmeo de empréstimo emitido pelo lowering
+  (`OP_SET_LOCAL_BORROW`, `OP_SET_GLOBAL_BORROW`, `OP_GET_LOCAL_MUT_BORROW`, e
+  `OP_MARK_UPVALUE_BORROW` para a caixa de upvalue). Tentar deduzir "este slot
+  é empréstimo?" perguntando à lista de slots possuídos do frame erra nas duas
+  direções: (i) um slot **possuído** cujo ocupante era `null`/escalar no
+  momento em que a lista foi consultada nunca chegou a ser registrado (o
+  `Retain` falha em não-composto) e seria tratado como empréstimo — o inc
+  devido é pulado (**under-count**, quebra a independência do vínculo por
+  valor); (ii) índices de slot são **reusados entre blocos irmãos** e a lista
+  não é podada no fim do escopo, então a entrada morta de um irmão faz um slot
+  genuinamente emprestado parecer possuído — o dec indevido volta (**dec a
+  menos**). A lista de possuídos serve para o release de fim de frame, não como
+  oráculo de tipo.
 - Natives da allowlist só-leitura (`cow_natives.go`): empréstimo puro.
 - Natives **com** assinatura: cópia ansiosa mantida (spec CoW §4.6) — fora
   do RC.

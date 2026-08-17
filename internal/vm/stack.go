@@ -176,26 +176,15 @@ func (f *CallFrame) ownSlot(vm *VM, slot int) {
 	f.Owned = append(f.Owned, ownedEntry{slot: slot, obj: v})
 }
 
-// ownsSlotIndex informa se o slot e um vinculo POSSUIDO deste frame. Slots de
-// tipo `ref` (params IsRef, `let x: ref T`, rebind de ref) sao emprestimos e
-// nunca aparecem em Owned — e por isso que a posse nao migra para o box do
-// upvalue quando um deles e capturado (ver closeUpvalue).
-func (f *CallFrame) ownsSlotIndex(slot int) bool {
-	for i := range f.Owned {
-		if f.Owned[i].slot == slot {
-			return true
-		}
-	}
-	return false
-}
-
 // captureUpvalue finds or creates an open upvalue for the given stack slot.
-// frameOwnedSlot diz se o slot e um vinculo POSSUIDO do frame; quando nao e
-// (slot de tipo `ref` — empréstimo), a caixa herda a condicao de emprestimo e
-// os funis de escrita dela param de contar posse (ver value.ObjUpvalue.
-// borrowed). A condicao e estatica por slot — decidida pelo tipo declarado, ja
-// resolvida antes de qualquer captura — entao decidir aqui e estavel.
-func (vm *VM) captureUpvalue(local *value.Value, frameOwnedSlot bool) *value.ObjUpvalue {
+//
+// RC: a caixa nasce POSSUIDORA. Quem a marca como emprestada e exclusivamente
+// o OP_MARK_UPVALUE_BORROW que o compilador emite depois do OP_CLOSURE, pelo
+// TIPO DECLARADO do slot capturado — a condicao e estatica. Inferi-la aqui a
+// partir de frame.Owned seria errado nas duas direcoes (slot possuido com
+// ocupante null/escalar na captura nao esta na lista; indice de slot reusado
+// entre blocos irmaos deixa entrada morta na lista).
+func (vm *VM) captureUpvalue(local *value.Value) *value.ObjUpvalue {
 	// var prevUpvalue *value.ObjUpvalue // Unused for now
 	upvalue := vm.openUpvalues
 
@@ -205,27 +194,23 @@ func (vm *VM) captureUpvalue(local *value.Value, frameOwnedSlot bool) *value.Obj
 		upvalue = upvalue.Next()
 	}
 
-	if upvalue == nil {
-		upvalue = value.NewOpenUpvalue(local, vm.openUpvalues)
-		vm.openUpvalues = upvalue
+	if upvalue != nil {
+		return upvalue
 	}
 
-	if !frameOwnedSlot {
-		upvalue.MarkBorrowed()
-	}
+	createdUpvalue := value.NewOpenUpvalue(local, vm.openUpvalues)
+	vm.openUpvalues = createdUpvalue
 
-	return upvalue
+	return createdUpvalue
 }
 
-// closeUpvalue fecha o box do upvalue aberto sobre o slot. frameOwnedSlot diz
-// se o slot era um vinculo POSSUIDO do frame (registrado em frame.Owned): so
-// nesse caso a posse migra do slot para o box. Um slot de tipo `ref` e
-// EMPRESTIMO (nunca entra em frame.Owned) — reter ao fechar daria um dono a
-// mais ao objeto emprestado e faria a mutacao atraves do empréstimo clonar,
-// perdendo a escrita. A caixa fica marcada como emprestada para que os funis
-// de escrita dela (OP_SET_UPVALUE, OP_GET_UPVALUE_MUT) tambem nao soltem o que
-// ela nunca reteve (dec a menos).
-func (vm *VM) closeUpvalue(slot *value.Value, frameOwnedSlot bool) {
+// closeUpvalue fecha o box do upvalue aberto sobre o slot. A decisao de posse
+// vem da PROPRIA CAIXA (marcada estaticamente pelo compilador via
+// OP_MARK_UPVALUE_BORROW quando o slot capturado tem tipo `ref`): caixa
+// possuidora assume a posse que o slot tinha; caixa emprestada nao retem —
+// reter daria um dono a mais ao objeto emprestado e faria a mutacao atraves do
+// empréstimo clonar, perdendo a escrita.
+func (vm *VM) closeUpvalue(slot *value.Value) {
 	var prev *value.ObjUpvalue
 	curr := vm.openUpvalues
 
@@ -235,10 +220,8 @@ func (vm *VM) closeUpvalue(slot *value.Value, frameOwnedSlot bool) {
 			// finalizeCurrentFrame) para o box do upvalue, que passa a ser
 			// dono duravel independente do frame. So retem aqui - nunca
 			// libera (o release do slot e responsabilidade do frame).
-			if frameOwnedSlot {
+			if !curr.IsBorrowed() {
 				value.Retain(*slot)
-			} else {
-				curr.MarkBorrowed()
 			}
 			next := curr.Next()
 			if prev == nil {

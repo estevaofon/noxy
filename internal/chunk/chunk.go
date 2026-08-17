@@ -101,6 +101,16 @@ const (
 	// (escrita perdida). Espelha o skip de params IsRef em callPreparedClosure.
 	OP_SET_LOCAL_BORROW  // [slot]
 	OP_SET_GLOBAL_BORROW // [const_hi, const_lo]; mesma regra para globais ref
+	// RC: gêmeos de EMPRÉSTIMO dos funis que trocariam posse. O compilador
+	// decide qual emitir pelo TIPO DECLARADO do slot (`ref T` = empréstimo) —
+	// a resposta é estática. Nunca inferir empréstimo em runtime a partir da
+	// lista de slots possuídos do frame: um slot possuído cujo ocupante era
+	// null/escalar na captura não aparece nela (Retain falha em não-composto)
+	// e índices de slot são reusados entre blocos irmãos sem poda da lista, de
+	// modo que a resposta dinâmica erra nas duas direções.
+	OP_GET_LOCAL_MUT_BORROW // [slot]; uniciza sem contar posse (slot ref)
+	OP_MARK_UPVALUE_BORROW  // [upvalue_index]; marca a caixa de peek(0) como
+	// emprestada (emitido logo após OP_CLOSURE, um por upvalue de tipo ref)
 )
 
 func (op OpCode) String() string {
@@ -165,6 +175,10 @@ func (op OpCode) String() string {
 		return "OP_SET_LOCAL_BORROW"
 	case OP_SET_GLOBAL_BORROW:
 		return "OP_SET_GLOBAL_BORROW"
+	case OP_GET_LOCAL_MUT_BORROW:
+		return "OP_GET_LOCAL_MUT_BORROW"
+	case OP_MARK_UPVALUE_BORROW:
+		return "OP_MARK_UPVALUE_BORROW"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -378,6 +392,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.byteInstruction("OP_SET_LOCAL_BORROW", offset)
 	case OP_SET_GLOBAL_BORROW:
 		return c.constantLongInstruction("OP_SET_GLOBAL_BORROW", offset)
+	case OP_GET_LOCAL_MUT_BORROW:
+		return c.byteInstruction("OP_GET_LOCAL_MUT_BORROW", offset)
+	case OP_MARK_UPVALUE_BORROW:
+		return c.byteInstruction("OP_MARK_UPVALUE_BORROW", offset)
 	case OP_EQUAL:
 		return c.simpleInstruction("OP_EQUAL", offset)
 	case OP_GREATER:

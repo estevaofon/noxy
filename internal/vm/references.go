@@ -132,6 +132,20 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 	}
 }
 
+// refStorageBorrows informa que o lugar apontado pelo ref NAO possui o que
+// guarda, e portanto a troca ali nao pode contar posse (soltar o que nunca se
+// reteve e dec a menos). Hoje o unico lugar assim e a caixa de upvalue marcada
+// como emprestada — caixa aberta sobre um slot de tipo `ref`.
+//
+// Defesa em profundidade: pelo caminho do compilador esse caso e inalcancavel,
+// porque OP_REF_LOCAL (o unico produtor de REF_UPVALUE) so e emitido para
+// local de tipo NAO-ref — um `ref u` com u ja de tipo `ref T` reempilha o
+// proprio ref via OP_GET_LOCAL, sem capturar nada. O consulta fica aqui para
+// que uma mudanca futura no lowering nao reabra o dec a menos em silencio.
+func refStorageBorrows(ref *value.ObjRef) bool {
+	return ref != nil && ref.RefType == value.REF_UPVALUE && ref.Upvalue.IsBorrowed()
+}
+
 func (vm *VM) lookupGlobalReferenceValue(ref *value.ObjRef) (value.Value, error) {
 	stored, _, _, err := vm.referenceStorage(ref)
 	return stored, err
@@ -164,9 +178,12 @@ func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error 
 		return err
 	}
 	// RC: funil unico para OP_STORE_REF / OP_STORE_VIA_REF /
-	// OP_SET_PROPERTY_DEREF - retain-antes-de-release em torno da troca.
-	value.Retain(updated)
-	value.Release(stored)
+	// OP_SET_PROPERTY_DEREF - retain-antes-de-release em torno da troca. Lugar
+	// que apenas empresta (caixa de upvalue emprestada) troca sem contar.
+	if !refStorageBorrows(ref) {
+		value.Retain(updated)
+		value.Release(stored)
+	}
 	store(updated)
 	return nil
 }
