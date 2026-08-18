@@ -24,9 +24,12 @@ func compileVMSourceForBench(b *testing.B, source string) *chunk.Chunk {
 	return code
 }
 
-// Mede alocações por chamada de função Noxy. Antes da Task 4: >=2 allocs/op
-// no caminho de chamada (CallFrame + Owned). Depois: 0 allocs/op de frame em
-// regime estacionário (capacidades de Owned/Deferred reusadas).
+// Mede alocações por chamada de função Noxy. leaf(n: int) recebe um escalar,
+// então value.Retain nunca "pega" nele e Owned não chega a crescer neste
+// benchmark — o que ele isola é só o &CallFrame{} por chamada. Antes da
+// Task 4: ~1 alloc/op de CallFrame por chamada de leaf (1000/op) + setup fixo
+// por Interpret. Depois: 0 allocs/op de CallFrame em regime estacionário,
+// restando só o setup fixo por Interpret.
 func BenchmarkNoxyCallOverhead(b *testing.B) {
 	machine := New()
 	code := compileVMSourceForBench(b, `

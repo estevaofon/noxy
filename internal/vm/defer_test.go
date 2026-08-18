@@ -316,8 +316,8 @@ func TestFinishFrameAggregatesPreparedCallHeadroomFailureAndContinues(t *testing
 	if !olderRan {
 		t.Fatal("headroom failure skipped the older deferred call")
 	}
-	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0].Closure != nil || machine.openUpvalues != nil {
-		t.Fatalf("dirty terminal VM: frames=%d current=%p stack=%d frame0=%p open=%p", machine.frameCount, machine.currentFrame, machine.stackTop, machine.frames[0].Closure, machine.openUpvalues)
+	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0].Closure != nil || machine.frames[0].Environment != nil || len(machine.frames[0].Owned) != 0 || len(machine.frames[0].Deferred) != 0 || machine.openUpvalues != nil {
+		t.Fatalf("dirty terminal VM: frames=%d current=%p stack=%d frame0=%p env=%p owned=%d deferred=%d open=%p", machine.frameCount, machine.currentFrame, machine.stackTop, machine.frames[0].Closure, machine.frames[0].Environment, len(machine.frames[0].Owned), len(machine.frames[0].Deferred), machine.openUpvalues)
 	}
 	if machine.stack[StackMax-2] != (value.Value{}) {
 		t.Fatalf("owned stack slot was not cleared: %#v", machine.stack[StackMax-2])
