@@ -255,7 +255,11 @@ func (c *Compiler) newPass1Compiler() *Compiler {
 	scratch.moduleName = c.moduleName
 	scratch.generics = c.registryOrInit()
 	scratch.instances = c.instancesOrInit()
-	scratch.moduleDiscovery = c.moduleDiscovery
+	// discoveryState() (nao c.moduleDiscovery cru): o pass 1 tem de
+	// COMPARTILHAR o cache de modulos com o pass 2, senao cada passada
+	// recarrega do zero todo modulo importado — metade da amplificacao de
+	// startup medida em `use http select *`.
+	scratch.moduleDiscovery = c.discoveryState()
 	scratch.namespaceImports = namespaceImportsCopy
 	scratch.pass1 = true
 	return scratch

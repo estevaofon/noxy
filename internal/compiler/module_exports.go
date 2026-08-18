@@ -11,16 +11,68 @@ import (
 	"strings"
 )
 
+// moduleDiscoveryState e o estado compartilhado da descoberta de modulos
+// dentro de UMA arvore de compiladores:
+//
+//   - active e o guard de ciclo (um modulo em carga nao pode ser recarregado
+//     por dentro da propria carga);
+//   - loaded e a MEMOIZACAO de loadModuleDeclarations. Sem ela, cada `use`
+//     paga um parse + um Compile completo de validacao do modulo (e,
+//     recursivamente, dos modulos que ele importa) UMA VEZ POR CHAMADOR:
+//     predeclareImportedTemplates (discoverModuleExports +
+//     moduleTopLevelBindings), predeclareImport (idem) e o case *ast.UseStmt
+//     de compiler.go — tudo isso dobrado pelo two-pass dos genericos. Medido
+//     em `use http select *`: 1,4s -> 12,3s. Com o memo o custo volta a UMA
+//     carga por modulo por compilacao.
 type moduleDiscoveryState struct {
 	active map[string]bool
+	loaded map[string]loadedModule
+}
+
+// loadedModule e o resultado memoizado de loadModuleDeclarations: o Program
+// ja parseado E VALIDADO (parseModuleDeclarations roda validator.Compile
+// antes de devolver) ou, para modulo de diretorio, a lista de submodulos.
+//
+// Compartilhar o MESMO *ast.Program entre chamadores e seguro porque a
+// mutacao in-place que o pipeline faz nele (resolveSignatureAnnotations /
+// resolveStructFieldAnnotations, e o merge das instancias monomorfizadas de
+// runGenericsPass1) acontece INTEIRA dentro de parseModuleDeclarations, antes
+// do primeiro retorno — o codigo anterior a este memo ja devolvia o AST
+// pos-mutacao a todo chamador, so que reconstruido do zero a cada vez. Os
+// consumidores (discoverModuleExports, discoverModuleStructs,
+// moduleTopLevelBindings, importBindingFrom) apenas LEEM as declaracoes; o
+// unico que guarda um ponteiro para dentro do modulo e importBindingFrom, ao
+// registrar um template no GenericRegistry, e a monomorfizacao sempre trabalha
+// sobre um CLONE (substituteFunction/substituteStruct) — nunca sobre tpl.Decl.
+type loadedModule struct {
+	program        *ast.Program
+	directoryNames []string
+}
+
+func newModuleDiscoveryState() *moduleDiscoveryState {
+	return &moduleDiscoveryState{
+		active: make(map[string]bool),
+		loaded: make(map[string]loadedModule),
+	}
+}
+
+// discoveryState devolve — criando na primeira chamada — o estado de
+// descoberta deste compilador. Criar UMA VEZ e guardar em c.moduleDiscovery e
+// o que faz o memo de loadModuleDeclarations valer entre os varios chamadores
+// de um mesmo `use` (antes, cada um fabricava um estado descartavel e o memo
+// morreria junto com ele). NewChild e newPass1Compiler propagam o ponteiro,
+// entao a arvore inteira de uma compilacao compartilha um unico cache — o
+// filho de NewChild (corpo de funcao, onde um `use` aninhado tambem compila) e
+// o compilador descartavel do pass 1 dos genericos inclusos.
+func (c *Compiler) discoveryState() *moduleDiscoveryState {
+	if c.moduleDiscovery == nil {
+		c.moduleDiscovery = newModuleDiscoveryState()
+	}
+	return c.moduleDiscovery
 }
 
 func (c *Compiler) discoverModuleExports(module string) (map[string]struct{}, bool) {
-	state := c.moduleDiscovery
-	if state == nil {
-		state = &moduleDiscoveryState{active: make(map[string]bool)}
-	}
-	return c.discoverModuleExportsWithState(module, state)
+	return c.discoverModuleExportsWithState(module, c.discoveryState())
 }
 
 func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDiscoveryState) (map[string]struct{}, bool) {
@@ -95,11 +147,7 @@ func (c *Compiler) discoverModuleStructs(module string) (map[string]*ast.StructS
 	// validator compile spawned to check a nested use statement would start
 	// its own independent, equally cycle-blind discovery, recursing without
 	// bound.
-	state := c.moduleDiscovery
-	if state == nil {
-		state = &moduleDiscoveryState{active: make(map[string]bool)}
-	}
-	return c.discoverModuleStructsWithState(module, state)
+	return c.discoverModuleStructsWithState(module, c.discoveryState())
 }
 
 func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDiscoveryState) (map[string]*ast.StructStatement, bool) {
@@ -242,11 +290,7 @@ func (c *Compiler) predeclareImportedTemplates(statements []ast.Statement) error
 // in-place durante esse Compile — o mesmo mecanismo que faz o proprio
 // modulo compilar corretamente sozinho.
 func (c *Compiler) moduleTopLevelBindings(module string) (map[string]ast.Statement, bool) {
-	state := c.moduleDiscovery
-	if state == nil {
-		state = &moduleDiscoveryState{active: make(map[string]bool)}
-	}
-	program, _, ok := c.loadModuleDeclarations(module, state)
+	program, _, ok := c.loadModuleDeclarations(module, c.discoveryState())
 	if !ok {
 		return nil, false
 	}
@@ -387,13 +431,38 @@ func isModuleTemplateDeclaration(declarations map[string]ast.Statement, name str
 	}
 }
 
+// loadModuleDeclarations resolve, parseia e VALIDA um modulo, memoizando o
+// resultado em state.loaded (ver moduleDiscoveryState).
+//
+// So SUCESSOS entram no cache. Uma falha pode ser CONTEXTUAL: o guard de
+// ciclo (state.active) faz um modulo que carrega perfeitamente sozinho
+// devolver false quando alcancado por dentro da propria carga, e memoizar
+// esse false condenaria o modulo pelo resto da compilacao. O inverso nao
+// existe — estar dentro de uma recursao so pode fazer FALHAR, nunca
+// suceder —, entao um sucesso e sempre valido para qualquer contexto.
 func (c *Compiler) loadModuleDeclarations(module string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
+	if cached, hit := state.loaded[module]; hit {
+		return cached.program, cached.directoryNames, true
+	}
 	if state.active[module] {
 		return nil, nil, false
 	}
 	state.active[module] = true
 	defer delete(state.active, module)
 
+	program, directoryNames, ok := c.resolveModuleDeclarations(module, state)
+	if ok {
+		if state.loaded == nil {
+			state.loaded = make(map[string]loadedModule)
+		}
+		state.loaded[module] = loadedModule{program: program, directoryNames: directoryNames}
+	}
+	return program, directoryNames, ok
+}
+
+// resolveModuleDeclarations e o corpo nao-memoizado de loadModuleDeclarations:
+// procura o arquivo/diretorio/embed do modulo e delega o parse+validacao.
+func (c *Compiler) resolveModuleDeclarations(module string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
 	pathName := strings.ReplaceAll(module, ".", string(filepath.Separator))
 	for _, candidate := range c.moduleFileCandidates(pathName) {
 		info, err := os.Stat(candidate)

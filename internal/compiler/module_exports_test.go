@@ -255,6 +255,83 @@ func TestFunctionBodyOnlyWildcardDoesNotAffectModuleLoadability(t *testing.T) {
 	}
 }
 
+// C1: loadModuleDeclarations e memoizado por moduleDiscoveryState, e o
+// estado vive no compilador (discoveryState()) em vez de ser fabricado
+// descartavel a cada chamada. Sem o memo, um unico `use` pagava um parse +
+// um Compile completo de validacao POR CHAMADOR — predeclareImportedTemplates
+// (discoverModuleExports + moduleTopLevelBindings), predeclareImport e o case
+// *ast.UseStmt de compiler.go —, tudo dobrado pelo two-pass dos genericos:
+// `use http select *` foi de 1,4s para 12,3s de startup.
+//
+// Duas provas: identidade de ponteiro do AST devolvido e sobrevivencia a
+// remocao do arquivo entre as duas chamadas (um reparse falharia).
+func TestModuleDeclarationsAreMemoizedPerCompiler(t *testing.T) {
+	root := t.TempDir()
+	modulePath := filepath.Join(root, "dep.nx")
+	if err := os.WriteFile(modulePath, []byte("func delete(url: string) -> void\nend\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
+
+	first, _, loadable := compiler.loadModuleDeclarations("dep", compiler.discoveryState())
+	if !loadable || first == nil {
+		t.Fatal("primeira carga de 'dep' falhou")
+	}
+	if err := os.Remove(modulePath); err != nil {
+		t.Fatal(err)
+	}
+
+	second, _, loadable := compiler.loadModuleDeclarations("dep", compiler.discoveryState())
+	if !loadable {
+		t.Fatal("segunda carga foi ao disco (arquivo removido) em vez de acertar o memo")
+	}
+	if first != second {
+		t.Fatal("segunda carga devolveu outro AST — o memo nao e compartilhado entre chamadas")
+	}
+	exports, loadable := compiler.discoverModuleExports("dep")
+	if !loadable {
+		t.Fatal("discoverModuleExports nao aproveitou o memo")
+	}
+	if _, hasDelete := exports["delete"]; !hasDelete {
+		t.Fatalf("exports memoizados = %v, quer 'delete'", exports)
+	}
+}
+
+// C1, segunda metade: o compilador descartavel do pass 1 dos genericos
+// compartilha o cache com o pass 2 (newPass1Compiler usa discoveryState()).
+// Se cada passada tivesse cache proprio, todo modulo importado seria
+// carregado duas vezes num programa com genericos. A prova e de identidade: o
+// template registrado no fim da compilacao aponta para uma declaracao DENTRO
+// do Program memoizado, ou seja, so existiu um AST do modulo.
+func TestGenericsTwoPassSharesModuleCache(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dep.nx"), []byte("func ident<T>(x: T) -> T\n    return x\nend\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compiler := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"))
+	if _, _, err := compiler.Compile(parse("use dep select ident\nident(1)")); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, memoized := compiler.discoveryState().loaded["dep"]
+	if !memoized || cached.program == nil {
+		t.Fatal("modulo 'dep' nao ficou memoizado apos a compilacao")
+	}
+	template, registered := compiler.registryOrInit().Funcs["ident"]
+	if !registered {
+		t.Fatal("template importado 'ident' nao chegou ao registry")
+	}
+	found := false
+	for _, statement := range cached.program.Statements {
+		if statement == ast.Statement(template.Decl) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("o template registrado nao aponta para o AST memoizado — pass 1 e pass 2 recarregaram o modulo separadamente")
+	}
+}
+
 func TestNestedModuleDiscoveryUsesProgramRoot(t *testing.T) {
 	tests := []struct {
 		name      string

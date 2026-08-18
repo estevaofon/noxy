@@ -168,7 +168,7 @@ func NewChild(parent *Compiler) *Compiler {
 		FileName:         parent.FileName,
 		moduleRoot:       parent.moduleRoot,
 		programBindings:  parent.programBindings,
-		moduleDiscovery:  parent.moduleDiscovery,
+		moduleDiscovery:  parent.discoveryState(),
 		generics:         parent.generics,
 		moduleName:       parent.moduleName,
 		instances:        parent.instances,

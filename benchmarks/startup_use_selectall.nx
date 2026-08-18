@@ -1,0 +1,12 @@
+// startup_use_selectall: sonda de startup com `use ... select *` — o caso que
+// mais carrega modulos (http reexporta http_parser + http_client +
+// http_server via wildcard aninhado). NENHUM generico envolvido: mede o custo
+// de carga de modulos do compilador puro (parse + Compile de validacao por
+// modulo), que o finding C1 da revisao final mostrou amplificado ~8x pelo
+// branch de genericos (cada `use` era recarregado por chamador, dobrado pelo
+// two-pass) e que a memoizacao de loadModuleDeclarations
+// (internal/compiler/module_exports.go) derrubou para uma carga por modulo.
+// Par obrigatorio: startup_use_namespace.nx (forma sem select).
+use http select *
+
+print("CHECKSUM:1")
