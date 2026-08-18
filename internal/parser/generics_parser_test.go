@@ -51,6 +51,59 @@ func TestTypeParamScopeEndsWithDeclaration(t *testing.T) {
 }
 
 // TestGenericSelfReferenceInStruct exige GenericType em posicao de tipo
-// (Stack<T> como anotacao), que e' implementado na Task 4. Movido para
-// internal/parser/generics_parser_test.go da Task 4 por decisao do brief da
-// Task 3 (§ "mover para Task 4 se ainda falhar ao fim desta").
+// (Stack<T> como anotacao). Relocado da Task 3 para a Task 4 por decisao do
+// brief da Task 3 (§ "mover para Task 4 se ainda falhar ao fim desta"), pois
+// so a Task 4 implementa GenericType em posicao de anotacao.
+func TestGenericSelfReferenceInStruct(t *testing.T) {
+	prog := parseProgramNoErrors(t, "struct Node<T>\n    value: T,\n    next: ref Node<T>\nend")
+	st := prog.Statements[0].(*ast.StructStatement)
+	next := st.FieldsList[1].Type.(*ast.RefType)
+	g := next.ElementType.(*ast.GenericType)
+	if g.Name != "Node" {
+		t.Fatalf("auto-referencia Node<T>, veio %s", g.String())
+	}
+	if _, ok := g.Args[0].(*ast.TypeParamType); !ok {
+		t.Fatalf("arg de Node<T> deve ser TypeParamType, veio %T", g.Args[0])
+	}
+}
+
+func TestParseGenericTypeAnnotation(t *testing.T) {
+	prog := parseProgramNoErrors(t, "struct Stack<T>\n    items: T[]\nend\nlet s: Stack<int> = null")
+	let := prog.Statements[1].(*ast.LetStmt)
+	g := let.Type.(*ast.GenericType)
+	if g.String() != "Stack<int>" {
+		t.Fatalf("tipo = %s, quer Stack<int>", g.String())
+	}
+}
+
+func TestParseNestedGenericTypeSplitsShiftRight(t *testing.T) {
+	prog := parseProgramNoErrors(t, "struct Stack<T>\n    items: T[]\nend\nlet s: Stack<Stack<int>> = null")
+	let := prog.Statements[1].(*ast.LetStmt)
+	if got := let.Type.String(); got != "Stack<Stack<int>>" {
+		t.Fatalf("tipo = %s", got)
+	}
+}
+
+func TestParseGenericTypeSplitsGTEBeforeAssign(t *testing.T) {
+	// sem espaco entre > e = : lexa GTE e o parser precisa dividir
+	prog := parseProgramNoErrors(t, "struct Stack<T>\n    items: T[]\nend\nlet s: Stack<int>= null")
+	let := prog.Statements[1].(*ast.LetStmt)
+	if got := let.Type.String(); got != "Stack<int>" {
+		t.Fatalf("tipo = %s", got)
+	}
+	if let.Value == nil {
+		t.Fatal("valor do let perdido no split de GTE")
+	}
+}
+
+func TestGenericTypeComposesWithArrayAndRef(t *testing.T) {
+	prog := parseProgramNoErrors(t, "struct Stack<T>\n    items: T[]\nend\nlet a: Stack<int>[] = []\nlet r: ref Stack<int> = null")
+	arr := prog.Statements[1].(*ast.LetStmt).Type.(*ast.ArrayType)
+	if arr.ElementType.String() != "Stack<int>" {
+		t.Fatalf("elemento = %s", arr.ElementType.String())
+	}
+	ref := prog.Statements[2].(*ast.LetStmt).Type.(*ast.RefType)
+	if ref.ElementType.String() != "Stack<int>" {
+		t.Fatalf("ref elemento = %s", ref.ElementType.String())
+	}
+}

@@ -23,6 +23,11 @@ type Parser struct {
 	// escopo durante o parse de uma declaracao generica (func ou struct).
 	// nil quando fora de uma declaracao generica.
 	activeTypeParams map[string]bool
+
+	// pendingTokens e' uma fila de tokens sinteticos gerados por
+	// splitCompositeGT (ex.: SHIFT_RIGHT dividido em dois GT). nextToken
+	// drena esta fila antes de pedir um novo token ao lexer.
+	pendingTokens []token.Token
 }
 
 func New(l *lexer.Lexer) *Parser {
@@ -98,6 +103,11 @@ func (p *Parser) peekError(t token.TokenType) {
 
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
+	if len(p.pendingTokens) > 0 {
+		p.peekToken = p.pendingTokens[0]
+		p.pendingTokens = p.pendingTokens[1:]
+		return
+	}
 	p.peekToken = p.l.NextToken()
 }
 
@@ -710,6 +720,29 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 			}
 			name += "." + p.curToken.Literal
 		}
+		// Tipo generico em posicao de anotacao: Nome<arg1, arg2>
+		if p.peekTokenIs(token.LT) {
+			p.nextToken() // eat nome; curToken = <
+			args := []ast.NoxyType{}
+			for {
+				p.nextToken() // avanca para o inicio do proximo tipo
+				arg := p.parseType()
+				if arg == nil {
+					return nil
+				}
+				args = append(args, arg)
+				p.splitCompositeGT() // divide >> ou >= pendentes ANTES de checar peek
+				if p.peekTokenIs(token.COMMA) {
+					p.nextToken()
+					continue
+				}
+				break
+			}
+			if !p.expectPeek(token.GT) {
+				return nil
+			}
+			return &ast.GenericType{Name: name, Args: args}
+		}
 		t = &ast.PrimitiveType{Name: name}
 	case token.MAP:
 		// map[key, val]
@@ -742,6 +775,24 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return nil
 	}
 	return t
+}
+
+// splitCompositeGT divide tokens compostos que contem '>' quando estamos
+// esperando fechar uma lista de argumentos de tipo (truque C#/Java):
+//
+//	>>  ->  > + >   (Stack<Stack<int>>)
+//	>=  ->  > + =   (let s: Stack<int>= v)
+func (p *Parser) splitCompositeGT() {
+	switch p.peekToken.Type {
+	case token.SHIFT_RIGHT:
+		gt := token.Token{Type: token.GT, Literal: ">", Line: p.peekToken.Line, Column: p.peekToken.Column}
+		p.pendingTokens = append([]token.Token{gt}, p.pendingTokens...)
+		p.peekToken = gt
+	case token.GTE:
+		assign := token.Token{Type: token.ASSIGN, Literal: "=", Line: p.peekToken.Line, Column: p.peekToken.Column + 1}
+		p.pendingTokens = append([]token.Token{assign}, p.pendingTokens...)
+		p.peekToken = token.Token{Type: token.GT, Literal: ">", Line: p.peekToken.Line, Column: p.peekToken.Column}
+	}
 }
 
 func (p *Parser) parseFunctionType() ast.NoxyType {
