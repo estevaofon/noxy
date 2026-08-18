@@ -940,40 +940,62 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		}
 
+		// Irmao float de isInt: so dispara quando AMBOS os lados sao
+		// estaticamente float. Mistos int/float ficam no caminho generico,
+		// que ja faz a promocao numerica.
+		isFloat := false
+		if leftType != nil && rightType != nil {
+			if leftType.String() == "float" && rightType.String() == "float" {
+				isFloat = true
+			}
+		}
+
 		switch n.Operator {
 		case "+":
 			if isInt {
 				c.emitByte(byte(chunk.OP_ADD_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_ADD_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_ADD))
 			}
 		case "-":
 			if isInt {
 				c.emitByte(byte(chunk.OP_SUB_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_SUB_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_SUBTRACT))
 			}
 		case "*":
 			if isInt {
 				c.emitByte(byte(chunk.OP_MUL_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_MUL_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_MULTIPLY))
 			}
 		case "/":
 			if isInt {
 				c.emitByte(byte(chunk.OP_DIV_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_DIV_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_DIVIDE))
 			}
 		case ">":
 			if isInt {
 				c.emitByte(byte(chunk.OP_GREATER_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_GREATER_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_GREATER))
 			}
 		case "<":
 			if isInt {
 				c.emitByte(byte(chunk.OP_LESS_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_LESS_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_LESS))
 			}

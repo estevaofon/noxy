@@ -136,6 +136,14 @@ const (
 	// que cabe em i8) fundido em soma direta no slot — sem trafego de pilha.
 	// Operandos: [slot u8][delta i8]. Overflow wrappa como OP_ADD_INT.
 	OP_INC_LOCAL_INT
+	// perf fase 1: irmaos float dos opcodes _INT (ambos os lados
+	// estaticamente float). Mistos int/float continuam no caminho generico.
+	OP_ADD_FLOAT
+	OP_SUB_FLOAT
+	OP_MUL_FLOAT
+	OP_DIV_FLOAT
+	OP_LESS_FLOAT
+	OP_GREATER_FLOAT
 )
 
 func (op OpCode) String() string {
@@ -222,6 +230,18 @@ func (op OpCode) String() string {
 		return "OP_JUMP_IF_NE_INT"
 	case OP_INC_LOCAL_INT:
 		return "OP_INC_LOCAL_INT"
+	case OP_ADD_FLOAT:
+		return "OP_ADD_FLOAT"
+	case OP_SUB_FLOAT:
+		return "OP_SUB_FLOAT"
+	case OP_MUL_FLOAT:
+		return "OP_MUL_FLOAT"
+	case OP_DIV_FLOAT:
+		return "OP_DIV_FLOAT"
+	case OP_LESS_FLOAT:
+		return "OP_LESS_FLOAT"
+	case OP_GREATER_FLOAT:
+		return "OP_GREATER_FLOAT"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -531,6 +551,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.shortInstruction("OP_JUMP_IF_NE_INT", offset)
 	case OP_INC_LOCAL_INT:
 		return c.slotDeltaInstruction("OP_INC_LOCAL_INT", offset)
+	case OP_ADD_FLOAT:
+		return c.simpleInstruction("OP_ADD_FLOAT", offset)
+	case OP_SUB_FLOAT:
+		return c.simpleInstruction("OP_SUB_FLOAT", offset)
+	case OP_MUL_FLOAT:
+		return c.simpleInstruction("OP_MUL_FLOAT", offset)
+	case OP_DIV_FLOAT:
+		return c.simpleInstruction("OP_DIV_FLOAT", offset)
+	case OP_LESS_FLOAT:
+		return c.simpleInstruction("OP_LESS_FLOAT", offset)
+	case OP_GREATER_FLOAT:
+		return c.simpleInstruction("OP_GREATER_FLOAT", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:

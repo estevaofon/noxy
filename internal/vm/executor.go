@@ -617,6 +617,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.stack[vm.stackTop-1] = value.Value{}
 			vm.stackTop--
 
+		case chunk.OP_ADD_FLOAT:
+			// Espelho float de OP_ADD_INT: sem zerar, escalar nao carrega ponteiro.
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat + vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
+
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
 			a := vm.pop()
@@ -635,6 +640,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewInt(a.AsInt - b.AsInt))
+		case chunk.OP_SUB_FLOAT:
+			// Espelho float de OP_SUB_INT.
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat - vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_MULTIPLY:
 			b := vm.pop()
 			a := vm.pop()
@@ -653,6 +662,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewInt(a.AsInt * b.AsInt))
+		case chunk.OP_MUL_FLOAT:
+			// Espelho float de OP_MUL_INT.
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat * vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_DIVIDE:
 			b := vm.pop()
 			a := vm.pop()
@@ -686,6 +699,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "division by zero")
 			}
 			vm.push(value.NewInt(a.AsInt / b.AsInt))
+		case chunk.OP_DIV_FLOAT:
+			// Mesma mensagem de erro do ramo float de OP_DIVIDE (generico):
+			// divisor 0.0 e erro de runtime, nao +Inf/NaN.
+			if vm.stack[vm.stackTop-1].AsFloat == 0 {
+				return vm.runtimeError(c, ip, "division by zero")
+			}
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat / vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_LEN:
 			val := vm.pop()
 			if val.Type == value.VAL_OBJ {
@@ -960,6 +981,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewBool(a.AsInt > b.AsInt))
+		case chunk.OP_GREATER_FLOAT:
+			// Espelho float de OP_GREATER_INT.
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat > vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_LESS:
 			b := vm.pop()
 			a := vm.pop()
@@ -974,6 +999,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
+		case chunk.OP_LESS_FLOAT:
+			// Espelho float de OP_LESS_INT.
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat < vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_LESS_INT:
 			// Inline pop/pop/push
 			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsInt < vm.stack[vm.stackTop-1].AsInt)
