@@ -99,7 +99,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 				return true, nil, err
 			}
 		}
-		c.emitCall(2, emission)
+		c.emitCall(2, emission, false)
 		return true, builtinType("void"), nil
 	case "pop":
 		container, err := c.compileReferenceArgument(call.Arguments[0])
@@ -110,7 +110,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		if !ok {
 			return true, nil, fmt.Errorf("[line %d] pop expects an array, got %s", c.currentLine, noxyTypeName(container))
 		}
-		c.emitCall(1, emission)
+		c.emitCall(1, emission, false)
 		return true, array.ElementType, nil
 	case "delete":
 		container, err := c.compileReferenceArgument(call.Arguments[0])
@@ -137,7 +137,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 				c.currentLine, noxyTypeName(mapping.KeyType), noxyTypeName(key),
 			)
 		}
-		c.emitCall(2, emission)
+		c.emitCall(2, emission, false)
 		return true, builtinType("void"), nil
 	case "json_loads":
 		jsonText, err := c.compileBuiltinValueArgument(call.Arguments[0])
@@ -157,7 +157,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		if primitive, ok := targetType.(*ast.PrimitiveType); ok && primitive.Name == "any" {
 			c.emitByte(byte(chunk.OP_MARK_REF_JSON_DYNAMIC))
 		}
-		c.emitCall(2, emission)
+		c.emitCall(2, emission, false)
 		return true, builtinType("bool"), nil
 	default:
 		return false, nil, nil

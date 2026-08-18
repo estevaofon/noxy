@@ -954,6 +954,21 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			gcache = c.GlobalCache()
 			ip = frame.IP
 
+		case chunk.OP_CALL_STATIC:
+			argCount := int(c.Code[ip])
+			ip++
+
+			frame.IP = ip // Save current instruction pointer to the frame before call
+
+			if ok, err := vm.callValueStatic(vm.peek(argCount), argCount, c, ip); !ok {
+				return err
+			}
+			// Update cached frame
+			frame = vm.currentFrame // Switch to new frame
+			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
+			ip = frame.IP
+
 		case chunk.OP_DEFER:
 			registration := sourceLocation(c, ip)
 			argCount := int(c.Code[ip])

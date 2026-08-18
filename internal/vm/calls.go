@@ -50,6 +50,31 @@ func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int
 	return false, vm.runtimeError(c, ip, "can only call functions and classes")
 }
 
+// callValueStatic é o caminho de OP_CALL_STATIC: o compilador provou os modos
+// dos argumentos no call site (isExact), e tipos são estáveis, então closures
+// pulam validateParameterModes. Struct constructors e natives seguem pelo
+// callValue normal — as validações deles são de outra natureza (aridade de
+// struct, assinatura de native) e continuam valendo.
+//
+// O skip depende de três invariantes do compilador — se qualquer um mudar,
+// este opcode deixa de ser sound:
+//  1. isExact só nasce de FunctionType exato; bare `func` é PrimitiveType e
+//     nunca ativa (function_types.go:23-26);
+//  2. areStrictTypesCompatible rejeita `any` como fonte para tipos função
+//     (function_types.go:177-178);
+//  3. fronteiras dinâmicas validadas comparam ParamIsRef em
+//     runtimeTypesEqual (runtime_type_validation.go:481-485).
+func (vm *VM) callValueStatic(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
+	if callee.Type == value.VAL_FUNCTION {
+		closure := callee.Obj.(*value.ObjClosure)
+		if argCount != closure.Function.Arity {
+			return false, vm.runtimeError(c, ip, "expected %d arguments but got %d", closure.Function.Arity, argCount)
+		}
+		return vm.callPreparedClosure(closure, argCount, c, ip)
+	}
+	return vm.callValue(callee, argCount, c, ip)
+}
+
 func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {
 	if callee.Type == value.VAL_OBJ {
 		if structDef, ok := callee.Obj.(*value.ObjStruct); ok && structDef != nil {

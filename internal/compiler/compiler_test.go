@@ -148,8 +148,11 @@ func run() -> void
     cleanup(7)
 end`, "run")
 	code := fn.Chunk.(*chunk.Chunk).Code
-	if !containsOpcode(code, chunk.OP_CALL) {
-		t.Fatal("ordinary call omitted OP_CALL")
+	// cleanup(7) é uma chamada exata (isExact): o compilador prova os modos
+	// dos parametros no call site, entao emite OP_CALL_STATIC (perf fase 1),
+	// nao o OP_CALL generico.
+	if !containsOpcode(code, chunk.OP_CALL_STATIC) {
+		t.Fatal("ordinary exact call omitted OP_CALL_STATIC")
 	}
 	if containsOpcode(code, chunk.OP_DEFER) {
 		t.Fatal("ordinary call emitted OP_DEFER")

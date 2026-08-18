@@ -117,6 +117,10 @@ const (
 	OP_MARK_UPVALUE_BORROW  // [upvalue_index]; marca a caixa de peek(0) como
 	// emprestada (emitido logo após OP_CLOSURE, um por upvalue de tipo ref)
 	OP_REF_LOCAL_BORROW // [slot]; ref para slot não-possuidor (caixa emprestada)
+	// perf fase 1: chamada cujos modos de parametro (ref/valor) o compilador
+	// provou no call site (isExact) — o VM pula validateParameterModes para
+	// closures. Layout de operando identico ao OP_CALL: [argCount u8].
+	OP_CALL_STATIC
 )
 
 func (op OpCode) String() string {
@@ -187,6 +191,8 @@ func (op OpCode) String() string {
 		return "OP_MARK_UPVALUE_BORROW"
 	case OP_REF_LOCAL_BORROW:
 		return "OP_REF_LOCAL_BORROW"
+	case OP_CALL_STATIC:
+		return "OP_CALL_STATIC"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -472,6 +478,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.shortInstruction("OP_LOOP", offset)
 	case OP_CALL:
 		return c.byteInstruction("OP_CALL", offset)
+	case OP_CALL_STATIC:
+		return c.byteInstruction("OP_CALL_STATIC", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:

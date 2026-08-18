@@ -1676,8 +1676,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	}
 }
 
-func (c *Compiler) emitCall(argCount int, emission callEmission) {
+func (c *Compiler) emitCall(argCount int, emission callEmission, static bool) {
 	op := chunk.OP_CALL
+	if static {
+		op = chunk.OP_CALL_STATIC
+	}
 	line := c.currentLine
 	if emission.deferred {
 		op = chunk.OP_DEFER
@@ -1737,7 +1740,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				}
 			}
 
-			c.emitCall(2, emission)
+			c.emitCall(2, emission, false)
 			return c.currentChunk, valType, nil // send returns value sent
 		} else if ident.Value == "chan_recv" {
 			if len(call.Arguments) != 1 {
@@ -1766,7 +1769,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				retType = chanType.ElementType
 			}
 
-			c.emitCall(1, emission)
+			c.emitCall(1, emission, false)
 			return c.currentChunk, retType, nil
 		} else if ident.Value == "addr" {
 			if emission.deferred {
@@ -1855,7 +1858,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 	}
 
-	c.emitCall(len(call.Arguments), emission)
+	c.emitCall(len(call.Arguments), emission, isExact)
 	if isExact {
 		return c.currentChunk, funcType.Return, nil
 	}
