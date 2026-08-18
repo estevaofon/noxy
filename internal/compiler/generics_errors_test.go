@@ -133,6 +133,43 @@ indice_de(idades, "30")`
 	}
 }
 
+// Mesmas duas mensagens (conflito com atribuição por argumento, inferência
+// só com null), agora via o CONSTRUTOR de struct genérico
+// (compileGenericConstructorSite, generics_structs.go) — a review da Task 11
+// apontou que a primeira rodada só cobriu o call site de FUNÇÃO
+// (compileGenericCallSite), embora os dois compartilhem a mesma máquina
+// (unifyPositionalArguments/missingTypeParamNullError, generics.go).
+func TestConstructorConflictAttributesArguments(t *testing.T) {
+	src := `struct Par<T>
+    a: T
+    b: T
+end
+Par(1, "x")`
+	_, _, err := New().Compile(parse(src))
+	if err == nil {
+		t.Fatal("esperava conflito de unificacao T=int vs T=string no construtor")
+	}
+	for _, want := range []string{
+		"T inferido como int (argumento 1)",
+		"string (argumento 2)",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("erro sem %q: %v", want, err)
+		}
+	}
+}
+
+func TestConstructorNullOnlyInferenceError(t *testing.T) {
+	src := `struct Caixa<T>
+    valor: T
+end
+Caixa(null)`
+	_, _, err := New().Compile(parse(src))
+	if err == nil || !strings.Contains(err.Error(), "não foi possível inferir T de null") {
+		t.Fatalf("esperava erro de inferencia com null no construtor, veio %v", err)
+	}
+}
+
 // §9 "Valor sem alvo concreto": TestGenericWithoutConcreteTargetIsError
 // (generics_target_test.go) ja cobre as posicoes HOOKADAS (`let` anotado com
 // `func`/`any`). Este teste cobre as posicoes que NENHUM hook intercepta —

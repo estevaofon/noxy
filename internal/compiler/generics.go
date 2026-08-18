@@ -249,79 +249,33 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 	// identificador NU nomeando OUTRO template de funcao (`aplica(nums,
 	// identity)`) nao pode ser compilado pelo caminho normal — o template nao
 	// existe em runtime, entao typeOfDiscardedExpression leria um global nunca
-	// definido. Esses argumentos ficam de lado nesta primeira passada, que
-	// resolve os parametros de tipo do CALLER pelos argumentos nao-genericos
-	// primeiro (ordem exigida pela spec).
-	// nullOnlyParams marca, por nome de parametro de tipo, se algum candidato
-	// de binding visto para ele num argumento de posicao "T" nua (nao
-	// aninhada — `x: T`, nao `x: T[]`) foi `null` ANTES de qualquer binding de
-	// verdade. unify trata null como "any/null nao contribui binding, nao
-	// falha" (§7) — silenciosamente igual a um argumento cujo tipo
-	// simplesmente nao teve nenhuma informacao. Sem esta marca,
-	// `identity(null)` e `vazio()` (T so aparece no retorno, nenhum argumento
-	// sequer tenta) cairiam na MESMA mensagem generica; a marca e o que
-	// permite compileGenericCallSite escolher a mensagem dedicada do §9 antes
-	// de delegar a ensureFunctionInstance. Uma marca nunca precisa ser
-	// desfeita: o consumidor (logo abaixo do loop) so a consulta quando o
-	// parametro AINDA esta sem binding no final — se um binding de verdade
-	// chegou depois (deste ou de outro argumento), a marca e irrelevante.
-	nullOnlyParams := make(map[string]bool)
-	// argIndexOf guarda, por nome de parametro de tipo, o indice (1-based) do
-	// PRIMEIRO argumento que efetivamente o bindou — e o que permite compor
-	// "T inferido como int (argumento 1) e string (argumento 2)" (§9) num
-	// conflito posterior, sem o unify saber nada de indices de argumento
-	// (unify e funcao pura; quem sabe a posicao e so este loop).
-	argIndexOf := make(map[string]int, len(tpl.Decl.TypeParams))
+	// definido. Esses argumentos sao identificados aqui (pre-passada rasa,
+	// so bareFunctionTemplateArgument) e desviados via skip da unificacao
+	// posicional comum abaixo, que resolve os parametros de tipo do CALLER
+	// pelos argumentos nao-genericos primeiro (ordem exigida pela spec) — a
+	// segunda passada, mais abaixo, cuida deles de verdade.
 	var templateArgs []int
+	skipTemplateArg := make(map[int]bool, len(call.Arguments))
 	for index, argument := range call.Arguments {
 		if _, _, isTemplateArg := c.bareFunctionTemplateArgument(argument); isTemplateArg {
 			templateArgs = append(templateArgs, index)
-			continue
+			skipTemplateArg[index] = true
 		}
-		expected := params[index].Type
-		// Parametro sem parametro de tipo nao contribui binding: nao ha razao
-		// para compilar o argumento so para descobrir um tipo que nao sera
-		// unificado (o caminho normal o compila e checa logo em seguida).
-		if !containsTypeParam(expected) {
-			continue
-		}
-		actual, err := c.typeOfDiscardedExpression(argument)
-		if err != nil {
-			return err
-		}
-		if typeParam, isBare := expected.(*ast.TypeParamType); isBare && isNullType(actual) {
-			if _, bound := bindings[typeParam.Name]; !bound {
-				nullOnlyParams[typeParam.Name] = true
-			}
-			continue
-		}
-		if err := c.unifyAnnotation(expected, actual, bindings); err != nil {
-			var conflict *conflictError
-			if errors.As(err, &conflict) {
-				if existingIndex, known := argIndexOf[conflict.Param]; known {
-					return fmt.Errorf(
-						"[line %d] %s inferido como %s (argumento %d) e %s (argumento %d)",
-						line, conflict.Param,
-						conflict.Existing.String(), existingIndex,
-						conflict.New.String(), index+1,
-					)
-				}
-			}
-			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
-		}
-		// Registra o(s) parametro(s) que ESTE argumento bindou pela PRIMEIRA
-		// vez (um unico argumento composto — `map[K,V]` — pode bindar mais de
-		// um de uma vez). So grava na primeira ocorrencia: e o PRIMEIRO
-		// argumento que deve aparecer como "(argumento N)" do lado esquerdo
-		// de um conflito futuro.
-		for _, typeParam := range tpl.Decl.TypeParams {
-			if _, recorded := argIndexOf[typeParam]; recorded {
-				continue
-			}
-			if _, bound := bindings[typeParam]; bound {
-				argIndexOf[typeParam] = index + 1
-			}
-		}
+	}
+
+	// nullOnlyParams (§9 "inferência só com null") e argIndexOf (§9
+	// "conflito de unificação" com atribuição por argumento) sao povoados por
+	// unifyPositionalArguments — maquinaria COMPARTILHADA com
+	// compileGenericConstructorSite (generics_structs.go), documentada la.
+	nullOnlyParams := make(map[string]bool)
+	argIndexOf := make(map[string]int, len(tpl.Decl.TypeParams))
+	if err := c.unifyPositionalArguments(
+		line, base, call.Arguments,
+		func(index int) ast.NoxyType { return params[index].Type },
+		func(index int) bool { return skipTemplateArg[index] },
+		tpl.Decl.TypeParams, bindings, nullOnlyParams, argIndexOf,
+	); err != nil {
+		return err
 	}
 
 	// Segunda passada: agora que os argumentos comuns ancoraram o que podiam,
@@ -362,17 +316,11 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 	// (cuja mensagem para parametro sem binding e a generica "não foi
 	// possível inferir T em 'f'") sempre que o binding que falta e exatamente
 	// um que so viu `null` como candidato — dá a mensagem dedicada do
-	// catalogo. Mesma ordem de tpl.Decl.TypeParams que ensureFunctionInstance
-	// usa, entao o primeiro parametro sem binding e sempre o mesmo nos dois
-	// caminhos.
-	for _, typeParam := range tpl.Decl.TypeParams {
-		if _, bound := bindings[typeParam]; bound {
-			continue
-		}
-		if nullOnlyParams[typeParam] {
-			return nullOnlyInferenceError(line, typeParam)
-		}
-		break
+	// catalogo. missingTypeParamNullError usa a MESMA ordem de
+	// tpl.Decl.TypeParams que ensureFunctionInstance, entao o primeiro
+	// parametro sem binding e sempre o mesmo nos dois caminhos.
+	if err := missingTypeParamNullError(line, tpl.Decl.TypeParams, bindings, nullOnlyParams); err != nil {
+		return err
 	}
 
 	name, _, err := c.ensureFunctionInstance(tpl, bindings, line)
@@ -381,6 +329,123 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 	}
 	callee.Value = name
 	c.setLine(line)
+	return nil
+}
+
+// unifyPositionalArguments e a maquinaria COMPARTILHADA entre os dois call
+// sites que inferem uma tupla de tipos a partir de argumentos posicionais
+// contra tipos esperados que podem conter TypeParamType —
+// compileGenericCallSite (chamada de funcao generica, acima) e
+// compileGenericConstructorSite (construtor de struct generico,
+// generics_structs.go). Por argumento:
+//
+//   - pula quando skip(index) e verdadeiro (compileGenericCallSite usa isto
+//     para desviar os argumentos-template, tratados numa segunda passada
+//     bidirecional a parte; compileGenericConstructorSite nao tem
+//     equivalente e passa skip nil);
+//   - pula quando expectedType(index) nao contem parametro de tipo nenhum
+//     (nada a unificar; nao ha razao para compilar o argumento so para
+//     descobrir um tipo que nao sera usado);
+//   - quando o tipo esperado e um `T` NU (nao aninhado — `x: T`, nao
+//     `x: T[]`) e o argumento e `null`, marca nullOnlyParams[T] em vez de
+//     unificar (§9 "inferência só com null" — unify trataria null como
+//     "não contribui binding, não falha", indistinguível de um argumento
+//     sem informação nenhuma; a marca e o que permite ao chamador, depois
+//     do loop, escolher a mensagem dedicada do catálogo via
+//     missingTypeParamNullError em vez da genérica "não foi possível
+//     inferir T em 'f'");
+//   - senao, unifica de verdade contra bindings; num conflito (unify devolve
+//     um *conflictError encadeado — errors.As), compoe a mensagem do §9 com
+//     atribuição por argumento ("T inferido como int (argumento 1) e string
+//     (argumento 2)") usando argIndexOf; sem atribuição conhecida (conflito
+//     vindo de uma posição sem argumento registrado — não deveria acontecer
+//     no uso atual, mas e defensivo), cai para a mensagem antiga com o
+//     `%v` cru;
+//   - registra em argIndexOf, para cada parametro de tipo AINDA sem entrada,
+//     o indice (1-based) deste argumento quando ele acabou de bindar esse
+//     parametro pela primeira vez (um unico argumento composto — `map[K,V]`
+//     — pode bindar mais de um de uma vez).
+//
+// bindings, nullOnlyParams e argIndexOf sao do CHAMADOR (mutados aqui,
+// consultados depois — inclusive por missingTypeParamNullError e pelas
+// passadas seguintes do chamador, como a segunda passada bidirecional de
+// compileGenericCallSite). typeParams e a lista de nomes de parametro de
+// tipo do template (tpl.Decl.TypeParams em ambos os chamadores) na ordem de
+// declaração — a mesma ordem que ensure*Instance usa, o que faz
+// missingTypeParamNullError e a checagem de aridade final apontarem sempre
+// para o mesmo parametro quando ha mais de um em aberto.
+func (c *Compiler) unifyPositionalArguments(
+	line int,
+	base string,
+	arguments []ast.Expression,
+	expectedType func(index int) ast.NoxyType,
+	skip func(index int) bool,
+	typeParams []string,
+	bindings map[string]ast.NoxyType,
+	nullOnlyParams map[string]bool,
+	argIndexOf map[string]int,
+) error {
+	for index, argument := range arguments {
+		if skip != nil && skip(index) {
+			continue
+		}
+		expected := expectedType(index)
+		if !containsTypeParam(expected) {
+			continue
+		}
+		actual, err := c.typeOfDiscardedExpression(argument)
+		if err != nil {
+			return err
+		}
+		if typeParam, isBare := expected.(*ast.TypeParamType); isBare && isNullType(actual) {
+			if _, bound := bindings[typeParam.Name]; !bound {
+				nullOnlyParams[typeParam.Name] = true
+			}
+			continue
+		}
+		if err := c.unifyAnnotation(expected, actual, bindings); err != nil {
+			var conflict *conflictError
+			if errors.As(err, &conflict) {
+				if existingIndex, known := argIndexOf[conflict.Param]; known {
+					return fmt.Errorf(
+						"[line %d] %s inferido como %s (argumento %d) e %s (argumento %d)",
+						line, conflict.Param,
+						conflict.Existing.String(), existingIndex,
+						conflict.New.String(), index+1,
+					)
+				}
+			}
+			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
+		}
+		for _, typeParam := range typeParams {
+			if _, recorded := argIndexOf[typeParam]; recorded {
+				continue
+			}
+			if _, bound := bindings[typeParam]; bound {
+				argIndexOf[typeParam] = index + 1
+			}
+		}
+	}
+	return nil
+}
+
+// missingTypeParamNullError e o gate COMPARTILHADO do §9 "inferência só com
+// null": percorre typeParams na ordem de declaração e, no primeiro parametro
+// AINDA sem binding, devolve a mensagem dedicada quando nullOnlyParams o
+// marcou — nil quando ou todos os parametros ja tem binding, ou o primeiro
+// sem binding nao foi marcado (o chamador delega para a mensagem generica de
+// ensure*Instance, que itera typeParams na MESMA ordem e portanto encontra o
+// mesmo parametro).
+func missingTypeParamNullError(line int, typeParams []string, bindings map[string]ast.NoxyType, nullOnlyParams map[string]bool) error {
+	for _, typeParam := range typeParams {
+		if _, bound := bindings[typeParam]; bound {
+			continue
+		}
+		if nullOnlyParams[typeParam] {
+			return nullOnlyInferenceError(line, typeParam)
+		}
+		break
+	}
 	return nil
 }
 

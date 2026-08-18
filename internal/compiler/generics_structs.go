@@ -295,25 +295,37 @@ func (c *Compiler) compileGenericConstructorSite(call *ast.CallExpression, calle
 		)
 	}
 
+	// unifyPositionalArguments/missingTypeParamNullError sao a maquinaria
+	// COMPARTILHADA com compileGenericCallSite (generics.go, documentada
+	// la): mesma unificacao posicional campo-a-campo, mesmo rastreio de
+	// nullOnlyParams (§9 "inferência só com null" — `Caixa(null)`) e
+	// argIndexOf (§9 "conflito de unificação" com atribuição por argumento).
+	// skip fica nil — construtor de struct nao tem o equivalente aos
+	// argumentos-template de compileGenericCallSite (campo posicional e
+	// sempre um valor, nunca um template de funcao nu).
 	bindings := make(map[string]ast.NoxyType, len(tpl.Decl.TypeParams))
-	for index, argument := range call.Arguments {
-		expected := fields[index].Type
-		if !containsTypeParam(expected) {
-			continue
-		}
-		actual, err := c.typeOfDiscardedExpression(argument)
-		if err != nil {
-			return err
-		}
-		if err := c.unifyAnnotation(expected, actual, bindings); err != nil {
-			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
-		}
+	nullOnlyParams := make(map[string]bool)
+	argIndexOf := make(map[string]int, len(tpl.Decl.TypeParams))
+	if err := c.unifyPositionalArguments(
+		line, base, call.Arguments,
+		func(index int) ast.NoxyType { return fields[index].Type },
+		nil,
+		tpl.Decl.TypeParams, bindings, nullOnlyParams, argIndexOf,
+	); err != nil {
+		return err
 	}
 
 	// Hint do `let` depois dos argumentos (§7: o argumento e a ancora primaria).
 	// A anotacao ja E a tupla, posicao a posicao — nao ha o que unificar, so
 	// preencher o que ficou em aberto.
 	c.applyStructHintBindings(tpl, hint, bindings, line)
+
+	// §9 "inferência só com null": mesmo gate de compileGenericCallSite,
+	// ANTES da checagem de aridade generica abaixo (cuja mensagem, para
+	// construtor, e "não foi possível inferir %s em '%s'").
+	if err := missingTypeParamNullError(line, tpl.Decl.TypeParams, bindings, nullOnlyParams); err != nil {
+		return err
+	}
 
 	args := make([]ast.NoxyType, 0, len(tpl.Decl.TypeParams))
 	for _, typeParam := range tpl.Decl.TypeParams {
