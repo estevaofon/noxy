@@ -118,8 +118,14 @@ func substituteInBlock(blk *ast.BlockStatement, b map[string]ast.NoxyType) {
 // substituteInStatement anda no clone de um statement trocando somente
 // campos de tipo (NoxyType), recursando em sub-statements/expressions para
 // alcancar anotacoes aninhadas (ex.: let dentro de if dentro de while).
-// Cobre todo case de ast.CloneStatement — nó sem case aqui e bug (panic),
-// espelhando o guard do cloner.
+// Cobre todo case de ast.CloneStatement — nó sem case aqui e bug (panic).
+//
+// A exaustividade e verificada estaticamente por
+// TestGenericWalkersCoverEveryNode (generics_walkers_guard_test.go), o
+// equivalente para estes walkers do que ast.TestClonerCoversEveryNode e para
+// o cloner: o panic sozinho so dispara se algum teste exercitar exatamente o
+// nó novo, e um nó esquecido aqui significa instancia com anotacao NAO
+// substituida — TypeParamType vazando para o pass 2.
 func substituteInStatement(s ast.Statement, b map[string]ast.NoxyType) {
 	if s == nil {
 		return

@@ -47,6 +47,78 @@ func TestMonomorphizedBytecodeEqualsHandwritten(t *testing.T) {
 	}
 }
 
+// M6 da revisao final de branch: o teste acima compara SO Code, e sobre um
+// corpo (`return arr[0]`) que nao emite nenhum opcode tipado nem povoa a
+// tabela de constantes — ou seja, nao prova a manchete da spec §1 ("o codigo
+// dentro da generica e tao especializado quanto o escrito a mao"). Este par
+// fecha as duas lacunas:
+//
+//   - corpo com aritmetica de int, e a asserção de que OP_ADD_INT (a
+//     especializacao que o compilador so emite quando SABE que os dois lados
+//     sao int) aparece DENTRO do corpo monomorfizado. Se a instancia
+//     compilasse com o tipo cru do template, `a + b` cairia no OP_ADD
+//     generico;
+//   - comparacao da tabela de CONSTANTES alem do Code: dois chunks podem ter
+//     bytes identicos e indices apontando para constantes diferentes.
+func TestMonomorphizedBytecodeMatchesHandwrittenWithTypedOpcodes(t *testing.T) {
+	const body = `
+    let rotulo: string = "soma"
+    print(rotulo)
+    return a + b + 7
+end
+`
+	generic := compiledFunction(t,
+		"func soma<T>(a: T, b: T) -> T"+body+"let total: int = soma(2, 3)",
+		"main::soma<int>")
+	hand := compiledFunction(t,
+		"func soma_int(a: int, b: int) -> int"+body+"let total: int = soma_int(2, 3)",
+		"soma_int")
+
+	genericChunk := generic.Chunk.(*chunk.Chunk)
+	handChunk := hand.Chunk.(*chunk.Chunk)
+
+	if !containsOpcode(handChunk.Code, chunk.OP_ADD_INT) {
+		t.Fatal("a versao a mao nao emitiu OP_ADD_INT — o teste perdeu o alvo")
+	}
+	if !containsOpcode(genericChunk.Code, chunk.OP_ADD_INT) {
+		t.Fatal("instancia sem OP_ADD_INT: `a + b` compilou com o tipo cru do template (§1)")
+	}
+	// containsOpcode e uma varredura de bytes crua (pode casar com um operando).
+	// O contraprova abaixo mostra que, para ESTE formato de corpo, a presenca
+	// do byte discrimina de verdade: a mesma funcao instanciada com float
+	// (que nao tem opcode aritmetico especializado) nao o contem.
+	floatInstance := compiledFunction(t,
+		"func somaf<T>(a: T, b: T) -> T\n    let rotulo: string = \"soma\"\n    print(rotulo)\n    return a + b + 7.0\nend\nlet total: float = somaf(2.0, 3.0)",
+		"main::somaf<float>")
+	if containsOpcode(floatInstance.Chunk.(*chunk.Chunk).Code, chunk.OP_ADD_INT) {
+		t.Fatal("a instancia float contem o byte de OP_ADD_INT — a sonda nao discrimina neste corpo")
+	}
+
+	if len(genericChunk.Code) != len(handChunk.Code) {
+		t.Fatalf("tamanhos de Code diferem: generico %d, a mao %d", len(genericChunk.Code), len(handChunk.Code))
+	}
+	for index := range genericChunk.Code {
+		if genericChunk.Code[index] != handChunk.Code[index] {
+			t.Fatalf("Code diverge no offset %d: %d vs %d", index, genericChunk.Code[index], handChunk.Code[index])
+		}
+	}
+
+	if len(genericChunk.Constants) != len(handChunk.Constants) {
+		t.Fatalf("tabelas de constantes diferem em tamanho: generico %d, a mao %d",
+			len(genericChunk.Constants), len(handChunk.Constants))
+	}
+	for index := range genericChunk.Constants {
+		got, want := genericChunk.Constants[index], handChunk.Constants[index]
+		if got.Type != want.Type || got.String() != want.String() {
+			t.Fatalf("constante %d diverge: generico %v (%s), a mao %v (%s)",
+				index, got.Type, got.String(), want.Type, want.String())
+		}
+	}
+	if len(genericChunk.Constants) == 0 {
+		t.Fatal("corpo nao povoou a tabela de constantes — a comparacao seria vazia")
+	}
+}
+
 func TestInferenceConflictError(t *testing.T) {
 	_, _, err := New().Compile(parse("func pick<T>(a: T, b: T) -> T\n    return a\nend\npick(1, \"x\")"))
 	if err == nil || !strings.Contains(err.Error(), "inferido como") {
