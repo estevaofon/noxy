@@ -81,27 +81,42 @@ func main() {
 		return
 	}
 
-	if *cpuProfile != "" {
-		f, err := os.Create(*cpuProfile)
+	exitCode := runFile(filename, string(content), getDir(filename), *showDisassembly, *cpuProfile, *memProfile)
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+}
+
+// runFile executa o arquivo cercado pelos profiles de CPU/memoria pedidos
+// pelas flags. runWithConfig devolve um codigo de saida em vez de chamar
+// os.Exit diretamente, entao os defers deste closure (StopCPUProfile,
+// f.Close) sempre rodam antes do processo terminar — inclusive quando o
+// programa falha no parser, no compilador ou em runtime. Sem isto, um
+// programa que termina em erro (justamente o caso mais interessante de
+// perfilar) deixava o --cpuprofile truncado e pulava o --memprofile por
+// completo, porque os.Exit não executa defers pendentes.
+func runFile(filename, input, rootPath string, showDisasm bool, cpuProfilePath, memProfilePath string) int {
+	if cpuProfilePath != "" {
+		f, err := os.Create(cpuProfilePath)
 		if err != nil {
 			fmt.Printf("Error creating CPU profile: %s\n", err)
-			os.Exit(1)
+			return 1
 		}
 		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
 			fmt.Printf("Error starting CPU profile: %s\n", err)
-			os.Exit(1)
+			return 1
 		}
 		defer pprof.StopCPUProfile()
 	}
 
-	runWithConfig(filename, string(content), getDir(filename), *showDisassembly)
+	exitCode := runWithConfig(filename, input, rootPath, showDisasm)
 
-	if *memProfile != "" {
-		f, err := os.Create(*memProfile)
+	if memProfilePath != "" {
+		f, err := os.Create(memProfilePath)
 		if err != nil {
 			fmt.Printf("Error creating memory profile: %s\n", err)
-			os.Exit(1)
+			return 1
 		}
 		runtime.GC()
 		if err := pprof.WriteHeapProfile(f); err != nil {
@@ -109,6 +124,8 @@ func main() {
 		}
 		f.Close()
 	}
+
+	return exitCode
 }
 
 func getDir(path string) string {
@@ -266,7 +283,12 @@ func verify() {
 	runWithConfig("verify.nx", input, ".", true)
 }
 
-func runWithConfig(filename string, input string, rootPath string, showDisasm bool) {
+// runWithConfig devolve o codigo de saida (0 sucesso, 1 erro) em vez de
+// chamar os.Exit diretamente — quem chama (runFile) precisa da chance de
+// rodar seus proprios defers (parar/gravar profile) antes do processo
+// terminar. Mensagens e codigos de saida observaveis pela CLI continuam
+// identicos.
+func runWithConfig(filename string, input string, rootPath string, showDisasm bool) int {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -275,14 +297,14 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		for _, msg := range p.Errors() {
 			fmt.Printf("%s\n", msg)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
 	chunk, _, err := c.Compile(program)
 	if err != nil {
 		fmt.Printf("Compiler error: %s\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	if showDisasm {
@@ -294,6 +316,7 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Printf("Runtime error: %s\n", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }

@@ -30,6 +30,16 @@ test_report(mandel_step(-0.5, 0.25))
 	if math.IsNaN(result.AsFloat) || math.IsInf(result.AsFloat, 0) {
 		t.Fatalf("resultado invalido: %v", result.AsFloat)
 	}
+	// Valor exato: 10 iteracoes de z = z^2+c a partir de z=0, c=-0.5+0.25i,
+	// reproduzidas em float64 puro (Python e Go concordam bit a bit — ver
+	// registro em .superpowers/sdd/2026-08-18-vm-perf-fase1-dispatch-e-chamadas).
+	// Sem isto, um typo trocando o operador de um opcode _FLOAT especializado
+	// (ex.: OP_MUL_FLOAT calculando a-b) passaria pela suite sem detectar,
+	// desde que o resultado continuasse sendo um float finito.
+	const want = 0x1.76b0f0f446e8ep-03
+	if result.AsFloat != want {
+		t.Fatalf("resultado incorreto: got %v (%x), want %v (%x)", result.AsFloat, result.AsFloat, want, want)
+	}
 }
 
 func TestFloatDivisionByZeroStillErrors(t *testing.T) {

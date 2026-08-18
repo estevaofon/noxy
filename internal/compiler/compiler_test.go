@@ -141,7 +141,7 @@ end`))
 	}
 }
 
-func TestCompileImmediateCallEmitsCallAndNotDefer(t *testing.T) {
+func TestCompileImmediateCallEmitsStaticCallAndNotDefer(t *testing.T) {
 	fn := compiledFunction(t, `func cleanup(value: int) -> void
 end
 func run() -> void
@@ -156,6 +156,25 @@ end`, "run")
 	}
 	if containsOpcode(code, chunk.OP_DEFER) {
 		t.Fatal("ordinary call emitted OP_DEFER")
+	}
+}
+
+// Callee dinâmico (tipo any): fnType não é *ast.FunctionType, isExact fica
+// false, e o compilador tem de cair para OP_CALL genérico — nunca
+// OP_CALL_STATIC, que pularia validateParameterModes em runtime.
+func TestCompileNonExactCallEmitsPlainCall(t *testing.T) {
+	fn := compiledFunction(t, `func cleanup(value: int) -> void
+end
+func run() -> void
+    let f: any = cleanup
+    f(7)
+end`, "run")
+	code := fn.Chunk.(*chunk.Chunk).Code
+	if containsOpcode(code, chunk.OP_CALL_STATIC) {
+		t.Fatal("non-exact call emitted OP_CALL_STATIC")
+	}
+	if !containsOpcode(code, chunk.OP_CALL) {
+		t.Fatal("non-exact call omitted OP_CALL")
 	}
 }
 

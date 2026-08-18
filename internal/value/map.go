@@ -11,6 +11,12 @@ type bindingStore struct {
 	values map[interface{}]Value
 }
 
+// Regra do gen: cada funil de mutação deste store precisa terminar com
+// store.gen.Add(1), sempre DEPOIS de aplicar a mutação — nunca antes. Um
+// bump visível antes da escrita deixaria um leitor concorrente observar a
+// nova geração com o valor velho ainda no map e cachear esse valor como se
+// fosse atual; um quinto funil que esqueça o bump reintroduz leitura
+// obsoleta em silêncio, sem nenhum teste acusando.
 func newBindingStore(values map[interface{}]Value) *bindingStore {
 	if values == nil {
 		values = make(map[interface{}]Value)

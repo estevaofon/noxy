@@ -1860,6 +1860,14 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		)
 	}
 
+	// modesProven começa igual a isExact e é derrubado se algum argumento
+	// deixa um modo (ref vs. valor) sem prova em tempo de compilação — ex.:
+	// `ref a` passado para um parâmetro `any` (areStrictTypesCompatible
+	// aceita `any` incondicionalmente, então isExact continua true, mas
+	// ninguém verificou que o valor não é uma ref). Só modesProven decide
+	// OP_CALL_STATIC; nesse caso caímos para OP_CALL, que ainda roda
+	// validateParameterModes em tempo de execução.
+	modesProven := isExact
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
@@ -1896,6 +1904,13 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			c.emitByte(byte(chunk.OP_DEREF))
 			argType = ref.ElementType
 		}
+		if isExact {
+			if _, stillRef := argType.(*ast.RefType); stillRef {
+				if _, expectedIsRef := funcType.Params[i].(*ast.RefType); !expectedIsRef {
+					modesProven = false
+				}
+			}
+		}
 		if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
 			return nil, nil, fmt.Errorf(
 				"[line %d] argument %d to '%s': expected %s, got %s",
@@ -1910,7 +1925,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 	}
 
-	c.emitCall(len(call.Arguments), emission, isExact)
+	c.emitCall(len(call.Arguments), emission, modesProven)
 	if isExact {
 		return c.currentChunk, funcType.Return, nil
 	}
