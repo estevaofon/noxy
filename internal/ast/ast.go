@@ -53,6 +53,30 @@ type PrimitiveType struct {
 
 func (t *PrimitiveType) String() string { return t.Name }
 
+// GenericType é um tipo genérico em posição de anotação: Stack<int>.
+// Name é resolvido para um template em escopo durante a compilação (§6/§8 da
+// spec); a identidade nominal final é o nome qualificado da instância.
+type GenericType struct {
+	Name string
+	Args []NoxyType
+}
+
+func (gt *GenericType) String() string {
+	parts := make([]string, len(gt.Args))
+	for i, a := range gt.Args {
+		parts[i] = a.String()
+	}
+	return gt.Name + "<" + strings.Join(parts, ", ") + ">"
+}
+
+// TypeParamType é um parâmetro de tipo (T) dentro de um template. Nó distinto
+// de PrimitiveType para não colidir com um struct real chamado T.
+type TypeParamType struct {
+	Name string
+}
+
+func (tp *TypeParamType) String() string { return tp.Name }
+
 type ArrayType struct {
 	ElementType NoxyType
 	Size        int // 0 for dynamic
@@ -377,6 +401,7 @@ func (ws *WhileStatement) String() string {
 type FunctionStatement struct {
 	Token      token.Token // The 'func' token
 	Name       string
+	TypeParams []string
 	Parameters []*Parameter
 	Body       *BlockStatement
 	ReturnType NoxyType
@@ -498,6 +523,7 @@ func (ie *IndexExpression) String() string {
 type StructStatement struct {
 	Token      token.Token // 'struct'
 	Name       string
+	TypeParams []string
 	Fields     map[string]NoxyType
 	FieldsList []*StructField
 }
