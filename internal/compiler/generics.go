@@ -781,11 +781,19 @@ func (c *Compiler) validateImportedTemplateScope(tpl *FuncTemplate, arguments []
 		if !hasDefinedType {
 			// name e ele mesmo outro template generico do modulo definidor: a
 			// dependencia certa e ele estar IMPORTADO (registrado no registry
-			// do importador), nao ter um tipo em globals — templates nunca
-			// tem tipo de valor.
-			_, isFuncDep := registry.Funcs[name]
-			_, isStructDep := registry.Structs[name]
-			if isFuncDep || isStructDep {
+			// do importador) E VINDO DO MESMO MODULO DEFINIDOR — nao ter um
+			// tipo em globals (templates nunca tem tipo de valor). O registry
+			// e um mapa FLAT por nome bare (R8): sem o check de Module aqui,
+			// um template HOMONIMO importado de um modulo DIFERENTE (`use
+			// outro select ajuda` quando quem processa<T> precisa e o
+			// 'ajuda' de 'colecoes') passaria a validacao por engano — a
+			// chamada bare-name dentro do corpo clonado (compileGenericCallSite)
+			// resolveria contra ESSE template errado em silencio, exatamente
+			// a classe de bug que o §8 existe pra prevenir.
+			funcDep, isFuncDep := registry.Funcs[name]
+			structDep, isStructDep := registry.Structs[name]
+			if (isFuncDep && funcDep.Module == moduleQualifier(tpl.Module)) ||
+				(isStructDep && structDep.Module == moduleQualifier(tpl.Module)) {
 				continue
 			}
 			return fmt.Errorf(

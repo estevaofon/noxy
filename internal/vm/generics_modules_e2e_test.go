@@ -192,3 +192,64 @@ test_report(r1 * 10 + r2)
 `)
 	expectInt(t, got, 12, "a::marca<int> e b::marca<int> nunca colidem (R8)")
 }
+
+// TestTemplateDependencyValidationChecksModuleIdentity cobre o achado da
+// revisao pos-Task-12: validateImportedTemplateScope tratava uma dependencia
+// que e ELA MESMA um template generico como satisfeita assim que QUALQUER
+// template com aquele nome BARE existisse em algum lugar do registry
+// (mapa flat por nome, R8) — sem checar se o template registrado vem do
+// MESMO modulo que processa<T> precisa. Cenario concreto: "colecoes" declara
+// processa<T> chamando ajuda<U> (mesmo modulo); um modulo NAO RELACIONADO
+// "outro" tambem exporta um generico homonimo "ajuda". Importar so
+// `processa` de colecoes e SEPARADAMENTE `ajuda` de outro fazia a validacao
+// passar (achava "outro"::ajuda no registry) e o corpo clonado de processa
+// chamaria "outro"::ajuda em silencio — a classe exata de bug que o §8
+// existe pra prevenir. Corrigido comparando o Module do template achado no
+// registry contra moduleQualifier(tpl.Module) antes de aceitar a
+// dependencia como satisfeita.
+func TestTemplateDependencyValidationChecksModuleIdentity(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "colecoes.nx", `
+func ajuda<U>(x: U) -> int
+    return 100
+end
+func processa<T>(arr: T[]) -> int
+    return ajuda(arr[0])
+end
+`)
+	write(t, root, "outro.nx", `
+func ajuda<U>(x: U) -> int
+    return 999
+end
+`)
+
+	t.Run("ajuda do modulo errado nao satisfaz a dependencia", func(t *testing.T) {
+		// processa precisa do 'ajuda' de colecoes; so o de "outro" foi
+		// importado — a validacao tem de recusar, nao aceitar o homonimo
+		// errado silenciosamente.
+		err := compileErrAtRoot(t, root, `
+use colecoes select processa
+use outro select ajuda
+let ns: int[] = [1]
+processa(ns)
+`)
+		if err == nil || !strings.Contains(err.Error(), "adicione ao select") {
+			t.Fatalf("esperava erro de dependencia (modulo errado), veio %v", err)
+		}
+	})
+
+	t.Run("ajuda do modulo certo satisfaz e e a que roda", func(t *testing.T) {
+		// "outro" importado ANTES: registry.Funcs["ajuda"] fica sobrescrito
+		// por colecoes (ultimo import vence, mesma semantica de select* já
+		// provada em TestHomonymousTemplatesDedupIsSafe) — processa's corpo
+		// e a propria validacao tem de enxergar o 'ajuda' de colecoes (valor
+		// de retorno 100), nunca o de "outro" (999).
+		got := captureVMSourceAtRoot(t, root, `
+use outro select ajuda
+use colecoes select processa, ajuda
+let ns: int[] = [1]
+test_report(processa(ns))
+`)
+		expectInt(t, got, 100, "processa deve chamar ajuda de colecoes, nao de outro")
+	})
+}
