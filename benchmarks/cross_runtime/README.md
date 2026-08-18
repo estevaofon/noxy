@@ -64,39 +64,57 @@ Três decisões, cada uma por um efeito medido neste repo:
 
 ## Resultados
 
-Noxy v0.5.0 (sobre develop @ 21e7b96) · CPython 3.13.1 · Lua 5.4.7 · Go 1.24.11
-· i7-1165G7 (4C/8T) · Windows 11 · mínimo de 9 execuções intercaladas. Números
-completos em [`results/cross_runtime.md`](results/cross_runtime.md).
+Noxy v0.6.0 (branch `perf/vm-dispatch-fase1`) · CPython 3.13.1 · Lua 5.4.7 ·
+Go 1.24.11 · i7-1165G7 (4C/8T) · Windows 11 · mínimo de 9 execuções
+intercaladas. Números completos em
+[`results/cross_runtime.md`](results/cross_runtime.md).
+
+As colunas `v0.5.0` abaixo são a rodada anterior (sobre develop @ 21e7b96),
+mantidas para mostrar o efeito da fase 1 de perf de dispatch e chamadas — o
+A/B commit a commit está em [`../RESULTS.md`](../RESULTS.md).
 
 ### Tempo total (ms)
 
-| bench | noxy | python | lua | go |
-|---|---|---|---|---|
-| `startup` | 63,0 | 94,3 | 45,5 | 47,6 |
-| `loop_arith` | 519,4 | 350,0 | 77,7 | 48,9 |
-| `map_churn` | 324,4 | 182,7 | – | – |
-| `mandelbrot` | 428,6 | 166,7 | – | – |
-| `string_ops` | 314,4 | 135,3 | – | – |
-| `bubblesort` | 666,9 | 157,1 | – | – |
-| `fib` | 804,9 | 187,7 | 93,8 | 47,8 |
+| bench | noxy v0.6.0 | noxy v0.5.0 | python | lua | go |
+|---|---|---|---|---|---|
+| `startup` | **49,6** | 63,0 | 75,4 | 38,2 | 38,5 |
+| `loop_arith` | **319,4** | 519,4 | 321,9 | 73,1 | 45,0 |
+| `map_churn` | **243,8** | 324,4 | 152,3 | – | – |
+| `mandelbrot` | **246,2** | 428,6 | 149,2 | – | – |
+| `string_ops` | **194,9** | 314,4 | 119,2 | – | – |
+| `bubblesort` | **529,8** | 666,9 | 152,3 | – | – |
+| `fib` | **380,8** | 804,9 | 171,8 | 85,9 | 40,8 |
+
+No tempo total o `loop_arith` do Noxy (319,4 ms) passou o do CPython
+(321,9 ms) — empate técnico, mas ajudado pelo piso de processo mais baixo; o
+número que interessa é o líquido abaixo.
 
 ### Tempo de execução, descontado o piso de `startup` (ms)
 
-| bench | noxy | python | lua | go | noxy ÷ python | noxy ÷ lua |
+| bench | noxy v0.6.0 | python | lua | go | ÷ python (v0.5.0 →) | ÷ lua |
 |---|---|---|---|---|---|---|
-| `loop_arith` | 456,4 | 255,7 | 32,2 | ~0 | **1,8x** | **14,2x** |
-| `map_churn` | 261,4 | 88,4 | – | – | **3,0x** | – |
-| `mandelbrot` | 365,6 | 72,4 | – | – | **5,1x** | – |
-| `string_ops` | 251,4 | 41,0 | – | – | **6,1x** | – |
-| `fib` | 741,9 | 93,4 | 48,3 | ~0 | **7,9x** | **15,4x** |
-| `bubblesort` | 603,9 | 62,8 | – | – | **9,6x** | – |
+| `loop_arith` | 269,8 | 246,5 | 34,9 | 6,5 | 1,8x → **1,1x** | **7,7x** |
+| `map_churn` | 194,2 | 76,9 | – | – | 3,0x → **2,5x** | – |
+| `mandelbrot` | 196,6 | 73,8 | – | – | 5,1x → **2,7x** | – |
+| `string_ops` | 145,3 | 43,8 | – | – | 6,1x → **3,3x** | – |
+| `fib` | 331,2 | 96,4 | 47,7 | ~0 | 7,9x → **3,4x** | **6,9x** |
+| `bubblesort` | 480,2 | 76,9 | – | – | 9,6x → **6,2x** | – |
 
 `~0` = o trabalho cabe dentro do ruído do piso de processo do runtime.
 
-### Estabilidade entre rodadas
+Queda no trabalho líquido do próprio Noxy entre as duas versões: `fib` −55,4%,
+`mandelbrot` −46,2%, `string_ops` −42,2%, `loop_arith` −40,9%, `map_churn`
+−25,7%, `bubblesort` −20,5%. O `string_ops` não foi alvo de nenhuma otimização
+desta fase — o ganho ali vem das chamadas e do laço, que qualquer programa
+paga.
+
+### Estabilidade entre rodadas (medida na v0.5.0)
 
 Cinco suítes completas em condições de carga diferentes. **O ranking é idêntico
-nas cinco**; as magnitudes variam:
+nas cinco**; as magnitudes variam. Estes números são da v0.5.0 e **não foram
+re-medidos na v0.6.0** — a rodada da v0.6.0 é uma só suíte de 9 execuções
+intercaladas, então as faixas abaixo continuam sendo a melhor estimativa
+disponível de dispersão, e devem ser lidas como tal:
 
 | bench | noxy ÷ python (faixa nas 5 rodadas) |
 |---|---|
@@ -126,56 +144,75 @@ número de três dígitos significativos.
 
 **O CPython é uma régua enganosa.** Ele não é o piso da comparação — é o meio
 da tabela. O Lua 5.4, com um VM mais simples e sem tipos estáticos, é ~2x mais
-rápido que o CPython no `fib` e ~8x no loop apertado. Contra o Lua, o Noxy fica
-**14x a 15x mais lento**; contra o CPython, 1,8x a 9,6x.
+rápido que o CPython no `fib` e ~7x no loop apertado. Na v0.6.0 o Noxy fica
+**~7x mais lento que o Lua** (era 14x–15x) e **1,1x a 6,2x mais lento que o
+CPython** (era 1,8x a 9,6x).
 
 **O custo não está distribuído por igual — ele se concentra:**
 
 - `loop_arith` é o piso: laço `while` com aritmética inteira e atribuição de
-  local, sem chamada, sem índice, sem alocação. A 1,8x do CPython, o despacho
-  de bytecode puro do Noxy é competitivo com o dele. Mas o mesmo bench está a
-  14,2x do Lua — ou seja, "competitivo com o CPython" aqui é fraqueza do
+  local, sem chamada, sem índice, sem alocação. A **1,1x** do CPython, o
+  despacho de bytecode puro do Noxy agora empata com o dele. Mas o mesmo bench
+  segue a 7,7x do Lua — "empatar com o CPython" aqui continua sendo fraqueza do
   CPython em loop numérico, não força do Noxy.
-- A partir daí o gap abre com o *tipo* de operação, não com o volume:
-  hashmap 3,0x, ponto flutuante 5,1x, string 6,1x, e o pior ponto em
-  **chamada de função (7,9x)** e **acesso indexado a array (9,6x)**.
+- O gap ainda abre com o *tipo* de operação, mas a ordem mudou: hashmap 2,5x,
+  ponto flutuante 2,7x, string 3,3x, **chamada de função 3,4x** — e o pior
+  ponto passou a ser **acesso indexado a array (6,2x)**, que era o segundo. A
+  fase 1 atacou globais, chamadas e despacho de laço; indexação de array não
+  foi tocada, e por isso subiu no ranking.
 
-**A pista mais acionável:** `fib` não toca em nenhum tipo composto — são só
-ints. O custo ali é do protocolo de chamada em si (setup de frame), não da
-validação de tipos O(n)/chamada já mapeada para maps/structs/refs.
+**A pista mais acionável era `fib`** — só ints, nenhum tipo composto, então o
+custo tinha de estar no protocolo de chamada em si. **Confirmado por profiling
+e corrigido:** resolução de globais por nome sob mutex (~15% cum) e alocação de
+`CallFrame` por chamada (1012 → 10 allocs/op) eram o grosso; `fib` caiu 55%.
+O que sobrou no perfil pós-fase é `push`/`pop` da pilha de operandos, hoje
+**24,4% do tempo de `fib`** — a maior fatia depois do despacho puro.
 
-**A inversão estrutural.** O Noxy é estaticamente tipado e compila para
-bytecode: os tipos são conhecidos em tempo de compilação, que é exatamente a
-informação que CPython e Lua pagam para descobrir em runtime. Hoje isso não
-está sendo convertido em velocidade. Some-se que o CPython 3.11+ tem um
-interpretador especializador adaptativo com inline caches nas mesmas operações
-onde o Noxy mais perde, e o formato do resultado fica consistente com **"falta
-camada de especialização"**, não com "o loop principal é ruim".
+**A inversão estrutural, parcialmente resolvida.** O Noxy é estaticamente
+tipado e compila para bytecode: os tipos são conhecidos em tempo de compilação,
+que é exatamente a informação que CPython e Lua pagam para descobrir em runtime.
+A v0.5.0 não convertia isso em velocidade; a hipótese registrada aqui era
+**"falta camada de especialização"**, não "o loop principal é ruim".
 
-**Ressalva:** essa atribuição de causa é hipótese lida a partir do formato dos
-números, **não de profiling**. Confirmar exige um `pprof` em `fib` e
-`bubblesort` antes de otimizar qualquer coisa.
+**A hipótese se confirmou.** A fase 1 (v0.6.0) construiu a primeira camada:
+chamada com modos provados estaticamente, resolução de globais cacheada,
+comparação+salto e incremento de local fundidos quando ambos os lados são
+estaticamente `int`, e aritmética `float` especializada. O gap contra o CPython
+caiu de 1,8x–9,6x para 1,1x–6,2x, e contra o Lua pela metade. A camada está
+longe de completa — indexação de array, campos de struct por índice e maps
+tipados seguem sem especialização.
 
 ## Onde o Noxy ganha
 
-- **Startup contra o CPython:** 63 ms contra 94 ms, ~1,5x mais rápido — real
-  para script curto e para o caso Lambda, onde o piso de processo é boa parte
-  do custo. A vantagem, porém, é sobre o
-  CPython, não sobre todo mundo (Lua e Go sobem em ~46 ms).
+- **Startup contra o CPython:** 49,6 ms contra 75,4 ms, ~1,5x mais rápido —
+  real para script curto e para o caso Lambda, onde o piso de processo é boa
+  parte do custo. A vantagem, porém, é sobre o CPython, não sobre todo mundo
+  (Lua e Go sobem em ~38 ms).
 - **Carga I/O-bound:** nos casos que o Noxy realmente atende hoje (servidor
   HTTP, SQLite, NoxyDB), o gargalo é I/O e a velocidade do interpretador quase
   não aparece.
-- **Ordem de grandeza:** estar 2x a 10x atrás do CPython em v0.5.0 é resultado
-  respeitável em termos absolutos. A maioria das implementações jovens fica
-  50x a 100x atrás.
+- **Ordem de grandeza:** estar 1,1x a 6,2x atrás do CPython na v0.6.0 (era 2x
+  a 10x na v0.5.0) é resultado respeitável em termos absolutos. A maioria das
+  implementações jovens fica 50x a 100x atrás.
 
 Sendo justo com o Lua: são 30 anos de tuning em C, VM baseada em registradores,
 sem GC concorrente e sem bounds check do Go. Não é meta de curto prazo — é a
-referência de onde dá para chegar.
+referência de onde dá para chegar. A distância caiu de ~15x para ~7x numa
+única fase, o que sugere que ainda há ganho estrutural na mesa antes de a
+comparação virar disputa de qualidade de codegen.
 
 ## Próximos passos sugeridos
 
 1. Escalar as cargas até o trabalho dominar o piso de processo (ver limitação
-   acima) e re-medir.
-2. `pprof` em `fib` e `bubblesort` para confirmar onde o tempo vai.
+   acima) e re-medir. **Ainda pendente** — e ficou mais urgente: com o Noxy
+   mais rápido, o trabalho líquido de vários benches encolheu em relação ao
+   piso, o que amplia a barra de erro dos ratios.
+2. ~~`pprof` em `fib` e `bubblesort`~~ — **feito** na fase 1 (flags
+   `--cpuprofile`/`--memprofile` na CLI; baseline e perfil pós-fase em
+   [`../../docs/superpowers/specs/2026-08-17-vm-perf-static-typing-research.md`](../../docs/superpowers/specs/2026-08-17-vm-perf-static-typing-research.md)).
 3. Portar os quatro benches restantes para Lua, fechando a calibração.
+4. Próximo alvo indicado pelo perfil pós-fase: layout do `Value` e `pop` sem
+   zerar escalares (`push`+`pop` = 24,4% do tempo de `fib`). Depois,
+   indexação de array — que esta rodada promoveu a pior ponto da tabela.
+5. Re-medir a estabilidade entre rodadas na v0.6.0 (as faixas registradas
+   acima são da v0.5.0).
