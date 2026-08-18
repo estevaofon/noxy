@@ -92,10 +92,14 @@ campo.transform = identity              // campo de struct → tipo do campo é 
 return identity                         // retorno declarado é o alvo
 ```
 
-**Ordem de resolução no caso argumento-de-chamada-genérica**: resolve os
-parâmetros de tipo pelos argumentos não-genéricos primeiro; se o tipo esperado do
-argumento-função ficou totalmente concreto, instancia; senão, erro pedindo
-anotação.
+**Ordem de resolução no caso argumento-de-chamada-genérica** (unificação
+bidirecional): resolve os parâmetros de tipo pelos argumentos não-genéricos
+primeiro; em seguida, o tipo esperado do argumento-função — possivelmente ainda
+**parcialmente** concreto (`func(int) -> B`) — é unificado contra a assinatura
+do template do argumento (`identity: func(T) -> T`), com os bindings propagando
+nos dois sentidos (`T=int ⇒ B=int`). Se ao final da propagação todos os
+parâmetros de tipo de ambos os lados estiverem resolvidos, ambas as instâncias
+são geradas; senão, erro pedindo anotação.
 
 **Posições onde genérica não pode virar valor** (erro de compilação, mensagem em
 §9): anotação `func` nua, `any`, e corrente de genéricos sem âncora
@@ -115,21 +119,37 @@ Decisões (com alternativas descartadas):
   caminho lento da VM — na contramão do gargalo de performance já identificado
   no cross-runtime. Monomorfização entrega bytecode idêntico ao especializado.
 - **Substituição de AST na frente do compilador** (não type-environment no core):
-  o core de 2600 linhas fica intocado; a maquinaria vive em arquivos novos.
+  a maquinaria de unificação/clonagem/registry vive em arquivos novos; o core
+  ganha **hooks enumerados** (não difusos): interceptação de call site genérico
+  em `compileCallExpression` (antes do `c.Compile(call.Function)`, que hoje
+  emite o callee antes dos argumentos — compiler.go:1850), e threading de tipo
+  esperado nas posições de target-typing do §3 — `LetStmt`, `ReturnStmt`,
+  elemento de array literal, atribuição a campo e argumento de chamada. Fora
+  desses hooks, o caminho de compilação permanece o atual.
 - **Lazy, dirigida por call sites, memoizada**: templates não geram código;
   instâncias nascem sob demanda quando um uso as exige, uma vez por tupla de
   tipos por unidade de compilação.
 
 Mecânica da instanciação:
 
-1. Call site (ou posição de target-typing) infere a tupla de tipos via unificação (§7).
-2. Nome decorado calculado: `first<int>`, `map<int,string>`, `Stack<int>`.
-   Identificadores de usuário não contêm `<`, então não há colisão possível.
+1. Call site (ou posição de target-typing) é interceptado **antes** do caminho
+   normal de compilação; os argumentos são compilados fora de ordem (bytecode
+   descartado — estamos no pass 1, ver §5) só para obter seus tipos, e a tupla
+   de tipos é inferida via unificação (§7).
+2. Nome decorado calculado, **qualificado pelo módulo definidor do template**:
+   `main::first<int>`, `colecoes::map<int,string>`, `main::Stack<int>`.
+   Identificadores de usuário não contêm `<` nem `::`, então não colidem com
+   instâncias; e duas instâncias só compartilham nome se vêm do **mesmo**
+   template com a **mesma** tupla — caso em que são o mesmo código e qualquer
+   sobrescrita é dedup idempotente (ver §8).
 3. Memo consultado; se ausente, **registra o nome decorado antes** de clonar
    (recursão e auto-referência terminam), clona o AST do template substituindo
    `T→tipo concreto` em toda posição de tipo, e agenda a declaração
    monomorfizada resultante — um `FunctionStatement`/`StructStatement` comum.
-4. O call site emite referência ao nome decorado (global comum).
+4. O nó do AST é **reescrito** para referenciar o nome decorado (`map` →
+   identificador `colecoes::map<int,string>`; idem posições de target-typing).
+   O pass 2 compila o AST reescrito pelo caminho 100% normal — nenhuma lógica
+   genérica ativa no pass 2.
 
 Cascata genérico→genérico é natural: o corpo clonado de `map<int,string>` contém
 chamadas com tipos já concretos, que disparam novas instanciações pelo mesmo
@@ -148,25 +168,45 @@ uma função não pode virar constante pré-fabricada em compile-time.
 parse → [há genéricos no programa ou nos módulos usados?]
               │não                        │sim
               ▼                           ▼
-      compila normal              Pass 1: compila descartando bytecode,
-      (custo exatamente zero)             coletando instanciações (memoizadas)
+      compila normal              Pass 1: compila descartando bytecode;
+      (custo exatamente zero)             call sites genéricos são interceptados,
+                                          argumentos compilados fora de ordem para
+                                          inferência, instâncias coletadas
+                                          (memoizadas) e o AST reescrito para os
+                                          nomes decorados (§4)
                                           ▼
                                   Pass 2: prepende as declarações monomorfizadas
                                           como statements sintéticos no topo do
                                           Program (structs antes de funções) e
-                                          compila normal
+                                          compila o AST reescrito pelo caminho
+                                          100% normal
 ```
 
 - No pass 2 tudo é código comum: instâncias viram globals via
   `OP_CLOSURE`/`OP_SET_GLOBAL`, aproveitam o cache de globals existente.
   **Zero mudança na VM.**
-- A detecção "há genéricos?" é uma varredura de declarações que já são
-  percorridas hoje (`discoverModuleExports`) — programa sem genéricos não paga
-  nada.
+- **A regra vale para todo caminho que compila um `Program`** — não só o
+  compilador do programa principal. Três outros caminhos compilam módulos e
+  precisam do mesmo tratamento "declaração genérica ⇒ registra template, pula
+  corpo" (+ two-pass quando o módulo usa os próprios templates internamente):
+  1. o **validator** de módulos em compile-time (`module_exports.go:305` compila
+     o módulo inteiro; um template com `T` livre falharia e o módulo viraria
+     "not loadable" silenciosamente);
+  2. o **runtime** do `use` (`vm/modules.go` — `compileAndRunModule` recompila
+     cada módulo com compiler novo);
+  3. os caminhos de **predeclare** (`predeclareStructs` /
+     `predeclareGlobalBindings`), que hoje registrariam o template cru com
+     `TypeParamType` nos tipos.
+- A detecção "há genéricos?" varre as declarações do programa e dos módulos
+  usados (via `loadModuleDeclarations`, com cache). Para import seletivo isso
+  carrega declarações que o predeclare atual não carrega — custo pequeno, mas
+  **medido pelo gate `startup_generics` (§11), não afirmado**. Programa sem
+  genéricos continua pulando o pass 1 inteiro.
 - Custo quando há genéricos: a compilação ~dobra, sobre uma base de poucos ms
   (startup total hoje: 63ms). Protegido por gate de benchmark (§11).
-- REPL: o two-pass aplica-se por linha de input; o registry de templates vive no
-  estado da sessão.
+- REPL: o two-pass aplica-se por linha de input; o registry de templates entra
+  no **estado compartilhado da sessão** (mudança de assinatura em
+  `NewWithState`, que hoje compartilha só globals e structs entre linhas).
 
 ## 6. Mudanças em lexer/parser/AST
 
@@ -175,7 +215,10 @@ parse → [há genéricos no programa ou nos módulos usados?]
 - `TypeParams []string` em `FunctionStatement` e `StructStatement`
   (vazio = declaração comum; caminho atual intocado).
 - `GenericType{Name string, Args []NoxyType}` para `Stack<int>` em posição de
-  tipo; `String()` produz o nome decorado.
+  tipo; `String()` produz o nome de exibição. Na resolução, `Name` é resolvido
+  para o template visível naquele escopo e o tipo passa a carregar a identidade
+  **qualificada** (§4) — dois structs `Stack` de módulos diferentes nunca
+  unificam como o mesmo tipo nominal.
 - `TypeParamType{Name string}` para `T` — nó distinto de `PrimitiveType` para
   não colidir com um struct real chamado `T`.
 
@@ -186,9 +229,10 @@ parse → [há genéricos no programa ou nos módulos usados?]
   declaração (params, retorno, campos e corpo).
 - `parseAtomicType`: `IDENT` seguido de `<` em posição de tipo → `GenericType`
   com lista de argumentos.
-- **Split de `>>`**: dentro de lista de argumentos de tipo, o token
+- **Split de `>>` e `>=`**: dentro de lista de argumentos de tipo, o token
   `SHIFT_RIGHT` é dividido em dois `GT` (truque padrão C#/Java) —
-  `Stack<Stack<int>>` parseia.
+  `Stack<Stack<int>>` parseia — e o token `GTE` é dividido em `GT` + `=`, para
+  que `let s: Stack<int>= Stack([])` (sem espaço) não quebre o parse do tipo.
 
 **Lexer**: nenhuma mudança.
 
@@ -201,6 +245,13 @@ estrutural que percorre os construtores de tipo:
   `map[string,int]` → `K=string, V=int`; idem `ref`, `chan`, `func(...)->...`,
   `GenericType` (args ponto a ponto).
 - Binding conflitante (`T=int` e depois `T=string`) → erro de unificação.
+- **`T` não pode bindar um tipo `ref`** (erro de unificação na v1): a decisão
+  own-vs-borrow do compilador é sintática sobre o tipo declarado (let `ref` sem
+  own, `OP_SET_GLOBAL_BORROW`, auto-deref de argumentos), e `T = ref Ponto`
+  mudaria a semântica de posse do corpo do template conforme a instanciação —
+  exatamente a classe de sutileza que o trabalho de CoW/RC caça. A forma
+  idiomática continua disponível: `func f<T>(r: ref T)` declara o `ref`
+  explicitamente e `T` binda o tipo do elemento.
 - Argumento de tipo desconhecido/`any` (ex.: literal `[]` vazio) não contribui
   binding — outro argumento ou o alvo do target-typing resolve.
 
@@ -230,6 +281,29 @@ declarações do módulo, que o compilador já possui. Isso proíbe por constru�
 captura de nomes do escopo do importador (quase dynamic scoping), que criaria
 código dependente de um vazamento e inviabilizaria a evolução abaixo.
 
+**Imports carregam tipos declarados (pré-requisito da inferência).** Hoje todo
+nome importado entra no compilador com tipo apagado (`c.globals[name] = nil` —
+compiler.go, caso `UseStmt`), o que faria `map(nums_importado, f)` falhar a
+inferência mesmo em código correto. A v1 muda o predeclare de imports
+(seletivo e `select *`) para registrar os **tipos declarados** dos exports,
+extraídos do AST que `loadModuleDeclarations` já possui (`LetStmt.Type`,
+assinaturas de função, structs). Benefício colateral: melhora a checagem
+estática de todo código cross-módulo, genérico ou não.
+
+**Templates não são acessíveis via namespace.** Na forma `use m` (módulo como
+objeto), `m.processa(nums)` não tem como funcionar — o template não existe como
+valor em runtime e o member access não carrega tipo estático. Erro de
+compilação dedicado (§9): "template genérico não é acessível via namespace —
+use `select`".
+
+**Instâncias exportadas são inofensivas por construção.** Instâncias são
+globals comuns e portanto entram no `ExportMap` do módulo (e em `select *`).
+Como o nome decorado é qualificado pelo módulo definidor do template (§4),
+duas instâncias só têm o mesmo nome se vêm do mesmo template com a mesma tupla
+— mesmo código; sobrescrita no import é dedup idempotente, nunca shadowing de
+código diferente. (A alternativa — filtrar nomes com `<` do
+`OP_IMPORT_FROM_ALL` — exigiria mudança na VM e foi descartada.)
+
 Consequência prática na v1: as dependências do template precisam estar visíveis
 **também** no importador —
 
@@ -237,6 +311,7 @@ Consequência prática na v1: as dependências do template precisam estar visív
 |---|---|---|
 | `use m select *` | sim — tudo entra nos globals | funciona sempre |
 | `use m select f` (seletivo) | só se importadas junto | erro acionável: "adicione X ao select ou use select *" |
+| `use m` (namespace) | n/a | template via `m.f` é erro de compilação dedicado |
 | corpo autossuficiente (params + builtins + genéricos) | irrelevante | funciona sempre |
 
 **Tabela de evolução** (cada passo só afrouxa exigências; nunca quebra código):
@@ -253,7 +328,10 @@ compromisso desta entrega.
 
 ## 9. Catálogo de erros
 
-Toda mensagem de erro de corpo carrega a **cadeia de instanciação**:
+Mensagens usam o **nome de exibição** (`soma<Ponto>`, sem o qualificador de
+módulo do §4, que é identidade interna); o módulo definidor aparece por extenso
+quando relevante ("de 'colecoes'"). Toda mensagem de erro de corpo carrega a
+**cadeia de instanciação**:
 
 ```
 [linha 12] em soma<Ponto> (instanciado na linha 40): operador '+' não definido para Ponto
@@ -267,6 +345,8 @@ Toda mensagem de erro de corpo carrega a **cadeia de instanciação**:
 | Aridade de args de tipo | `Stack<int,string>` para `Stack<T>` | "'Stack' espera 1 argumento de tipo, recebeu 2" |
 | Param de tipo fora de escopo | `T` usado fora da declaração | "tipo 'T' não declarado" |
 | Genérico aninhado | `func` genérica dentro de função | "declaração genérica só é permitida no top level" |
+| Template via namespace | `m.processa(nums)` com `use m` | "template genérico 'processa' não é acessível via namespace — use `select`" |
+| `T` bindando ref | `identity(r)` com `r: ref Ponto` resolvendo `T=ref Ponto` | "T não pode ser um tipo ref — declare o parâmetro como `ref T`" |
 | Escopo de definição (§8) | template referencia nome fora do módulo | "'processa<Ponto>' referencia 'validar', não declarado no módulo 'colecoes'" |
 | Dependência não importada (§8) | import seletivo sem a dependência | "'processa<Ponto>' precisa de 'ajuda' de 'colecoes' — adicione ao select ou use select *" |
 | Erro de corpo por instanciação | `soma(pontos)` | cadeia de instanciação, como acima |
@@ -299,10 +379,16 @@ Toda mensagem de erro de corpo carrega a **cadeia de instanciação**:
 
 **E2E `.nx`** (entram no corpus do runner) — map/filter/reduce; `Stack<T>` com
 push/pop via funções; `Node<T>` lista ligada; construtor com target-typing
-(`Stack([])`); todas as posições de target-typing do §3; cross-módulo
-(`select *`, seletivo com e sem dependências); genérico chamando genérico;
-`Stack<Stack<int>>`; recursão genérica. **Negativos**: um exemplo por linha do
-catálogo do §9.
+(`Stack([])`); todas as posições de target-typing do §3 (incluindo unificação
+bidirecional `map(nums, identity)`); cross-módulo (`select *`, seletivo com e
+sem dependências); **dois módulos com templates homônimos instanciados na mesma
+tupla via `select *`** (prova do dedup por nome qualificado, §8); inferência
+sobre **dados importados** (prova do predeclare tipado, §8); **template dentro
+de módulo** passando pelo validator e pelo `compileAndRunModule` (módulo que
+usa os próprios genéricos internamente); genérico chamando genérico;
+`Stack<Stack<int>>`; `Stack<int>=` sem espaço (split de `GTE`); recursão
+genérica. **Negativos**: um exemplo por linha do catálogo do §9 — incluindo
+`use m` namespace e `T` bindando ref.
 
 **Benchmarks com gate** —
 - `startup_generics`: variante do bench de startup com programa usando
@@ -329,6 +415,6 @@ assimetria com builtins acabou.
 | Risco | Mitigação |
 |---|---|
 | Explosão de código (muitas instâncias) | memo por unidade de compilação; instâncias são pequenas; aceito na v1 — medir antes de otimizar |
-| Compile time em programas grandes | detecção pula o pass 1 sem genéricos; gate `startup_generics`; saídas conhecidas (cache de descoberta) se o número aparecer |
+| Compile time em programas grandes | detecção pula o pass 1 sem genéricos (mas carrega declarações de módulos em import seletivo — custo coberto pelo gate); gate `startup_generics`; saídas conhecidas (cache de descoberta) se o número aparecer |
 | Qualidade de mensagens de erro | catálogo do §9 é requisito de aceite, com teste negativo por linha |
 | Interação com CoW/validação runtime | identidades nominais decoradas usam o caminho existente; testes E2E de semântica de valor com structs genéricos |
