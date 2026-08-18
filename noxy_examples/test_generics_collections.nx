@@ -1,0 +1,105 @@
+// test_generics_collections.nx — dogfood de collections.nx (spec §11): map_arr
+// /filter/reduce/contains_val genericos exercitados com int E string, incluindo
+// A != B (map_arr) e T != R (reduce), provando que a monomorfizacao cobre
+// combinacoes de tipos distintas na mesma tupla de chamadas.
+use collections select *
+use sys select *
+
+let passed: int = 0
+let failed: int = 0
+
+func check(name: string, condition: bool) -> void
+    if condition then
+        passed = passed + 1
+        print("PASS: " + name)
+    else
+        failed = failed + 1
+        print("FAIL: " + name)
+    end
+end
+
+// --- Helpers de int ---
+func double_int(x: int) -> int
+    return x * 2
+end
+
+func is_even(x: int) -> bool
+    return x % 2 == 0
+end
+
+func add_int(acc: int, x: int) -> int
+    return acc + x
+end
+
+func int_to_label(x: int) -> string
+    return "n" + to_str(x)
+end
+
+// --- Helpers de string ---
+func shout(s: string) -> string
+    return s + "!"
+end
+
+func is_long(s: string) -> bool
+    return strlen(s) > 3
+end
+
+func concat_str(acc: string, x: string) -> string
+    return acc + x
+end
+
+func sum_len(acc: int, s: string) -> int
+    return acc + strlen(s)
+end
+
+print("=== GENERICS COLLECTIONS TESTS ===")
+
+// --- int[] ---
+let nums: int[] = [1, 2, 3, 4, 5]
+
+let doubled: int[] = map_arr(nums, double_int)
+check("map_arr int->int", doubled == [2, 4, 6, 8, 10])
+
+let evens: int[] = filter(nums, is_even)
+check("filter int", evens == [2, 4])
+
+let total: int = reduce(nums, 0, add_int)
+check("reduce int->int", total == 15)
+
+check("contains_val int hit", contains_val(nums, 3))
+check("contains_val int miss", !contains_val(nums, 99))
+
+// A != B: map_arr de int[] para string[]
+let labels: string[] = map_arr(nums, int_to_label)
+check("map_arr int->string (A!=B)", labels == ["n1", "n2", "n3", "n4", "n5"])
+
+// --- string[] ---
+let words: string[] = ["ana", "bob", "charlie", "dan"]
+
+let shouted: string[] = map_arr(words, shout)
+check("map_arr string->string", shouted == ["ana!", "bob!", "charlie!", "dan!"])
+
+let long_words: string[] = filter(words, is_long)
+check("filter string", long_words == ["charlie"])
+
+let joined: string = reduce(words, "", concat_str)
+check("reduce string->string", joined == "anabobcharliedan")
+
+check("contains_val string hit", contains_val(words, "bob"))
+check("contains_val string miss", !contains_val(words, "zzz"))
+
+// T != R: reduce de string[] para int (soma de comprimentos)
+let lengths_sum: int = reduce(words, 0, sum_len)
+check("reduce string->int (T!=R)", lengths_sum == 16)
+
+print("")
+print("=== RESULTS ===")
+print("Passed: " + to_str(passed))
+print("Failed: " + to_str(failed))
+
+if failed > 0 then
+    print("SOME GENERICS COLLECTIONS TESTS FAILED")
+    sys_exit(1)
+end
+
+print("ALL GENERICS COLLECTIONS TESTS PASSED")

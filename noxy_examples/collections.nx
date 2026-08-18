@@ -1,0 +1,40 @@
+// collections: o modulo que a assimetria com builtins impedia de existir.
+// map/filter/reduce/contains_val genericos, escritos em Noxy puro — a mesma
+// classe de abstracao que antes so existia como builtin (append/length/contains).
+// Nota: `map` e palavra reservada da linguagem (tipo `map[K,V]`), entao a
+// funcao de transformacao chama-se `map_arr` — filter/reduce/contains_val nao
+// colidem com nenhuma keyword.
+func map_arr<A, B>(arr: A[], fn: func(A) -> B) -> B[]
+    let out: B[] = []
+    for item in arr do
+        append(out, fn(item))
+    end
+    return out
+end
+
+func filter<T>(arr: T[], keep: func(T) -> bool) -> T[]
+    let out: T[] = []
+    for item in arr do
+        if keep(item) then
+            append(out, item)
+        end
+    end
+    return out
+end
+
+func reduce<T, R>(arr: T[], init: R, fn: func(R, T) -> R) -> R
+    let acc: R = init
+    for item in arr do
+        acc = fn(acc, item)
+    end
+    return acc
+end
+
+func contains_val<T>(arr: T[], alvo: T) -> bool
+    for item in arr do
+        if item == alvo then
+            return true
+        end
+    end
+    return false
+end
