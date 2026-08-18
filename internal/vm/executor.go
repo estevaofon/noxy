@@ -999,14 +999,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
-		case chunk.OP_LESS_FLOAT:
-			// Espelho float de OP_LESS_INT.
-			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat < vm.stack[vm.stackTop-1].AsFloat)
-			vm.stackTop--
 		case chunk.OP_LESS_INT:
 			// Inline pop/pop/push
 			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsInt < vm.stack[vm.stackTop-1].AsInt)
 			vm.stack[vm.stackTop-1] = value.Value{}
+			vm.stackTop--
+		case chunk.OP_LESS_FLOAT:
+			// Espelho float de OP_LESS_INT.
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat < vm.stack[vm.stackTop-1].AsFloat)
 			vm.stackTop--
 		case chunk.OP_EQUAL:
 			b := vm.pop()

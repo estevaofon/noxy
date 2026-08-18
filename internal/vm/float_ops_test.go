@@ -2,6 +2,7 @@ package vm
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -41,5 +42,11 @@ f(1.0, 0.0)
 `)
 	if err == nil {
 		t.Fatal("divisao float por zero deveria continuar sendo erro de runtime")
+	}
+	// A mensagem (nao so a presenca de erro) precisa bater com o caminho
+	// generico (ramo float de OP_DIVIDE): sem isto, um typo introduzido em
+	// so um dos dois handlers passaria despercebido pela suite.
+	if !strings.Contains(err.Error(), "division by zero") {
+		t.Fatalf("mensagem de erro divergiu do caminho generico: esperava conter %q, obtido %q", "division by zero", err.Error())
 	}
 }

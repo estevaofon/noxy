@@ -49,26 +49,33 @@ end
 
 // TestMixedIntFloatArithmeticStaysGeneric prova que um operando int e outro
 // float NAO disparam nem OP_*_INT nem OP_*_FLOAT: soh o caminho generico faz
-// a promocao numerica int->float.
+// a promocao numerica int->float. Cobre todos os seis operadores que
+// ganharam o ramo isFloat (+ - * / > <), nao so os quatro aritmeticos: o
+// gate isFloat e um unico bool computado antes do switch, mas cada braco do
+// switch e um site de emissao separado, entao cada um merece sua propria
+// prova.
 func TestMixedIntFloatArithmeticStaysGeneric(t *testing.T) {
 	cases := []struct {
-		operator string
-		generic  chunk.OpCode
-		intOp    chunk.OpCode
-		floatOp  chunk.OpCode
+		operator   string
+		returnType string
+		generic    chunk.OpCode
+		intOp      chunk.OpCode
+		floatOp    chunk.OpCode
 	}{
-		{"+", chunk.OP_ADD, chunk.OP_ADD_INT, chunk.OP_ADD_FLOAT},
-		{"-", chunk.OP_SUBTRACT, chunk.OP_SUB_INT, chunk.OP_SUB_FLOAT},
-		{"*", chunk.OP_MULTIPLY, chunk.OP_MUL_INT, chunk.OP_MUL_FLOAT},
-		{"/", chunk.OP_DIVIDE, chunk.OP_DIV_INT, chunk.OP_DIV_FLOAT},
+		{"+", "float", chunk.OP_ADD, chunk.OP_ADD_INT, chunk.OP_ADD_FLOAT},
+		{"-", "float", chunk.OP_SUBTRACT, chunk.OP_SUB_INT, chunk.OP_SUB_FLOAT},
+		{"*", "float", chunk.OP_MULTIPLY, chunk.OP_MUL_INT, chunk.OP_MUL_FLOAT},
+		{"/", "float", chunk.OP_DIVIDE, chunk.OP_DIV_INT, chunk.OP_DIV_FLOAT},
+		{">", "bool", chunk.OP_GREATER, chunk.OP_GREATER_INT, chunk.OP_GREATER_FLOAT},
+		{"<", "bool", chunk.OP_LESS, chunk.OP_LESS_INT, chunk.OP_LESS_FLOAT},
 	}
 	for _, tc := range cases {
 		t.Run(tc.operator, func(t *testing.T) {
 			source := fmt.Sprintf(`
-func f(a: int, b: float) -> float
+func f(a: int, b: float) -> %s
     return a %s b
 end
-`, tc.operator)
+`, tc.returnType, tc.operator)
 			fn := compiledFunction(t, source, "f")
 			code := fn.Chunk.(*chunk.Chunk).Code
 
