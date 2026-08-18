@@ -85,10 +85,25 @@ func (c *Compiler) registryOrInit() *GenericRegistry {
 type instanceQueue struct {
 	memo    map[string]bool
 	ordered []ast.Statement
+	// structInstances e o memo das instancias de STRUCT — e um mapa para a
+	// declaracao, nao um set: no acerto de memo ainda precisamos registrar a
+	// instancia em c.structs/c.globals do compilador atual (cada filho tem
+	// copias proprias dessas tabelas), e para isso a declaracao tem de estar a
+	// mao. Registrar a entrada aqui ANTES de resolver os campos e o que faz
+	// auto-referencia (`next: ref Node<T>`) terminar.
+	structInstances map[string]*ast.StructStatement
+	// structKeys guarda a tupla de cada instancia de struct para o caminho
+	// inverso da resolucao (expandInstanceNames): unificar a anotacao generica
+	// do template contra um tipo concreto que ja carrega o nome qualificado.
+	structKeys map[string]structInstanceKey
 }
 
 func newInstanceQueue() *instanceQueue {
-	return &instanceQueue{memo: make(map[string]bool)}
+	return &instanceQueue{
+		memo:            make(map[string]bool),
+		structInstances: make(map[string]*ast.StructStatement),
+		structKeys:      make(map[string]structInstanceKey),
+	}
 }
 
 // instancesOrInit devolve a fila da compilacao corrente. Dentro do pass 1 ela
@@ -240,7 +255,7 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 		if err != nil {
 			return err
 		}
-		if err := unify(expected, actual, bindings); err != nil {
+		if err := c.unifyAnnotation(expected, actual, bindings); err != nil {
 			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
 		}
 	}
@@ -249,7 +264,7 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 	// vazio()`). Depois dos argumentos, por decisao da spec §7 — o argumento e
 	// a ancora primaria, o alvo do target-typing e complemento.
 	if hint != nil && containsTypeParam(tpl.Decl.ReturnType) {
-		if err := unify(tpl.Decl.ReturnType, hint, bindings); err != nil {
+		if err := c.unifyAnnotation(tpl.Decl.ReturnType, hint, bindings); err != nil {
 			return fmt.Errorf("[line %d] retorno de '%s': %v", line, base, err)
 		}
 	}
@@ -288,13 +303,28 @@ func (c *Compiler) ensureFunctionInstance(tpl *FuncTemplate, bindings map[string
 	}
 	name := instanceName(tpl.Module, base, arguments)
 
+	// A assinatura da instancia entra em globals RESOLVIDA (§4, terceira familia
+	// de hooks): um parametro `Caixa<T>` vira `main::Caixa<int>`, nao
+	// `Caixa<int>`. Sem isso o call site reescrito leria um tipo cuja identidade
+	// nominal nao existe em c.structs, e a checagem de tipos do pass 1
+	// divergiria da do pass 2 (que le a assinatura ja reescrita do clone).
+	// Resolver aqui tambem garante que a instancia de struct entre na fila ANTES
+	// da instancia de funcao que a menciona.
 	parameterTypes := make([]ast.NoxyType, len(tpl.Decl.Parameters))
 	for index, parameter := range tpl.Decl.Parameters {
-		parameterTypes[index] = substituteType(parameter.Type, bindings)
+		resolved, err := c.resolveAnnotation(substituteType(parameter.Type, bindings), line)
+		if err != nil {
+			return "", nil, err
+		}
+		parameterTypes[index] = resolved
+	}
+	resolvedReturn, err := c.resolveAnnotation(substituteType(tpl.Decl.ReturnType, bindings), line)
+	if err != nil {
+		return "", nil, err
 	}
 	instanceType := &ast.FunctionType{
 		Params: parameterTypes,
-		Return: substituteType(tpl.Decl.ReturnType, bindings),
+		Return: resolvedReturn,
 	}
 
 	// Sempre registra o tipo no compilador ATUAL, inclusive no acerto de memo:
@@ -367,6 +397,13 @@ func (c *Compiler) typeOfDiscardedExpression(expr ast.Expression) (ast.NoxyType,
 // aparece no retorno. Fica armado apenas quando o valor e, de fato, uma
 // chamada direta a um template — assim nenhuma outra expressao consome o hint
 // por engano.
+//
+// O mesmo hint serve aos dois tipos de site, com leituras diferentes: o site de
+// FUNCAO unifica a anotacao contra o tipo de retorno do template; o site de
+// CONSTRUTOR de struct le nela a tupla da instancia (applyStructHintBindings).
+// Nenhum dos dois pode consumir o hint do outro — cada um limpa o campo na
+// entrada, e o hint so e armado quando o valor do `let` e uma chamada direta ao
+// template daquele mesmo tipo.
 func (c *Compiler) setGenericReturnHint(target ast.NoxyType, valueExpr ast.Expression) {
 	c.genericReturnHint = nil
 	if !c.pass1 || target == nil {
@@ -380,7 +417,10 @@ func (c *Compiler) setGenericReturnHint(target ast.NoxyType, valueExpr ast.Expre
 	if !ok {
 		return
 	}
-	if _, isTemplate := c.registryOrInit().Funcs[callee.Value]; !isTemplate {
+	registry := c.registryOrInit()
+	_, isFunctionTemplate := registry.Funcs[callee.Value]
+	_, isStructTemplate := registry.Structs[callee.Value]
+	if !isFunctionTemplate && !isStructTemplate {
 		return
 	}
 	c.genericReturnHint = target

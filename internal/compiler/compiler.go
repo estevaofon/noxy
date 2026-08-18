@@ -77,6 +77,8 @@ type Compiler struct {
 	// genericReturnHint carrega a anotacao do `let` envolvente para o proximo
 	// call site generico (target-typing do §7). Armado em setGenericReturnHint,
 	// consumido e limpo em compileGenericCallSite.
+	// O mesmo campo serve ao construtor de struct generico (`let c: Caixa<int> =
+	// Caixa([])`), consumido e limpo em compileGenericConstructorSite.
 	genericReturnHint ast.NoxyType
 }
 
@@ -180,7 +182,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		for name, bindingType := range c.globals {
 			sequentialBindings[name] = bindingType
 		}
-		c.predeclareStructs(n.Statements)
+		if err := c.predeclareStructs(n.Statements); err != nil {
+			return nil, nil, err
+		}
 		if err := c.predeclareGlobalBindings(n.Statements); err != nil {
 			return nil, nil, err
 		}
@@ -206,6 +210,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.LetStmt:
 		c.setLine(n.Token.Line)
+		// §4, terceira familia de hooks: a anotacao pode nomear instancias de
+		// struct generico (`Caixa<int>`, `Caixa<int>[]`, `ref Node<int>`). A
+		// resolucao vem ANTES de tudo — antes do hint, do emitDefaultInit e da
+		// checagem de tipos — e reescreve n.Type in-place para o nome
+		// qualificado, que e o que o pass 2 compila.
+		resolvedAnnotation, err := c.resolveAnnotation(n.Type, n.Token.Line)
+		if err != nil {
+			return nil, nil, err
+		}
+		n.Type = resolvedAnnotation
+
 		var valType ast.NoxyType
 		// Compile initializer
 		if n.Value != nil {
@@ -683,6 +698,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, nil, nil
 		}
 		c.setLine(n.Token.Line)
+		// §4, terceira familia de hooks: um campo pode anotar um struct generico
+		// (`c: Caixa<int>`), inclusive num struct comum. Resolve in-place nos dois
+		// espelhos antes de derivar o valor do struct e o tipo do construtor.
+		if err := c.resolveStructFieldAnnotations(n, n.Token.Line); err != nil {
+			return nil, nil, err
+		}
 		if c.scopeDepth > 0 {
 			prior, existed := c.structs[n.Name]
 			c.scopedStructs = append(c.scopedStructs, scopedStructBinding{
@@ -1362,7 +1383,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// nascimento, a captura por closure produz caixa possuidora e o rebind
 		// usa o store contado — Owns volta a coincidir com "tipo nao-ref".
 		c.emitByte(byte(chunk.OP_OWN_LOCAL))
-		c.addOwnedLocal(n.Identifier, nil) // User variable (consumes Item from stack)
+		// Ruling R5: a variavel do laco recebe o tipo do elemento da colecao
+		// quando ele e estaticamente conhecido (array -> elemento, map -> chave,
+		// que e o que o laco produz depois da reescrita para `keys(m)`). Colecao
+		// de tipo desconhecido continua produzindo variavel sem tipo — nil aqui
+		// significa "nao sei", como antes. Sem isso nenhuma chamada generica
+		// ancorada na variavel do laco consegue inferir T.
+		c.addOwnedLocal(n.Identifier, forEachElementType(colType)) // User variable (consumes Item from stack)
 
 		// 9. Compile Body
 		_, _, err = c.Compile(n.Body)
@@ -1711,6 +1738,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 		c.setLine(n.Token.Line)
 
+		// §4, terceira familia de hooks: parametro/retorno de funcao NAO-generica
+		// podem anotar um struct generico (`func conta(cs: Caixa<int>[]) -> int`).
+		// Resolve antes de registrar o tipo do global — o tipo publicado tem de ser
+		// o mesmo que o pass 2 vai derivar do AST reescrito.
+		if err := c.resolveSignatureAnnotations(n.Parameters, &n.ReturnType, n.Token.Line); err != nil {
+			return nil, nil, err
+		}
 		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
@@ -1734,6 +1768,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		fnName := n.Name
 		if fnName == "" {
 			fnName = "anonymous"
+		}
+		// Mesmo hook do FunctionStatement: a assinatura de um literal tambem pode
+		// anotar instancias de struct generico.
+		if err := c.resolveSignatureAnnotations(n.Parameters, &n.ReturnType, n.Token.Line); err != nil {
+			return nil, nil, err
 		}
 
 		fnObj, fnCompiler, err := c.compileFunction(fnName, n.Parameters, n.Body, n.ReturnType) // Literal return type? n.ReturnType? FunctionLiteral needs return type field if typed. Assuming inferred/any if nil.
@@ -1904,9 +1943,18 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	// Um local/parametro que sombreia o nome do template tambem nao dispara —
 	// quem vence e o binding mais interno, como no caminho normal.
 	if callee, ok := call.Function.(*ast.Identifier); ok {
-		if template, isTemplate := c.registryOrInit().Funcs[callee.Value]; isTemplate {
+		registry := c.registryOrInit()
+		if template, isTemplate := registry.Funcs[callee.Value]; isTemplate {
 			if slot, _ := c.resolveLocal(callee.Value); slot == -1 {
 				if err := c.compileGenericCallSite(call, callee, template); err != nil {
+					return nil, nil, err
+				}
+			}
+		} else if structTemplate, isStructTemplate := registry.Structs[callee.Value]; isStructTemplate {
+			// Construtor de struct generico: `Caixa(41)`. Mesmo hook, mesma regra
+			// de sombreamento — um local com o nome do template vence.
+			if slot, _ := c.resolveLocal(callee.Value); slot == -1 {
+				if err := c.compileGenericConstructorSite(call, callee, structTemplate); err != nil {
 					return nil, nil, err
 				}
 			}

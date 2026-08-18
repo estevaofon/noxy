@@ -59,6 +59,132 @@ test_report(run())
 	expectInt(t, got, 42, "chamada generica dentro de corpo nao-generico")
 }
 
+// §4 terceira familia de hooks: struct generico instanciado por construtor
+// posicional; a instancia e um struct comum no pass 2 (member access, mutacao
+// de campo, validacao CoW por identidade nominal do nome qualificado).
+func TestGenericStructConstructorAndAccess(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+let c: Caixa<int> = Caixa(41)
+c.valor = c.valor + 1
+test_report(c.valor)
+`)
+	expectInt(t, got, 42, "Caixa<int> construida e mutada")
+}
+
+func TestGenericStructAnnotationOnlyPositions(t *testing.T) {
+	// §11: instanciacao por anotacao pura — sem call site de construtor
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+let vazias: Caixa<int>[] = []
+let semInit: Caixa<int>
+func conta(cs: Caixa<int>[]) -> int
+    return length(cs)
+end
+test_report(conta(vazias))
+`)
+	expectInt(t, got, 0, "anotacoes puras instanciam o struct")
+}
+
+func TestGenericStructSelfReference(t *testing.T) {
+	got := captureVMSource(t, `
+struct Node<T>
+    value: T,
+    next: ref Node<T>
+end
+let n2: Node<int> = Node(2, null)
+let n1: Node<int> = Node(1, ref n2)
+test_report(n1.next.value)
+`)
+	expectInt(t, got, 2, "lista ligada generica")
+}
+
+func TestNestedGenericStruct(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+let dupla: Caixa<Caixa<int>> = Caixa(Caixa(9))
+test_report(dupla.valor.valor)
+`)
+	expectInt(t, got, 9, "Caixa<Caixa<int>>")
+}
+
+// §10: a instancia e um tipo nominal comum, entao a semantica de valor (CoW) e
+// a validacao de tipo em runtime valem para ela sem nenhuma mudanca de VM — a
+// copia nao alcanca o original.
+func TestGenericStructValueSemantics(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+let a: Caixa<int> = Caixa(1)
+let b: Caixa<int> = a
+b.valor = 99
+test_report(a.valor)
+`)
+	expectInt(t, got, 1, "mutacao da copia nao alcanca o original")
+}
+
+// §11: Stack<T> manipulada por funcoes genericas. Duas coisas de uma vez: o
+// construtor sem ancora nos argumentos (`Pilha([])`, resolvido pelo hint da
+// anotacao do `let`) e a unificacao de `Pilha<T>` — a anotacao do template —
+// contra o tipo concreto `main::Pilha<int>` do argumento.
+func TestGenericStructWithGenericFunctions(t *testing.T) {
+	got := captureVMSource(t, `
+struct Pilha<T>
+    itens: T[]
+end
+func empilha<T>(p: ref Pilha<T>, v: T)
+    append(p.itens, v)
+end
+func topo<T>(p: Pilha<T>) -> T
+    return p.itens[length(p.itens) - 1]
+end
+let p: Pilha<int> = Pilha([])
+empilha(ref p, 7)
+empilha(ref p, 42)
+test_report(topo(p))
+`)
+	expectInt(t, got, 42, "Pilha<int> empilhada e lida por funcoes genericas")
+}
+
+// Instancia como elemento de array e valor de map: as anotacoes compostas
+// preservam a estrutura externa e a runtime type info do container e completa.
+func TestGenericStructInsideContainers(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+let cs: Caixa<int>[] = [Caixa(1), Caixa(2)]
+let m: map[string, Caixa<int>] = {"a": Caixa(39)}
+test_report(cs[1].valor + m["a"].valor)
+`)
+	expectInt(t, got, 41, "instancia dentro de array e de map")
+}
+
+// R5: a variavel de for-each ganha o tipo do elemento da colecao quando ele e
+// estaticamente conhecido — sem isso a variavel entra com tipo nil e nenhuma
+// chamada generica ancorada nela consegue inferir T.
+func TestGenericCallAnchoredOnLoopVariable(t *testing.T) {
+	got := captureVMSource(t, `
+func identity<T>(x: T) -> T
+    return x
+end
+let nums: int[] = [10, 20, 12]
+let total: int = 0
+for v in nums do
+    total = total + identity(v)
+end
+test_report(total)
+`)
+	expectInt(t, got, 42, "T=int inferido da variavel do for-each")
+}
+
 func TestGenericCallsGeneric(t *testing.T) {
 	got := captureVMSource(t, `
 func first<T>(arr: T[]) -> T
