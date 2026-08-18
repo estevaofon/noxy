@@ -18,6 +18,11 @@ type Parser struct {
 	infixParseFns  map[token.TokenType]func(ast.Expression) ast.Expression
 
 	errors []string
+
+	// activeTypeParams contem os nomes de parametros de tipo (T, U, ...) em
+	// escopo durante o parse de uma declaracao generica (func ou struct).
+	// nil quando fora de uma declaracao generica.
+	activeTypeParams map[string]bool
 }
 
 func New(l *lexer.Lexer) *Parser {
@@ -693,6 +698,9 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 	case token.BYTES: // This is Literal 'b"..."'.
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.IDENTIFIER:
+		if p.activeTypeParams[p.curToken.Literal] {
+			return &ast.TypeParamType{Name: p.curToken.Literal}
+		}
 		name := p.curToken.Literal
 		// Support dot notation for types (e.g. io.File)
 		for p.peekTokenIs(token.DOT) {
@@ -1089,6 +1097,28 @@ func (p *Parser) parseCaseBody() *ast.BlockStatement {
 	return block
 }
 
+// parseTypeParameters consome <T, U> apos o nome de uma declaracao generica.
+// curToken esta no nome; ao retornar, curToken esta no GT final.
+func (p *Parser) parseTypeParameters() []string {
+	p.nextToken() // eat <
+	names := []string{}
+	for {
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
+		names = append(names, p.curToken.Literal)
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+			continue
+		}
+		break
+	}
+	if !p.expectPeek(token.GT) {
+		return nil
+	}
+	return names
+}
+
 func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 	stmt := &ast.FunctionStatement{Token: p.curToken}
 
@@ -1096,6 +1126,19 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 		return nil
 	}
 	stmt.Name = p.curToken.Literal
+
+	// Parametros de tipo opcionais: func nome<T, U>(...)
+	if p.peekTokenIs(token.LT) {
+		stmt.TypeParams = p.parseTypeParameters()
+		if stmt.TypeParams == nil {
+			return nil
+		}
+		p.activeTypeParams = map[string]bool{}
+		for _, name := range stmt.TypeParams {
+			p.activeTypeParams[name] = true
+		}
+		defer func() { p.activeTypeParams = nil }()
+	}
 
 	if !p.expectPeek(token.LPAREN) {
 		return nil
@@ -1440,9 +1483,22 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 	}
 	stmt.Name = p.curToken.Literal
 
+	// Parametros de tipo opcionais: struct Nome<T, U>
+	if p.peekTokenIs(token.LT) {
+		stmt.TypeParams = p.parseTypeParameters()
+		if stmt.TypeParams == nil {
+			return nil
+		}
+		p.activeTypeParams = map[string]bool{}
+		for _, name := range stmt.TypeParams {
+			p.activeTypeParams[name] = true
+		}
+		defer func() { p.activeTypeParams = nil }()
+	}
+
 	stmt.FieldsList = []*ast.StructField{}
 
-	p.nextToken() // move past Name.
+	p.nextToken() // move past Name (or GT, when generic).
 
 	for !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
 		if p.curTokenIs(token.NEWLINE) || p.curTokenIs(token.COMMA) {
