@@ -80,9 +80,36 @@ colateral de pressão de GC do novo layout do `CallFrame` (array de valores
 reusado pode manter o slot anterior vivo por mais tempo antes de ser
 sobrescrito, mudando o que o GC varre por chamada); alternativa é ruído puro
 — é o bench de menor escala absoluta da suíte (~230-250ms), o que amplia
-qualquer jitter de agendamento em pontos percentuais. **Não investigado a
-fundo nem corrigido** — fora do mandato desta task (medir e reportar, não
-consertar); decisão de merge é do controller.
+qualquer jitter de agendamento em pontos percentuais.
+
+**Bissecção posterior (2026-08-18)** resolveu a dúvida ruído-vs-real e
+descartou a hipótese de ruído puro. Protocolo: worktree destacada, quatro
+commits medidos intercalados (`f107508` baseline, `bb8a773` = tudo antes do
+reuso de `CallFrame`, `d460e5a` = reuso de frame já corrigido, `6d991e5` =
+head), 3 sessões (N=15, N=20, N=20), com **controle de rótulo duplicado
+apontando para o mesmo binário** nas sessões 2-3 para medir o piso de ruído.
+
+- **Piso de ruído** (mediana × mediana, mesmo executável, mesma sessão):
+  **~1,2-1,4%**. Amostras cruas são bem mais dispersas (desvio ~6-12% da
+  mediana em trechos limpos, até ~20-28% de CV quando houve contaminação de
+  fundo), o que explica a dispersão entre sessões da tabela acima.
+- **A regressão é real e reprodutível**: baseline→head deu +9,97%, +9,78% e
+  +6,47% nas três sessões (média **+8,7%**), ordem de grandeza acima do piso
+  — consistente com os +7,0% da tabela.
+- **A atribuição a um único commit NÃO fecha**: o passo
+  `bb8a773`→`d460e5a` (reuso de `CallFrame`) concentrou todo o salto na
+  sessão 1 (+14,9%), mas só +1,4% e +4,0% nas sessões 2-3, onde a regressão
+  se acumulou gradualmente ao longo dos commits seguintes. Na média o reuso
+  de frame ainda é o maior contribuinte isolado (+6,8pp de +8,7pp) e é por
+  onde começar, mas provavelmente não é a causa única — o padrão é
+  compatível com efeito difuso de alocação/GC espalhado por vários commits
+  da fase, o que também explica o profile não mostrar nenhum símbolo da
+  fase 1 no caminho quente.
+
+Detalhes e medições cruas:
+`.superpowers/sdd/2026-08-18-vm-perf-fase1-dispatch-e-chamadas/share-mutate-bisect.md`
+(diretório de trabalho, não versionado). **Regressão aceita e rastreada, não
+corrigida nesta fase** — ver Interpretação.
 
 ### Perfil de cada bench
 
