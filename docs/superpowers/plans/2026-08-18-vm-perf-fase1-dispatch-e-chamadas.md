@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **Opcodes só por APPEND** ao fim do bloco `const` de `internal/chunk/chunk.go` — nunca renumerar (comentário em `OP_MARK_SHARED` confirma a regra; módulos cacheados dependem disso).
-- **Semântica idêntica**: mesmos outputs, mesmos erros com as mesmas mensagens. O corpus `noxy_examples/` (130/130 via `go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx`) é o juiz.
+- **Semântica idêntica**: mesmos outputs, mesmos erros com as mesmas mensagens. O corpus `noxy_examples/` (164/164 via `go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx` — baseline medido em 2026-08-18 na Task 1; o juiz é "0 falhas", o total cresce quando exemplos novos entram) é o juiz.
 - **RC intocado**: nenhum funil retain/release muda de lugar ou de contagem (spec CoW-RC §4.2). Os opcodes novos deste plano só operam sobre escalares (int/float), que não participam de RC.
 - **Gates de benchmark** (protocolo de `benchmarks/RESULTS.md`, mediana de 9 execuções intercaladas): `bench_typed_call_map`, `bench_share_mutate`, `bench_call_light`, `bench_conway` não podem regredir >5% vs `develop`.
 - `go test ./...` verde; `go test ./internal/value -race` e `go test ./internal/vm -race` verdes; `go vet ./...` limpo (o `sync.Once` novo em `Chunk` exige checagem copylocks).
@@ -379,7 +379,7 @@ go test ./internal/vm -race -count=1
 go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
 ```
 
-Esperado: tudo verde, corpus 130/130.
+Esperado: tudo verde, corpus 164/164.
 
 - [ ] **Step 8: Medir fib A/B**
 
@@ -588,7 +588,7 @@ go run ./cmd/noxy --disassembly tmp_static.nx | Select-String "OP_CALL"
 Remove-Item tmp_static.nx
 ```
 
-Esperado: suíte verde, corpus 130/130, e a linha do disassembly mostra `OP_CALL_STATIC` para a chamada tipada.
+Esperado: suíte verde, corpus 164/164, e a linha do disassembly mostra `OP_CALL_STATIC` para a chamada tipada.
 
 - [ ] **Step 6: Commit**
 
@@ -763,7 +763,7 @@ go test ./internal/value -race -count=1
 go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
 ```
 
-Esperado: tudo verde, 130/130. Atenção especial a `rc_uniqueness_test.go`, `reference_ownership_test.go`, `defer_test.go`, `unwind_test.go` — se qualquer um falhar, o reuso de `Owned`/`Deferred` vazou estado entre frames; revisar a limpeza do Step 3.
+Esperado: tudo verde, 164/164. Atenção especial a `rc_uniqueness_test.go`, `reference_ownership_test.go`, `defer_test.go`, `unwind_test.go` — se qualquer um falhar, o reuso de `Owned`/`Deferred` vazou estado entre frames; revisar a limpeza do Step 3.
 
 - [ ] **Step 5: Re-rodar o benchmark de alocação**
 
@@ -1177,7 +1177,7 @@ go build -o noxy_perf.exe ./cmd/noxy
 1..5 | ForEach-Object { Measure-Command { .\noxy_develop.exe benchmarks\cross_runtime\loop_arith.nx } | Select -Expand TotalMilliseconds; Measure-Command { .\noxy_perf.exe benchmarks\cross_runtime\loop_arith.nx } | Select -Expand TotalMilliseconds }
 ```
 
-Esperado: verde, 130/130, queda visível em loop_arith e fib.
+Esperado: verde, 164/164, queda visível em loop_arith e fib.
 
 - [ ] **Step 8: Commit**
 
@@ -1543,7 +1543,7 @@ go test ./internal/vm -race -count=1
 go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
 ```
 
-Tudo verde, corpus 130/130 — anotar os números reais do output.
+Tudo verde, corpus 164/164 — anotar os números reais do output.
 
 - [ ] **Step 2: A/B intercalado nos benches CoW (gates)**
 
