@@ -132,6 +132,10 @@ const (
 	OP_JUMP_IF_GE_INT
 	OP_JUMP_IF_EQ_INT
 	OP_JUMP_IF_NE_INT
+	// perf fase 1: `i = i + K` / `i = i - K` (i local int possuidor, K literal
+	// que cabe em i8) fundido em soma direta no slot — sem trafego de pilha.
+	// Operandos: [slot u8][delta i8]. Overflow wrappa como OP_ADD_INT.
+	OP_INC_LOCAL_INT
 )
 
 func (op OpCode) String() string {
@@ -216,6 +220,8 @@ func (op OpCode) String() string {
 		return "OP_JUMP_IF_EQ_INT"
 	case OP_JUMP_IF_NE_INT:
 		return "OP_JUMP_IF_NE_INT"
+	case OP_INC_LOCAL_INT:
+		return "OP_INC_LOCAL_INT"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -523,6 +529,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.shortInstruction("OP_JUMP_IF_EQ_INT", offset)
 	case OP_JUMP_IF_NE_INT:
 		return c.shortInstruction("OP_JUMP_IF_NE_INT", offset)
+	case OP_INC_LOCAL_INT:
+		return c.slotDeltaInstruction("OP_INC_LOCAL_INT", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
@@ -630,6 +638,15 @@ func (c *Chunk) byteInstruction(name string, offset int) int {
 	slot := c.Code[offset+1]
 	fmt.Printf("%-16s %4d\n", name, slot)
 	return offset + 2
+}
+
+// slotDeltaInstruction imprime os dois operandos de OP_INC_LOCAL_INT: o slot
+// (u8, sem sinal) e o delta (i8, com sinal — negativo para `i = i - K`).
+func (c *Chunk) slotDeltaInstruction(name string, offset int) int {
+	slot := c.Code[offset+1]
+	delta := int8(c.Code[offset+2])
+	fmt.Printf("%-16s %4d %4d\n", name, slot, delta)
+	return offset + 3
 }
 
 func (c *Chunk) shortInstruction(name string, offset int) int {

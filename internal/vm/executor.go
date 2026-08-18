@@ -192,6 +192,16 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				ip += offset
 			}
 
+		case chunk.OP_INC_LOCAL_INT:
+			// perf fase 1: soma o delta direto no slot, sem empilhar/desempilhar
+			// nada. RC: int e escalar (Retain/Release de OP_SET_LOCAL sao no-op
+			// para VAL_INT — ownersOf so rastreia VAL_OBJ), entao nao ha posse a
+			// atualizar aqui — mesma escrita direta que OP_SET_LOCAL faria.
+			slot := c.Code[ip]
+			delta := int8(c.Code[ip+1])
+			ip += 2
+			vm.stack[frame.LocalBase+int(slot)].AsInt += int64(delta)
+
 		case chunk.OP_TRUE:
 			vm.push(value.NewBool(true))
 		case chunk.OP_FALSE:

@@ -338,6 +338,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, nil, nil
 
 		} else if ident, ok := n.Target.(*ast.Identifier); ok {
+			// Fusao de incremento: emite OP_INC_LOCAL_INT e nao empilha nada
+			// (atribuicao e statement; o POP do caminho generico tambem cai fora).
+			if c.tryFuseLocalIntIncrement(ident, n.Value) {
+				return c.currentChunk, nil, nil
+			}
 			// Identifier Assignment: x = val
 			// 1. Compile Value (pushed to stack)
 			_, valType, err := c.Compile(n.Value)
@@ -2247,6 +2252,43 @@ func (c *Compiler) localOwns(index int) bool {
 		return false
 	}
 	return c.locals[index].Owns
+}
+
+// tryFuseLocalIntIncrement funde `i = i + K` / `i = i - K` (i local int
+// POSSUIDOR — slot ref nunca funde; K literal int em [-128,127]) em
+// OP_INC_LOCAL_INT. Retorna true se emitiu (nada mais a fazer no site).
+// Sem emissao especulativa: todas as checagens sao sintaticas/de simbolo.
+func (c *Compiler) tryFuseLocalIntIncrement(ident *ast.Identifier, valueExpr ast.Expression) bool {
+	arg, localType := c.resolveLocal(ident.Value)
+	if arg == -1 || arg > 255 || !c.localOwns(arg) {
+		return false
+	}
+	prim, ok := localType.(*ast.PrimitiveType)
+	if !ok || prim.Name != "int" {
+		return false
+	}
+	infix, ok := valueExpr.(*ast.InfixExpression)
+	if !ok || (infix.Operator != "+" && infix.Operator != "-") {
+		return false
+	}
+	left, ok := infix.Left.(*ast.Identifier)
+	if !ok || left.Value != ident.Value {
+		return false
+	}
+	lit, ok := infix.Right.(*ast.IntegerLiteral)
+	if !ok {
+		return false
+	}
+	delta := lit.Value
+	if infix.Operator == "-" {
+		delta = -delta
+	}
+	if delta < -128 || delta > 127 {
+		return false
+	}
+	c.emitBytes(byte(chunk.OP_INC_LOCAL_INT), byte(arg))
+	c.emitByte(byte(int8(delta)))
+	return true
 }
 
 func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
