@@ -66,9 +66,13 @@ test_report(result["value"])
 }
 
 // when/case é o select de canais da linguagem (cada `case` precisa ser
-// chan_recv/chan_send); aqui o valor que atravessa o canal é o campo de um
-// struct genérico instanciado, provando que Caixa<int>.valor é um int comum
-// tanto para chan_send quanto para o binding do case.
+// chan_recv/chan_send). Aqui é a INSTÂNCIA Caixa<int> inteira que atravessa o
+// canal (não só o campo) — o binding do case (`bound`) tem tipo dinâmico
+// (nil) no compilador e vive só no escopo do case, então ele é copiado para
+// `recebida`, uma variável já declarada FORA do when, antes do `.valor` ser
+// lido depois do bloco. Isso prova que o valor monomorfizado sobrevive
+// intacto ao round-trip pelo canal, ao rebind de case e à passagem de escopo
+// — não apenas que um int qualquer chega do outro lado.
 func TestWhenOverGenericStruct(t *testing.T) {
 	got := captureVMSource(t, `
 struct Caixa<T>
@@ -76,15 +80,17 @@ struct Caixa<T>
 end
 let c: Caixa<int> = Caixa(7)
 let ch: any = make_chan(1)
-chan_send(ch, c.valor)
+chan_send(ch, c)
+let recebida: Caixa<int>
 when
-    case recebido = chan_recv(ch) then
-        test_report(recebido * 6)
+    case bound = chan_recv(ch) then
+        recebida = bound
     default
-        test_report(-1)
+        recebida = Caixa(-1)
 end
+test_report(recebida.valor * 6)
 `)
-	expectInt(t, got, 42, "when/case sobre campo de struct generico")
+	expectInt(t, got, 42, "when/case sobre struct generico inteiro (nao so o campo)")
 }
 
 // f-string interpolando um campo de struct genérico e json_dumps serializando
