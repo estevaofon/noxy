@@ -149,6 +149,52 @@ monomorfização introduzam custo que se acumule com o tamanho do programa
 nesta escala; ficaria para benchmarks futuros com mais templates/instâncias
 verificar se o custo permanece sub-linear.
 
+### Adendo — startup de `use` (finding C1 da revisão final de branch)
+
+**Data:** 2026-08-18, sessão posterior às medições acima. Motivo: a revisão
+final de branch mediu um caso que `startup_generics` **não** cobria —
+startup de um programa que só faz `use`, **sem genérico nenhum** — e achou
+uma amplificação de ~8x. Gate 2 (corpus não-genérico) não a pegou porque os
+três benches daquele gate não importam módulo.
+
+**Causa** (`internal/compiler/module_exports.go`): `loadModuleDeclarations`
+re-parseava **e** re-compilava (validator descartável) o módulo a cada
+chamada, recursivamente, sem cache algum. O branch de genéricos somou ~4
+chamadas por `use` (`predeclareImportedTemplates` →
+`discoverModuleExports` + `moduleTopLevelBindings`; `predeclareImport`; o
+case `*ast.UseStmt`), tudo dobrado pelo two-pass. Custo pré-existente
+(base já pagava 1,4s num `select *`), amplificado pelo branch.
+
+**Correção:** memoização por `moduleDiscoveryState` (módulo → programa
+parseado + submódulos), com o estado agora criado **uma vez por compilador**
+(`discoveryState()`) e propagado por `NewChild`/`newPass1Compiler` — antes,
+cada chamador fabricava um estado descartável e nenhum memo sobreviveria.
+Só sucessos entram no cache: uma falha pode ser contextual (guard de ciclo),
+um sucesso nunca é.
+
+Sondas versionadas: `benchmarks/startup_use_selectall.nx` e
+`benchmarks/startup_use_namespace.nx`. Mediana de 9 execuções por célula,
+mesmo processo/binário por linha. `head (pré-C1)` = `314428d`, último commit
+do branch antes desta rodada de fixes.
+
+| sonda | base (`bff429a`) | head (pré-C1) | head (pós-C1) |
+|---|---|---|---|
+| `startup_use_selectall.nx` (`use http select *`) | 1445,8 ms | 11681,2 ms | **96,2 ms** |
+| `startup_use_namespace.nx` (`use http`) | 361,5 ms | 1474,4 ms | **101,2 ms** |
+| `startup_generics.nx` (controle, com genéricos) | 62,3 ms | 65,8 ms | 60,2 ms |
+
+O head pós-fix não só volta à ordem de grandeza da base como fica **~15x
+mais rápido que a base** no `select *` — a memoização paga também o custo
+pré-existente, que a base sempre teve. A sonda de controle
+(`startup_generics`) não se move: o caminho de genéricos não foi tocado.
+
+Efeito colateral na suíte de testes (mesma causa, mesmo fix):
+`go test ./internal/compiler` 48,7s → **1,3s**; `go test ./internal/vm`
+128,8s → **41,6s**.
+
+**Corpus:** 167/167 (`run_all_tests_concurrent.nx`, 11502ms) no binário
+pós-fix — sem regressão.
+
 ## develop (f107508) × fase 1 de dispatch e chamadas (perf/vm-dispatch-fase1)
 
 **Data:** 2026-08-18 · Windows 11 · protocolo intercalado, mediana de 9

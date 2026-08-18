@@ -67,7 +67,25 @@ funções vindos de outro módulo (`primeiro(numeros_importado)`).
   continua compilando e passando após o fix acima —
   `noxy_examples/run_all_tests_concurrent.nx` reporta 167/167.
 
+### Changed
+
+- A variável de `for ... in` passa a receber o **tipo estático do elemento**
+  da coleção quando ele é conhecido (array → tipo do elemento; map → tipo da
+  chave, que é o que o laço produz). Antes ela entrava sempre sem tipo.
+  Requisito dos genéricos — sem isso, `identity(v)` dentro de um for-each
+  chega à unificação sem âncora e `T` fica sem binding —, mas o efeito é
+  geral: **pode revelar erros de tipo latentes** em código que hoje compila,
+  mesma classe (e mesma migração) da mudança de imports tipados acima.
+  Coleção de tipo desconhecido continua produzindo variável sem tipo.
+
 ### Fixed
+
+- **REPL preserva structs declarados entre linhas.** Cada linha recebia um
+  mapa de structs novo, então um `struct Point ... end` digitado numa linha
+  simplesmente não existia na linha seguinte. Bug **pré-existente** (não
+  introduzido pelos genéricos), corrigido junto porque a mesma linha de
+  código passou a persistir também o registry de templates genéricos da
+  sessão (`cmd/noxy/main.go`, spec §5).
 
 - Operadores aritméticos (`+`, `-`, `*`, `/`, `%`) sobre structs agora são
   erro de **compilação**, não mais crash de runtime. Antes, `a + b` com
