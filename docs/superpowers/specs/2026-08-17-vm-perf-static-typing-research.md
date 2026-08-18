@@ -1,6 +1,9 @@
 # Pesquisa: performance da VM explorando tipagem estática
 
-**Data:** 2026-08-17 · **Status:** diagnóstico por leitura de código + baseline pprof coletado (Task 1, ver seção "Baseline pprof (Task 1)" no fim deste documento)
+**Data:** 2026-08-17 · **Status:** fases 0-3 implementadas e medidas
+(`perf/vm-dispatch-fase1`, Tasks 1-8) — ver seção "Baseline pprof (Task 1)" e
+"Pprof pós-fase 1 (Task 8)" no fim deste documento. Fases 4-6 seguem como
+pesquisa/planos futuros.
 
 **Contexto:** cross-runtime (benchmarks/cross_runtime/results/cross_runtime.md) mostra Noxy
 4–10x mais lenta que CPython no trabalho descontado o startup (fib: 742ms vs 93ms;
@@ -75,19 +78,32 @@ bubblesort: 604ms vs 63ms; loop_arith: 456ms vs 256ms). Meta: ficar entre Python
 
 - RC-uniqueness (Owners atômico) é recente e delicado: qualquer mudança em
   push/pop/frames não pode alterar os funis retain/release (spec §4.2 do CoW-RC).
-- Gates: benches rastreados não podem regredir >5%; corpus de exemplos 130/130;
+- Gates: benches rastreados não podem regredir >5%; corpus de exemplos
+  164/164 (número corrigido de 130 no commit `e7c533d`);
   `go test ./...` e `-race` verdes.
 - Semântica não muda: mesmos outputs, mesmos erros em runtime (mensagens iguais).
 
 ## Forma sugerida do plano (fases, cada uma com A/B intercalado)
 
-0. Flag `-cpuprofile`/`-memprofile` no CLI + baseline pprof de fib/loop_arith/bubblesort.
-1. Globais por slot/cache + remover mutex do caminho single-task (alvo: fib).
-2. Chamadas: frame sem alocação + pular validateParameterModes estaticamente provada (alvo: fib).
-3. Fusões int: OP_INC_LOCAL_INT, OP_JUMP_IF_LESS_INT, variantes FLOAT (alvo: loop_arith, mandelbrot).
-4. Structs por índice (alvo: bench_path_update, conway).
-5. Maps tipados + Len() O(1) (alvo: map_churn).
-6. Pop sem zerar escalares / Value layout (medir antes; maior risco, só com pprof provando).
+0. ✅ **Implementada** (Task 1, commit `60ed8d7`). Flag `-cpuprofile`/`-memprofile` no CLI + baseline pprof de fib/loop_arith/bubblesort.
+1. ✅ **Implementada** (Task 2, commit `67e9d52`). Globais por slot/cache + remover mutex do caminho single-task (alvo: fib).
+2. ✅ **Implementada** (Tasks 3-4, commits `bb8a773`, `1ca26e7`+`d460e5a`). Chamadas: frame sem alocação (allocs/chamada 1012→10) + pular validateParameterModes estaticamente provada (`OP_CALL_STATIC`) (alvo: fib).
+3. ✅ **Implementada** (Tasks 5-7, commits `c43276c`+`32b33c7`, `56882ca`, `4d43cdf`+`6d991e5`). Fusões int: OP_INC_LOCAL_INT, seis opcodes de comparação+salto inteiro fundidos, variantes FLOAT (alvo: loop_arith, mandelbrot).
+
+Resultado agregado das fases 0-3 (Task 8, ver `benchmarks/RESULTS.md` e
+`benchmarks/cross_runtime/results/cross_runtime.md`): `fib` 804,9ms →
+380,8ms (−52,7%, ~2,1x), `loop_arith` 519,4ms → 319,4ms (−38,5%, ~1,63x),
+`mandelbrot` 428,6ms → 246,2ms (−42,6%, ~1,74x) — todos além da estimativa
+original de cada task. Nos benches CoW (fora do escopo original, mas gates
+de regressão), 9 de 11 melhoraram (alguns >30%) porque o custo de chamada
+in-module e o incremento fundido de laço atravessam qualquer programa nesse
+formato; `bench_share_mutate` excedeu o gate de 5% (ver `benchmarks/RESULTS.md`,
+seção "develop (f107508) × fase 1 de dispatch e chamadas" — gate reprovado,
+não corrigido, decisão do controller).
+
+4. **Não implementada** — plano futuro. Structs por índice (alvo: bench_path_update, conway). Não confirmada por profile desta fase: nem `fib` nem `bench_conway` usam structs, então nenhum profile coletado até aqui sustenta ou refuta esse alvo diretamente — continua válido pela leitura de código original (`ObjInstance.Fields` como `map[string]Value`).
+5. **Não implementada** — plano futuro. Maps tipados + Len() O(1) (alvo: map_churn). Mesma ressalva: não re-confirmada por profile nesta rodada (o profile pós-fase coletado foi de `fib`, que não usa maps).
+6. **Próximo alvo indicado pelo profile pós-fase 1** (ver seção "Pprof pós-fase 1 (Task 8)" abaixo). Pop sem zerar escalares / Value layout — era "maior risco, só com pprof provando"; o pprof pós-fase agora mostra `push`+`pop` como 24,4% do tempo de `fib` (14,63%+9,76%), a maior fração isolada depois do dispatch puro (`(*VM).run`, 43,90%), com o custo de globais e alocação de chamada já cortado. Essa é a prova que o item pedia.
 
 ## Baseline pprof (Task 1)
 
@@ -213,3 +229,98 @@ Showing top 15 nodes out of 74
   envolvem (`bindingStore.get`, `GlobalEnvironment.Resolve`) aparecem com custo
   cumulativo relevante em `fib`, então a hipótese de custo de globais permanece
   válida para orientar a Task seguinte (fase 1: globais por slot).
+
+## Pprof pós-fase 1 (Task 8)
+
+**Data:** 2026-08-18 · Binário: `noxy_perf.exe` no HEAD do branch
+(`6d991e5`, fases 0-3 completas: cache de globais, `OP_CALL_STATIC`,
+`CallFrame` sem alocação, opcodes fundidos int/float). Coletado com:
+
+```powershell
+.\noxy_perf.exe --cpuprofile=fib_pos.prof benchmarks\cross_runtime\fib.nx
+go tool pprof -top -nodecount=15 noxy_perf.exe fib_pos.prof
+```
+
+### fib.nx — `CHECKSUM:832040`
+
+```
+File: noxy_perf.exe
+Type: cpu
+Duration: 531.23ms, Total samples = 410ms (77.18%)
+Showing nodes accounting for 410ms, 100% of 410ms total
+Showing top 15 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+     180ms 43.90% 43.90%      390ms 95.12%  noxy-vm/internal/vm.(*VM).run
+      60ms 14.63% 58.54%       60ms 14.63%  noxy-vm/internal/vm.(*VM).push (inline)
+      40ms  9.76% 68.29%       60ms 14.63%  noxy-vm/internal/vm.(*VM).callPreparedClosure
+      40ms  9.76% 78.05%       50ms 12.20%  noxy-vm/internal/vm.(*VM).finalizeCurrentFrame
+      40ms  9.76% 87.80%       40ms  9.76%  noxy-vm/internal/vm.(*VM).pop
+      20ms  4.88% 92.68%       20ms  4.88%  runtime.cgocall
+      10ms  2.44% 95.12%       10ms  2.44%  noxy-vm/internal/value.Retain (inline)
+      10ms  2.44% 97.56%       20ms  4.88%  noxy-vm/internal/vm.(*CallFrame).ownSlot
+      10ms  2.44%   100%       60ms 14.63%  noxy-vm/internal/vm.(*VM).finishFrame
+         0     0%   100%       20ms  4.88%  internal/syscall/windows/registry.Key.GetMUIStringValue
+         0     0%   100%       20ms  4.88%  internal/syscall/windows/registry.regLoadMUIString
+         0     0%   100%      390ms 95.12%  main.main
+         0     0%   100%      390ms 95.12%  main.runWithConfig
+         0     0%   100%      390ms 95.12%  noxy-vm/internal/vm.(*VM).Interpret (inline)
+         0     0%   100%      390ms 95.12%  noxy-vm/internal/vm.(*VM).InterpretWithEnvironment
+```
+
+### Leitura vs. baseline (Task 1)
+
+- **Custo #1 (globais) desapareceu do top 15.** `(*GlobalEnvironment).Resolve`
+  (14,94% cum no baseline) e `(*bindingStore).get` (11,49% cum) não aparecem
+  mais — nem sequer abaixo do corte. O cache de globais com geração (Task 2)
+  removeu o custo por completo do caminho quente de `fib`, não só reduziu.
+- **Custo #2 (alocação por chamada) também sumiu.**
+  `runtime.mallocgcSmallScanNoHeader` (6,90% cum no baseline),
+  `runtime.memclrNoHeapPointers`, `runtime.nilinterequal`,
+  `runtime.typePointers.next` — todos ligados a alocação/GC de `CallFrame` —
+  não aparecem mais. Consistente com o allocs/chamada 1012→10 medido nas
+  Tasks 3-4. `sync/atomic.(*Int32).Add` (4,60% no baseline, plausivelmente o
+  retain/release de `Owners` no caminho de chamada) também não aparece mais.
+- **`(*VM).pop` — verificação pedida explicitamente.** Caiu de 13,79% flat
+  (120ms, 2º maior nó do baseline) para 9,76% flat (40ms, 5º maior nó): tanto
+  a fração relativa quanto o tempo absoluto caíram, e a queda absoluta (3x) é
+  maior que a queda do tempo total (870ms→410ms amostrados, ~2,1x) — ou seja,
+  `pop` ficou mais barato mesmo descontando que o programa inteiro ficou mais
+  rápido. O item #3 da pesquisa ("Value gordo + pop que zera") **não foi
+  atacado diretamente** nesta fase (nenhuma task tocou o zeramento de slot em
+  `pop`); a queda é efeito colateral provável de `fib` agora executar menos
+  push/pop por chamada (`OP_CALL_STATIC` evita parte do trabalho que
+  `callPreparedClosure`/`validateParameterModes` faziam antes ao redor da
+  chamada). `pop` **continua no top 15** e não foi eliminado — o zeramento em
+  si (48 bytes por slot) segue intocado.
+- **`push` subiu de 2,30% (20ms) para 14,63% (60ms) — ressalva de amostragem.**
+  Em termos absolutos `push` triplicou, o que à primeira vista parece uma
+  regressão; mas o profile pós-fase tem só 41 amostras de 10ms no total
+  (410ms/10ms), então 60ms são 6 amostras — contagem baixa demais para
+  distinguir "ficou mais caro" de ruído de amostragem/inlining diferente
+  entre os dois binários. Não tratado como achado confiável, só registrado.
+- **O que domina agora:** `(*VM).run` (43,90% flat, 95,12% cum) — o dispatch
+  puro, que só cai fundindo mais opcodes ou reduzindo o Value por
+  instrução — e o cluster de setup/teardown de frame
+  (`callPreparedClosure`+`finalizeCurrentFrame`+`finishFrame`+`ownSlot`,
+  ~14-25% cum cada, parcialmente sobrepostos) ainda não zerado apesar da
+  Task 3-4. `push`+`pop` juntos são 24,4% do tempo total — a maior fração
+  isolada depois do dispatch, contra 16,1% no baseline (2,30%+13,79%): com
+  globais e alocação cortados, o que sobra sobe de posição relativa mesmo
+  sem ficar mais caro em si.
+
+### Próximo alvo indicado por este profile
+
+**Fase 6 do plano (Value layout / pop sem zerar escalar), item #3 da lista de
+custos** — não fase 4 (structs por índice) nem fase 5 (maps tipados): `fib`
+não usa structs nem maps, então este profile não fala sobre esses dois
+alvos, só sobre o dispatch geral e o formato de `Value`. O gate textual da
+pesquisa era "medir antes; maior risco, só com pprof provando" — este é esse
+pprof: com #1/#2 resolvidos, `push`+`pop` (24,4%) e o cluster de
+frame-setup/teardown (ainda não zerado) são o que resta de maior massa em
+`fib`. Fase 4/5 continuam válidas como planos futuros para os benches que
+elas miravam originalmente (`bench_path_update`/`bench_conway` para structs,
+`bench_map_churn` para maps) — mas isso exigiria profiles desses benches
+especificamente, não feitos nesta rodada (só `fib` foi perfilado
+pós-fase, conforme o Step 3 desta task; `bench_share_mutate` também foi
+perfilado à parte, ver `benchmarks/RESULTS.md`, mas é sobre o gate que
+regrediu, não sobre o próximo alvo de otimização).

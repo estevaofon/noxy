@@ -3,6 +3,143 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## develop (f107508) × fase 1 de dispatch e chamadas (perf/vm-dispatch-fase1)
+
+**Data:** 2026-08-18 · Windows 11 · protocolo intercalado, mediana de 9
+execuções por sessão — **4 sessões limpas repetidas** (nenhum outro processo
+de benchmark ativo) porque `bench_share_mutate` e `bench_call_light` ficaram
+perto da fronteira do gate/com dispersão notável entre sessões; ver nota¹
+sobre o ruído e nota² sobre duas sessões adicionais descartadas por
+contaminação de medição. Spec:
+`docs/superpowers/specs/2026-08-17-vm-perf-static-typing-research.md`.
+Commits do branch: cache de globais com geração (`67e9d52`), `OP_CALL_STATIC`
+(`bb8a773`), `CallFrame` em array de valores reusado, allocs/chamada 1012→10
+(`1ca26e7`+`d460e5a`), seis opcodes fundidos de comparação+salto inteiro
+(`c43276c`+`32b33c7`), `OP_INC_LOCAL_INT` (`56882ca`), seis opcodes `_FLOAT`
+especializados (`4d43cdf`+`6d991e5`).
+
+**Verificação completa (Step 1):** `go vet ./...` sem saída (limpo);
+`go test ./... -count=1` verde em todos os pacotes (`internal/compiler`
+5,072s, `internal/vm` 58,068s, resto sub-segundo); `go test ./internal/value
+-race -count=1` verde (1,093s); `go test ./internal/vm -race -count=1` verde
+(74,934s). **Corpus de exemplos 164/164** (`run_all_tests_concurrent.nx`,
+10849ms) — número corrigido de 130 para 164 no commit `e7c533d`, confirmado
+aqui na íntegra.
+
+| bench | perfil | develop_ms | perf_ms | delta | veredito |
+|---|---|---|---|---|---|
+| bench_call_readonly | leitor puro O(n), array 20k | 1732,3 | 1121,3 | **−35,3%** | ✅ |
+| bench_spawn_sum | soma paralela via spawn_task | 1018,2 | 696,8 | **−31,6%** | ✅ |
+| bench_conway | grid mutado via ref, 60 gerações | 2554,3 | 2063,0 | **−19,2%** | ✅ gate |
+| bench_call_ref | mutação in-place via ref | 4206,5 | 3622,0 | −13,9% | ✅ |
+| bench_map_churn | escrita intensa em map | 443,8 | 394,1 | −11,2% | ✅ |
+| bench_bubblesort | sort in-place via ref | 3897,5 | 3493,5 | −10,4% | ✅ |
+| bench_path_update | `a[i].x = v` em loop, dono único | 621,1 | 580,0 | −6,6% | ✅ |
+| bench_typed_call_map | chamada tipada in-module, map 2,5k via ref | 76,9 | 73,4 | −4,6% | ✅ gate |
+| bench_call_light | chamada O(1), array 10k por valor | 65,5 | 62,6 | −4,5%¹ | ✅ gate |
+| bench_value_call_mutate | helper por valor em laço de mutação | 70,1 | 67,1 | −4,3% | ✅ |
+| bench_share_mutate | compartilha e muta em loop | 232,9 | 249,1 | **+7,0%**³ | ❌ **acima do gate** |
+
+Valores agregados: mediana das 4 sessões limpas, calculada separadamente para
+`develop_ms` e `perf_ms` (cada sessão já é mediana de 9 execuções
+intercaladas), delta recalculado a partir das duas medianas.
+
+¹ `bench_call_light` variou de −12,9% a +0,6% entre as 4 sessões (mediana de
+deltas por sessão: −8,3%); a sessão que deu +0,6% é a mesma que deu o pior
+número de `bench_share_mutate` (+10,5%, nota³) — indício de uma perturbação
+pontual de sistema naquela sessão específica, não um padrão. Mesmo no pior
+caso agregado (−4,5%), o bench segue dentro do gate.
+
+² Duas sessões adicionais foram descartadas: por um erro de execução, um
+processo de benchmark em background (`interleaved_compare.ps1` intercalando
+os mesmos binários) ficou rodando **ao mesmo tempo** que uma segunda
+invocação em primeiro plano — os dois competiam por CPU. Os deltas dessas
+duas sessões contaminadas (`bench_call_readonly` −33% a −36%,
+`bench_conway` −17% a −21%, `bench_spawn_sum` −31% a −33%) são consistentes
+em direção com as 4 sessões limpas usadas na tabela acima, então a
+contaminação não parece ter invertido nenhum resultado — mas foram
+descartadas mesmo assim por não seguirem o protocolo (nenhum outro processo
+de benchmark ativo), e por terem escrito no mesmo arquivo
+`results/interleaved.md` uma da outra.
+
+³ **Gate excedido.** `bench_share_mutate` — pior caso do CoW por construção
+(`let b = a` seguido de mutação de um array de 5000 elementos, 2500 rodadas)
+— fica **acima dos +5%** nas 4 sessões limpas: +6,4%, +6,1%, +2,8%, +10,5%
+(mediana das 4 deltas por sessão: +6,25%; delta das medianas agregadas:
++7,0%). Só 1 das 4 sessões (+2,8%) ficaria dentro do gate; as outras 3
+excedem. Um profile do candidato (`noxy_perf.exe --cpuprofile`, 15 repetições
+da carga do bench para juntar amostra) mostra o tempo extra concentrado no
+caminho de clone/CoW já existente — `(*VM).copyValue` (42,3% cum),
+`runtime.scanobject`/`scanblock` (GC, ~27% cum), `value.Retain`,
+`value.ownersOf`, `runtime.bulkBarrierPreWrite` — **nenhum símbolo da fase 1**
+(cache de globais, `OP_CALL_STATIC`, `CallFrame`, opcodes fundidos) aparece
+nesse profile. Não há profile do baseline para comparar lado a lado (a flag
+`--cpuprofile` é ela própria um commit deste branch — `noxy_develop.exe` não
+tem a flag), então a causa não pôde ser isolada: hipótese em aberto é efeito
+colateral de pressão de GC do novo layout do `CallFrame` (array de valores
+reusado pode manter o slot anterior vivo por mais tempo antes de ser
+sobrescrito, mudando o que o GC varre por chamada); alternativa é ruído puro
+— é o bench de menor escala absoluta da suíte (~230-250ms), o que amplia
+qualquer jitter de agendamento em pontos percentuais. **Não investigado a
+fundo nem corrigido** — fora do mandato desta task (medir e reportar, não
+consertar); decisão de merge é do controller.
+
+### Perfil de cada bench
+
+- **`bench_call_readonly`/`bench_spawn_sum`/`bench_conway`** — os três
+  maiores ganhos (−35,3%, −31,6%, −19,2%) surpreendem porque nenhum dos três
+  é o alvo declarado da fase (fib/loop_arith/mandelbrot). Motivo: todos têm
+  laço quente `while i < N do ... i = i + 1 end` (ganha com os seis opcodes
+  fundidos de comparação+salto e `OP_INC_LOCAL_INT`) **e** chamada de função
+  in-module (`spawn_sum` chama a task por closure; `conway` chama `step`/`idx`
+  por iteração; `call_readonly` chama o leitor a cada rodada) — ganha também
+  com `OP_CALL_STATIC` e o `CallFrame` sem alocação. A fase mirava fib para
+  #1/#2 e loop_arith/mandelbrot para #3, mas as duas otimizações de chamada
+  (#1/#2) valem para **qualquer** chamada in-module tipada, não só fib — e é
+  isso que aparece aqui.
+- **`bench_call_ref`/`bench_map_churn`/`bench_bubblesort`/`bench_path_update`**
+  — mesma explicação em menor grau (−13,9% a −6,6%): laço com incremento
+  inteiro fundido, mas o custo dominante desses benches é o caminho de
+  referência/CoW (`resolveReferenceValue`, unicidade), que esta fase não
+  tocou — por isso o ganho é menor que nos três benches acima.
+- **`bench_typed_call_map`/`bench_call_light`** (gates) **e
+  `bench_value_call_mutate`** (não é gate, mesmo padrão) — chamada
+  O(1)/O(2500) com container grande por `ref`/valor, ganho modesto (−4,3% a
+  −4,6%): já estavam perto do piso depois da validação O(1) por tag (PR
+  #31), então sobra pouco para os opcodes desta fase cortarem.
+- **`bench_share_mutate`** — ver nota³ acima: único bench que regride, e o
+  único cujo perfil não mostra nenhuma infraestrutura desta fase.
+
+### Interpretação
+
+**O alcance da fase foi maior que o previsto.** O plano mirava
+fib/loop_arith/mandelbrot para as otimizações de globais, chamadas e opcodes
+fundidos (fases 0-3 da spec). Nos benches CoW — nenhum deles no escopo
+original — 9 de 11 melhoraram, vários de forma expressiva
+(`call_readonly` −35%, `spawn_sum` −32%, `conway` −19%): o custo de chamada
+in-module (#1/#2) e o incremento fundido de laço (#3) atravessam qualquer
+programa com esse formato, que é a maioria do corpus real.
+
+**Onde fica neutro:** `bench_typed_call_map`, `bench_call_light` e
+`bench_value_call_mutate` — os três já operavam perto do piso pós-validação
+O(1) (PR #31); ganho pequeno mas real, dentro do gate.
+
+**Onde paga, sem maquiagem:** `bench_share_mutate` excede o gate de 5% em 3
+das 4 sessões limpas (mediana +6,25% a +7,0%, ver nota³). Ao contrário da
+rodada da fase RC-uniqueness (onde `map_churn`/`spawn_sum` excediam o gate de
+forma consistente e explicável pelo bookkeeping de RC), aqui a causa não está
+clara: o profile do bench não mostra nenhum código desta fase, só o caminho
+de clone/GC que já existia antes dela. **Gate formalmente reprovado** —
+reportado sem tentativa de correção, para decisão do controller.
+
+**O que resta:** o pprof pós-fase de `fib` (ver spec de pesquisa) mostra que,
+com globais e alocação de chamada resolvidos, `push`/`pop` (Value de 48
+bytes, item #3 da pesquisa) voltaram a ser a maior fração isolada depois do
+dispatch puro — candidato natural da próxima fase. `bench_share_mutate`
+citado acima é o outro fio solto: precisa de um profile do baseline (fora do
+alcance sem recompilar `noxy_develop.exe` com a flag `--cpuprofile`) para
+isolar a causa.
+
 ## develop (fac7542) × RC-uniqueness fase 1 (perf/cow-uniqueness-rc)
 
 **Data:** 2026-08-17 · Windows 11 · medição intercalada final, mediana de 9
