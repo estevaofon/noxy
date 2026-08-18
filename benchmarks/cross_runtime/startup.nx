@@ -1,0 +1,6 @@
+// Piso de custo: subir o processo, compilar e imprimir uma linha.
+func main()
+    print("CHECKSUM:0")
+end
+
+main()

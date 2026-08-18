@@ -1,0 +1,18 @@
+// Construcao, concatenacao e fatiamento de strings curtas.
+use strings select *
+
+func main()
+    let i: int = 0
+    let acc: int = 0
+    while i < 200000 do
+        let s: string = "item_" + to_str(i)
+        acc = acc + length(s)
+        if substring(s, 5, 6) == "1" then
+            acc = acc + 1
+        end
+        i = i + 1
+    end
+    print(f"CHECKSUM:{acc}")
+end
+
+main()

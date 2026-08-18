@@ -1,0 +1,12 @@
+// Loop apertado: despacho de bytecode e aritmetica inteira, sem alocacao.
+func main()
+    let i: int = 0
+    let s: int = 0
+    while i < 3000000 do
+        s = (s + i * 3) % 1000003
+        i = i + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()

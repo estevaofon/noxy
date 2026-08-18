@@ -1,0 +1,31 @@
+// Aritmetica de ponto flutuante em loop fechado.
+func mandel(w: int, h: int, max_iter: int) -> int
+    let total: int = 0
+    let py: int = 0
+    while py < h do
+        let y0: float = to_float(py) / to_float(h) * 2.0 - 1.0
+        let px: int = 0
+        while px < w do
+            let x0: float = to_float(px) / to_float(w) * 3.0 - 2.0
+            let x: float = 0.0
+            let y: float = 0.0
+            let it: int = 0
+            while it < max_iter && x * x + y * y <= 4.0 do
+                let xt: float = x * x - y * y + x0
+                y = 2.0 * x * y + y0
+                x = xt
+                it = it + 1
+            end
+            total = total + it
+            px = px + 1
+        end
+        py = py + 1
+    end
+    return total
+end
+
+func main()
+    print(f"CHECKSUM:{mandel(200, 200, 50)}")
+end
+
+main()

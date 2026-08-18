@@ -1,0 +1,19 @@
+// Escrita e leitura intensa em hashmap de chave string.
+func main()
+    let m: map[string, int] = {"seed": 0}
+    let round: int = 0
+    let s: int = 0
+    while round < 100 do
+        let i: int = 0
+        while i < 3000 do
+            let k: string = f"k{i % 500}"
+            m[k] = round * i
+            s = s + m[k] % 7
+            i = i + 1
+        end
+        round = round + 1
+    end
+    print(f"CHECKSUM:{s}")
+end
+
+main()
