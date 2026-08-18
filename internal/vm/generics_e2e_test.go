@@ -218,6 +218,56 @@ test_report(head_twice(xs, ys))
 	expectInt(t, got, 2, "cascata generico->generico")
 }
 
+// Regressao (C2 da revisao final de branch): um nome de template CAPTURADO
+// por uma closure (upvalue) tem de perder para o binding capturado, nao para
+// o template. Os guards de call site em compileCallExpression checavam so
+// resolveLocal — o upvalue escapava, a chamada era interceptada como
+// generica e o programa devolvia 21 (id<int>(21)) em vez de 42 (dobro(21)),
+// silenciosamente. isShadowedByLocal (locais E upvalues) e a regra que todos
+// os outros hooks do §3/§4 ja usavam.
+func TestGenericTemplateShadowedByUpvalue(t *testing.T) {
+	got := captureVMSource(t, `
+func dobro(x: int) -> int
+    return x * 2
+end
+func id<T>(x: T) -> T
+    return x
+end
+func run() -> int
+    let id: func(int) -> int = dobro
+    let f: func(int) -> int = func(v: int) -> int
+        return id(v)
+    end
+    return f(21)
+end
+test_report(run())
+`)
+	expectInt(t, got, 42, "upvalue sombreia o template generico homonimo")
+}
+
+// Par do teste acima para CONSTRUTOR de struct generico: o mesmo guard
+// (segunda metade do C2) protege `Caixa(...)` quando `Caixa` foi capturado
+// como upvalue por uma closure.
+func TestGenericStructTemplateShadowedByUpvalue(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+func incrementa(x: int) -> int
+    return x + 1
+end
+func run() -> int
+    let Caixa: func(int) -> int = incrementa
+    let f: func(int) -> int = func(v: int) -> int
+        return Caixa(v)
+    end
+    return f(41)
+end
+test_report(run())
+`)
+	expectInt(t, got, 42, "upvalue sombreia o template de struct homonimo")
+}
+
 // §3 target-typing: `let` anotado com um tipo de funcao concreto e o alvo que
 // instancia identity<int> — a genérica vira closure comum sem call site
 // nenhum.

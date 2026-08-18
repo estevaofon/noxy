@@ -2085,20 +2085,26 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	// normal resolve um global comum.
 	//
 	// No pass 2 nada dispara: os nomes reescritos nao sao chaves do registro.
-	// Um local/parametro que sombreia o nome do template tambem nao dispara —
-	// quem vence e o binding mais interno, como no caminho normal.
+	// Um local/parametro/UPVALUE que sombreia o nome do template tambem nao
+	// dispara — quem vence e o binding mais interno, como no caminho normal.
+	// O guard e isShadowedByLocal (locais E upvalues), o mesmo que as outras
+	// familias de hook usam (generics_target.go): checar so resolveLocal
+	// deixava passar o nome CAPTURADO por uma closure (`let id = dobro`
+	// seguido de `func() ... id(v) ... end`), e a chamada era interceptada
+	// como generica em vez de chamar o valor capturado — codigo errado em
+	// silencio, sem erro nenhum.
 	if callee, ok := call.Function.(*ast.Identifier); ok {
 		registry := c.registryOrInit()
 		if template, isTemplate := registry.Funcs[callee.Value]; isTemplate {
-			if slot, _ := c.resolveLocal(callee.Value); slot == -1 {
+			if !c.isShadowedByLocal(callee.Value) {
 				if err := c.compileGenericCallSite(call, callee, template); err != nil {
 					return nil, nil, err
 				}
 			}
 		} else if structTemplate, isStructTemplate := registry.Structs[callee.Value]; isStructTemplate {
 			// Construtor de struct generico: `Caixa(41)`. Mesmo hook, mesma regra
-			// de sombreamento — um local com o nome do template vence.
-			if slot, _ := c.resolveLocal(callee.Value); slot == -1 {
+			// de sombreamento — um local ou upvalue com o nome do template vence.
+			if !c.isShadowedByLocal(callee.Value) {
 				if err := c.compileGenericConstructorSite(call, callee, structTemplate); err != nil {
 					return nil, nil, err
 				}
