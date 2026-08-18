@@ -54,7 +54,16 @@ type SharedState struct {
 }
 
 type VM struct {
-	frames       [FramesMax]*CallFrame
+	// frames e um array de VALORES, reusado por indice a cada chamada (nunca
+	// realocado): callPreparedClosure escreve em &frames[frameCount] em vez
+	// de heap-alocar um *CallFrame novo. As capacidades de Owned/Deferred de
+	// cada slot sao load-bearing para isso — finalizeCurrentFrame (unwind.go)
+	// trunca as duas com `[:0]`, nunca com `= nil`; setar `= nil` devolveria
+	// o custo de uma alocacao por chamada que esta troca existe para eliminar
+	// (ver BenchmarkNoxyCallOverhead em call_alloc_bench_test.go). vm.currentFrame
+	// aponta para dentro deste array — estavel porque o array tem tamanho
+	// fixo e nunca e realocado.
+	frames       [FramesMax]CallFrame
 	frameCount   int
 	currentFrame *CallFrame
 

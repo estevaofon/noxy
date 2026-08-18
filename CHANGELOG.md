@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-08-18
 
 ### Added
 
@@ -23,6 +23,49 @@
   dele (63ms contra 94ms). O ranking se repetiu em cinco rodadas; as
   magnitudes variam, porque o número líquido amplifica ruído do piso de
   processo. Não altera comportamento da linguagem.
+
+- Flags `--cpuprofile`/`--memprofile` na CLI (`cmd/noxy/main.go`), para
+  gravar profile de CPU e de heap do programa Noxy em execução — parte da
+  infraestrutura de medição da fase 1 de perf de dispatch/chamadas (ver
+  seção Performance abaixo).
+
+### Performance
+
+- Fase 1 de perf de dispatch e chamadas (branch `perf/vm-dispatch-fase1`,
+  spec `docs/superpowers/specs/2026-08-17-vm-perf-static-typing-research.md`).
+  `OP_CALL_STATIC` (`internal/vm/calls.go`) pula `validateParameterModes` em
+  chamadas de closure cujo call site o compilador provou estaticamente
+  (`isExact`, `internal/compiler/compiler.go`); o `CallFrame` de cada chamada
+  passou a reusar um array de valores em vez de alocar um novo a cada
+  chamada (allocs/op de uma chamada típica: 1012 → 10). Mais 13 opcodes
+  especializados de despacho, todos por APPEND ao fim do bloco de constantes
+  de `internal/chunk/chunk.go`: seis pares comparação+salto fundidos para
+  inteiro (`OP_JUMP_IF_LT_INT`/`LE`/`GT`/`GE`/`EQ`/`NE_INT`),
+  `OP_INC_LOCAL_INT` (funde `i = i +- K` numa soma direta no slot, sem
+  tráfego de pilha) e seis opcodes `_FLOAT` espelhando os `_INT` de
+  aritmética e comparação quando os dois lados são estaticamente float.
+
+  Medido nos três benches alvo (`benchmarks/cross_runtime/`, mínimo de 9
+  execuções intercaladas): `fib` 804,9→380,8ms (**~2,1x**), `loop_arith`
+  519,4→319,4ms (**~1,63x**), `mandelbrot` 428,6→246,2ms (**~1,74x**) —
+  todos acima da estimativa por task. No comparativo cross-runtime contra
+  CPython 3.13, `fib` foi de 7,9x atrás para 3,4x, e `loop_arith` de 1,8x
+  para ~1,1x (gap praticamente fechado). RC intocado — nenhum funil de
+  retain/release muda de lugar ou de contagem; os opcodes novos só operam
+  sobre escalares (int/float), que não participam de RC.
+  `go vet ./...` limpo, `go test ./...` verde, `-race` verde em
+  `internal/vm` e `internal/value`, corpus de exemplos 164/164 idêntico.
+
+  **Regressão aceita e rastreada, não corrigida nesta fase:**
+  `bench_share_mutate` (pior caso de CoW por construção — `let b = a`
+  seguido de mutação de um array grande) piorou em média **+8,7%** numa
+  bissecção dedicada (3 sessões intercaladas, piso de ruído medido em
+  ~1,2-1,4%, então o efeito é real e reproduzível, não ruído). O reuso de
+  `CallFrame` é o maior contribuinte isolado, mas não fecha a conta sozinho —
+  o padrão é compatível com pressão de GC difusa espalhada por vários
+  commits da fase, e nenhum símbolo da fase 1 aparece no profile do bench.
+  Detalhes completos: `benchmarks/RESULTS.md`, seção "develop (f107508) ×
+  fase 1 de dispatch e chamadas".
 
 ### Fixed
 

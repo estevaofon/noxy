@@ -71,3 +71,15 @@ func (environment *GlobalEnvironment) ReplaceLocal(values map[string]Value) {
 func (environment *GlobalEnvironment) ExportMap() Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjMap{store: environment.local}}
 }
+
+// Generation soma as gerações dos stores da cadeia de ambientes. Qualquer
+// escrita em qualquer nível (inclusive via ObjMap exportado que compartilha o
+// store — ver ExportMap) avança a soma; os contadores só incrementam, então a
+// soma é estritamente crescente e serve de token de invalidação de cache.
+func (environment *GlobalEnvironment) Generation() uint64 {
+	var sum uint64
+	for current := environment; current != nil; current = current.parent {
+		sum += current.local.gen.Load()
+	}
+	return sum
+}

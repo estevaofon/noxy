@@ -38,6 +38,8 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 			switch op {
 			case chunk.OP_CONSTANT, chunk.OP_GET_LOCAL, chunk.OP_SET_LOCAL,
 				chunk.OP_GET_UPVALUE, chunk.OP_SET_UPVALUE, chunk.OP_CALL,
+				// perf fase 1: mesmo layout de operando do OP_CALL (1 byte argCount)
+				chunk.OP_CALL_STATIC,
 				chunk.OP_DEFER, chunk.OP_REF_LOCAL, chunk.OP_REF_UPVALUE,
 				chunk.OP_GET_LOCAL_MUT, chunk.OP_GET_UPVALUE_MUT,
 				chunk.OP_SET_PROPERTY_DEREF, chunk.OP_INVOKE,

@@ -3,6 +3,8 @@ package chunk
 import (
 	"fmt"
 	"noxy-vm/internal/value"
+	"sync"
+	"sync/atomic"
 )
 
 type OpCode byte
@@ -115,6 +117,33 @@ const (
 	OP_MARK_UPVALUE_BORROW  // [upvalue_index]; marca a caixa de peek(0) como
 	// emprestada (emitido logo após OP_CLOSURE, um por upvalue de tipo ref)
 	OP_REF_LOCAL_BORROW // [slot]; ref para slot não-possuidor (caixa emprestada)
+	// perf fase 1: chamada cujos modos de parametro (ref/valor) o compilador
+	// provou no call site (isExact) — o VM pula validateParameterModes para
+	// closures. Layout de operando identico ao OP_CALL: [argCount u8].
+	OP_CALL_STATIC
+	// perf fase 1: comparacao int + salto condicional fundidos. Consomem dois
+	// VAL_INT da pilha (sem zerar: escalares nao carregam ponteiros) e saltam
+	// [hi][lo] adiante quando a condicao NOMEADA vale. Emitidos pelo
+	// compilador so quando ambos os lados sao estaticamente int; o salto e o
+	// jump-if-false da condicao de origem (`<` emite GE, `<=` emite GT, ...).
+	OP_JUMP_IF_LT_INT
+	OP_JUMP_IF_LE_INT
+	OP_JUMP_IF_GT_INT
+	OP_JUMP_IF_GE_INT
+	OP_JUMP_IF_EQ_INT
+	OP_JUMP_IF_NE_INT
+	// perf fase 1: `i = i + K` / `i = i - K` (i local int possuidor, K literal
+	// que cabe em i8) fundido em soma direta no slot — sem trafego de pilha.
+	// Operandos: [slot u8][delta i8]. Overflow wrappa como OP_ADD_INT.
+	OP_INC_LOCAL_INT
+	// perf fase 1: irmaos float dos opcodes _INT (ambos os lados
+	// estaticamente float). Mistos int/float continuam no caminho generico.
+	OP_ADD_FLOAT
+	OP_SUB_FLOAT
+	OP_MUL_FLOAT
+	OP_DIV_FLOAT
+	OP_LESS_FLOAT
+	OP_GREATER_FLOAT
 )
 
 func (op OpCode) String() string {
@@ -185,6 +214,34 @@ func (op OpCode) String() string {
 		return "OP_MARK_UPVALUE_BORROW"
 	case OP_REF_LOCAL_BORROW:
 		return "OP_REF_LOCAL_BORROW"
+	case OP_CALL_STATIC:
+		return "OP_CALL_STATIC"
+	case OP_JUMP_IF_LT_INT:
+		return "OP_JUMP_IF_LT_INT"
+	case OP_JUMP_IF_LE_INT:
+		return "OP_JUMP_IF_LE_INT"
+	case OP_JUMP_IF_GT_INT:
+		return "OP_JUMP_IF_GT_INT"
+	case OP_JUMP_IF_GE_INT:
+		return "OP_JUMP_IF_GE_INT"
+	case OP_JUMP_IF_EQ_INT:
+		return "OP_JUMP_IF_EQ_INT"
+	case OP_JUMP_IF_NE_INT:
+		return "OP_JUMP_IF_NE_INT"
+	case OP_INC_LOCAL_INT:
+		return "OP_INC_LOCAL_INT"
+	case OP_ADD_FLOAT:
+		return "OP_ADD_FLOAT"
+	case OP_SUB_FLOAT:
+		return "OP_SUB_FLOAT"
+	case OP_MUL_FLOAT:
+		return "OP_MUL_FLOAT"
+	case OP_DIV_FLOAT:
+		return "OP_DIV_FLOAT"
+	case OP_LESS_FLOAT:
+		return "OP_LESS_FLOAT"
+	case OP_GREATER_FLOAT:
+		return "OP_GREATER_FLOAT"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -301,6 +358,26 @@ type Chunk struct {
 	Constants []value.Value
 	Lines     []int
 	FileName  string
+
+	globalCacheOnce sync.Once
+	globalCache     []atomic.Pointer[GlobalCacheEntry]
+}
+
+// GlobalCacheEntry cacheia a resolução de um OP_GET_GLOBAL: válida enquanto o
+// mesmo ambiente estiver ativo E a geração somada da cadeia não mudar. Env e
+// Gen juntos tornam impossível servir valor stale: qualquer escrita bumpa a
+// geração; chunk rodando sob outro ambiente falha a comparação de Env.
+type GlobalCacheEntry struct {
+	Env *value.GlobalEnvironment
+	Gen uint64
+	Val value.Value
+}
+
+func (c *Chunk) GlobalCache() []atomic.Pointer[GlobalCacheEntry] {
+	c.globalCacheOnce.Do(func() {
+		c.globalCache = make([]atomic.Pointer[GlobalCacheEntry], len(c.Constants))
+	})
+	return c.globalCache
 }
 
 func New() *Chunk {
@@ -315,6 +392,14 @@ func New() *Chunk {
 func (c *Chunk) Write(byteCode byte, line int) {
 	c.Code = append(c.Code, byteCode)
 	c.Lines = append(c.Lines, line)
+}
+
+// TruncateTo descarta bytecode ja emitido a partir do offset n (Code e Lines
+// andam em paralelo). Usado pelo compilador para desfazer a emissao
+// especulativa dos operandos de uma condicao que nao pode ser fundida.
+func (c *Chunk) TruncateTo(n int) {
+	c.Code = c.Code[:n]
+	c.Lines = c.Lines[:n]
 }
 
 func (c *Chunk) AddConstant(v value.Value) int {
@@ -450,6 +535,34 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.shortInstruction("OP_LOOP", offset)
 	case OP_CALL:
 		return c.byteInstruction("OP_CALL", offset)
+	case OP_CALL_STATIC:
+		return c.byteInstruction("OP_CALL_STATIC", offset)
+	case OP_JUMP_IF_LT_INT:
+		return c.shortInstruction("OP_JUMP_IF_LT_INT", offset)
+	case OP_JUMP_IF_LE_INT:
+		return c.shortInstruction("OP_JUMP_IF_LE_INT", offset)
+	case OP_JUMP_IF_GT_INT:
+		return c.shortInstruction("OP_JUMP_IF_GT_INT", offset)
+	case OP_JUMP_IF_GE_INT:
+		return c.shortInstruction("OP_JUMP_IF_GE_INT", offset)
+	case OP_JUMP_IF_EQ_INT:
+		return c.shortInstruction("OP_JUMP_IF_EQ_INT", offset)
+	case OP_JUMP_IF_NE_INT:
+		return c.shortInstruction("OP_JUMP_IF_NE_INT", offset)
+	case OP_INC_LOCAL_INT:
+		return c.slotDeltaInstruction("OP_INC_LOCAL_INT", offset)
+	case OP_ADD_FLOAT:
+		return c.simpleInstruction("OP_ADD_FLOAT", offset)
+	case OP_SUB_FLOAT:
+		return c.simpleInstruction("OP_SUB_FLOAT", offset)
+	case OP_MUL_FLOAT:
+		return c.simpleInstruction("OP_MUL_FLOAT", offset)
+	case OP_DIV_FLOAT:
+		return c.simpleInstruction("OP_DIV_FLOAT", offset)
+	case OP_LESS_FLOAT:
+		return c.simpleInstruction("OP_LESS_FLOAT", offset)
+	case OP_GREATER_FLOAT:
+		return c.simpleInstruction("OP_GREATER_FLOAT", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
@@ -557,6 +670,15 @@ func (c *Chunk) byteInstruction(name string, offset int) int {
 	slot := c.Code[offset+1]
 	fmt.Printf("%-16s %4d\n", name, slot)
 	return offset + 2
+}
+
+// slotDeltaInstruction imprime os dois operandos de OP_INC_LOCAL_INT: o slot
+// (u8, sem sinal) e o delta (i8, com sinal — negativo para `i = i - K`).
+func (c *Chunk) slotDeltaInstruction(name string, offset int) int {
+	slot := c.Code[offset+1]
+	delta := int8(c.Code[offset+2])
+	fmt.Printf("%-16s %4d %4d\n", name, slot, delta)
+	return offset + 3
 }
 
 func (c *Chunk) shortInstruction(name string, offset int) int {

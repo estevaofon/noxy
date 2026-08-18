@@ -36,8 +36,8 @@ func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.Global
 	scriptClosure := &value.ObjClosure{Function: scriptFunction, Upvalues: []*value.ObjUpvalue{}, Environment: environment}
 	vm.stackTop = 0
 	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: scriptClosure})
-	frame := &CallFrame{Closure: scriptClosure, IP: 0, StackBase: 0, LocalBase: 1, Environment: environment}
-	vm.frames[0] = frame
+	frame := &vm.frames[0]
+	*frame = CallFrame{Closure: scriptClosure, IP: 0, StackBase: 0, LocalBase: 1, Environment: environment, Deferred: frame.Deferred[:0], Owned: frame.Owned[:0]}
 	vm.frameCount = 1
 	vm.currentFrame = frame
 	return vm.run(1, nil)
@@ -47,6 +47,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
 	c := frame.Closure.Function.Chunk.(*chunk.Chunk)
+	gcache := c.GlobalCache()
 	ip := frame.IP
 	defer func() {
 		if vm.currentFrame == frame {
@@ -140,6 +141,67 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip += 2
 			ip -= offset
 
+		// perf fase 1: comparacao int + salto fundidos. Consomem os dois
+		// VAL_INT do topo (sem zerar: escalares nao carregam ponteiros para o
+		// GC reter) e saltam quando a condicao NOMEADA vale.
+		case chunk.OP_JUMP_IF_LT_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt < vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_LE_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt <= vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_GT_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt > vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_GE_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt >= vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_EQ_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt == vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_NE_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt != vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_INC_LOCAL_INT:
+			// perf fase 1: soma o delta direto no slot, sem empilhar/desempilhar
+			// nada. RC: int e escalar (Retain/Release de OP_SET_LOCAL sao no-op
+			// para VAL_INT — ownersOf so rastreia VAL_OBJ), entao nao ha posse a
+			// atualizar aqui — mesma escrita direta que OP_SET_LOCAL faria.
+			slot := c.Code[ip]
+			delta := int8(c.Code[ip+1])
+			ip += 2
+			vm.stack[frame.LocalBase+int(slot)].AsInt += int64(delta)
+
 		case chunk.OP_TRUE:
 			vm.push(value.NewBool(true))
 		case chunk.OP_FALSE:
@@ -185,6 +247,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_GET_GLOBAL:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
+			// Geração lida ANTES do Resolve: uma escrita concorrente entre os
+			// dois avança a geração, então a entrada gravada com a geração
+			// antiga falha a comparação na próxima leitura e re-resolve — o
+			// cache pode sub-cachear, nunca servir valor stale.
+			gen := frame.Environment.Generation()
+			if entry := gcache[index].Load(); entry != nil && entry.Env == frame.Environment && entry.Gen == gen {
+				vm.push(entry.Val)
+				continue
+			}
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
@@ -192,6 +263,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if !ok {
 				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 			}
+			gcache[index].Store(&chunk.GlobalCacheEntry{Env: frame.Environment, Gen: gen, Val: val})
 			vm.push(val)
 
 		case chunk.OP_SET_GLOBAL:
@@ -545,6 +617,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.stack[vm.stackTop-1] = value.Value{}
 			vm.stackTop--
 
+		case chunk.OP_ADD_FLOAT:
+			// Espelho float de OP_ADD_INT: sem zerar, escalar nao carrega ponteiro.
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat + vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
+
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
 			a := vm.pop()
@@ -563,6 +640,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewInt(a.AsInt - b.AsInt))
+		case chunk.OP_SUB_FLOAT:
+			// Espelho float de OP_SUB_INT.
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat - vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_MULTIPLY:
 			b := vm.pop()
 			a := vm.pop()
@@ -581,6 +662,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewInt(a.AsInt * b.AsInt))
+		case chunk.OP_MUL_FLOAT:
+			// Espelho float de OP_MUL_INT.
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat * vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_DIVIDE:
 			b := vm.pop()
 			a := vm.pop()
@@ -614,6 +699,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "division by zero")
 			}
 			vm.push(value.NewInt(a.AsInt / b.AsInt))
+		case chunk.OP_DIV_FLOAT:
+			// Mesma mensagem de erro do ramo float de OP_DIVIDE (generico):
+			// divisor 0.0 e erro de runtime, nao +Inf/NaN.
+			if vm.stack[vm.stackTop-1].AsFloat == 0 {
+				return vm.runtimeError(c, ip, "division by zero")
+			}
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat / vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_LEN:
 			val := vm.pop()
 			if val.Type == value.VAL_OBJ {
@@ -888,6 +981,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewBool(a.AsInt > b.AsInt))
+		case chunk.OP_GREATER_FLOAT:
+			// Espelho float de OP_GREATER_INT.
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat > vm.stack[vm.stackTop-1].AsFloat)
+			vm.stackTop--
 		case chunk.OP_LESS:
 			b := vm.pop()
 			a := vm.pop()
@@ -906,6 +1003,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Inline pop/pop/push
 			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsInt < vm.stack[vm.stackTop-1].AsInt)
 			vm.stack[vm.stackTop-1] = value.Value{}
+			vm.stackTop--
+		case chunk.OP_LESS_FLOAT:
+			// Espelho float de OP_LESS_INT.
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat < vm.stack[vm.stackTop-1].AsFloat)
 			vm.stackTop--
 		case chunk.OP_EQUAL:
 			b := vm.pop()
@@ -940,6 +1041,22 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Update cached frame
 			frame = vm.currentFrame // Switch to new frame
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
+			ip = frame.IP
+
+		case chunk.OP_CALL_STATIC:
+			argCount := int(c.Code[ip])
+			ip++
+
+			frame.IP = ip // Save current instruction pointer to the frame before call
+
+			if ok, err := vm.callValueStatic(vm.peek(argCount), argCount, c, ip); !ok {
+				return err
+			}
+			// Update cached frame
+			frame = vm.currentFrame // Switch to new frame
+			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
 			ip = frame.IP
 
 		case chunk.OP_DEFER:
@@ -1079,6 +1196,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			frame = vm.currentFrame
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
 			ip = frame.IP
 
 		case chunk.OP_ARRAY:
@@ -1139,6 +1257,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			frame = vm.currentFrame
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
 			ip = frame.IP
 			vm.push(mod)
 

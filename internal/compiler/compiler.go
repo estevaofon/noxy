@@ -338,6 +338,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, nil, nil
 
 		} else if ident, ok := n.Target.(*ast.Identifier); ok {
+			// Fusao de incremento: emite OP_INC_LOCAL_INT e nao empilha nada
+			// (atribuicao e statement; o POP do caminho generico tambem cai fora).
+			if c.tryFuseLocalIntIncrement(ident, n.Value) {
+				return c.currentChunk, nil, nil
+			}
 			// Identifier Assignment: x = val
 			// 1. Compile Value (pushed to stack)
 			_, valType, err := c.Compile(n.Value)
@@ -935,40 +940,62 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		}
 
+		// Irmao float de isInt: so dispara quando AMBOS os lados sao
+		// estaticamente float. Mistos int/float ficam no caminho generico,
+		// que ja faz a promocao numerica.
+		isFloat := false
+		if leftType != nil && rightType != nil {
+			if leftType.String() == "float" && rightType.String() == "float" {
+				isFloat = true
+			}
+		}
+
 		switch n.Operator {
 		case "+":
 			if isInt {
 				c.emitByte(byte(chunk.OP_ADD_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_ADD_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_ADD))
 			}
 		case "-":
 			if isInt {
 				c.emitByte(byte(chunk.OP_SUB_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_SUB_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_SUBTRACT))
 			}
 		case "*":
 			if isInt {
 				c.emitByte(byte(chunk.OP_MUL_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_MUL_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_MULTIPLY))
 			}
 		case "/":
 			if isInt {
 				c.emitByte(byte(chunk.OP_DIV_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_DIV_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_DIVIDE))
 			}
 		case ">":
 			if isInt {
 				c.emitByte(byte(chunk.OP_GREATER_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_GREATER_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_GREATER))
 			}
 		case "<":
 			if isInt {
 				c.emitByte(byte(chunk.OP_LESS_INT))
+			} else if isFloat {
+				c.emitByte(byte(chunk.OP_LESS_FLOAT))
 			} else {
 				c.emitByte(byte(chunk.OP_LESS))
 			}
@@ -1099,20 +1126,30 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.IfStatement:
 		c.setLine(n.Token.Line)
-		// Compile condition
-		_, condType, err := c.Compile(n.Condition)
+		// Compile condition: fusao especulativa (comparacao int + salto) com
+		// rollback para o caminho generico se um dos lados nao for int.
+		fusedOp, fused, err := c.tryCompileFusedCondition(n.Condition)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, ok := condType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		var jumpToElse int
+		if fused {
+			jumpToElse = c.emitJump(fusedOp)
+		} else {
+			_, condType, err := c.Compile(n.Condition)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, ok := condType.(*ast.RefType); ok {
+				c.emitByte(byte(chunk.OP_DEREF))
+			}
+
+			// Emit JumpIfFalse
+			jumpToElse = c.emitJump(chunk.OP_JUMP_IF_FALSE)
+
+			// Compile Then block (Consequence)
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)
 		}
-
-		// Emit JumpIfFalse
-		jumpToElse := c.emitJump(chunk.OP_JUMP_IF_FALSE)
-
-		// Compile Then block (Consequence)
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)
 
 		_, _, err = c.Compile(n.Consequence)
 		if err != nil {
@@ -1125,7 +1162,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Patch Else jump
 		c.patchJump(jumpToElse)
 
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition value (if we jumped here, condition was false)
+		if !fused {
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition value (if we jumped here, condition was false)
+		}
 
 		// Compile Else block (Alternative)
 		if n.Alternative != nil {
@@ -1147,18 +1186,29 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
 		c.loops = append(c.loops, loop)
 
-		_, condType, err := c.Compile(n.Condition)
+		// Compile condition: fusao especulativa (comparacao int + salto) com
+		// rollback para o caminho generico se um dos lados nao for int.
+		fusedOp, fused, err := c.tryCompileFusedCondition(n.Condition)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, ok := condType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		var jumpToExit int
+		if fused {
+			jumpToExit = c.emitJump(fusedOp)
+		} else {
+			_, condType, err := c.Compile(n.Condition)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, ok := condType.(*ast.RefType); ok {
+				c.emitByte(byte(chunk.OP_DEREF))
+			}
+
+			// Exit jump
+			jumpToExit = c.emitJump(chunk.OP_JUMP_IF_FALSE)
+
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition
 		}
-
-		// Exit jump
-		jumpToExit := c.emitJump(chunk.OP_JUMP_IF_FALSE)
-
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition
 
 		_, _, err = c.Compile(n.Body)
 		if err != nil {
@@ -1169,7 +1219,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.emitLoop(loopStart)
 
 		c.patchJump(jumpToExit)
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+		if !fused {
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+		}
 
 		// Patch Break Jumps
 		for _, jump := range loop.BreakJumps {
@@ -1676,8 +1728,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	}
 }
 
-func (c *Compiler) emitCall(argCount int, emission callEmission) {
+func (c *Compiler) emitCall(argCount int, emission callEmission, static bool) {
 	op := chunk.OP_CALL
+	if static {
+		op = chunk.OP_CALL_STATIC
+	}
 	line := c.currentLine
 	if emission.deferred {
 		op = chunk.OP_DEFER
@@ -1737,7 +1792,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				}
 			}
 
-			c.emitCall(2, emission)
+			c.emitCall(2, emission, false)
 			return c.currentChunk, valType, nil // send returns value sent
 		} else if ident.Value == "chan_recv" {
 			if len(call.Arguments) != 1 {
@@ -1766,7 +1821,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				retType = chanType.ElementType
 			}
 
-			c.emitCall(1, emission)
+			c.emitCall(1, emission, false)
 			return c.currentChunk, retType, nil
 		} else if ident.Value == "addr" {
 			if emission.deferred {
@@ -1805,6 +1860,14 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		)
 	}
 
+	// modesProven começa igual a isExact e é derrubado se algum argumento
+	// deixa um modo (ref vs. valor) sem prova em tempo de compilação — ex.:
+	// `ref a` passado para um parâmetro `any` (areStrictTypesCompatible
+	// aceita `any` incondicionalmente, então isExact continua true, mas
+	// ninguém verificou que o valor não é uma ref). Só modesProven decide
+	// OP_CALL_STATIC; nesse caso caímos para OP_CALL, que ainda roda
+	// validateParameterModes em tempo de execução.
+	modesProven := isExact
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
@@ -1841,6 +1904,13 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			c.emitByte(byte(chunk.OP_DEREF))
 			argType = ref.ElementType
 		}
+		if isExact {
+			if _, stillRef := argType.(*ast.RefType); stillRef {
+				if _, expectedIsRef := funcType.Params[i].(*ast.RefType); !expectedIsRef {
+					modesProven = false
+				}
+			}
+		}
 		if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
 			return nil, nil, fmt.Errorf(
 				"[line %d] argument %d to '%s': expected %s, got %s",
@@ -1855,7 +1925,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 	}
 
-	c.emitCall(len(call.Arguments), emission)
+	c.emitCall(len(call.Arguments), emission, modesProven)
 	if isExact {
 		return c.currentChunk, funcType.Return, nil
 	}
@@ -2061,6 +2131,73 @@ func (c *Compiler) emitOpWithConstantIndex(op chunk.OpCode, index int) {
 	c.emitByte(byte(index & 0xff))
 }
 
+// fusedIntCompareJump mapeia o operador da CONDICAO para o opcode que salta
+// quando a condicao FALHA (e o jump-if-false fundido): `i < n` continua no
+// corpo quando vale e salta para fora com GE.
+func fusedIntCompareJump(operator string) (chunk.OpCode, bool) {
+	switch operator {
+	case "<":
+		return chunk.OP_JUMP_IF_GE_INT, true
+	case "<=":
+		return chunk.OP_JUMP_IF_GT_INT, true
+	case ">":
+		return chunk.OP_JUMP_IF_LE_INT, true
+	case ">=":
+		return chunk.OP_JUMP_IF_LT_INT, true
+	case "==":
+		return chunk.OP_JUMP_IF_NE_INT, true
+	case "!=":
+		return chunk.OP_JUMP_IF_EQ_INT, true
+	}
+	return 0, false
+}
+
+// tryCompileFusedCondition tenta compilar cond como (left, right) ints puros e
+// devolve o opcode de salto fundido a emitir com emitJump. Emissao
+// especulativa: se um dos lados nao for estaticamente int, o bytecode dos
+// operandos e DESFEITO (TruncateTo) e o chamador segue o caminho generico.
+// Constantes adicionadas na especulacao ficam orfas no pool — inofensivo, mas
+// note que um operando que e um literal de funcao orfa a FUNCAO INTEIRA
+// compilada (um ObjFunction com seu proprio chunk, retido pelo modulo pelo
+// resto da vida do programa) e conta no tamanho de GlobalCache() (dimensionado
+// por len(Constants)) — ainda inofensivo (o cache so cresce, nunca e indexado
+// por essas entradas mortas), so mais bytes do que uma constante escalar orfa.
+func (c *Compiler) tryCompileFusedCondition(cond ast.Expression) (chunk.OpCode, bool, error) {
+	infix, ok := cond.(*ast.InfixExpression)
+	if !ok {
+		return 0, false, nil
+	}
+	jumpOp, ok := fusedIntCompareJump(infix.Operator)
+	if !ok {
+		return 0, false, nil
+	}
+	checkpoint := len(c.currentChunk.Code)
+	_, leftType, err := c.Compile(infix.Left)
+	if err != nil {
+		// Sem TruncateTo aqui: um erro aborta a compilacao inteira (o
+		// chamador propaga err e nenhum bytecode deste Chunk chega a ser
+		// executado), entao nao ha invariante de "pilha do bytecode emitido"
+		// a preservar — diferente dos dois `if ... TruncateTo` abaixo, que
+		// tratam um retorno SEM erro (tipo nao-int) onde a compilacao
+		// continua e o caminho generico precisa reemitir do zero.
+		return 0, false, err
+	}
+	if leftType == nil || leftType.String() != "int" {
+		c.currentChunk.TruncateTo(checkpoint)
+		return 0, false, nil
+	}
+	_, rightType, err := c.Compile(infix.Right)
+	if err != nil {
+		// Mesmo raciocinio: erro aborta a compilacao inteira.
+		return 0, false, err
+	}
+	if rightType == nil || rightType.String() != "int" {
+		c.currentChunk.TruncateTo(checkpoint)
+		return 0, false, nil
+	}
+	return jumpOp, true, nil
+}
+
 func (c *Compiler) emitJump(op chunk.OpCode) int {
 	c.emitByte(byte(op))
 	c.emitByte(0xff)
@@ -2152,6 +2289,43 @@ func (c *Compiler) localOwns(index int) bool {
 		return false
 	}
 	return c.locals[index].Owns
+}
+
+// tryFuseLocalIntIncrement funde `i = i + K` / `i = i - K` (i local int
+// POSSUIDOR — slot ref nunca funde; K literal int em [-128,127]) em
+// OP_INC_LOCAL_INT. Retorna true se emitiu (nada mais a fazer no site).
+// Sem emissao especulativa: todas as checagens sao sintaticas/de simbolo.
+func (c *Compiler) tryFuseLocalIntIncrement(ident *ast.Identifier, valueExpr ast.Expression) bool {
+	arg, localType := c.resolveLocal(ident.Value)
+	if arg == -1 || arg > 255 || !c.localOwns(arg) {
+		return false
+	}
+	prim, ok := localType.(*ast.PrimitiveType)
+	if !ok || prim.Name != "int" {
+		return false
+	}
+	infix, ok := valueExpr.(*ast.InfixExpression)
+	if !ok || (infix.Operator != "+" && infix.Operator != "-") {
+		return false
+	}
+	left, ok := infix.Left.(*ast.Identifier)
+	if !ok || left.Value != ident.Value {
+		return false
+	}
+	lit, ok := infix.Right.(*ast.IntegerLiteral)
+	if !ok {
+		return false
+	}
+	delta := lit.Value
+	if infix.Operator == "-" {
+		delta = -delta
+	}
+	if delta < -128 || delta > 127 {
+		return false
+	}
+	c.emitBytes(byte(chunk.OP_INC_LOCAL_INT), byte(arg))
+	c.emitByte(byte(int8(delta)))
+	return true
 }
 
 func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {

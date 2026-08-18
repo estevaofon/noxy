@@ -176,8 +176,16 @@ func (f *CallFrame) ownSlot(vm *VM, slot int) {
 				// entrada passa a apontar o objeto novo (retido acima).
 				f.Owned[i].obj = v
 			} else {
+				// Swap-remove: o slot k perde sua entrada (release ja aconteceu
+				// no site chamador antes de nos chamar). O array de suporte
+				// sobrevive a este frame (vm.frames e reusado, nao realocado),
+				// entao o antigo indice `last` precisa ser zerado depois do
+				// swap — senao continua nomeando um objeto ja liberado, preso
+				// fora do alcance de qualquer `range f.Owned` (que respeita
+				// len, nao cap) ate um append futuro por acaso sobrescreve-lo.
 				last := len(f.Owned) - 1
 				f.Owned[i] = f.Owned[last]
+				f.Owned[last] = ownedEntry{}
 				f.Owned = f.Owned[:last]
 			}
 			return
@@ -211,8 +219,12 @@ func (f *CallFrame) bindOwnedSlot(vm *VM, slot int) {
 		if retained {
 			f.Owned[i].obj = v
 		} else {
+			// Swap-remove: mesmo cuidado de ownSlot acima — zerar `last`
+			// depois do swap para nao reter, no backing array reusado entre
+			// frames, o value.Value de um objeto ja liberado pela linha acima.
 			last := len(f.Owned) - 1
 			f.Owned[i] = f.Owned[last]
+			f.Owned[last] = ownedEntry{}
 			f.Owned = f.Owned[:last]
 		}
 		return

@@ -104,8 +104,8 @@ func sourceLocation(c *chunk.Chunk, ip int) SourceLocation {
 func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
 	frames := make([]string, 0, vm.frameCount)
 	for i := vm.frameCount - 1; i >= 0; i-- {
-		frame := vm.frames[i]
-		if frame == nil || frame.Closure == nil || frame.Closure.Function == nil {
+		frame := &vm.frames[i]
+		if frame.Closure == nil || frame.Closure.Function == nil {
 			continue
 		}
 		c, _ := frame.Closure.Function.Chunk.(*chunk.Chunk)

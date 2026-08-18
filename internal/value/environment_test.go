@@ -65,6 +65,36 @@ func TestGlobalEnvironmentLocalOperationsAndSnapshots(t *testing.T) {
 	}
 }
 
+func TestGenerationBumpsOnSetLocal(t *testing.T) {
+	env := NewGlobalEnvironment(nil)
+	g0 := env.Generation()
+	env.SetLocal("x", NewInt(1))
+	if env.Generation() == g0 {
+		t.Fatal("SetLocal deve avançar a geração")
+	}
+}
+
+func TestGenerationSeesParentWrites(t *testing.T) {
+	root := NewGlobalEnvironment(nil)
+	child := NewGlobalEnvironment(root)
+	g0 := child.Generation()
+	root.SetLocal("x", NewInt(1))
+	if child.Generation() == g0 {
+		t.Fatal("escrita no pai deve avançar a geração vista pelo filho")
+	}
+}
+
+func TestGenerationSeesExportedMapWrites(t *testing.T) {
+	env := NewGlobalEnvironment(nil)
+	env.SetLocal("x", NewInt(1))
+	g0 := env.Generation()
+	exported := env.ExportMap().Obj.(*ObjMap)
+	exported.Set("x", NewInt(2))
+	if env.Generation() == g0 {
+		t.Fatal("escrita via ObjMap que compartilha o store deve avançar a geração")
+	}
+}
+
 func TestGlobalEnvironmentNilDoesNotResolve(t *testing.T) {
 	var environment *GlobalEnvironment
 	if _, found := environment.GetLocal("missing"); found {

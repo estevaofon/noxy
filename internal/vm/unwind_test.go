@@ -83,7 +83,7 @@ work()`)
 	if err != nil || !valuesEqual(captured, value.NewInt(42)) {
 		t.Fatalf("error=%v captured=%v, want 42", err, captured)
 	}
-	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0] != nil || machine.openUpvalues != nil {
+	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0].Closure != nil || machine.frames[0].Environment != nil || len(machine.frames[0].Owned) != 0 || len(machine.frames[0].Deferred) != 0 || machine.openUpvalues != nil {
 		t.Fatalf("dirty terminal VM: frames=%d current=%p stack=%d open=%p", machine.frameCount, machine.currentFrame, machine.stackTop, machine.openUpvalues)
 	}
 }
@@ -126,7 +126,7 @@ defer cleanup(3)`)
 	if unwind.Deferred[0].Registration.Line != 4 || unwind.Deferred[1].Registration.Line != 3 {
 		t.Fatalf("registration lines=%d,%d want 4,3", unwind.Deferred[0].Registration.Line, unwind.Deferred[1].Registration.Line)
 	}
-	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0] != nil {
+	if machine.frameCount != 0 || machine.currentFrame != nil || machine.stackTop != 0 || machine.frames[0].Closure != nil || machine.frames[0].Environment != nil || len(machine.frames[0].Owned) != 0 || len(machine.frames[0].Deferred) != 0 {
 		t.Fatalf("dirty terminal VM: frames=%d current=%p stack=%d", machine.frameCount, machine.currentFrame, machine.stackTop)
 	}
 }
