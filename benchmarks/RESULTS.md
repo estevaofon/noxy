@@ -106,10 +106,10 @@ apontando para o mesmo binário** nas sessões 2-3 para medir o piso de ruído.
   da fase, o que também explica o profile não mostrar nenhum símbolo da
   fase 1 no caminho quente.
 
-Detalhes e medições cruas:
-`.superpowers/sdd/2026-08-18-vm-perf-fase1-dispatch-e-chamadas/share-mutate-bisect.md`
-(diretório de trabalho, não versionado). **Regressão aceita e rastreada, não
-corrigida nesta fase** — ver Interpretação.
+Detalhes e medições cruas (protocolo, os 4 commits medidos, todas as
+amostras individuais e o controle de rótulo duplicado):
+`benchmarks/results/2026-08-18-share-mutate-bisect.md`. **Regressão aceita e
+rastreada, não corrigida nesta fase** — ver Interpretação.
 
 ### Perfil de cada bench
 
