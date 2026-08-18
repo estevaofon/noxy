@@ -66,6 +66,8 @@ type Compiler struct {
 	scopedStructs       []scopedStructBinding
 	programBindings     map[string]ast.NoxyType
 	moduleDiscovery     *moduleDiscoveryState
+	generics            *GenericRegistry // lazy-init: use registryOrInit()
+	moduleName          string           // default "main"; setter usado nas tasks de modulo
 }
 
 type callEmission struct {
@@ -107,6 +109,7 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 		currentLine:  1,
 		FileName:     fileName,
 		moduleRoot:   moduleRoot,
+		moduleName:   "main",
 	}
 	c.currentChunk.FileName = fileName
 	return c
@@ -135,6 +138,8 @@ func NewChild(parent *Compiler) *Compiler {
 		moduleRoot:      parent.moduleRoot,
 		programBindings: parent.programBindings,
 		moduleDiscovery: parent.moduleDiscovery,
+		generics:        parent.generics,
+		moduleName:      parent.moduleName,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -641,6 +646,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.StructStatement:
+		if len(n.TypeParams) > 0 {
+			if c.scopeDepth > 0 || c.enclosing != nil {
+				return nil, nil, fmt.Errorf("[line %d] declaração genérica só é permitida no top level", n.Token.Line)
+			}
+			c.registryOrInit().Structs[n.Name] = &StructTemplate{Decl: n, Module: c.moduleName}
+			return c.currentChunk, nil, nil
+		}
 		c.setLine(n.Token.Line)
 		if c.scopeDepth > 0 {
 			prior, existed := c.structs[n.Name]
@@ -1661,6 +1673,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.FunctionStatement:
+		if len(n.TypeParams) > 0 {
+			if c.scopeDepth > 0 || c.enclosing != nil {
+				return nil, nil, fmt.Errorf("[line %d] declaração genérica só é permitida no top level", n.Token.Line)
+			}
+			c.registryOrInit().Funcs[n.Name] = &FuncTemplate{Decl: n, Module: c.moduleName}
+			return c.currentChunk, nil, nil
+		}
 		c.setLine(n.Token.Line)
 
 		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
