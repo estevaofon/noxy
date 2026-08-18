@@ -2114,7 +2114,12 @@ func fusedIntCompareJump(operator string) (chunk.OpCode, bool) {
 // devolve o opcode de salto fundido a emitir com emitJump. Emissao
 // especulativa: se um dos lados nao for estaticamente int, o bytecode dos
 // operandos e DESFEITO (TruncateTo) e o chamador segue o caminho generico.
-// Constantes adicionadas na especulacao ficam orfas no pool — inofensivo.
+// Constantes adicionadas na especulacao ficam orfas no pool — inofensivo, mas
+// note que um operando que e um literal de funcao orfa a FUNCAO INTEIRA
+// compilada (um ObjFunction com seu proprio chunk, retido pelo modulo pelo
+// resto da vida do programa) e conta no tamanho de GlobalCache() (dimensionado
+// por len(Constants)) — ainda inofensivo (o cache so cresce, nunca e indexado
+// por essas entradas mortas), so mais bytes do que uma constante escalar orfa.
 func (c *Compiler) tryCompileFusedCondition(cond ast.Expression) (chunk.OpCode, bool, error) {
 	infix, ok := cond.(*ast.InfixExpression)
 	if !ok {
@@ -2127,6 +2132,12 @@ func (c *Compiler) tryCompileFusedCondition(cond ast.Expression) (chunk.OpCode, 
 	checkpoint := len(c.currentChunk.Code)
 	_, leftType, err := c.Compile(infix.Left)
 	if err != nil {
+		// Sem TruncateTo aqui: um erro aborta a compilacao inteira (o
+		// chamador propaga err e nenhum bytecode deste Chunk chega a ser
+		// executado), entao nao ha invariante de "pilha do bytecode emitido"
+		// a preservar — diferente dos dois `if ... TruncateTo` abaixo, que
+		// tratam um retorno SEM erro (tipo nao-int) onde a compilacao
+		// continua e o caminho generico precisa reemitir do zero.
 		return 0, false, err
 	}
 	if leftType == nil || leftType.String() != "int" {
@@ -2135,6 +2146,7 @@ func (c *Compiler) tryCompileFusedCondition(cond ast.Expression) (chunk.OpCode, 
 	}
 	_, rightType, err := c.Compile(infix.Right)
 	if err != nil {
+		// Mesmo raciocinio: erro aborta a compilacao inteira.
 		return 0, false, err
 	}
 	if rightType == nil || rightType.String() != "int" {

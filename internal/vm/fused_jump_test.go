@@ -9,8 +9,15 @@ import (
 )
 
 // Frame raiz: stack[0] = script closure; empilhamos a,b e o opcode fundido
-// salta (ou não) sobre um OP_CONSTANT sentinela. Sem OP_RETURN de propósito
-// (o loop cai fora no fim do código e deixa a pilha para inspeção).
+// salta (ou não) sobre um OP_CONSTANT sentinela. Depois do sentinela vem um
+// OP_CONSTANT marcador que os DOIS caminhos executam — isso prova não só que
+// saltou, mas que o pouso caiu exatamente no início da instrução seguinte ao
+// sentinela: um pouso errado por 1 byte para qualquer lado decodificaria um
+// opcode/operando no meio de uma instrução, o que não produz nem a pilha
+// "saltou" (closure+marcador) nem a "não saltou" (closure+sentinela+marcador)
+// — cairia no `default` abaixo (ou o próprio VM devolveria erro). Sem
+// OP_RETURN de propósito (o loop cai fora no fim do código e deixa a pilha
+// para inspeção).
 func runFusedJump(t *testing.T, op chunk.OpCode, a, b int64) (jumped bool) {
 	t.Helper()
 	machine := New()
@@ -18,28 +25,40 @@ func runFusedJump(t *testing.T, op chunk.OpCode, a, b int64) (jumped bool) {
 	ca := code.AddConstant(value.NewInt(a))
 	cb := code.AddConstant(value.NewInt(b))
 	sentinel := code.AddConstant(value.NewInt(777))
+	marker := code.AddConstant(value.NewInt(888))
 	code.Write(byte(chunk.OP_CONSTANT), 1)
 	code.Write(byte(ca), 1)
 	code.Write(byte(chunk.OP_CONSTANT), 1)
 	code.Write(byte(cb), 1)
 	code.Write(byte(op), 1)
 	code.Write(0, 1) // offset hi
-	code.Write(2, 1) // offset lo: pula o OP_CONSTANT sentinela (2 bytes)
+	code.Write(2, 1) // offset lo: pula exatamente a instrucao OP_CONSTANT sentinela (2 bytes)
 	code.Write(byte(chunk.OP_CONSTANT), 1)
 	code.Write(byte(sentinel), 1)
+	code.Write(byte(chunk.OP_CONSTANT), 1)
+	code.Write(byte(marker), 1)
 	if err := machine.Interpret(code); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
-	// Se saltou, a pilha ficou só com a closure (stackTop==1); senão, o
-	// sentinela 777 está no topo.
-	if machine.stackTop == 1 {
+	switch machine.stackTop {
+	case 2: // closure + marcador: saltou e pousou exatamente certo
+		top := machine.stack[1]
+		if top.Type != value.VAL_INT || top.AsInt != 888 {
+			t.Fatalf("pouso do salto incorreto: top=%s", top.String())
+		}
 		return true
+	case 3: // closure + sentinela + marcador: nao saltou
+		sentinelTop := machine.stack[1]
+		markerTop := machine.stack[2]
+		if sentinelTop.Type != value.VAL_INT || sentinelTop.AsInt != 777 ||
+			markerTop.Type != value.VAL_INT || markerTop.AsInt != 888 {
+			t.Fatalf("pilha inesperada (nao saltou): sentinela=%s marcador=%s", sentinelTop.String(), markerTop.String())
+		}
+		return false
+	default:
+		t.Fatalf("pilha com formato inesperado apos execucao (pouso de salto provavelmente errado): stackTop=%d", machine.stackTop)
+		return false
 	}
-	top := machine.stack[machine.stackTop-1]
-	if top.Type != value.VAL_INT || top.AsInt != 777 {
-		t.Fatalf("pilha inesperada: top=%s stackTop=%d", top.String(), machine.stackTop)
-	}
-	return false
 }
 
 func TestFusedJumpOpcodes(t *testing.T) {

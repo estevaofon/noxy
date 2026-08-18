@@ -1,8 +1,10 @@
 package compiler
 
 import (
+	"fmt"
 	"testing"
 
+	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
 )
@@ -19,8 +21,13 @@ func compileFusedSource(t *testing.T, source string) error {
 	return err
 }
 
+// TestFusedWhileCompiles fundia sem checar o bytecode gerado (so "compila
+// sem erro"), o que passaria identico se a fusao fosse desligada ou se a
+// tabela de mapeamento operador->opcode saisse invertida. Fortalecido para
+// tambem exigir OP_JUMP_IF_GE_INT presente (a fusao de `<` de fato disparou)
+// e OP_JUMP_IF_FALSE ausente (nao caiu no caminho generico).
 func TestFusedWhileCompiles(t *testing.T) {
-	if err := compileFusedSource(t, `
+	source := `
 func f() -> int
     let i: int = 0
     while i < 10 do
@@ -29,8 +36,80 @@ func f() -> int
     return i
 end
 f()
-`); err != nil {
+`
+	if err := compileFusedSource(t, source); err != nil {
 		t.Fatalf("compile error: %v", err)
+	}
+	fn := compiledFunction(t, source, "f")
+	code := fn.Chunk.(*chunk.Chunk).Code
+	if !containsOpcode(code, chunk.OP_JUMP_IF_GE_INT) {
+		t.Fatalf("`while i < 10` nao fundiu: OP_JUMP_IF_GE_INT ausente do bytecode")
+	}
+	if containsOpcode(code, chunk.OP_JUMP_IF_FALSE) {
+		t.Fatalf("`while i < 10` caiu no caminho generico (OP_JUMP_IF_FALSE presente) apesar de i e 10 serem int")
+	}
+}
+
+// TestFusedOperatorMapsToExpectedOpcode fixa, por bytecode, a tabela inteira
+// de fusedIntCompareJump — as seis linhas de negacao manual sao o ponto mais
+// propenso a inversao desta mudanca (o proprio brief ja apontava a direcao do
+// salto como o risco central). Sem este teste, so `<` e `<=` ficavam presos
+// por comportamento via TestFusedWhileAndIfBehavior (pacote vm); `>`, `>=`,
+// `==` e `!=` nao tinham nenhuma asercao no `go test`. Para nao passar de
+// forma vazia (achar o byte certo por acaso em outro lugar do chunk, ou olhar
+// para o chunk errado), cada caso: (a) usa compiledFunction, que ja falha com
+// t.Fatalf se a funcao nao existir no pool de constantes; (b) exige AUSENCIA
+// dos outros cinco opcodes fundidos (uma inversao troca QUAL opcode aparece,
+// nao duplica); e (c) exige AUSENCIA de OP_JUMP_IF_FALSE (prova que fundiu,
+// nao caiu no generico).
+func TestFusedOperatorMapsToExpectedOpcode(t *testing.T) {
+	allFused := []chunk.OpCode{
+		chunk.OP_JUMP_IF_LT_INT,
+		chunk.OP_JUMP_IF_LE_INT,
+		chunk.OP_JUMP_IF_GT_INT,
+		chunk.OP_JUMP_IF_GE_INT,
+		chunk.OP_JUMP_IF_EQ_INT,
+		chunk.OP_JUMP_IF_NE_INT,
+	}
+	cases := []struct {
+		operator string
+		want     chunk.OpCode
+	}{
+		{"<", chunk.OP_JUMP_IF_GE_INT},
+		{"<=", chunk.OP_JUMP_IF_GT_INT},
+		{">", chunk.OP_JUMP_IF_LE_INT},
+		{">=", chunk.OP_JUMP_IF_LT_INT},
+		{"==", chunk.OP_JUMP_IF_NE_INT},
+		{"!=", chunk.OP_JUMP_IF_EQ_INT},
+	}
+	for _, tc := range cases {
+		t.Run(tc.operator, func(t *testing.T) {
+			source := fmt.Sprintf(`
+func f(a: int, b: int) -> int
+    if a %s b then
+        return 1
+    end
+    return 0
+end
+`, tc.operator)
+			fn := compiledFunction(t, source, "f")
+			code := fn.Chunk.(*chunk.Chunk).Code
+
+			if !containsOpcode(code, tc.want) {
+				t.Fatalf("operador %q: esperava %s no bytecode, ausente", tc.operator, tc.want)
+			}
+			for _, other := range allFused {
+				if other == tc.want {
+					continue
+				}
+				if containsOpcode(code, other) {
+					t.Fatalf("operador %q: opcode fundido inesperado %s tambem presente (tabela de mapeamento provavelmente invertida)", tc.operator, other)
+				}
+			}
+			if containsOpcode(code, chunk.OP_JUMP_IF_FALSE) {
+				t.Fatalf("operador %q: OP_JUMP_IF_FALSE presente — condicao nao fundiu", tc.operator)
+			}
+		})
 	}
 }
 
