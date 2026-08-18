@@ -278,3 +278,54 @@ func TestRefBindingError(t *testing.T) {
 		t.Fatalf("T=ref deve ser erro de unificacao, veio %v", err)
 	}
 }
+
+// I2 da revisao final de branch: recursao POLIMORFICA (cada nivel pede uma
+// tupla NOVA, entao o memo nunca acerta) travava o compilador para sempre —
+// f<int>, f<int[]>, f<int[][]>, ... sem fim. maxInstantiationDepth corta com
+// o erro do §9, embrulhado na cadeia de instanciacao, que aqui e justamente o
+// diagnostico util: mostra a torre de tuplas divergentes.
+//
+// O teste tambem e o guard de que o corte e RAPIDO: sem ele este Compile nao
+// retorna e o pacote inteiro estoura o timeout do `go test`.
+func TestPolymorphicRecursionHitsDepthCap(t *testing.T) {
+	src := `func f<T>(x: T, n: int) -> int
+    if n <= 0 then
+        return 0
+    end
+    let arr: T[] = [x]
+    return f(arr, n - 1)
+end
+let start: int = 1
+f(start, 3)`
+	_, _, err := New().Compile(parse(src))
+	if err == nil {
+		t.Fatal("recursao polimorfica deveria bater no teto de profundidade")
+	}
+	for _, want := range []string{
+		"profundidade máxima de instanciação genérica excedida (64)",
+		"recursão polimórfica?",
+		"em f<int[][]> (instanciado na linha 5)",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("erro sem %q: %v", want, err)
+		}
+	}
+}
+
+// I2, metade dos STRUCTS: o mesmo teto vale para a cadeia de campos
+// (`proximo: Caixa<T[]>` nunca fecha). ensureStructInstance tem o guard
+// gemeo em volta de resolveStructFieldAnnotations.
+func TestPolymorphicStructRecursionHitsDepthCap(t *testing.T) {
+	src := `struct Caixa<T>
+    valor: T
+    proximo: Caixa<T[]>
+end
+let c: Caixa<int> = null`
+	_, _, err := New().Compile(parse(src))
+	if err == nil {
+		t.Fatal("cadeia de campos polimorfica deveria bater no teto de profundidade")
+	}
+	if !strings.Contains(err.Error(), "profundidade máxima de instanciação genérica excedida (64)") {
+		t.Fatalf("erro sem o teto de profundidade: %v", err)
+	}
+}

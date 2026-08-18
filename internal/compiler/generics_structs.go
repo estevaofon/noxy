@@ -233,6 +233,13 @@ func (c *Compiler) ensureStructInstance(tpl *StructTemplate, args []ast.NoxyType
 		return name, nil
 	}
 
+	// Teto de aninhamento (§9), gemeo do de ensureFunctionInstance: resolver
+	// os campos e o passo que pode pedir OUTRA instancia (`campo: Caixa<T[]>`
+	// numa cadeia que nunca fecha).
+	if queue.depth >= maxInstantiationDepth {
+		return "", instantiationDepthError(line)
+	}
+
 	bindings := make(map[string]ast.NoxyType, len(args))
 	for index, typeParam := range tpl.Decl.TypeParams {
 		bindings[typeParam] = args[index]
@@ -242,7 +249,10 @@ func (c *Compiler) ensureStructInstance(tpl *StructTemplate, args []ast.NoxyType
 	queue.structKeys[name] = structInstanceKey{Base: base, Args: args}
 	c.registerStructInstance(instance)
 
-	if err := c.resolveStructFieldAnnotations(instance, line); err != nil {
+	queue.depth++
+	err := c.resolveStructFieldAnnotations(instance, line)
+	queue.depth--
+	if err != nil {
 		return "", instantiationChainError(displayInstanceName(base, args), line, err)
 	}
 	// Re-registra: os campos mudaram (GenericType -> nome qualificado) e o tipo
@@ -445,6 +455,16 @@ func (c *Compiler) expandInstanceNames(t ast.NoxyType) ast.NoxyType {
 			params[index] = c.expandInstanceNames(param)
 		}
 		return &ast.FunctionType{Params: params, Return: c.expandInstanceNames(n.Return)}
+	case *ast.GenericType:
+		// Forma generica JA expandida no topo, mas com argumentos que podem
+		// carregar nomes de instancia (`Pilha<main::Caixa<int>>`): recursa nos
+		// args para que os dois lados de uma unificacao usem a mesma grafia em
+		// toda profundidade.
+		args := make([]ast.NoxyType, len(n.Args))
+		for index, argument := range n.Args {
+			args[index] = c.expandInstanceNames(argument)
+		}
+		return &ast.GenericType{Name: n.Name, Args: args}
 	default:
 		return t
 	}

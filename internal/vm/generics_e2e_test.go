@@ -306,6 +306,28 @@ test_report(mesmos[2])
 	expectInt(t, got, 3, "unificacao bidirecional")
 }
 
+// I5 da revisao final de branch, E2E: uma generica cujo PARAMETRO e um struct
+// generico (`pega<T>(c: Caixa<T>)`) passada como valor-argumento. O template
+// escreve `Caixa<T>` e o tipo observado no site e `main::Caixa<int>` — sem a
+// ponte de expandInstanceNames na unificacao bidirecional, o programa nao
+// compilava ("esperava main::Caixa<int>, encontrado Caixa<T>").
+func TestBidirectionalArgumentWithGenericStructParam(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+func pega<T>(c: Caixa<T>) -> T
+    return c.valor
+end
+func aplica<A, B>(x: A, fn: func(A) -> B) -> B
+    return fn(x)
+end
+let c: Caixa<int> = Caixa(42)
+test_report(aplica(c, pega))
+`)
+	expectInt(t, got, 42, "struct generico como parametro do argumento-template")
+}
+
 // §3: elemento de array literal (tipo do elemento vem da anotacao do `let`
 // envolvente) e posicao de retorno (tipo de retorno declarado da funcao
 // corrente). A sintaxe de array-de-funcao exige parenteses

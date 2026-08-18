@@ -47,7 +47,14 @@ func (c *Compiler) instantiateForTarget(name string, target ast.NoxyType, line i
 
 	bindings := make(map[string]ast.NoxyType, len(tpl.Decl.TypeParams))
 	templateSig := newFunctionType(tpl.Decl.Parameters, tpl.Decl.ReturnType)
-	if err := unify(templateSig, targetFn, bindings); err != nil {
+	// unifyAnnotation, nao unify cru (I5): a assinatura do template escreve
+	// `Pilha<T>` (GenericType) e o alvo carrega o nome QUALIFICADO da
+	// instancia (`main::Pilha<int>`). Sem a ponte de expandInstanceNames as
+	// duas formas nunca casam e `func f<T>(p: Pilha<T>)` em posicao de valor
+	// falhava com "esperava main::Pilha<int>, encontrado Pilha<T>" — a
+	// mesma divergencia que o caminho principal (unifyPositionalArguments) ja
+	// resolvia via unifyAnnotation.
+	if err := c.unifyAnnotation(templateSig, targetFn, bindings); err != nil {
 		return "", true, fmt.Errorf("[line %d] %v", line, err)
 	}
 
@@ -215,6 +222,27 @@ func (c *Compiler) rejectBareGenericTemplateIdentifier(identifier *ast.Identifie
 //   - os dois concretos: mesma recursão estrutural e mesmas folgas de
 //     compatibilidade de unify (any/null não bindam, `func` nu aceita
 //     qualquer chamável).
+// unifyBidirectionalAnnotated e unifyBidirectional com a MESMA ponte de nomes
+// de instancia que unifyAnnotation aplica no caminho principal (I5). Aqui os
+// dois lados podem trazer as duas formas: expected sai de
+// substituteType(parametro do template do CALLER, bindings) — anotacao
+// generica (`func(A) -> B`) com os bindings ja concretos e QUALIFICADOS
+// (`main::Pilha<int>`) —, e actual e a assinatura CRUA do template do
+// argumento (`func(Pilha<T>) -> T`). Sem expandir os dois, `func f<T>(p:
+// Pilha<T>)` passado como argumento falhava com "esperava main::Pilha<int>,
+// encontrado Pilha<T>", uma comparacao entre duas grafias do MESMO tipo.
+//
+// expandInstanceNames devolve o mesmo ponteiro quando nao ha instancia
+// nenhuma a reescrever, entao o caso comum (sem struct generico envolvido)
+// nao paga alocacao.
+func (c *Compiler) unifyBidirectionalAnnotated(expected, actual ast.NoxyType, callerBindings, argBindings map[string]ast.NoxyType) error {
+	return unifyBidirectional(
+		c.expandInstanceNames(expected),
+		c.expandInstanceNames(actual),
+		callerBindings, argBindings,
+	)
+}
+
 func unifyBidirectional(expected, actual ast.NoxyType, callerBindings, argBindings map[string]ast.NoxyType) error {
 	if expected == nil || actual == nil {
 		return nil
@@ -331,6 +359,14 @@ func unifyBidirectional(expected, actual ast.NoxyType, callerBindings, argBindin
 // bindTypeParam aplica a um bindings map as mesmas regras do case
 // TypeParamType de unify: ref é proibido como alvo de binding, any/null não
 // contribuem binding, e um binding já existente que diverge é conflito.
+//
+// O conflito devolve *conflictError (I5), o MESMO tipo estruturado que unify
+// devolve — não um fmt.Errorf com o texto igual. A mensagem é idêntica
+// (conflictError.Error() produz "T inferido como X e Y"), mas só o tipo
+// estruturado deixa o chamador extrair Param/Existing/New via errors.As e
+// compor a atribuição por argumento do §9 ("... (argumento 1) e ...
+// (argumento 2)"). Com fmt.Errorf, a passada bidirecional de
+// compileGenericCallSite ficava permanentemente fora dessa atribuição.
 func bindTypeParam(bindings map[string]ast.NoxyType, name string, value ast.NoxyType) error {
 	if _, isRef := value.(*ast.RefType); isRef {
 		return fmt.Errorf("%s não pode ser um tipo ref (tentativa de bindar %s)", name, value.String())
@@ -340,7 +376,7 @@ func bindTypeParam(bindings map[string]ast.NoxyType, name string, value ast.Noxy
 	}
 	if existing, ok := bindings[name]; ok {
 		if existing.String() != value.String() {
-			return fmt.Errorf("%s inferido como %s e %s", name, existing.String(), value.String())
+			return &conflictError{Param: name, Existing: existing, New: value}
 		}
 		return nil
 	}

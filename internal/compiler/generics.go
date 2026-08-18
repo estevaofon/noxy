@@ -97,6 +97,30 @@ type instanceQueue struct {
 	// inverso da resolucao (expandInstanceNames): unificar a anotacao generica
 	// do template contra um tipo concreto que ja carrega o nome qualificado.
 	structKeys map[string]structInstanceKey
+	// depth e a profundidade de instanciacao ANINHADA corrente (quantos
+	// corpos/campos de instancia estao abertos na pilha). O memo faz recursao
+	// COMUM terminar — a segunda visita reencontra a mesma tupla e para —, mas
+	// nao faz nada por RECURSAO POLIMORFICA, onde cada nivel pede uma tupla
+	// NOVA (`func f<T>(x: T)` com `let arr: T[] = [x]` e `f(arr, ...)`
+	// instancia f<int>, f<int[]>, f<int[][]>, ...). O memo nunca acerta e o
+	// compilador nao termina. maxInstantiationDepth corta com o erro do §9.
+	depth int
+}
+
+// maxInstantiationDepth e o teto de instanciacoes generica-dentro-de-generica
+// aninhadas. Codigo real fica em um digito (uma instancia que usa outra que
+// usa outra); 64 e folgado o bastante para nunca aparecer num programa
+// legitimo e apertado o bastante para o erro chegar em milissegundos.
+const maxInstantiationDepth = 64
+
+// instantiationDepthError e a mensagem do §9 para o teto acima. Chega ao
+// usuario embrulhada na cadeia de instanciacao (instantiationChainError), que
+// mostra exatamente a torre de tuplas divergentes.
+func instantiationDepthError(line int) error {
+	return fmt.Errorf(
+		"[line %d] profundidade máxima de instanciação genérica excedida (%d) — recursão polimórfica?",
+		line, maxInstantiationDepth,
+	)
 }
 
 func newInstanceQueue() *instanceQueue {
@@ -196,9 +220,17 @@ func (c *Compiler) registerStructTemplate(name string, tpl *StructTemplate, line
 // REPL/modulos, onde o registro chega populado de fora (SetGenericState) sem
 // que a linha atual declare nada generico. Programa sem genericos responde
 // false e pula o pass 1 inteiro (custo exatamente zero, §5).
+//
+// Leitura nil-safe, nao registryOrInit: este gate roda em TODO Compile de
+// Program (programa principal, cada modulo, cada linha do REPL) e nao pode
+// alocar um GenericRegistry (dois mapas) so para descobrir que ele esta
+// vazio — mesmo cuidado que rejectBareGenericTemplateIdentifier
+// (generics_target.go) ja tomava no caminho por identificador.
 func (c *Compiler) hasGenerics() bool {
-	registry := c.registryOrInit()
-	return len(registry.Funcs) > 0 || len(registry.Structs) > 0
+	if c.generics == nil {
+		return false
+	}
+	return len(c.generics.Funcs) > 0 || len(c.generics.Structs) > 0
 }
 
 // runGenericsPass1 executa o pass 1 (§5): compila o programa inteiro num
@@ -349,7 +381,22 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 		}
 		templateSig := newFunctionType(argTpl.Decl.Parameters, argTpl.Decl.ReturnType)
 		argBindings := make(map[string]ast.NoxyType, len(argTpl.Decl.TypeParams))
-		if err := unifyBidirectional(expectedFn, templateSig, bindings, argBindings); err != nil {
+		if err := c.unifyBidirectionalAnnotated(expectedFn, templateSig, bindings, argBindings); err != nil {
+			// Mesma atribuicao por argumento do §9 que unifyPositionalArguments
+			// aplica no caminho comum (I5): um conflito estruturado sabe QUAL
+			// parametro divergiu, e argIndexOf sabe qual argumento o bindou
+			// primeiro. Sem isto, este caminho so sabia dizer "argumento N".
+			var conflict *conflictError
+			if errors.As(err, &conflict) {
+				if existingIndex, known := argIndexOf[conflict.Param]; known {
+					return fmt.Errorf(
+						"[line %d] %s inferido como %s (argumento %d) e %s (argumento %d)",
+						line, conflict.Param,
+						conflict.Existing.String(), existingIndex,
+						conflict.New.String(), index+1,
+					)
+				}
+			}
 			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
 		}
 		instName, _, err := c.ensureFunctionInstance(argTpl, argBindings, line)
@@ -574,8 +621,18 @@ func (c *Compiler) ensureFunctionInstance(tpl *FuncTemplate, bindings map[string
 		return "", nil, err
 	}
 
+	// Teto de aninhamento (§9): compilar o corpo e o passo que pode pedir
+	// OUTRA instancia. Sem o teto, recursao polimorfica (tupla nova a cada
+	// nivel, memo nunca acerta) trava o compilador em vez de errar.
+	if queue.depth >= maxInstantiationDepth {
+		return "", nil, instantiationDepthError(line)
+	}
+
 	instance := substituteFunction(tpl, bindings, name)
-	if err := c.compileInstanceBody(instance); err != nil {
+	queue.depth++
+	err = c.compileInstanceBody(instance)
+	queue.depth--
+	if err != nil {
 		return "", nil, instantiationChainError(displayInstanceName(base, arguments), line, err)
 	}
 	queue.ordered = append(queue.ordered, instance)
@@ -854,9 +911,14 @@ func collectFreeIdentifiers(decl *ast.FunctionStatement) map[string]bool {
 // collectBoundNamesInBlock/Statement/Expression povoam bound com todo nome
 // de VALOR introduzido em qualquer profundidade do corpo — espelham a
 // cobertura de nos de substituteInStatement/substituteInExpression
-// (generics_substitute.go), inclusive o guard por reflexao (panic num nó
-// sem case): um nó novo em ast tem de ganhar tratamento aqui tambem, senao
-// este walker fica cego para os bindings que esse nó introduz.
+// (generics_substitute.go), inclusive o panic no default: um nó novo em ast
+// tem de ganhar tratamento aqui tambem, senao este walker fica cego para os
+// bindings que esse nó introduz.
+//
+// A exaustividade e verificada estaticamente por
+// TestGenericWalkersCoverEveryNode (generics_walkers_guard_test.go), que
+// enumera os nós de ast.go e exige um `case` em cada walker — o panic
+// sozinho so dispararia se algum teste exercitasse exatamente o nó novo.
 func collectBoundNamesInBlock(blk *ast.BlockStatement, bound map[string]bool) {
 	if blk == nil {
 		return
@@ -967,9 +1029,10 @@ func collectBoundNamesInExpression(e ast.Expression, bound map[string]bool) {
 
 // collectFreeInBlock/Statement/Expression e o segundo passe de
 // collectFreeIdentifiers: mesma cobertura de nós que
-// collectBoundNamesInBlock/Statement/Expression, so que em vez de POVOAR
-// bound, cada *ast.Identifier encontrado em posicao de valor (leitura ou
-// alvo de atribuicao) que NAO esta em bound entra em free.
+// collectBoundNamesInBlock/Statement/Expression (e o mesmo guard estatico de
+// TestGenericWalkersCoverEveryNode), so que em vez de POVOAR bound, cada
+// *ast.Identifier encontrado em posicao de valor (leitura ou alvo de
+// atribuicao) que NAO esta em bound entra em free.
 // MemberAccessExpression.Member e uma string crua (nao um Identifier), e
 // portanto nunca contribui — `x.campo` nao exige que "campo" resolva como
 // nome solto.
