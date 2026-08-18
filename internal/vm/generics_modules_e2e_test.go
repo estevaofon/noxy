@@ -253,3 +253,120 @@ test_report(processa(ns))
 		expectInt(t, got, 100, "processa deve chamar ajuda de colecoes, nao de outro")
 	})
 }
+
+// I1 da revisao final de branch: `use` DENTRO de corpo de funcao (forma legal
+// da linguagem — ver TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule
+// em module_exports_test.go) que traga um template generico registrava o
+// template no meio da compilacao, DEPOIS da decisao hasGenerics()/two-pass
+// (que so varre `use` de TOPO). A chamada seguinte batia no guard defensivo
+// do pass 2 com "bug do compilador de genéricos" e uma linha deslocada.
+// Agora e um erro acionavel, com a saida obvia. Suporte de verdade a `use`
+// aninhado de template esta fora de escopo.
+func TestNestedUseImportingTemplateIsActionableError(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "colecoes.nx", "func ident<T>(x: T) -> T\n    return x\nend\n")
+
+	cases := []struct {
+		name    string
+		program string
+	}{
+		{
+			name:    "select nominal",
+			program: "func run() -> int\n    use colecoes select ident\n    return ident(41)\nend\nrun()",
+		},
+		{
+			name:    "select *",
+			program: "func run() -> int\n    use colecoes select *\n    return ident(41)\nend\nrun()",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			err := compileErrAtRoot(t, root, tt.program)
+			if err == nil {
+				t.Fatal("esperava erro para template importado em corpo de funcao")
+			}
+			want := "template genérico importado dentro de corpo de função não é suportado — mova o 'use' para o top level"
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("erro = %v, quer conter %q", err, want)
+			}
+			// A linha e a do `use`, nao a do call site nem a linha 1 do
+			// guard defensivo antigo.
+			if !strings.HasPrefix(err.Error(), "[line 2]") {
+				t.Fatalf("erro = %v, quer prefixo [line 2] (a linha do `use`)", err)
+			}
+		})
+	}
+}
+
+// I1, contra-prova: `use` aninhado de modulo SEM template continua legal — a
+// checagem nova nao pode transformar o caso suportado em erro.
+func TestNestedUseWithoutTemplateStillCompiles(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "comum.nx", "func dobro(x: int) -> int\n    return x * 2\nend\n")
+	got := captureVMSourceAtRoot(t, root, `
+func run() -> int
+    use comum select dobro
+    return dobro(21)
+end
+test_report(run())
+`)
+	expectInt(t, got, 42, "use aninhado sem generico continua valido")
+}
+
+// I3, primeira linha sem cobertura do catalogo §9: "conflito de shadowing".
+// O corpo do template importado referencia 'base', que existe NOS DOIS lados
+// com tipos DIFERENTES — sem o gate, o 'base' do importador seria capturado
+// em silencio no lugar do binding do modulo definidor.
+func TestImportedTemplateShadowingConflictIsError(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "colecoes.nx", `
+let base: int = 10
+func processa<T>(arr: T[]) -> int
+    return base + length(arr)
+end
+`)
+	err := compileErrAtRoot(t, root, `
+use colecoes select processa
+let base: string = "outro"
+let ns: int[] = [1]
+processa(ns)
+`)
+	if err == nil {
+		t.Fatal("esperava erro de shadowing entre importador e modulo definidor")
+	}
+	for _, fragment := range []string{"conflito de shadowing", "'base'", "no importador", "'colecoes'"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("erro = %v, quer conter %q", err, fragment)
+		}
+	}
+}
+
+// I3, segunda linha sem cobertura do catalogo §9: "referencia 'X', não
+// declarado no módulo 'Y'". O nome livre do corpo do template NAO existe no
+// modulo definidor mas resolve no importador — o unico caso onde a
+// heuristica "ausente dos dois lados = builtin" nao vale, porque ha risco
+// real de captura por homonimo.
+func TestImportedTemplateReferencesUndeclaredNameIsError(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "colecoes.nx", `
+func processa<T>(arr: T[]) -> int
+    externo()
+    return length(arr)
+end
+`)
+	err := compileErrAtRoot(t, root, `
+use colecoes select processa
+func externo() -> void
+end
+let ns: int[] = [1]
+processa(ns)
+`)
+	if err == nil {
+		t.Fatal("esperava erro de nome nao declarado no modulo definidor")
+	}
+	for _, fragment := range []string{"referencia 'externo'", "não declarado no módulo 'colecoes'"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("erro = %v, quer conter %q", err, fragment)
+		}
+	}
+}

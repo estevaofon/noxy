@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"maps"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
@@ -196,6 +197,60 @@ func (c *Compiler) importModuleStructs(module string, names []string) {
 			c.structs[name] = definition
 		}
 	}
+}
+
+// rejectNestedTemplateImport recusa, com a mensagem acionavel do §9, um `use`
+// ANINHADO (dentro de corpo de funcao ou de lambda — c.enclosing != nil) que
+// traga um template generico para o escopo.
+//
+// Por que e um erro e nao uma feature: a decisao "este programa precisa do
+// two-pass?" (hasGenerics em Compile(*ast.Program)) e tomada UMA VEZ, na
+// entrada, olhando so os `use` do TOPO (predeclareImportedTemplates varre
+// statements de topo). Um `use` aninhado registra o template no meio da
+// compilacao, DEPOIS que essa decisao ja passou: no pass 1 nada acontece
+// (aquele programa nem entrou no two-pass) e no pass 2 a chamada bate no
+// guard defensivo de compileGenericCallSite, que acusa "bug do compilador de
+// genéricos" com a linha errada — mensagem inutil para quem escreveu o
+// programa. Suportar de verdade exigiria redecidir o two-pass a cada `use`
+// aninhado; ate la, o erro claro (com a saida obvia: mover o `use` para o
+// topo) vale mais que o falso relato de bug.
+//
+// A forma de NAMESPACE (`use m [as alias]`) nunca importa nome nenhum (§8) e
+// portanto nunca traz template: passa direto. Modulo que nao carrega tambem
+// passa direto (bindings vazio) — a tolerancia que
+// TestFunctionBodyOnlyWildcardDoesNotAffectModuleLoadability exige.
+func (c *Compiler) rejectNestedTemplateImport(declaration *ast.UseStmt) error {
+	if c.enclosing == nil {
+		return nil
+	}
+	var names []string
+	switch {
+	case declaration.SelectAll:
+		exports, _ := c.discoverModuleExports(declaration.Module)
+		names = make([]string, 0, len(exports))
+		for name := range exports {
+			names = append(names, name)
+		}
+	case len(declaration.Selectors) > 0:
+		names = declaration.Selectors
+	default:
+		return nil
+	}
+	bindings, _ := c.moduleTopLevelBindings(declaration.Module)
+	for _, name := range names {
+		if isModuleTemplateDeclaration(bindings, name) {
+			return nestedTemplateImportError(declaration.Token.Line)
+		}
+	}
+	return nil
+}
+
+// nestedTemplateImportError e a mensagem verbatim do §9 para o caso acima.
+func nestedTemplateImportError(line int) error {
+	return fmt.Errorf(
+		"[line %d] template genérico importado dentro de corpo de função não é suportado — mova o 'use' para o top level",
+		line,
+	)
 }
 
 func (c *Compiler) predeclareImport(declaration *ast.UseStmt) error {

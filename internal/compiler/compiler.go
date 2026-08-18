@@ -1710,6 +1710,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.UseStmt:
+		// §9/I1: `use` aninhado (corpo de funcao/lambda) que traga um template
+		// generico e recusado com mensagem acionavel ANTES de qualquer emissao
+		// — ver rejectNestedTemplateImport. Sem isto o template entrava no
+		// registry no meio da compilacao e a chamada batia no guard defensivo
+		// do pass 2, que acusa "bug do compilador" com a linha errada.
+		if err := c.rejectNestedTemplateImport(n); err != nil {
+			return nil, nil, err
+		}
+
 		// 1. Emit Module Name
 		nameConst := c.makeConstant(value.NewString(n.Module))
 		// 2. Emit Import (Loads module and pushes it to stack)
