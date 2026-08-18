@@ -16,7 +16,9 @@ import (
 	"noxy-vm/internal/vm"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
+	"runtime/pprof"
 	"strings"
 )
 
@@ -42,6 +44,8 @@ func main() {
 	}
 
 	getPkg := flag.String("get", "", "Download and install a package (e.g. github.com/user/repo@version)")
+	cpuProfile := flag.String("cpuprofile", "", "Write CPU profile to file")
+	memProfile := flag.String("memprofile", "", "Write memory profile to file")
 	flag.Parse()
 
 	if *showHelp {
@@ -77,7 +81,34 @@ func main() {
 		return
 	}
 
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			fmt.Printf("Error creating CPU profile: %s\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			fmt.Printf("Error starting CPU profile: %s\n", err)
+			os.Exit(1)
+		}
+		defer pprof.StopCPUProfile()
+	}
+
 	runWithConfig(filename, string(content), getDir(filename), *showDisassembly)
+
+	if *memProfile != "" {
+		f, err := os.Create(*memProfile)
+		if err != nil {
+			fmt.Printf("Error creating memory profile: %s\n", err)
+			os.Exit(1)
+		}
+		runtime.GC()
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			fmt.Printf("Error writing memory profile: %s\n", err)
+		}
+		f.Close()
+	}
 }
 
 func getDir(path string) string {
