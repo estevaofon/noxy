@@ -68,6 +68,16 @@ type Compiler struct {
 	moduleDiscovery     *moduleDiscoveryState
 	generics            *GenericRegistry // lazy-init: use registryOrInit()
 	moduleName          string           // default "main"; setter usado nas tasks de modulo
+	instances           *instanceQueue   // lazy-init: use instancesOrInit()
+	// pass1 marca o compilador descartavel da primeira passada dos genericos
+	// (§5): interceptacao de call site generico so acontece com ele ligado, e
+	// ele tambem e o guard de recursao do two-pass (um Compile(*ast.Program)
+	// em pass 1 nao reentra na pass 1).
+	pass1 bool
+	// genericReturnHint carrega a anotacao do `let` envolvente para o proximo
+	// call site generico (target-typing do §7). Armado em setGenericReturnHint,
+	// consumido e limpo em compileGenericCallSite.
+	genericReturnHint ast.NoxyType
 }
 
 type callEmission struct {
@@ -140,6 +150,8 @@ func NewChild(parent *Compiler) *Compiler {
 		moduleDiscovery: parent.moduleDiscovery,
 		generics:        parent.generics,
 		moduleName:      parent.moduleName,
+		instances:       parent.instances,
+		pass1:           parent.pass1,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -152,6 +164,18 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		// Two-pass dos genericos (§5). Fica AQUI, na entrada de *ast.Program,
+		// para que todo caminho que compila um Program — programa principal,
+		// validator de modulo, runtime do `use`, REPL — ganhe o tratamento
+		// sem duplicacao. Programa sem genericos nao paga nada alem da
+		// varredura das declaracoes do topo.
+		c.predeclareGenericTemplates(n.Statements)
+		if !c.pass1 && c.hasGenerics() {
+			if err := c.runGenericsPass1(n); err != nil {
+				return nil, nil, err
+			}
+		}
+
 		sequentialBindings := make(map[string]ast.NoxyType, len(c.globals))
 		for name, bindingType := range c.globals {
 			sequentialBindings[name] = bindingType
@@ -185,7 +209,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		var valType ast.NoxyType
 		// Compile initializer
 		if n.Value != nil {
+			// Target-typing do §7: a anotacao do `let` e o hint para o T que
+			// so aparece no retorno do template. Armado imediatamente antes
+			// (e limpo imediatamente depois) da compilacao do valor.
+			c.setGenericReturnHint(n.Type, n.Value)
 			_, t, err := c.Compile(n.Value)
+			c.genericReturnHint = nil
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1862,6 +1891,25 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 
 			c.emitByte(byte(chunk.OP_ADDR))
 			return c.currentChunk, &ast.PrimitiveType{Name: "string"}, nil
+		}
+	}
+
+	// Interceptacao de call site generico (§4): tem de vir ANTES do caminho
+	// normal, que compilaria o callee e leria o tipo CRU do template (com
+	// TypeParamType) do registro de globals. Depois da interceptacao o
+	// identificador ja aponta para a instancia monomorfizada e o caminho
+	// normal resolve um global comum.
+	//
+	// No pass 2 nada dispara: os nomes reescritos nao sao chaves do registro.
+	// Um local/parametro que sombreia o nome do template tambem nao dispara —
+	// quem vence e o binding mais interno, como no caminho normal.
+	if callee, ok := call.Function.(*ast.Identifier); ok {
+		if template, isTemplate := c.registryOrInit().Funcs[callee.Value]; isTemplate {
+			if slot, _ := c.resolveLocal(callee.Value); slot == -1 {
+				if err := c.compileGenericCallSite(call, callee, template); err != nil {
+					return nil, nil, err
+				}
+			}
 		}
 	}
 
