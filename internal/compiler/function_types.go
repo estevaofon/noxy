@@ -247,7 +247,9 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 	for _, statement := range statements {
 		switch declaration := statement.(type) {
 		case *ast.UseStmt:
-			c.predeclareImport(declaration)
+			if err := c.predeclareImport(declaration); err != nil {
+				return err
+			}
 		case *ast.FunctionStatement:
 			if _, duplicate := seen[declaration.Name]; duplicate {
 				return fmt.Errorf("[line %d] duplicate function '%s'", declaration.Token.Line, declaration.Name)

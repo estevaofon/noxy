@@ -128,19 +128,66 @@ func (c *Compiler) instancesOrInit() *instanceQueue {
 // com o mesmo ponteiro quando a declaracao e efetivamente compilada.
 // Declaracoes genericas ANINHADAS nao passam por aqui (a varredura e so no
 // topo) e continuam sendo rejeitadas pelos cases do Compile.
-func (c *Compiler) predeclareGenericTemplates(statements []ast.Statement) {
+func (c *Compiler) predeclareGenericTemplates(statements []ast.Statement) error {
 	for _, statement := range statements {
 		switch declaration := statement.(type) {
 		case *ast.FunctionStatement:
 			if len(declaration.TypeParams) > 0 {
-				c.registryOrInit().Funcs[declaration.Name] = &FuncTemplate{Decl: declaration, Module: c.moduleName}
+				if err := c.registerFuncTemplate(declaration.Name, &FuncTemplate{Decl: declaration, Module: c.moduleName}, declaration.Token.Line); err != nil {
+					return err
+				}
 			}
 		case *ast.StructStatement:
 			if len(declaration.TypeParams) > 0 {
-				c.registryOrInit().Structs[declaration.Name] = &StructTemplate{Decl: declaration, Module: c.moduleName}
+				if err := c.registerStructTemplate(declaration.Name, &StructTemplate{Decl: declaration, Module: c.moduleName}, declaration.Token.Line); err != nil {
+					return err
+				}
 			}
 		}
 	}
+	return nil
+}
+
+// moduleQualifier normaliza o nome de um modulo para uso como qualificador
+// de instanceName (o campo Module de FuncTemplate/StructTemplate). Hoje e
+// identidade — existe como um unico ponto de acoplamento, para que uma
+// normalizacao futura (aliases, caminhos de submodulo) nao precise caçar
+// cada site que hoje escreve `n.Module`/`declaration.Module` cru.
+func moduleQualifier(module string) string {
+	return module
+}
+
+// registerFuncTemplate insere tpl no registro sob name, recusando a colisao
+// de homonimo entre familias documentada na revisao da Task 9: instanceName
+// (generics_substitute.go) qualifica so por modulo+base+args, sem marcar se
+// a base veio de `func` ou de `struct` — um `func Foo<T>` e um `struct
+// Foo<T>` com o MESMO nome (no mesmo modulo, ou um local e outro importado)
+// produziriam o MESMO nome qualificado ao serem instanciados com a mesma
+// tupla (`main::Foo<int>`), e um sobrescreveria o c.globals/c.structs do
+// outro em silencio. Fechado aqui, na fronteira de registro (chamada tanto
+// pelas declaracoes locais quanto pelo import de templates), com um erro de
+// compilacao claro em vez de uma colisao confusa em runtime.
+func (c *Compiler) registerFuncTemplate(name string, tpl *FuncTemplate, line int) error {
+	if _, collides := c.registryOrInit().Structs[name]; collides {
+		return fmt.Errorf(
+			"[line %d] '%s' já nomeia um struct genérico — não pode também nomear uma função genérica (mesmo nome colidiria na instanciação)",
+			line, name,
+		)
+	}
+	c.registryOrInit().Funcs[name] = tpl
+	return nil
+}
+
+// registerStructTemplate e o espelho de registerFuncTemplate para structs.
+func (c *Compiler) registerStructTemplate(name string, tpl *StructTemplate, line int) error {
+	if _, collides := c.registryOrInit().Funcs[name]; collides {
+		return fmt.Errorf(
+			"[line %d] '%s' já nomeia uma função genérica — não pode também nomear um struct genérico (mesmo nome colidiria na instanciação)",
+			line, name,
+		)
+	}
+	c.registryOrInit().Structs[name] = tpl
+	return nil
 }
 
 // hasGenerics decide se o Program precisa do two-pass. A varredura das
@@ -200,11 +247,16 @@ func (c *Compiler) newPass1Compiler() *Compiler {
 	for name, definition := range c.structs {
 		structsCopy[name] = definition
 	}
+	namespaceImportsCopy := make(map[string]string, len(c.namespaceImports))
+	for name, module := range c.namespaceImports {
+		namespaceImportsCopy[name] = module
+	}
 	scratch := NewWithStateAndRoot(globalsCopy, structsCopy, c.FileName, c.moduleRoot)
 	scratch.moduleName = c.moduleName
 	scratch.generics = c.registryOrInit()
 	scratch.instances = c.instancesOrInit()
 	scratch.moduleDiscovery = c.moduleDiscovery
+	scratch.namespaceImports = namespaceImportsCopy
 	scratch.pass1 = true
 	return scratch
 }
@@ -509,6 +561,15 @@ func (c *Compiler) ensureFunctionInstance(tpl *FuncTemplate, bindings map[string
 	}
 	queue.memo[name] = true
 
+	// §8, regra de escopo de definicao: so entra em jogo para template
+	// IMPORTADO (tpl.Module != c.moduleName — o importador nao e quem
+	// define). Template local tem importador==definidor por construcao,
+	// entao a regra e trivialmente satisfeita e este gate e um no-op para
+	// todo o corpus de genericos anterior a Task 12.
+	if err := c.validateImportedTemplateScope(tpl, arguments, line); err != nil {
+		return "", nil, err
+	}
+
 	instance := substituteFunction(tpl, bindings, name)
 	if err := c.compileInstanceBody(instance); err != nil {
 		return "", nil, instantiationChainError(displayInstanceName(base, arguments), line, err)
@@ -661,4 +722,341 @@ func splitLinePrefix(message string) (int, string, bool) {
 		return 0, "", false
 	}
 	return line, strings.TrimLeft(message[end+1:], " "), true
+}
+
+// validateImportedTemplateScope implementa a regra de escopo de definicao do
+// §8, EM DUAS PARTES, para um template IMPORTADO de outro modulo
+// (tpl.Module != c.moduleName — chamada so a partir desse caso em
+// ensureFunctionInstance; template local nunca chega aqui):
+//
+//   - (a) todo identificador livre do corpo ORIGINAL do template (antes da
+//     substituicao — os TypeParams ainda sao TypeParamType, irrelevante
+//     aqui, so nomes de VALOR importam) tem de resolver no top level do
+//     modulo que o declara (discoverModuleExports do modulo definidor,
+//     que enxerga suas proprias funcoes/lets/structs/templates
+//     independente do que O IMPORTADOR selecionou) — ou ser um builtin;
+//   - (b) quando resolve la, o TIPO DECLARADO visivel no IMPORTADOR
+//     (c.globals, ja populado pelo predeclare tipado — Task 12) tem de
+//     ser IDENTICO (String()) ao tipo declarado no modulo definidor —
+//     senao um homonimo do importador seria capturado em silencio no
+//     lugar do binding certo, exatamente o risco que o §8 documenta.
+//
+// Heuristica deliberada para "e builtin" na parte (a): o pacote compiler
+// nao importa o pacote vm (evitaria um ciclo de import) e portanto nao tem
+// como enumerar os nomes nativos (`length`, `contains`, os `probe_*` de
+// teste, etc.) — e o compilador ja tolera qualquer global desconhecido em
+// tempo de compilacao hoje (Identifier caindo no global sem checar
+// c.globals — ver o case *ast.Identifier de Compile), delegando para o
+// runtime. Em vez de duplicar (e deixar desatualizada) uma lista de
+// builtins, esta funcao reproduz a MESMA tolerancia: um nome ausente do
+// modulo definidor SO vira erro quando ele resolve para ALGO no
+// importador — o UNICO caso onde existe risco real de captura silenciosa
+// por homonimo. Um nome ausente dos dois lados (o caso comum de um
+// builtin genuino) passa em silencio, como o resto do compilador já faz.
+func (c *Compiler) validateImportedTemplateScope(tpl *FuncTemplate, arguments []ast.NoxyType, line int) error {
+	if tpl.Module == "" || tpl.Module == c.moduleName {
+		return nil
+	}
+	exports, loadable := c.discoverModuleExports(tpl.Module)
+	if !loadable {
+		// Modulo ja teria falhado a carregar em outro ponto (predeclare do
+		// `use`, ou o proprio ensureFunctionInstance nao teria achado tpl no
+		// registry) — nao ha o que reportar aqui de novo.
+		return nil
+	}
+	display := displayInstanceName(tpl.Decl.Name, arguments)
+	registry := c.registryOrInit()
+	for name := range collectFreeIdentifiers(tpl.Decl) {
+		if _, declaredInModule := exports[name]; !declaredInModule {
+			if _, shadowedByImporter := c.globals[name]; shadowedByImporter {
+				return fmt.Errorf(
+					"[line %d] '%s' referencia '%s', não declarado no módulo '%s'",
+					line, display, name, tpl.Module,
+				)
+			}
+			continue // presumivelmente builtin — ver heuristica no comentario acima
+		}
+
+		definedType, hasDefinedType := c.importedBindingType(tpl.Module, name)
+		if !hasDefinedType {
+			// name e ele mesmo outro template generico do modulo definidor: a
+			// dependencia certa e ele estar IMPORTADO (registrado no registry
+			// do importador), nao ter um tipo em globals — templates nunca
+			// tem tipo de valor.
+			_, isFuncDep := registry.Funcs[name]
+			_, isStructDep := registry.Structs[name]
+			if isFuncDep || isStructDep {
+				continue
+			}
+			return fmt.Errorf(
+				"[line %d] '%s' precisa de '%s' de '%s' — adicione ao select ou use select *",
+				line, display, name, tpl.Module,
+			)
+		}
+
+		importerType, hasImporterType := c.globals[name]
+		if !hasImporterType {
+			return fmt.Errorf(
+				"[line %d] '%s' precisa de '%s' de '%s' — adicione ao select ou use select *",
+				line, display, name, tpl.Module,
+			)
+		}
+		if importerType == nil || definedType.String() != importerType.String() {
+			importerDesc := "desconhecido"
+			if importerType != nil {
+				importerDesc = importerType.String()
+			}
+			return fmt.Errorf(
+				"[line %d] '%s' tem tipo %s no importador e %s em '%s' — conflito de shadowing",
+				line, name, importerDesc, definedType.String(), tpl.Module,
+			)
+		}
+	}
+	return nil
+}
+
+// collectFreeIdentifiers devolve o conjunto de identificadores LIDOS
+// (leitura OU alvo de atribuicao — os dois exigem que o nome ja resolva
+// para um binding existente) no corpo de um template de funcao que NAO sao
+// localmente vinculados por ele (parametros, `let`, variavel de for-each,
+// parametro de lambda ou de func aninhada, nome de func/struct aninhado).
+//
+// Sobre-aproxima o conjunto de nomes vinculados numa unica passada FLAT
+// (collectBoundNamesInBlock), sem pilha de escopos: um nome local a um
+// ramo do corpo e tratado como vinculado no corpo INTEIRO. Isso so pode
+// produzir FALSOS NEGATIVOS (deixar de sinalizar uma referencia realmente
+// fora de escopo que por coincidencia tem o mesmo nome de um local em outro
+// ramo) — nunca falso positivo, que rejeitaria um template importado
+// valido. E a direcao segura para a checagem do §8.
+func collectFreeIdentifiers(decl *ast.FunctionStatement) map[string]bool {
+	bound := make(map[string]bool, len(decl.Parameters))
+	for _, param := range decl.Parameters {
+		bound[param.Name] = true
+	}
+	collectBoundNamesInBlock(decl.Body, bound)
+	free := make(map[string]bool)
+	collectFreeInBlock(decl.Body, bound, free)
+	return free
+}
+
+// collectBoundNamesInBlock/Statement/Expression povoam bound com todo nome
+// de VALOR introduzido em qualquer profundidade do corpo — espelham a
+// cobertura de nos de substituteInStatement/substituteInExpression
+// (generics_substitute.go), inclusive o guard por reflexao (panic num nó
+// sem case): um nó novo em ast tem de ganhar tratamento aqui tambem, senao
+// este walker fica cego para os bindings que esse nó introduz.
+func collectBoundNamesInBlock(blk *ast.BlockStatement, bound map[string]bool) {
+	if blk == nil {
+		return
+	}
+	for _, s := range blk.Statements {
+		collectBoundNamesInStatement(s, bound)
+	}
+}
+
+func collectBoundNamesInStatement(s ast.Statement, bound map[string]bool) {
+	if s == nil {
+		return
+	}
+	switch n := s.(type) {
+	case *ast.LetStmt:
+		bound[n.Name.Value] = true
+		collectBoundNamesInExpression(n.Value, bound)
+	case *ast.AssignStmt:
+		collectBoundNamesInExpression(n.Target, bound)
+		collectBoundNamesInExpression(n.Value, bound)
+	case *ast.ReturnStmt:
+		collectBoundNamesInExpression(n.ReturnValue, bound)
+	case *ast.DeferStmt:
+		collectBoundNamesInExpression(n.Call, bound)
+	case *ast.BreakStmt:
+		// sem nome, sem sub-no.
+	case *ast.UseStmt:
+		// sem identificador de valor vinculado por este walker.
+	case *ast.ExpressionStmt:
+		collectBoundNamesInExpression(n.Expression, bound)
+	case *ast.BlockStatement:
+		collectBoundNamesInBlock(n, bound)
+	case *ast.IfStatement:
+		collectBoundNamesInExpression(n.Condition, bound)
+		collectBoundNamesInBlock(n.Consequence, bound)
+		collectBoundNamesInBlock(n.Alternative, bound)
+	case *ast.WhileStatement:
+		collectBoundNamesInExpression(n.Condition, bound)
+		collectBoundNamesInBlock(n.Body, bound)
+	case *ast.FunctionStatement:
+		bound[n.Name] = true
+		for _, p := range n.Parameters {
+			bound[p.Name] = true
+		}
+		collectBoundNamesInBlock(n.Body, bound)
+	case *ast.ForStatement:
+		bound[n.Identifier] = true
+		collectBoundNamesInExpression(n.Collection, bound)
+		collectBoundNamesInBlock(n.Body, bound)
+	case *ast.StructStatement:
+		// struct aninhado: so o nome do TIPO, que este walker (identificadores
+		// de VALOR) nao rastreia.
+	case *ast.WhenStatement:
+		for _, clause := range n.Cases {
+			collectBoundNamesInStatement(clause.Condition, bound)
+			collectBoundNamesInBlock(clause.Body, bound)
+		}
+	default:
+		panic("collectBoundNamesInStatement: nó sem case — adicione aqui e o guard passa")
+	}
+}
+
+func collectBoundNamesInExpression(e ast.Expression, bound map[string]bool) {
+	if e == nil {
+		return
+	}
+	switch n := e.(type) {
+	case *ast.Identifier, *ast.IntegerLiteral, *ast.FloatLiteral, *ast.StringLiteral,
+		*ast.BytesLiteral, *ast.NullLiteral, *ast.Boolean:
+		// sem sub-no.
+	case *ast.ZerosLiteral:
+		collectBoundNamesInExpression(n.Size, bound)
+	case *ast.PrefixExpression:
+		collectBoundNamesInExpression(n.Right, bound)
+	case *ast.InfixExpression:
+		collectBoundNamesInExpression(n.Left, bound)
+		collectBoundNamesInExpression(n.Right, bound)
+	case *ast.FunctionLiteral:
+		for _, p := range n.Parameters {
+			bound[p.Name] = true
+		}
+		collectBoundNamesInBlock(n.Body, bound)
+	case *ast.CallExpression:
+		collectBoundNamesInExpression(n.Function, bound)
+		for _, a := range n.Arguments {
+			collectBoundNamesInExpression(a, bound)
+		}
+	case *ast.ArrayLiteral:
+		for _, el := range n.Elements {
+			collectBoundNamesInExpression(el, bound)
+		}
+	case *ast.MapLiteral:
+		for i := range n.Keys {
+			collectBoundNamesInExpression(n.Keys[i], bound)
+		}
+		for i := range n.Values {
+			collectBoundNamesInExpression(n.Values[i], bound)
+		}
+	case *ast.IndexExpression:
+		collectBoundNamesInExpression(n.Left, bound)
+		collectBoundNamesInExpression(n.Index, bound)
+	case *ast.MemberAccessExpression:
+		collectBoundNamesInExpression(n.Left, bound)
+	default:
+		panic("collectBoundNamesInExpression: nó sem case — adicione aqui e o guard passa")
+	}
+}
+
+// collectFreeInBlock/Statement/Expression e o segundo passe de
+// collectFreeIdentifiers: mesma cobertura de nós que
+// collectBoundNamesInBlock/Statement/Expression, so que em vez de POVOAR
+// bound, cada *ast.Identifier encontrado em posicao de valor (leitura ou
+// alvo de atribuicao) que NAO esta em bound entra em free.
+// MemberAccessExpression.Member e uma string crua (nao um Identifier), e
+// portanto nunca contribui — `x.campo` nao exige que "campo" resolva como
+// nome solto.
+func collectFreeInBlock(blk *ast.BlockStatement, bound, free map[string]bool) {
+	if blk == nil {
+		return
+	}
+	for _, s := range blk.Statements {
+		collectFreeInStatement(s, bound, free)
+	}
+}
+
+func collectFreeInStatement(s ast.Statement, bound, free map[string]bool) {
+	if s == nil {
+		return
+	}
+	switch n := s.(type) {
+	case *ast.LetStmt:
+		collectFreeInExpression(n.Value, bound, free)
+	case *ast.AssignStmt:
+		collectFreeInExpression(n.Target, bound, free)
+		collectFreeInExpression(n.Value, bound, free)
+	case *ast.ReturnStmt:
+		collectFreeInExpression(n.ReturnValue, bound, free)
+	case *ast.DeferStmt:
+		collectFreeInExpression(n.Call, bound, free)
+	case *ast.BreakStmt:
+	case *ast.UseStmt:
+	case *ast.ExpressionStmt:
+		collectFreeInExpression(n.Expression, bound, free)
+	case *ast.BlockStatement:
+		collectFreeInBlock(n, bound, free)
+	case *ast.IfStatement:
+		collectFreeInExpression(n.Condition, bound, free)
+		collectFreeInBlock(n.Consequence, bound, free)
+		collectFreeInBlock(n.Alternative, bound, free)
+	case *ast.WhileStatement:
+		collectFreeInExpression(n.Condition, bound, free)
+		collectFreeInBlock(n.Body, bound, free)
+	case *ast.FunctionStatement:
+		collectFreeInBlock(n.Body, bound, free)
+	case *ast.ForStatement:
+		collectFreeInExpression(n.Collection, bound, free)
+		collectFreeInBlock(n.Body, bound, free)
+	case *ast.StructStatement:
+		// sem identificador de valor.
+	case *ast.WhenStatement:
+		for _, clause := range n.Cases {
+			collectFreeInStatement(clause.Condition, bound, free)
+			collectFreeInBlock(clause.Body, bound, free)
+		}
+	default:
+		panic("collectFreeInStatement: nó sem case — adicione aqui e o guard passa")
+	}
+}
+
+func collectFreeInExpression(e ast.Expression, bound, free map[string]bool) {
+	if e == nil {
+		return
+	}
+	switch n := e.(type) {
+	case *ast.Identifier:
+		if !bound[n.Value] {
+			free[n.Value] = true
+		}
+	case *ast.IntegerLiteral, *ast.FloatLiteral, *ast.StringLiteral,
+		*ast.BytesLiteral, *ast.NullLiteral, *ast.Boolean:
+		// sem sub-no.
+	case *ast.ZerosLiteral:
+		collectFreeInExpression(n.Size, bound, free)
+	case *ast.PrefixExpression:
+		collectFreeInExpression(n.Right, bound, free)
+	case *ast.InfixExpression:
+		collectFreeInExpression(n.Left, bound, free)
+		collectFreeInExpression(n.Right, bound, free)
+	case *ast.FunctionLiteral:
+		collectFreeInBlock(n.Body, bound, free)
+	case *ast.CallExpression:
+		collectFreeInExpression(n.Function, bound, free)
+		for _, a := range n.Arguments {
+			collectFreeInExpression(a, bound, free)
+		}
+	case *ast.ArrayLiteral:
+		for _, el := range n.Elements {
+			collectFreeInExpression(el, bound, free)
+		}
+	case *ast.MapLiteral:
+		for i := range n.Keys {
+			collectFreeInExpression(n.Keys[i], bound, free)
+		}
+		for i := range n.Values {
+			collectFreeInExpression(n.Values[i], bound, free)
+		}
+	case *ast.IndexExpression:
+		collectFreeInExpression(n.Left, bound, free)
+		collectFreeInExpression(n.Index, bound, free)
+	case *ast.MemberAccessExpression:
+		collectFreeInExpression(n.Left, bound, free)
+	default:
+		panic("collectFreeInExpression: nó sem case — adicione aqui e o guard passa")
+	}
 }

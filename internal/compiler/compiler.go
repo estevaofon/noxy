@@ -87,6 +87,14 @@ type Compiler struct {
 	// antes de ser compilado. Armado em setArrayElementHint, consumido e limpo
 	// no proprio case de ArrayLiteral.
 	arrayElementHint ast.NoxyType
+	// namespaceImports mapeia o nome local de um `use m` (forma de namespace,
+	// sem select) para o modulo que ele nomeia — §8: "template genérico não é
+	// acessível via namespace". E uma COPIA por compilador (como globals/
+	// structs, nao um ponteiro compartilhado como generics/instances):
+	// um `use` dentro de um corpo de funcao (permitido — ver
+	// TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule) so pode
+	// afetar o escopo daquele corpo, nunca vazar para o compilador pai.
+	namespaceImports map[string]string
 }
 
 type callEmission struct {
@@ -143,24 +151,29 @@ func NewChild(parent *Compiler) *Compiler {
 	for name, definition := range parent.structs {
 		childStructs[name] = definition
 	}
+	childNamespaceImports := make(map[string]string, len(parent.namespaceImports))
+	for name, module := range parent.namespaceImports {
+		childNamespaceImports[name] = module
+	}
 	c := &Compiler{
-		enclosing:       parent,
-		currentChunk:    chunk.New(),
-		locals:          []Local{},
-		globals:         childGlobals,
-		structs:         childStructs,
-		upvalues:        []Upvalue{},
-		scopeDepth:      0,
-		loops:           []*Loop{},
-		currentLine:     parent.currentLine,
-		FileName:        parent.FileName,
-		moduleRoot:      parent.moduleRoot,
-		programBindings: parent.programBindings,
-		moduleDiscovery: parent.moduleDiscovery,
-		generics:        parent.generics,
-		moduleName:      parent.moduleName,
-		instances:       parent.instances,
-		pass1:           parent.pass1,
+		enclosing:        parent,
+		currentChunk:     chunk.New(),
+		locals:           []Local{},
+		globals:          childGlobals,
+		structs:          childStructs,
+		upvalues:         []Upvalue{},
+		scopeDepth:       0,
+		loops:            []*Loop{},
+		currentLine:      parent.currentLine,
+		FileName:         parent.FileName,
+		moduleRoot:       parent.moduleRoot,
+		programBindings:  parent.programBindings,
+		moduleDiscovery:  parent.moduleDiscovery,
+		generics:         parent.generics,
+		moduleName:       parent.moduleName,
+		instances:        parent.instances,
+		pass1:            parent.pass1,
+		namespaceImports: childNamespaceImports,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -178,7 +191,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// validator de modulo, runtime do `use`, REPL — ganhe o tratamento
 		// sem duplicacao. Programa sem genericos nao paga nada alem da
 		// varredura das declaracoes do topo.
-		c.predeclareGenericTemplates(n.Statements)
+		if err := c.predeclareGenericTemplates(n.Statements); err != nil {
+			return nil, nil, err
+		}
+		// §8/R8: templates IMPORTADOS entram no registry aqui tambem, cedo —
+		// ver o comentario de predeclareImportedTemplates para o porque
+		// (hasGenerics(), logo abaixo, precisa ja enxergar um template que so
+		// veio de `use m select f`, nao de uma declaracao local).
+		if err := c.predeclareImportedTemplates(n.Statements); err != nil {
+			return nil, nil, err
+		}
 		if !c.pass1 && c.hasGenerics() {
 			if err := c.runGenericsPass1(n); err != nil {
 				return nil, nil, err
@@ -723,7 +745,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if c.scopeDepth > 0 || c.enclosing != nil {
 				return nil, nil, fmt.Errorf("[line %d] declaração genérica só é permitida no top level", n.Token.Line)
 			}
-			c.registryOrInit().Structs[n.Name] = &StructTemplate{Decl: n, Module: c.moduleName}
+			if err := c.registerStructTemplate(n.Name, &StructTemplate{Decl: n, Module: c.moduleName}, n.Token.Line); err != nil {
+				return nil, nil, err
+			}
 			return c.currentChunk, nil, nil
 		}
 		c.setLine(n.Token.Line)
@@ -1698,16 +1722,39 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !loadable && c.enclosing == nil {
 				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'", n.Token.Line, n.Module)
 			}
+			// §8/R8: templates genericos exportados entram no registry
+			// (Module = modulo definidor) em vez de c.globals — importBindingFrom
+			// decide por declaracao. Templates nunca tem valor em runtime (a
+			// declaracao original nao emite bytecode nenhum), entao ficam
+			// ausentes do ExportMap que OP_IMPORT_FROM_ALL le abaixo — sem
+			// tratamento especial aqui: a instrucao so importa as chaves que
+			// EXISTEM no map do modulo, e simplesmente nao ha chave "processa".
+			bindings, _ := c.moduleTopLevelBindings(n.Module)
 			for name := range exports {
-				c.globals[name] = nil
+				if err := c.importBindingFrom(n.Module, bindings, name); err != nil {
+					return nil, nil, err
+				}
 			}
 			c.importModuleStructs(n.Module, nil)
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b
 			c.importModuleStructs(n.Module, n.Selectors)
+			bindings, _ := c.moduleTopLevelBindings(n.Module)
 			for _, sel := range n.Selectors {
-				c.globals[sel] = nil
+				if err := c.importBindingFrom(n.Module, bindings, sel); err != nil {
+					return nil, nil, err
+				}
+				if isModuleTemplateDeclaration(bindings, sel) {
+					// §8: template generico nao existe como valor em runtime
+					// (sem bytecode proprio) — buscar "sel" como propriedade do
+					// objeto do modulo lancaria "undefined property" (o
+					// ExportMap nunca tem essa chave). O registro acima
+					// (importBindingFrom, no GenericRegistry) e tudo que este
+					// nome precisa: a instancia concreta nasce como declaracao
+					// sintetica comum no two-pass do IMPORTADOR.
+					continue
+				}
 				// DUP the module
 				c.emitByte(byte(chunk.OP_DUP))
 
@@ -1737,7 +1784,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			nameConst := c.makeConstant(value.NewString(bindName))
-			c.globals[bindName] = nil
+			c.importNamespace(n.Module, bindName)
 			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
@@ -1804,7 +1851,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if c.scopeDepth > 0 || c.enclosing != nil {
 				return nil, nil, fmt.Errorf("[line %d] declaração genérica só é permitida no top level", n.Token.Line)
 			}
-			c.registryOrInit().Funcs[n.Name] = &FuncTemplate{Decl: n, Module: c.moduleName}
+			if err := c.registerFuncTemplate(n.Name, &FuncTemplate{Decl: n, Module: c.moduleName}, n.Token.Line); err != nil {
+				return nil, nil, err
+			}
 			return c.currentChunk, nil, nil
 		}
 		c.setLine(n.Token.Line)
@@ -2001,6 +2050,31 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 
 			c.emitByte(byte(chunk.OP_ADDR))
 			return c.currentChunk, &ast.PrimitiveType{Name: "string"}, nil
+		}
+	}
+
+	// §8/§9: `use m` (namespace, sem select) seguido de `m.processa(...)`.
+	// O template nunca existe como valor em runtime (declaracao generica nao
+	// emite bytecode) e o member access nao carrega tipo estatico nenhum —
+	// sem esta interceptacao o caminho normal so falharia mais tarde, em
+	// runtime, com "undefined property" generico. Checa ANTES da
+	// interceptacao de call site generico abaixo porque o callee aqui e um
+	// *ast.MemberAccessExpression, nunca um *ast.Identifier — os dois hooks
+	// nao competem pelo mesmo formato de callee.
+	if memberCall, isMemberCall := call.Function.(*ast.MemberAccessExpression); isMemberCall {
+		if leftIdent, isIdent := memberCall.Left.(*ast.Identifier); isIdent {
+			if slot, _ := c.resolveLocal(leftIdent.Value); slot == -1 {
+				if upvalue, _ := c.resolveUpvalue(leftIdent.Value); upvalue == -1 {
+					if module, isNamespace := c.namespaceImports[leftIdent.Value]; isNamespace {
+						if c.moduleExportsGenericTemplateName(module, memberCall.Member) {
+							return nil, nil, fmt.Errorf(
+								"[line %d] template genérico '%s' não é acessível via namespace — use select",
+								c.currentLine, memberCall.Member,
+							)
+						}
+					}
+				}
+			}
 		}
 	}
 

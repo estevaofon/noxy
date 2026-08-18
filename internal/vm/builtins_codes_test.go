@@ -99,7 +99,11 @@ test_report(codes(b"raw"))`
 	machine.DefineNative("test_report", func([]value.Value) value.Value {
 		return value.NewNull()
 	})
-	err := interpretVMSource(t, machine, source)
+	// Task 12 (§8): `use strings select *` now predeclares `codes` with its
+	// declared type instead of erasing it to nil, so the mismatch is caught
+	// at compile time instead of at runtime — same message, earlier stage.
+	// interpretOrCompileErr accepts either.
+	err := interpretOrCompileErr(t, machine, source)
 	if err == nil {
 		t.Fatal("codes(bytes) returned with no error; want a raised type error")
 	}

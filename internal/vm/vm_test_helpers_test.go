@@ -29,6 +29,30 @@ func interpretVMSource(t *testing.T, machine *VM, source string) error {
 	return machine.Interpret(compileVMSource(t, source))
 }
 
+// interpretOrCompileErr compiles and (if compilation succeeds) interprets
+// source, returning whichever error surfaces first — compile-time or
+// runtime — instead of treating a compile failure as a test-infra fatal
+// (unlike interpretVMSource/compileVMSource). Task 12 (§8) gave imports
+// their declared types instead of erasing them to nil, so some type
+// mismatches that could only be caught at runtime before (through a real
+// `use m select *` call site) are now caught earlier, at compile time, with
+// the same message. Use this for a test that only cares THAT a mismatch is
+// reported, not at which stage.
+func interpretOrCompileErr(t *testing.T, machine *VM, source string) error {
+	t.Helper()
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.New().Compile(program)
+	if err != nil {
+		return err
+	}
+	return machine.Interpret(code)
+}
+
 func captureVMSource(t *testing.T, source string) value.Value {
 	t.Helper()
 	machine := New()

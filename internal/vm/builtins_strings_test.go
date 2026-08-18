@@ -380,7 +380,14 @@ test_report(is_valid_utf8("text"))`
 		}
 		return value.NewNull()
 	})
-	err := interpretVMSource(t, machine, source)
+	// Task 12 (§8): `use strings select *` now predeclares is_valid_utf8 with
+	// its declared `b: bytes` type instead of erasing it to nil, so this
+	// mismatch is caught at compile time rather than reaching the native at
+	// runtime — same message ("expected bytes, got string"), earlier stage.
+	// interpretOrCompileErr accepts either, since the fix documented above
+	// (requireBytesArgument) is now backed up, not superseded, by a static
+	// check.
+	err := interpretOrCompileErr(t, machine, source)
 	if err == nil {
 		t.Fatalf("is_valid_utf8(\"text\") through use strings select * returned %#v with no error; want a raised type error", captured)
 	}
