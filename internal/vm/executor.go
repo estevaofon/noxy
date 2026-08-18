@@ -141,6 +141,57 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip += 2
 			ip -= offset
 
+		// perf fase 1: comparacao int + salto fundidos. Consomem os dois
+		// VAL_INT do topo (sem zerar: escalares nao carregam ponteiros para o
+		// GC reter) e saltam quando a condicao NOMEADA vale.
+		case chunk.OP_JUMP_IF_LT_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt < vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_LE_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt <= vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_GT_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt > vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_GE_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt >= vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_EQ_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt == vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
+		case chunk.OP_JUMP_IF_NE_INT:
+			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
+			ip += 2
+			vm.stackTop -= 2
+			if vm.stack[vm.stackTop].AsInt != vm.stack[vm.stackTop+1].AsInt {
+				ip += offset
+			}
+
 		case chunk.OP_TRUE:
 			vm.push(value.NewBool(true))
 		case chunk.OP_FALSE:

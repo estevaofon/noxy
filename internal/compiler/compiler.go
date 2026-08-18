@@ -1099,20 +1099,30 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.IfStatement:
 		c.setLine(n.Token.Line)
-		// Compile condition
-		_, condType, err := c.Compile(n.Condition)
+		// Compile condition: fusao especulativa (comparacao int + salto) com
+		// rollback para o caminho generico se um dos lados nao for int.
+		fusedOp, fused, err := c.tryCompileFusedCondition(n.Condition)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, ok := condType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		var jumpToElse int
+		if fused {
+			jumpToElse = c.emitJump(fusedOp)
+		} else {
+			_, condType, err := c.Compile(n.Condition)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, ok := condType.(*ast.RefType); ok {
+				c.emitByte(byte(chunk.OP_DEREF))
+			}
+
+			// Emit JumpIfFalse
+			jumpToElse = c.emitJump(chunk.OP_JUMP_IF_FALSE)
+
+			// Compile Then block (Consequence)
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)
 		}
-
-		// Emit JumpIfFalse
-		jumpToElse := c.emitJump(chunk.OP_JUMP_IF_FALSE)
-
-		// Compile Then block (Consequence)
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition value (since we entered THEN)
 
 		_, _, err = c.Compile(n.Consequence)
 		if err != nil {
@@ -1125,7 +1135,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Patch Else jump
 		c.patchJump(jumpToElse)
 
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition value (if we jumped here, condition was false)
+		if !fused {
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition value (if we jumped here, condition was false)
+		}
 
 		// Compile Else block (Alternative)
 		if n.Alternative != nil {
@@ -1147,18 +1159,29 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
 		c.loops = append(c.loops, loop)
 
-		_, condType, err := c.Compile(n.Condition)
+		// Compile condition: fusao especulativa (comparacao int + salto) com
+		// rollback para o caminho generico se um dos lados nao for int.
+		fusedOp, fused, err := c.tryCompileFusedCondition(n.Condition)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, ok := condType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		var jumpToExit int
+		if fused {
+			jumpToExit = c.emitJump(fusedOp)
+		} else {
+			_, condType, err := c.Compile(n.Condition)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, ok := condType.(*ast.RefType); ok {
+				c.emitByte(byte(chunk.OP_DEREF))
+			}
+
+			// Exit jump
+			jumpToExit = c.emitJump(chunk.OP_JUMP_IF_FALSE)
+
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition
 		}
-
-		// Exit jump
-		jumpToExit := c.emitJump(chunk.OP_JUMP_IF_FALSE)
-
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition
 
 		_, _, err = c.Compile(n.Body)
 		if err != nil {
@@ -1169,7 +1192,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.emitLoop(loopStart)
 
 		c.patchJump(jumpToExit)
-		c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+		if !fused {
+			c.emitByte(byte(chunk.OP_POP)) // Pop condition at exit
+		}
 
 		// Patch Break Jumps
 		for _, jump := range loop.BreakJumps {
@@ -2062,6 +2087,61 @@ func (c *Compiler) emitOpWithConstantIndex(op chunk.OpCode, index int) {
 	c.emitByte(byte(op))
 	c.emitByte(byte((index >> 8) & 0xff))
 	c.emitByte(byte(index & 0xff))
+}
+
+// fusedIntCompareJump mapeia o operador da CONDICAO para o opcode que salta
+// quando a condicao FALHA (e o jump-if-false fundido): `i < n` continua no
+// corpo quando vale e salta para fora com GE.
+func fusedIntCompareJump(operator string) (chunk.OpCode, bool) {
+	switch operator {
+	case "<":
+		return chunk.OP_JUMP_IF_GE_INT, true
+	case "<=":
+		return chunk.OP_JUMP_IF_GT_INT, true
+	case ">":
+		return chunk.OP_JUMP_IF_LE_INT, true
+	case ">=":
+		return chunk.OP_JUMP_IF_LT_INT, true
+	case "==":
+		return chunk.OP_JUMP_IF_NE_INT, true
+	case "!=":
+		return chunk.OP_JUMP_IF_EQ_INT, true
+	}
+	return 0, false
+}
+
+// tryCompileFusedCondition tenta compilar cond como (left, right) ints puros e
+// devolve o opcode de salto fundido a emitir com emitJump. Emissao
+// especulativa: se um dos lados nao for estaticamente int, o bytecode dos
+// operandos e DESFEITO (TruncateTo) e o chamador segue o caminho generico.
+// Constantes adicionadas na especulacao ficam orfas no pool — inofensivo.
+func (c *Compiler) tryCompileFusedCondition(cond ast.Expression) (chunk.OpCode, bool, error) {
+	infix, ok := cond.(*ast.InfixExpression)
+	if !ok {
+		return 0, false, nil
+	}
+	jumpOp, ok := fusedIntCompareJump(infix.Operator)
+	if !ok {
+		return 0, false, nil
+	}
+	checkpoint := len(c.currentChunk.Code)
+	_, leftType, err := c.Compile(infix.Left)
+	if err != nil {
+		return 0, false, err
+	}
+	if leftType == nil || leftType.String() != "int" {
+		c.currentChunk.TruncateTo(checkpoint)
+		return 0, false, nil
+	}
+	_, rightType, err := c.Compile(infix.Right)
+	if err != nil {
+		return 0, false, err
+	}
+	if rightType == nil || rightType.String() != "int" {
+		c.currentChunk.TruncateTo(checkpoint)
+		return 0, false, nil
+	}
+	return jumpOp, true, nil
 }
 
 func (c *Compiler) emitJump(op chunk.OpCode) int {

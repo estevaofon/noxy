@@ -121,6 +121,17 @@ const (
 	// provou no call site (isExact) — o VM pula validateParameterModes para
 	// closures. Layout de operando identico ao OP_CALL: [argCount u8].
 	OP_CALL_STATIC
+	// perf fase 1: comparacao int + salto condicional fundidos. Consomem dois
+	// VAL_INT da pilha (sem zerar: escalares nao carregam ponteiros) e saltam
+	// [hi][lo] adiante quando a condicao NOMEADA vale. Emitidos pelo
+	// compilador so quando ambos os lados sao estaticamente int; o salto e o
+	// jump-if-false da condicao de origem (`<` emite GE, `<=` emite GT, ...).
+	OP_JUMP_IF_LT_INT
+	OP_JUMP_IF_LE_INT
+	OP_JUMP_IF_GT_INT
+	OP_JUMP_IF_GE_INT
+	OP_JUMP_IF_EQ_INT
+	OP_JUMP_IF_NE_INT
 )
 
 func (op OpCode) String() string {
@@ -193,6 +204,18 @@ func (op OpCode) String() string {
 		return "OP_REF_LOCAL_BORROW"
 	case OP_CALL_STATIC:
 		return "OP_CALL_STATIC"
+	case OP_JUMP_IF_LT_INT:
+		return "OP_JUMP_IF_LT_INT"
+	case OP_JUMP_IF_LE_INT:
+		return "OP_JUMP_IF_LE_INT"
+	case OP_JUMP_IF_GT_INT:
+		return "OP_JUMP_IF_GT_INT"
+	case OP_JUMP_IF_GE_INT:
+		return "OP_JUMP_IF_GE_INT"
+	case OP_JUMP_IF_EQ_INT:
+		return "OP_JUMP_IF_EQ_INT"
+	case OP_JUMP_IF_NE_INT:
+		return "OP_JUMP_IF_NE_INT"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -345,6 +368,14 @@ func (c *Chunk) Write(byteCode byte, line int) {
 	c.Lines = append(c.Lines, line)
 }
 
+// TruncateTo descarta bytecode ja emitido a partir do offset n (Code e Lines
+// andam em paralelo). Usado pelo compilador para desfazer a emissao
+// especulativa dos operandos de uma condicao que nao pode ser fundida.
+func (c *Chunk) TruncateTo(n int) {
+	c.Code = c.Code[:n]
+	c.Lines = c.Lines[:n]
+}
+
 func (c *Chunk) AddConstant(v value.Value) int {
 	c.Constants = append(c.Constants, v)
 	return len(c.Constants) - 1
@@ -480,6 +511,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.byteInstruction("OP_CALL", offset)
 	case OP_CALL_STATIC:
 		return c.byteInstruction("OP_CALL_STATIC", offset)
+	case OP_JUMP_IF_LT_INT:
+		return c.shortInstruction("OP_JUMP_IF_LT_INT", offset)
+	case OP_JUMP_IF_LE_INT:
+		return c.shortInstruction("OP_JUMP_IF_LE_INT", offset)
+	case OP_JUMP_IF_GT_INT:
+		return c.shortInstruction("OP_JUMP_IF_GT_INT", offset)
+	case OP_JUMP_IF_GE_INT:
+		return c.shortInstruction("OP_JUMP_IF_GE_INT", offset)
+	case OP_JUMP_IF_EQ_INT:
+		return c.shortInstruction("OP_JUMP_IF_EQ_INT", offset)
+	case OP_JUMP_IF_NE_INT:
+		return c.shortInstruction("OP_JUMP_IF_NE_INT", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
