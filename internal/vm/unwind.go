@@ -58,17 +58,18 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 	// um valor diferente do que foi retido. Sites de sobrescrita ja liberam
 	// o velho e atualizam a entrada (ownSlot); nao ha guard de stackTop
 	// porque o release agora e por objeto, nao por leitura de vm.stack.
-	for _, entry := range frame.Owned {
-		value.Release(entry.obj)
+	for i := range frame.Owned {
+		value.Release(frame.Owned[i].obj)
+		frame.Owned[i] = ownedEntry{}
 	}
-	frame.Owned = nil
+	frame.Owned = frame.Owned[:0]
 
 	for index := frame.StackBase; index < ownedTop; index++ {
 		vm.stack[index] = value.Value{}
 	}
 
-	frameIndex := vm.frameCount - 1
-	vm.frames[frameIndex] = nil
+	frame.Closure = nil
+	frame.Environment = nil
 	vm.frameCount--
 	vm.stackTop = frame.StackBase
 
@@ -78,7 +79,7 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 		return outcome
 	}
 
-	vm.currentFrame = vm.frames[vm.frameCount-1]
+	vm.currentFrame = &vm.frames[vm.frameCount-1]
 	if outcome.Err == nil {
 		vm.push(outcome.Result)
 	}

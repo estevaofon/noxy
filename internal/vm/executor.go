@@ -36,8 +36,8 @@ func (vm *VM) InterpretWithEnvironment(c *chunk.Chunk, environment *value.Global
 	scriptClosure := &value.ObjClosure{Function: scriptFunction, Upvalues: []*value.ObjUpvalue{}, Environment: environment}
 	vm.stackTop = 0
 	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: scriptClosure})
-	frame := &CallFrame{Closure: scriptClosure, IP: 0, StackBase: 0, LocalBase: 1, Environment: environment}
-	vm.frames[0] = frame
+	frame := &vm.frames[0]
+	*frame = CallFrame{Closure: scriptClosure, IP: 0, StackBase: 0, LocalBase: 1, Environment: environment, Deferred: frame.Deferred[:0], Owned: frame.Owned[:0]}
 	vm.frameCount = 1
 	vm.currentFrame = frame
 	return vm.run(1, nil)

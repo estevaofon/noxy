@@ -54,7 +54,7 @@ type SharedState struct {
 }
 
 type VM struct {
-	frames       [FramesMax]*CallFrame
+	frames       [FramesMax]CallFrame
 	frameCount   int
 	currentFrame *CallFrame
 

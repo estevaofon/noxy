@@ -173,10 +173,7 @@ func (vm *VM) retargetOwnedSlot(ref *value.ObjRef, updated value.Value) bool {
 		return false
 	}
 	for i := vm.frameCount - 1; i >= 0; i-- {
-		frame := vm.frames[i]
-		if frame == nil {
-			continue
-		}
+		frame := &vm.frames[i]
 		for j := range frame.Owned {
 			slot := frame.Owned[j].slot
 			if slot < 0 || slot >= len(vm.stack) {
@@ -217,10 +214,7 @@ func (vm *VM) retargetOwnedSlotForUpvalue(upv *value.ObjUpvalue, updated value.V
 		return false
 	}
 	for i := vm.frameCount - 1; i >= 0; i-- {
-		frame := vm.frames[i]
-		if frame == nil {
-			continue
-		}
+		frame := &vm.frames[i]
 		for j := range frame.Owned {
 			slot := frame.Owned[j].slot
 			if slot < 0 || slot >= len(vm.stack) {

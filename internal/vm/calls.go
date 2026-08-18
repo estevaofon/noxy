@@ -140,13 +140,14 @@ func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *ch
 		return false, vm.runtimeError(c, ip, "stack overflow")
 	}
 
-	frame := &CallFrame{
-		Closure:     closure,
-		IP:          0,
-		StackBase:   vm.stackTop - argCount - 1,
-		LocalBase:   vm.stackTop - argCount - 1,
-		Environment: closure.Environment,
-	}
+	frame := &vm.frames[vm.frameCount]
+	frame.Closure = closure
+	frame.IP = 0
+	frame.StackBase = vm.stackTop - argCount - 1
+	frame.LocalBase = vm.stackTop - argCount - 1
+	frame.Environment = closure.Environment
+	frame.Deferred = frame.Deferred[:0]
+	frame.Owned = frame.Owned[:0]
 
 	// RC: parametros sem ref sao vinculos duraveis do frame novo
 	params := closure.Function.Params
@@ -157,8 +158,6 @@ func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *ch
 		frame.ownSlot(vm, frame.LocalBase+1+i)
 	}
 
-	// Push new frame
-	vm.frames[vm.frameCount] = frame
 	vm.frameCount++
 	vm.currentFrame = frame
 	return true, nil

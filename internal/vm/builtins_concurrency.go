@@ -64,12 +64,15 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		}
 
 		// Create Frame
-		frame := &CallFrame{
+		frame := &threadVM.frames[0]
+		*frame = CallFrame{
 			Closure:     closure,
 			IP:          0,
 			StackBase:   0,
 			LocalBase:   0,
 			Environment: closure.Environment,
+			Deferred:    frame.Deferred[:0],
+			Owned:       frame.Owned[:0],
 		}
 
 		// RC: registra os slots retidos acima no frame manual (spawn não passa
@@ -84,7 +87,6 @@ func (vm *VM) defineConcurrencyBuiltins() {
 			}
 		}
 
-		threadVM.frames[0] = frame
 		threadVM.frameCount = 1
 		threadVM.currentFrame = frame
 

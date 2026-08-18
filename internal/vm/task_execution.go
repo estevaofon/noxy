@@ -81,12 +81,15 @@ func (vm *VM) executePreparedTaskCall(call preparedTaskCall) (value.Value, error
 	for _, argument := range call.Arguments {
 		vm.push(argument)
 	}
-	frame := &CallFrame{
+	frame := &vm.frames[0]
+	*frame = CallFrame{
 		Closure:     call.Closure,
 		IP:          0,
 		StackBase:   0,
 		LocalBase:   0,
 		Environment: call.Closure.Environment,
+		Deferred:    frame.Deferred[:0],
+		Owned:       frame.Owned[:0],
 	}
 	// RC: parametros sem ref sao vinculos duraveis do frame da task — mesmo
 	// bind que callPreparedClosure faz (spec §4.2, linha da captura de task:
@@ -103,7 +106,7 @@ func (vm *VM) executePreparedTaskCall(call preparedTaskCall) (value.Value, error
 		}
 		frame.ownSlot(vm, frame.LocalBase+1+i)
 	}
-	vm.frames[0], vm.frameCount, vm.currentFrame = frame, 1, frame
+	vm.frameCount, vm.currentFrame = 1, frame
 	if err := vm.run(1, &result); err != nil {
 		return value.NewNull(), err
 	}
