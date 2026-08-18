@@ -42,6 +42,23 @@ test_report(soma_rec(xs, 0))
 	expectInt(t, got, 3, "recursao generica")
 }
 
+// Chamada generica de dentro de um corpo NAO-generico: o predeclare nao
+// registra mais o template em globals, entao a interceptacao (via registry) e
+// a unica coisa que faz este programa compilar.
+func TestGenericCalledFromNonGenericBody(t *testing.T) {
+	got := captureVMSource(t, `
+func first<T>(arr: T[]) -> T
+    return arr[0]
+end
+func run() -> int
+    let xs: int[] = [42]
+    return first(xs)
+end
+test_report(run())
+`)
+	expectInt(t, got, 42, "chamada generica dentro de corpo nao-generico")
+}
+
 func TestGenericCallsGeneric(t *testing.T) {
 	got := captureVMSource(t, `
 func first<T>(arr: T[]) -> T

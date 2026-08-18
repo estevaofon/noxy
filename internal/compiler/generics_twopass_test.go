@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
 )
@@ -103,14 +104,109 @@ f("abc")`))
 	}
 }
 
-// §5: programa sem genericos nao paga pass 1 — nenhuma fila de instancias
-// chega a ser criada.
+// §5: programa sem genericos nao paga pass 1 — o AST sai intocado e nenhuma
+// fila de instancias sobra no compilador.
 func TestNonGenericProgramSkipsPassOne(t *testing.T) {
 	c := New()
-	if _, _, err := c.Compile(parse("func f(x: int) -> int\n    return x\nend\nf(1)")); err != nil {
+	program := parse("func f(x: int) -> int\n    return x\nend\nf(1)")
+	before := len(program.Statements)
+	if _, _, err := c.Compile(program); err != nil {
 		t.Fatal(err)
 	}
+	if c.hasGenerics() {
+		t.Fatal("programa sem genericos populou o registry (gate do pass 1)")
+	}
+	if len(program.Statements) != before {
+		t.Fatalf("statements = %d, quer %d (pass 1 prependou algo)", len(program.Statements), before)
+	}
 	if c.instances != nil {
-		t.Fatal("programa sem genericos criou fila de instancias (pass 1 rodou)")
+		t.Fatal("fila de instancias sobrou no compilador")
+	}
+}
+
+// instanceDeclNames lista, na ordem, as declaracoes sinteticas que o pass 1
+// prependou a um Program (instancias sao as unicas funcoes com "::" no nome —
+// identificador de usuario nunca contem o qualificador de modulo, §4).
+func instanceDeclNames(program *ast.Program) []string {
+	names := []string{}
+	for _, statement := range program.Statements {
+		if fn, ok := statement.(*ast.FunctionStatement); ok && strings.Contains(fn.Name, "::") {
+			names = append(names, fn.Name)
+		}
+	}
+	return names
+}
+
+func countInstanceFunctions(code *chunk.Chunk, name string) int {
+	count := 0
+	for _, constant := range code.Constants {
+		if constant.Type == value.VAL_FUNCTION && constant.Obj.(*value.ObjFunction).Name == name {
+			count++
+		}
+	}
+	return count
+}
+
+// A fila (memo + ordered) vive por COMPILACAO DE PROGRAMA, nao por compilador.
+// O registry persiste entre compilacoes (§5: REPL guarda templates na sessao),
+// entao um segundo Compile no mesmo compilador precisa: (a) NAO herdar as
+// declaracoes sinteticas do programa anterior, e (b) re-instanciar do zero uma
+// tupla que o memo do programa anterior ja tinha visto.
+func TestInstanceQueueIsScopedPerProgramCompile(t *testing.T) {
+	c := New()
+	first := parse("func id<T>(x: T) -> T\n    return x\nend\nid(1)\nid(\"a\")")
+	firstCode, _, err := c.Compile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(instanceDeclNames(first), " "); got != "main::id<int> main::id<string>" {
+		t.Fatalf("programa 1 prependou %q", got)
+	}
+	// O chunk do compilador e cumulativo entre Compile: medimos o DELTA que o
+	// programa 2 emite, nao o total.
+	stringsBefore := countInstanceFunctions(firstCode, "main::id<string>")
+
+	second := parse("id(2)")
+	secondCode, _, err := c.Compile(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// (a) nada do programa 1 vaza para o programa 2 — nem no AST, nem no
+	// bytecode emitido pela segunda compilacao.
+	if got := strings.Join(instanceDeclNames(second), " "); got != "main::id<int>" {
+		t.Fatalf("programa 2 prependou %q, quer apenas main::id<int>", got)
+	}
+	if delta := countInstanceFunctions(secondCode, "main::id<string>") - stringsBefore; delta != 0 {
+		t.Fatalf("programa 2 emitiu %d closures de main::id<string> (vazamento do programa 1)", delta)
+	}
+	// (b) a tupla usada nos dois programas e re-instanciada no segundo, apesar
+	// de o memo do primeiro ja te-la visto.
+	if c.instances != nil {
+		t.Fatal("fila de instancias sobrou no compilador depois do merge")
+	}
+}
+
+// Finding 2: templates genericos nunca entram em c.globals/c.structs pelo
+// predeclare — o tipo deles carrega TypeParamType e applyProgramBindings o
+// injetaria em c.globals durante TODO corpo de funcao. A identidade deles vive
+// so no GenericRegistry.
+func TestPredeclareSkipsGenericTemplates(t *testing.T) {
+	c := New()
+	program := parse("func id<T>(x: T) -> T\n    return x\nend\nstruct Caixa<T>\n    item: T\nend\nid(1)")
+	if _, _, err := c.Compile(program); err != nil {
+		t.Fatal(err)
+	}
+	if _, leaked := c.programBindings["id"]; leaked {
+		t.Fatal("template de funcao 'id' vazou para programBindings (tipo cru com TypeParamType)")
+	}
+	if _, leaked := c.programBindings["Caixa"]; leaked {
+		t.Fatal("template de struct 'Caixa' vazou para programBindings")
+	}
+	if _, leaked := c.structs["Caixa"]; leaked {
+		t.Fatal("template de struct 'Caixa' vazou para c.structs")
+	}
+	// A instancia, essa sim, e uma declaracao comum e predeclara normalmente.
+	if _, ok := c.programBindings["main::id<int>"]; !ok {
+		t.Fatal("instancia main::id<int> nao chegou a programBindings")
 	}
 }

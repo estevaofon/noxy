@@ -69,9 +69,19 @@ func (c *Compiler) registryOrInit() *GenericRegistry {
 //     corpo dela exigiu, entao toda dependencia aparece antes de quem depende
 //     dela — inclusive structs antes das funcoes que os usam, de graca.
 //
-// O ponteiro e compartilhado entre o compilador real, o compilador
-// descartavel do pass 1, os compiladores de corpo de instancia e todos os
-// filhos (NewChild): ha exatamente uma fila por unidade de compilacao.
+// Tempo de vida: UMA COMPILACAO DE PROGRAMA, nao um compilador. A fila nasce
+// na entrada do two-pass e e solta depois do merge (runGenericsPass1). O
+// registry de templates, esse sim, pode persistir entre compilacoes (§5: o
+// REPL guarda os templates da sessao) — mas memo e ordered nao podem: herdar o
+// memo suprimiria a re-instanciacao de uma tupla cuja declaracao nao esta mais
+// na lista de statements, e herdar ordered prependaria as instancias do
+// programa anterior no programa atual. Re-instanciar por programa e tambem a
+// semantica certa para o REPL: cada linha redefine seus globals de instancia,
+// idempotentemente (§8).
+//
+// Dentro de uma compilacao o ponteiro e compartilhado entre o compilador real,
+// o compilador descartavel do pass 1, os compiladores de corpo de instancia e
+// todos os filhos (NewChild).
 type instanceQueue struct {
 	memo    map[string]bool
 	ordered []ast.Statement
@@ -81,7 +91,10 @@ func newInstanceQueue() *instanceQueue {
 	return &instanceQueue{memo: make(map[string]bool)}
 }
 
-// instancesOrInit e o analogo de registryOrInit para a fila de instancias.
+// instancesOrInit devolve a fila da compilacao corrente. Dentro do pass 1 ela
+// nunca e nil (runGenericsPass1 a instala antes de criar qualquer compilador
+// de pass 1, e newPass1Compiler/NewChild propagam o ponteiro); a lazy-init
+// aqui e so uma rede de seguranca para nao lidar com nil.
 func (c *Compiler) instancesOrInit() *instanceQueue {
 	if c.instances == nil {
 		c.instances = newInstanceQueue()
@@ -135,11 +148,18 @@ func (c *Compiler) hasGenerics() bool {
 // Erros do pass 1 sao propagados (nao engolidos): sao exatamente os erros de
 // inferencia e de corpo de instancia do §9.
 func (c *Compiler) runGenericsPass1(program *ast.Program) error {
+	// Fila NOVA por compilacao de programa, e solta no fim (inclusive em erro):
+	// nem o memo nem as declaracoes sinteticas podem atravessar dois
+	// Compile(*ast.Program) no mesmo compilador — ver o comentario de
+	// instanceQueue.
+	queue := newInstanceQueue()
+	c.instances = queue
+	defer func() { c.instances = nil }()
+
 	scratch := c.newPass1Compiler()
 	if _, _, err := scratch.Compile(program); err != nil {
 		return err
 	}
-	queue := c.instancesOrInit()
 	if len(queue.ordered) == 0 {
 		return nil
 	}

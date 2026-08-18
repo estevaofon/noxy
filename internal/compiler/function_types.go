@@ -224,10 +224,25 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 				return fmt.Errorf("[line %d] duplicate function '%s'", declaration.Token.Line, declaration.Name)
 			}
 			seen[declaration.Name] = struct{}{}
+			// Genericos (§5): um template NAO tem tipo concreto — seus params
+			// carregam TypeParamType. Registra-lo aqui o copiaria para
+			// c.programBindings, e applyProgramBindings o injetaria de volta em
+			// c.globals durante todo corpo de funcao compilado. A identidade do
+			// template vive no GenericRegistry; quem entra em globals sao as
+			// INSTANCIAS, que o pass 2 prepende como declaracoes comuns e
+			// passam por aqui normalmente.
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
 			c.globals[declaration.Name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
 		case *ast.LetStmt:
 			c.globals[declaration.Name.Value] = declaration.Type
 		case *ast.StructStatement:
+			// Mesma regra do template de funcao: o construtor de um struct
+			// generico nao tem assinatura concreta antes da substituicao.
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
 			params := make([]ast.NoxyType, 0, len(declaration.FieldsList))
 			for _, field := range declaration.FieldsList {
 				params = append(params, field.Type)
@@ -249,6 +264,14 @@ func (c *Compiler) predeclareStructs(statements []ast.Statement) {
 	for _, statement := range statements {
 		definition, ok := statement.(*ast.StructStatement)
 		if ok {
+			// Genericos (§5): a tabela de structs e consultada por resolucao de
+			// campo e por runtimeTypeInfo, que precisam de tipos concretos. Um
+			// template tem campos com TypeParamType — ele fica so no
+			// GenericRegistry; as instancias monomorfizadas e que sao
+			// StructStatement comuns e entram aqui.
+			if len(definition.TypeParams) > 0 {
+				continue
+			}
 			c.structs[definition.Name] = definition
 		}
 	}
