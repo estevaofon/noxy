@@ -217,3 +217,64 @@ test_report(head_twice(xs, ys))
 `)
 	expectInt(t, got, 2, "cascata generico->generico")
 }
+
+// §3 target-typing: `let` anotado com um tipo de funcao concreto e o alvo que
+// instancia identity<int> — a genérica vira closure comum sem call site
+// nenhum.
+func TestTargetTypingLetAnnotation(t *testing.T) {
+	got := captureVMSource(t, `
+func identity<T>(x: T) -> T
+    return x
+end
+let f: func(int) -> int = identity
+test_report(f(5))
+`)
+	expectInt(t, got, 5, "identity instanciada por anotacao de let")
+}
+
+// §3 unificação bidirecional: aplica(nums, identity) — A=int ancora pelo
+// argumento nao-generico primeiro; o parametro esperado func(A)->B (ja com
+// A=int) unifica contra func(T)->T do template do argumento, propagando
+// T=int => B=int. As duas instancias (aplica<int,int> e identity<int>) nascem
+// do mesmo call site.
+func TestTargetTypingBidirectionalArgument(t *testing.T) {
+	got := captureVMSource(t, `
+func identity<T>(x: T) -> T
+    return x
+end
+func aplica<A, B>(arr: A[], fn: func(A) -> B) -> B[]
+    let out: B[] = []
+    for item in arr do
+        append(out, fn(item))
+    end
+    return out
+end
+let nums: int[] = [1, 2, 3]
+let mesmos: int[] = aplica(nums, identity)
+test_report(mesmos[2])
+`)
+	expectInt(t, got, 3, "unificacao bidirecional")
+}
+
+// §3: elemento de array literal (tipo do elemento vem da anotacao do `let`
+// envolvente) e posicao de retorno (tipo de retorno declarado da funcao
+// corrente). A sintaxe de array-de-funcao exige parenteses
+// (`(func(int) -> int)[]`) porque `func(int) -> int[]` parseia como "retorna
+// int[]" — precedencia de `[]` documentada em parseType/parseAtomicType.
+func TestTargetTypingArrayElementAndReturn(t *testing.T) {
+	got := captureVMSource(t, `
+func dobro(x: int) -> int
+    return x * 2
+end
+func identity<T>(x: T) -> T
+    return x
+end
+func escolhe() -> func(int) -> int
+    return identity
+end
+let fs: (func(int) -> int)[] = [dobro, identity]
+let g: func(int) -> int = escolhe()
+test_report(fs[1](10) + g(1))
+`)
+	expectInt(t, got, 11, "array de funcoes e return position")
+}

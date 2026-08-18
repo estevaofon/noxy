@@ -80,6 +80,13 @@ type Compiler struct {
 	// O mesmo campo serve ao construtor de struct generico (`let c: Caixa<int> =
 	// Caixa([])`), consumido e limpo em compileGenericConstructorSite.
 	genericReturnHint ast.NoxyType
+	// arrayElementHint carrega o tipo de elemento da anotacao do `let`
+	// envolvente para o proximo array literal (target-typing do §3, posicao 3):
+	// `let fs: (func(int) -> int)[] = [dobro, identity]` precisa que cada
+	// elemento identificador nu (`identity`) saiba o alvo `func(int) -> int`
+	// antes de ser compilado. Armado em setArrayElementHint, consumido e limpo
+	// no proprio case de ArrayLiteral.
+	arrayElementHint ast.NoxyType
 }
 
 type callEmission struct {
@@ -224,12 +231,26 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		var valType ast.NoxyType
 		// Compile initializer
 		if n.Value != nil {
+			// §3 target-typing, posicao 1: o valor do `let` pode ser um
+			// identificador NU nomeando um template de funcao (`let f:
+			// func(int) -> int = identity`) — a anotacao e o alvo concreto que
+			// instancia a genérica antes de qualquer tentativa de compilar o
+			// identificador normalmente (o que hoje leria um global nunca
+			// definido).
+			if err := c.rewriteIfGenericValue(n.Value, n.Type); err != nil {
+				return nil, nil, err
+			}
 			// Target-typing do §7: a anotacao do `let` e o hint para o T que
 			// so aparece no retorno do template. Armado imediatamente antes
 			// (e limpo imediatamente depois) da compilacao do valor.
 			c.setGenericReturnHint(n.Type, n.Value)
+			// §3, posicao 3: elemento de array literal — o tipo de elemento
+			// da anotacao e o alvo para cada identificador nu dentro de `[
+			// ... ]`. Mesma disciplina de armar/limpar do hint acima.
+			c.setArrayElementHint(n.Type, n.Value)
 			_, t, err := c.Compile(n.Value)
 			c.genericReturnHint = nil
+			c.arrayElementHint = nil
 			if err != nil {
 				return nil, nil, err
 			}
@@ -629,13 +650,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				leftType = nil
 			}
 
-			// 2. Compile Value
-			_, valType, err := c.Compile(n.Value)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			// RESOLVE FIELD TYPE:
+			// RESOLVE FIELD TYPE (antes de compilar o valor: §3 target-typing,
+			// posicao 4, precisa do tipo declarado do campo como alvo para
+			// decidir se n.Value e um template de funcao nu):
 			var fieldType ast.NoxyType
 			if prim, ok := leftType.(*ast.PrimitiveType); ok {
 				if structDef, exists := c.structs[prim.Name]; exists {
@@ -646,6 +663,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						}
 					}
 				}
+			}
+
+			// §3 target-typing, posicao 4: `campo.transform = identity` — o
+			// tipo declarado do campo e o alvo concreto.
+			if err := c.rewriteIfGenericValue(n.Value, fieldType); err != nil {
+				return nil, nil, err
+			}
+
+			// 2. Compile Value
+			_, valType, err := c.Compile(n.Value)
+			if err != nil {
+				return nil, nil, err
 			}
 
 			// TYPE-BASED ASSIGNMENT LOGIC:
@@ -787,8 +816,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.ArrayLiteral:
+		// §3 target-typing, posicao 3: consome o hint armado pelo `let`
+		// envolvente (setArrayElementHint) ANTES de compilar qualquer
+		// elemento — leitura unica, para nao vazar num array literal aninhado
+		// dentro de um elemento deste.
+		elementHint := c.arrayElementHint
+		c.arrayElementHint = nil
 		var elemType ast.NoxyType
 		for i, el := range n.Elements {
+			if elementHint != nil {
+				if err := c.rewriteIfGenericValue(el, elementHint); err != nil {
+					return nil, nil, err
+				}
+			}
 			_, t, err := c.Compile(el)
 			if err != nil {
 				return nil, nil, err
@@ -1695,6 +1735,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, nil, nil
 		}
 
+		// §3 target-typing, posicao 2: `return identity` dentro de uma funcao
+		// cujo retorno declarado e um tipo de funcao concreto instancia a
+		// genérica antes da compilacao normal do valor de retorno.
+		if err := c.rewriteIfGenericValue(n.ReturnValue, expected); err != nil {
+			return nil, nil, err
+		}
+
 		_, actual, err := c.Compile(n.ReturnValue)
 		if err != nil {
 			return nil, nil, err
@@ -2005,6 +2052,24 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				}
 				continue
 			}
+		}
+
+		// §3 target-typing, posicao 5 (parte nao-generica: callee comum
+		// recebendo um template de funcao nu, `func aplicaSimples(fn:
+		// func(int)->int)` chamado com `aplicaSimples(identity)`): quando o
+		// tipo do parametro e conhecido e concreto, e o alvo; sem alvo
+		// conhecido (isExact falso), rewriteIfGenericValue erra pedindo
+		// anotacao — exatamente a regra do §9 para identificador de template
+		// em posicao de valor sem tipo concreto. Callees GENERICOS (`aplica`)
+		// ja tiveram seus argumentos-template resolvidos e reescritos em
+		// compileGenericCallSite antes de chegar aqui; o registro nao tem mais
+		// a chave crua, entao este hook e um no-op para eles.
+		var argTarget ast.NoxyType
+		if isExact {
+			argTarget = funcType.Params[i]
+		}
+		if err := c.rewriteIfGenericValue(arg, argTarget); err != nil {
+			return nil, nil, err
 		}
 
 		_, argType, err := c.Compile(arg)

@@ -243,7 +243,20 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 	}
 
 	bindings := make(map[string]ast.NoxyType, len(tpl.Decl.TypeParams))
+
+	// §3, unificacao bidirecional (posicao 5): um argumento que e um
+	// identificador NU nomeando OUTRO template de funcao (`aplica(nums,
+	// identity)`) nao pode ser compilado pelo caminho normal — o template nao
+	// existe em runtime, entao typeOfDiscardedExpression leria um global nunca
+	// definido. Esses argumentos ficam de lado nesta primeira passada, que
+	// resolve os parametros de tipo do CALLER pelos argumentos nao-genericos
+	// primeiro (ordem exigida pela spec).
+	var templateArgs []int
 	for index, argument := range call.Arguments {
+		if _, _, isTemplateArg := c.bareFunctionTemplateArgument(argument); isTemplateArg {
+			templateArgs = append(templateArgs, index)
+			continue
+		}
 		expected := params[index].Type
 		// Parametro sem parametro de tipo nao contribui binding: nao ha razao
 		// para compilar o argumento so para descobrir um tipo que nao sera
@@ -258,6 +271,31 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 		if err := c.unifyAnnotation(expected, actual, bindings); err != nil {
 			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
 		}
+	}
+
+	// Segunda passada: agora que os argumentos comuns ancoraram o que podiam,
+	// cada argumento-template tem seu parametro esperado (ja parcialmente
+	// concreto) unificado CONTRA A ASSINATURA DO PROPRIO TEMPLATE do
+	// argumento, com bindings propagando nos dois sentidos (§3). Bindings do
+	// argumento vivem num mapa PROPRIO por ocorrencia — duas passagens do
+	// mesmo template neste call site podem instanciar tuplas diferentes.
+	for _, index := range templateArgs {
+		argIdent, argTpl, _ := c.bareFunctionTemplateArgument(call.Arguments[index])
+		expected := substituteType(params[index].Type, bindings)
+		expectedFn, ok := expected.(*ast.FunctionType)
+		if !ok {
+			return noConcreteTargetError(line, argIdent.Value)
+		}
+		templateSig := newFunctionType(argTpl.Decl.Parameters, argTpl.Decl.ReturnType)
+		argBindings := make(map[string]ast.NoxyType, len(argTpl.Decl.TypeParams))
+		if err := unifyBidirectional(expectedFn, templateSig, bindings, argBindings); err != nil {
+			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
+		}
+		instName, _, err := c.ensureFunctionInstance(argTpl, argBindings, line)
+		if err != nil {
+			return err
+		}
+		argIdent.Value = instName
 	}
 
 	// Hint do `let`: resolve o T que so aparece no retorno (`let xs: int[] =
