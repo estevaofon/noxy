@@ -3,6 +3,152 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## develop (bff429a) × genéricos paramétricos (feat/generics)
+
+**Data:** 2026-08-18 · Windows 11 · protocolo intercalado, mediana de 9
+execuções por sessão. Spec: `docs/superpowers/specs/2026-08-18-generics-design.md`
+§11. Task: `.superpowers/sdd/2026-08-18-generics/task-16-brief.md`. Gates
+novos desta seção: `generic_vs_hand` e regressão do corpus não-genérico são
+gates duros; `startup_generics` é informativo (spec §11: "sem regressão
+material do startup", sem limiar numérico fixado — este relatório adota
+sinalização em `> +15ms` como critério operacional, per orientação da task
+brief).
+
+**Verificação completa:** `go vet ./...` sem saída (limpo); `go test ./...
+-count=1` verde em todos os pacotes (`internal/compiler` 68,117s,
+`internal/vm` 145,820s, resto sub-segundo — a suíte de `internal/vm` inclui
+os testes novos de genéricos: unificação, cloner de AST com guard por
+reflexão, igualdade de bytecode, E2E, interações de runtime, negativos).
+**Corpus de exemplos 164/164** (`run_all_tests_concurrent.nx`, 20187ms) no
+binário `feat/generics` (`noxy_generics_bench.exe`, `c93cfb3`) — mesmo número
+já reportado na seção da fase 1 de dispatch, confirmando que o corpus
+existente continua passando por inteiro com genéricos ativos (gate de
+regressão do corpus, spec §11).
+
+### Gate 1 — `generic_vs_hand`: razão ≤ 1,05 (Ruling R4 do controller)
+
+**Divergência registrada:** a spec §11 declara gate de razão **1,0x**; o
+controller (Ruling R4, binding) definiu **≤ 1,05** como folga de ruído sobre
+esse 1,0x — a garantia dura de custo-zero continua sendo o teste de
+igualdade de bytecode (Task 8: `first<int>` monomorfizado emite a mesma
+sequência de opcodes que a versão escrita à mão), não este benchmark de
+parede. Este relatório usa 1,05 por autoridade de R4.
+
+`benchmarks/bench_generic_vs_hand.nx` só roda no binário `feat/generics` (o
+binário `develop` não faz parse de `<T>`), então não há segundo binário para
+intercalar contra. Em vez disso a medição é **interna ao processo**
+(`time_now_ms()`), em ordem **ABBA** (gen, hand, hand, gen) dentro da mesma
+execução — necessário porque uma medição AB simples (gen sempre primeiro)
+mostrou deriva sistemática de até +9% entre sessões¹, e o gate de 5% é
+apertado demais para o piso de ruído documentado no resto da suíte
+(~1-4%). ABBA dá às duas funções a mesma posição média (2,5) na sequência,
+cancelando deriva linear dentro do processo. O binário inteiro roda 9 vezes
+por sessão; mediana de `GEN_MS`/`HAND_MS` calculada separadamente, razão das
+duas medianas.
+
+| sessão | gen_ms (mediana) | hand_ms (mediana) | razão |
+|---|---|---|---|
+| 1 | 387 | 400 | 0,968 |
+| 2 | 378 | 387 | 0,977 |
+| 3 | 377 | 374 | 1,008 |
+
+**Agregado (mediana das 3 sessões, por lado):** gen_ms=378, hand_ms=387,
+**razão = 0,977** → ✅ **dentro do gate** (≤ 1,05). Checksum idêntico
+(`384128000`) em todas as 27 execuções (3 sessões × 9), confirmando que
+`soma_gen<int>` e `soma_hand` computam o mesmo resultado.
+
+### Gate 2 — regressão do corpus não-genérico (develop × genéricos)
+
+Roda 3 benchmarks existentes não-genéricos (`bench_bubblesort.nx`,
+`bench_call_light.nx`, `bench_typed_call_map.nx` — os três já rastreados
+como gate na seção da fase 1 de dispatch) via `interleaved_compare.ps1`
+apontado para um diretório temporário só com esses três arquivos (copiados;
+o script varre `bench_*.nx` do próprio diretório e os dois arquivos novos
+desta tarefa usam sintaxe `<T>` que o binário `develop` não faz parse —
+incluí-los quebraria a varredura inteira no lado `develop`). **5 sessões**
+rodadas (uma sessão inicial cujo `results/interleaved.md` falhou por
+diretório ausente, valores só no console — mantida porque a medição em si é
+válida — mais 4 sessões limpas), porque `bench_typed_call_map` deu um
+outlier de +12,6% na sessão 2, acima do limiar de ~5% usado no resto do
+projeto — ver nota².
+
+| bench | develop_ms | generics_ms | delta agregado | veredito |
+|---|---|---|---|---|
+| bench_bubblesort | 4013,8 | 4050,0 | +0,90% | ✅ |
+| bench_call_light | 78,0 | 75,9 | −2,69% | ✅ |
+| bench_typed_call_map | 87,1 | 86,6 | −0,57%² | ✅ |
+
+Valores agregados: mediana das 5 sessões, calculada separadamente para
+`develop_ms` e `generics_ms`, delta recalculado a partir das duas medianas
+(mesma convenção da seção da fase 1 de dispatch).
+
+### Info — `startup_generics` (sem gate duro; sinalizar > +15ms)
+
+`benchmarks/startup_generics.nx` (1 template `Caixa<T>` + 2 instanciações,
+`Caixa<int>` e `Caixa<string>`, + print) contra
+`benchmarks/cross_runtime/startup.nx` (piso de processo sem genéricos),
+**ambos no binário `feat/generics`** — isola o custo marginal da detecção
+"há genéricos?" e do pass 1 de monomorfização sobre o mesmo binário, sem
+confundir com qualquer outra diferença entre binários. Script ad hoc
+(`interleaved_files.ps1`, mesma técnica de `interleaved_compare.ps1` com o
+eixo trocado: binário fixo, arquivo variável), 3 sessões de 9 execuções.
+
+| sessão | startup_ms (sem genéricos) | startup_generics_ms | delta |
+|---|---|---|---|
+| 1 | 51,3 | 53,3 | +2,0ms |
+| 2 | 52,2 | 52,8 | +0,6ms |
+| 3 | 51,4 | 55,4 | +4,0ms |
+
+**Agregado:** 51,4ms → 53,3ms, **delta = +1,9ms** — bem abaixo do limiar de
+sinalização de +15ms. Custo de compilação dobrando sobre uma base de poucos
+ms (spec §11: "a compilação ~dobra, sobre uma base de poucos ms") é
+consistente com a ordem de grandeza aqui: o programa inteiro (parse + duas
+passes + compile + run + print) segue no mesmo patamar do piso de processo
+(~50-55ms), a monomorfização de 1 template com 2 instanciações não é visível
+acima do ruído de spawn de processo nesta escala.
+
+¹ Medição AB descartada (não commitada): mesmo bench, ordem fixa gen-depois-
+hand, 2 sessões de 9 execuções — sessão 1 deu razão 1,008 (dentro do gate),
+sessão 2 deu **1,094** (acima do gate de 1,05). A causa aparente é a segunda
+função chamada dentro do processo herdar cache/branch-predictor "quente" da
+primeira, não custo real de despacho genérico — a versão ABBA committada
+elimina essa fonte de viés por construção (ver corpo do gate 1 acima).
+
+² O outlier da sessão 2 (`bench_typed_call_map` +12,6%, base=79,9ms
+cand=90ms) não se repete nas outras 4 sessões (deltas: +0,9%, −0,6%, −0,1%,
+−3,2%) — é o bench de menor escala absoluta dos três (~80-90ms), mesmo
+padrão de sensibilidade a ruído de sistema já documentado para benches
+curtos na seção da fase 1 de dispatch (nota¹ daquela seção). A mediana
+agregada das 5 sessões (−0,57%) fica bem dentro do gate; sem esse outlier a
+leitura seria idêntica.
+
+### Interpretação
+
+**Gate 1 confirma o custo-zero em runtime além do teste de bytecode.** A
+razão agregada (0,977, faixa 0,968–1,008 nas 3 sessões) está centrada em
+torno de 1,0, sem viés sistemático para nenhum lado — exatamente o esperado
+quando `soma_gen<int>` e `soma_hand` emitem a mesma sequência de opcodes
+(Task 8). A divergência do gate declarado na spec (1,0x → ≤1,05x, Ruling R4)
+existe para dar folga ao ruído de medição de parede, não porque exista custo
+real: o teste de bytecode é quem carrega a prova, este benchmark é
+confirmação empírica adicional.
+
+**Gate 2 confirma que o corpus não-genérico não paga nada pela existência de
+genéricos no compilador.** As três magnitudes agregadas (+0,90%, −2,69%,
+−0,57%) ficam dentro do mesmo piso de ruído (~1-4%) documentado nas seções
+anteriores deste arquivo para essa máquina — nenhum sinal de regressão real.
+Consistente com a spec §11: "programa sem genéricos continua pulando o pass
+1 inteiro".
+
+**O startup paga um custo pequeno e não sinalizável.** +1,9ms agregados (faixa
++0,6 a +4,0ms nas 3 sessões) para compilar um programa com 1 template e 2
+instanciações, contra um piso de processo de ~51ms — ordem de grandeza
+consistente com a spec (compilação "~dobra... sobre uma base de poucos ms").
+Não há indício de que a detecção "há genéricos?" ou o pass 1 de
+monomorfização introduzam custo que se acumule com o tamanho do programa
+nesta escala; ficaria para benchmarks futuros com mais templates/instâncias
+verificar se o custo permanece sub-linear.
+
 ## develop (f107508) × fase 1 de dispatch e chamadas (perf/vm-dispatch-fase1)
 
 **Data:** 2026-08-18 · Windows 11 · protocolo intercalado, mediana de 9
