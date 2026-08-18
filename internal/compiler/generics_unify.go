@@ -25,6 +25,28 @@ import (
 //     "esperava".
 //   - GenericType unifica Args ponto a ponto (mesmo Name e aridade).
 //
+// Compatibilidade "nunca mais estrita que areTypesCompatible": unify é
+// consumida durante a inferência de tipos em sites de chamada genéricos, e
+// não pode rejeitar uma chamada que o checador de tipos "de verdade"
+// (Compiler.areTypesCompatible, compiler.go) aceitaria — isso quebraria
+// chamadas estruturalmente válidas. Por isso, na posição expected concreta
+// (fora de um TypeParamType), replicamos as mesmas três folgas de
+// areTypesCompatible antes de comparar construtor a construtor: expected
+// "any" aceita qualquer actual; actual "any" ou "null" nunca é erro (não
+// binda, não falha); expected "func" (bare) aceita qualquer actual chamável
+// (isCallableType: FunctionType ou "func" bare). Reusamos os helpers de
+// pacote isAny/isNullType/isBareFunctionType/isCallableType (definidos em
+// compiler.go e function_types.go) para não duplicar essas regras com uma
+// semântica levemente diferente.
+//
+// O que NÃO replicamos aqui é Compiler.acceptsNull (que decide se um actual
+// null é aceito por um expected nomeado consultando c.structs) — unify é uma
+// função pura, sem acesso à tabela de structs do compilador. Nesses casos
+// "não temos certeza": preferimos não bindar e não errar, e deixar a
+// checagem de tipos da pass 2 (com o *Compiler completo) decidir depois. Ou
+// seja, unify pode ser mais permissiva que areTypesCompatible em casos que
+// dependem de contexto que ela não tem — nunca mais estrita.
+//
 // nil: expected ou actual nil é tratado conservadoramente — sem binding, sem
 // erro. Ambos os lados nil não deveriam ocorrer em uso real (a spec exige
 // tipos resolvidos antes de chamar unify); optamos por não travar aqui e
@@ -39,7 +61,7 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 		if _, isRef := actual.(*ast.RefType); isRef {
 			return fmt.Errorf("%s não pode ser um tipo ref (tentativa de bindar %s)", tp.Name, actual.String())
 		}
-		if isAnyOrNull(actual) {
+		if isAny(actual) || isNullType(actual) {
 			return nil
 		}
 		if existing, ok := bindings[tp.Name]; ok {
@@ -50,6 +72,22 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 		}
 		bindings[tp.Name] = ast.CloneType(actual)
 		return nil
+	}
+
+	// expected concreto: folgas de compatibilidade que espelham
+	// areTypesCompatible antes de exigir casamento de construtor (ver
+	// comentário da função).
+	if isAny(expected) {
+		return nil
+	}
+	if isAny(actual) || isNullType(actual) {
+		return nil
+	}
+	if isBareFunctionType(expected) {
+		if isCallableType(actual) {
+			return nil
+		}
+		return fmt.Errorf("esperava %s, encontrado %s", expected.String(), actual.String())
 	}
 
 	switch exp := expected.(type) {
@@ -124,17 +162,6 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 	default:
 		return fmt.Errorf("esperava %s, encontrado %s", expected.String(), actual.String())
 	}
-}
-
-// isAnyOrNull reporta se t é o primitivo "any" ou "null" — os únicos tipos
-// concretos que, em posição actual, não contribuem binding para um
-// TypeParamType (spec §7).
-func isAnyOrNull(t ast.NoxyType) bool {
-	pt, ok := t.(*ast.PrimitiveType)
-	if !ok {
-		return false
-	}
-	return pt.Name == "any" || pt.Name == "null"
 }
 
 // containsTypeParam reporta se t contém, em qualquer profundidade, um

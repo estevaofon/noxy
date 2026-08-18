@@ -40,6 +40,16 @@ func TestUnifyTable(t *testing.T) {
 		{"null nao binda", tParam("T"), tNull(), map[string]string{}, ""},
 		{"T nao binda ref", tParam("T"), &ast.RefType{ElementType: tInt()}, nil, "não pode ser um tipo ref"},
 		{"construtor divergente", tArr(tParam("T")), tInt(), nil, "esperava"},
+		{"map[T,any] contra map[int,string]: any folgado no leaf nao erra",
+			&ast.MapType{KeyType: tParam("T"), ValueType: tAny()},
+			&ast.MapType{KeyType: tInt(), ValueType: tString()},
+			map[string]string{"T": "int"}, ""},
+		{"ref int contra null: null folgado nao erra",
+			&ast.RefType{ElementType: tInt()}, tNull(), map[string]string{}, ""},
+		{"func bare contra FunctionType: callable folgado nao erra",
+			&ast.PrimitiveType{Name: "func"},
+			&ast.FunctionType{Params: []ast.NoxyType{tInt()}, Return: tString()},
+			map[string]string{}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
