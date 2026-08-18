@@ -47,6 +47,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 	// Cache current frame values for speed
 	frame := vm.currentFrame
 	c := frame.Closure.Function.Chunk.(*chunk.Chunk)
+	gcache := c.GlobalCache()
 	ip := frame.IP
 	defer func() {
 		if vm.currentFrame == frame {
@@ -185,6 +186,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_GET_GLOBAL:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
+			// Geração lida ANTES do Resolve: uma escrita concorrente entre os
+			// dois avança a geração, então a entrada gravada com a geração
+			// antiga falha a comparação na próxima leitura e re-resolve — o
+			// cache pode sub-cachear, nunca servir valor stale.
+			gen := frame.Environment.Generation()
+			if entry := gcache[index].Load(); entry != nil && entry.Env == frame.Environment && entry.Gen == gen {
+				vm.push(entry.Val)
+				continue
+			}
 			nameVal := c.Constants[index]
 			name := nameVal.Obj.(string)
 
@@ -192,6 +202,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if !ok {
 				return vm.runtimeError(c, ip, "undefined global variable '%s'", name)
 			}
+			gcache[index].Store(&chunk.GlobalCacheEntry{Env: frame.Environment, Gen: gen, Val: val})
 			vm.push(val)
 
 		case chunk.OP_SET_GLOBAL:
@@ -940,6 +951,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Update cached frame
 			frame = vm.currentFrame // Switch to new frame
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
 			ip = frame.IP
 
 		case chunk.OP_DEFER:
@@ -1079,6 +1091,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			frame = vm.currentFrame
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
 			ip = frame.IP
 
 		case chunk.OP_ARRAY:
@@ -1139,6 +1152,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			frame = vm.currentFrame
 			c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+			gcache = c.GlobalCache()
 			ip = frame.IP
 			vm.push(mod)
 

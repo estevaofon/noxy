@@ -3,6 +3,8 @@ package chunk
 import (
 	"fmt"
 	"noxy-vm/internal/value"
+	"sync"
+	"sync/atomic"
 )
 
 type OpCode byte
@@ -301,6 +303,26 @@ type Chunk struct {
 	Constants []value.Value
 	Lines     []int
 	FileName  string
+
+	globalCacheOnce sync.Once
+	globalCache     []atomic.Pointer[GlobalCacheEntry]
+}
+
+// GlobalCacheEntry cacheia a resolução de um OP_GET_GLOBAL: válida enquanto o
+// mesmo ambiente estiver ativo E a geração somada da cadeia não mudar. Env e
+// Gen juntos tornam impossível servir valor stale: qualquer escrita bumpa a
+// geração; chunk rodando sob outro ambiente falha a comparação de Env.
+type GlobalCacheEntry struct {
+	Env *value.GlobalEnvironment
+	Gen uint64
+	Val value.Value
+}
+
+func (c *Chunk) GlobalCache() []atomic.Pointer[GlobalCacheEntry] {
+	c.globalCacheOnce.Do(func() {
+		c.globalCache = make([]atomic.Pointer[GlobalCacheEntry], len(c.Constants))
+	})
+	return c.globalCache
 }
 
 func New() *Chunk {
