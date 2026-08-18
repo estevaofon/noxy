@@ -6,6 +6,26 @@ import (
 	"noxy-vm/internal/ast"
 )
 
+// conflictError e o erro estruturado que unify devolve quando um parametro de
+// tipo ja tem binding e o novo valor observado diverge (comparacao por
+// String()). Error() produz exatamente a mesma mensagem "T inferido como X e
+// Y" que TestUnifyTable/TestInferenceConflictError ja verificam por
+// substring — nada muda para quem so olha err.Error(). O que o tipo
+// estruturado acrescenta e os campos Param/Existing/New, que um chamador com
+// mais contexto (compileGenericCallSite, generics.go) pode extrair via
+// errors.As para compor a mensagem do §9 com atribuicao por argumento ("T
+// inferido como int (argumento 1) e string (argumento 2)") sem parsear
+// texto.
+type conflictError struct {
+	Param    string
+	Existing ast.NoxyType
+	New      ast.NoxyType
+}
+
+func (e *conflictError) Error() string {
+	return fmt.Sprintf("%s inferido como %s e %s", e.Param, e.Existing.String(), e.New.String())
+}
+
 // unify casa estruturalmente expected (um tipo de template, possivelmente
 // contendo TypeParamType) contra actual (um tipo concreto observado num site
 // de chamada), acumulando bindings de parâmetro de tipo em bindings.
@@ -66,7 +86,7 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 		}
 		if existing, ok := bindings[tp.Name]; ok {
 			if existing.String() != actual.String() {
-				return fmt.Errorf("%s inferido como %s e %s", tp.Name, existing.String(), actual.String())
+				return &conflictError{Param: tp.Name, Existing: existing, New: actual}
 			}
 			return nil
 		}

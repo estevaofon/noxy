@@ -107,6 +107,35 @@ func callableName(expression ast.Expression) string {
 	return expression.String()
 }
 
+// arithmeticOperators sao os operadores infixos que a VM so executa sobre
+// numeros (e, no caso exclusivo de '+', tambem strings/bytes) — nunca sobre
+// struct. Usado pelo compilador para recusar 'a + b' com operando struct em
+// tempo de compilacao, em vez de deixar estourar no runtime (executor.go,
+// "operands must be numbers...").
+var arithmeticOperators = map[string]bool{
+	"+": true,
+	"-": true,
+	"*": true,
+	"/": true,
+	"%": true,
+}
+
+// structOperandName devolve o nome do primeiro operando (esquerda, depois
+// direita) cujo tipo estatico e um struct registrado em c.structs — "",
+// false quando nenhum dos dois e. Usado pelo InfixExpression para montar a
+// mensagem do catalogo §9 ("operador '+' não definido para Ponto") com o
+// nome do struct ofensor.
+func (c *Compiler) structOperandName(leftType, rightType ast.NoxyType) (string, bool) {
+	for _, t := range [...]ast.NoxyType{leftType, rightType} {
+		if prim, ok := t.(*ast.PrimitiveType); ok {
+			if _, exists := c.structs[prim.Name]; exists {
+				return prim.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 func unwrapRefType(t ast.NoxyType) ast.NoxyType {
 	if ref, ok := t.(*ast.RefType); ok {
 		return ref.ElementType

@@ -954,6 +954,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, upvalueType, nil
 		} else {
 			// Global
+			// §9/§4: fallback para as posicoes de valor que nenhum hook de
+			// genericos intercepta (map literal, expression statement solto)
+			// — ver o comentario de rejectBareGenericTemplateIdentifier em
+			// generics_target.go. Sombreamento por local/upvalue ja foi
+			// descartado pelos dois ramos acima, entao a mesma regra vale
+			// aqui sem checagem extra.
+			if err := c.rejectBareGenericTemplateIdentifier(n); err != nil {
+				return nil, nil, err
+			}
 			nameConstant := c.makeConstant(value.NewString(n.Value))
 			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
 
@@ -1031,6 +1040,21 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(byte(chunk.OP_DEREF))
 			if ref, ok := rightType.(*ast.RefType); ok {
 				rightType = ref.ElementType
+			}
+		}
+
+		// Structs nunca definem operador aritmetico (OP_ADD e companhia, em
+		// runtime, so aceitam numeros — e OP_ADD tambem strings/bytes — nunca
+		// ObjStruct: cai no "operands must be numbers..." generico do
+		// executor). Sem esta checagem, 'a + b' com a,b struct compilava
+		// silenciosamente e so estourava no runtime; dentro do corpo de uma
+		// instancia generica monomorfizada isso escapava por completo da
+		// cadeia de instanciacao do §9 (instantiationChainError so envolve
+		// ERROS DE COMPILACAO). Pegar aqui cedo produz a mensagem exata do
+		// catalogo, com a linha do proprio operador.
+		if arithmeticOperators[n.Operator] {
+			if structName, isStruct := c.structOperandName(leftType, rightType); isStruct {
+				return nil, nil, fmt.Errorf("[line %d] operador '%s' não definido para %s", n.Token.Line, n.Operator, structName)
 			}
 		}
 

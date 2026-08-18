@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -251,6 +252,26 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 	// definido. Esses argumentos ficam de lado nesta primeira passada, que
 	// resolve os parametros de tipo do CALLER pelos argumentos nao-genericos
 	// primeiro (ordem exigida pela spec).
+	// nullOnlyParams marca, por nome de parametro de tipo, se algum candidato
+	// de binding visto para ele num argumento de posicao "T" nua (nao
+	// aninhada — `x: T`, nao `x: T[]`) foi `null` ANTES de qualquer binding de
+	// verdade. unify trata null como "any/null nao contribui binding, nao
+	// falha" (§7) — silenciosamente igual a um argumento cujo tipo
+	// simplesmente nao teve nenhuma informacao. Sem esta marca,
+	// `identity(null)` e `vazio()` (T so aparece no retorno, nenhum argumento
+	// sequer tenta) cairiam na MESMA mensagem generica; a marca e o que
+	// permite compileGenericCallSite escolher a mensagem dedicada do §9 antes
+	// de delegar a ensureFunctionInstance. Uma marca nunca precisa ser
+	// desfeita: o consumidor (logo abaixo do loop) so a consulta quando o
+	// parametro AINDA esta sem binding no final — se um binding de verdade
+	// chegou depois (deste ou de outro argumento), a marca e irrelevante.
+	nullOnlyParams := make(map[string]bool)
+	// argIndexOf guarda, por nome de parametro de tipo, o indice (1-based) do
+	// PRIMEIRO argumento que efetivamente o bindou — e o que permite compor
+	// "T inferido como int (argumento 1) e string (argumento 2)" (§9) num
+	// conflito posterior, sem o unify saber nada de indices de argumento
+	// (unify e funcao pura; quem sabe a posicao e so este loop).
+	argIndexOf := make(map[string]int, len(tpl.Decl.TypeParams))
 	var templateArgs []int
 	for index, argument := range call.Arguments {
 		if _, _, isTemplateArg := c.bareFunctionTemplateArgument(argument); isTemplateArg {
@@ -268,8 +289,38 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 		if err != nil {
 			return err
 		}
+		if typeParam, isBare := expected.(*ast.TypeParamType); isBare && isNullType(actual) {
+			if _, bound := bindings[typeParam.Name]; !bound {
+				nullOnlyParams[typeParam.Name] = true
+			}
+			continue
+		}
 		if err := c.unifyAnnotation(expected, actual, bindings); err != nil {
+			var conflict *conflictError
+			if errors.As(err, &conflict) {
+				if existingIndex, known := argIndexOf[conflict.Param]; known {
+					return fmt.Errorf(
+						"[line %d] %s inferido como %s (argumento %d) e %s (argumento %d)",
+						line, conflict.Param,
+						conflict.Existing.String(), existingIndex,
+						conflict.New.String(), index+1,
+					)
+				}
+			}
 			return fmt.Errorf("[line %d] argumento %d de '%s': %v", line, index+1, base, err)
+		}
+		// Registra o(s) parametro(s) que ESTE argumento bindou pela PRIMEIRA
+		// vez (um unico argumento composto — `map[K,V]` — pode bindar mais de
+		// um de uma vez). So grava na primeira ocorrencia: e o PRIMEIRO
+		// argumento que deve aparecer como "(argumento N)" do lado esquerdo
+		// de um conflito futuro.
+		for _, typeParam := range tpl.Decl.TypeParams {
+			if _, recorded := argIndexOf[typeParam]; recorded {
+				continue
+			}
+			if _, bound := bindings[typeParam]; bound {
+				argIndexOf[typeParam] = index + 1
+			}
 		}
 	}
 
@@ -305,6 +356,23 @@ func (c *Compiler) compileGenericCallSite(call *ast.CallExpression, callee *ast.
 		if err := c.unifyAnnotation(tpl.Decl.ReturnType, hint, bindings); err != nil {
 			return fmt.Errorf("[line %d] retorno de '%s': %v", line, base, err)
 		}
+	}
+
+	// §9 "inferência só com null": intercepta ANTES de ensureFunctionInstance
+	// (cuja mensagem para parametro sem binding e a generica "não foi
+	// possível inferir T em 'f'") sempre que o binding que falta e exatamente
+	// um que so viu `null` como candidato — dá a mensagem dedicada do
+	// catalogo. Mesma ordem de tpl.Decl.TypeParams que ensureFunctionInstance
+	// usa, entao o primeiro parametro sem binding e sempre o mesmo nos dois
+	// caminhos.
+	for _, typeParam := range tpl.Decl.TypeParams {
+		if _, bound := bindings[typeParam]; bound {
+			continue
+		}
+		if nullOnlyParams[typeParam] {
+			return nullOnlyInferenceError(line, typeParam)
+		}
+		break
 	}
 
 	name, _, err := c.ensureFunctionInstance(tpl, bindings, line)
@@ -462,6 +530,18 @@ func (c *Compiler) setGenericReturnHint(target ast.NoxyType, valueExpr ast.Expre
 		return
 	}
 	c.genericReturnHint = target
+}
+
+// nullOnlyInferenceError e a mensagem dedicada do §9 para quando `null` e a
+// UNICA razao de um parametro de tipo continuar sem binding (`identity(null)`
+// sem outra ancora) — distinta da mensagem generica "não foi possível
+// inferir T em 'f'" (usada quando T simplesmente nunca teve candidato
+// nenhum, ex.: `vazio()` com T so no retorno).
+func nullOnlyInferenceError(line int, typeParam string) error {
+	return fmt.Errorf(
+		"[line %d] não foi possível inferir %s de null — anote o tipo",
+		line, typeParam,
+	)
 }
 
 // displayInstanceName produz o nome de exibicao do §9 — `soma<Ponto>`, SEM o

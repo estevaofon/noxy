@@ -337,10 +337,21 @@ func (c *Compiler) compileGenericConstructorSite(call *ast.CallExpression, calle
 }
 
 // applyStructHintBindings completa bindings com os argumentos de tipo escritos
-// na anotacao do `let` que envolve o site de construtor. So preenche parametro
-// de tipo AINDA em aberto: o argumento e a ancora primaria (§7), e um conflito
-// entre argumento e anotacao aparece adiante como erro de tipo do `let`, com a
-// mensagem do caminho normal.
+// na anotacao do `let` que envolve o site de construtor. Regra geral: so
+// preenche parametro de tipo AINDA em aberto — o argumento e a ancora
+// primaria (§7), e um conflito entre argumento e anotacao aparece adiante
+// como erro de tipo do `let`, com a mensagem do caminho normal.
+//
+// Excecao deliberada (§7: "any é legal como argumento de tipo explícito" é
+// uma regra incondicional, não qualificada por "só quando nada mais
+// bindou"): quando a anotacao pede `any` explicitamente para um parametro,
+// esse `any` PREVALECE mesmo sobre um binding ja inferido do argumento —
+// `Caixa<any> = Caixa(1)` produz a instancia `Caixa<any>` (campo `any`
+// aceita o `1` normalmente pelo caminho comum de checagem de tipos), em vez
+// de conflitar com `Caixa<int>` inferido do argumento sozinho. A checagem e
+// sintatica direta (isAny do proprio no da anotacao, sem resolveAnnotation)
+// porque `any` nunca e GenericType — não ha instanciacao/efeito colateral a
+// evitar ao inspeciona-lo cedo, ao contrario do caso geral abaixo.
 //
 // A anotacao chega em uma de duas formas, dependendo de quem a resolveu
 // primeiro (o predeclare do topo do programa ou o proprio case do `let`):
@@ -355,6 +366,10 @@ func (c *Compiler) applyStructHintBindings(tpl *StructTemplate, hint ast.NoxyTyp
 		return
 	}
 	for index, typeParam := range tpl.Decl.TypeParams {
+		if isAny(annotation.Args[index]) {
+			bindings[typeParam] = annotation.Args[index]
+			continue
+		}
 		if _, bound := bindings[typeParam]; bound {
 			continue
 		}

@@ -143,6 +143,53 @@ func noConcreteTargetError(line int, name string) error {
 	)
 }
 
+// noConcreteStructTargetError e o par de noConcreteTargetError para STRUCT
+// genérico: identificador nomeando um template de struct em posição de valor
+// sem nada de onde tirar a tupla de argumentos de tipo (nem chamada de
+// construtor — que passaria pelo hook de compileGenericConstructorSite —, nem
+// anotação de `let` que instancie via resolveAnnotation).
+func noConcreteStructTargetError(line int, name string) error {
+	return fmt.Errorf(
+		"[line %d] struct genérico '%s' precisa de tipo concreto — anote os argumentos de tipo ou construa diretamente",
+		line, name,
+	)
+}
+
+// rejectBareGenericTemplateIdentifier e o fallback do §9 para as posições de
+// valor que NENHUM hook do §3/§4 intercepta antes de alcançar o case
+// genérico de Identifier em compiler.go (Compile) — valor de map literal,
+// expression statement solto. As cinco posições hookadas (§3: `let`
+// anotado, `return`, elemento de array, campo de struct, argumento de
+// chamada) e o call site direto (§4, callee de CallExpression, para função
+// OU construtor de struct) já reescrevem identifier.Value para o nome
+// qualificado da instância ANTES de qualquer Compile(identifier) acontecer —
+// nesses casos identifier.Value não é mais chave de nenhum dos dois mapas do
+// registry e esta função é um no-op.
+//
+// Quando o identificador NOMEIA um template e chegou aqui intocado, a
+// causa é sempre a mesma: nenhum hook cobre esta posição, e compilar
+// normalmente leria um global que nunca foi definido (template nunca emite
+// bytecode) — mensagem confusa a jusante em vez do erro claro do catálogo.
+// Chamador (compiler.go, case *ast.Identifier) só invoca isto depois que
+// resolveLocal/resolveUpvalue já falharam, então a mesma regra de
+// sombreamento das outras famílias de hook vale aqui de graça.
+//
+// c.generics pode ser nil (programa sem declaração genérica nenhuma, §5): o
+// guard evita alocar o registry lazily (registryOrInit) só para descobrir
+// que está vazio — custo zero por identificador em programa comum.
+func (c *Compiler) rejectBareGenericTemplateIdentifier(identifier *ast.Identifier) error {
+	if c.generics == nil {
+		return nil
+	}
+	if _, isFuncTemplate := c.generics.Funcs[identifier.Value]; isFuncTemplate {
+		return noConcreteTargetError(identifier.Token.Line, identifier.Value)
+	}
+	if _, isStructTemplate := c.generics.Structs[identifier.Value]; isStructTemplate {
+		return noConcreteStructTargetError(identifier.Token.Line, identifier.Value)
+	}
+	return nil
+}
+
 // unifyBidirectional e a versão "dois lados" de unify, exigida pela
 // unificação bidirecional do §3 (posição 5, argumento de chamada): expected
 // pode conter TypeParamType do template do CALLER (bindings em
