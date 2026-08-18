@@ -153,6 +153,23 @@ test_report(topo(p))
 	expectInt(t, got, 42, "Pilha<int> empilhada e lida por funcoes genericas")
 }
 
+// Instancia pedida SO dentro de um corpo de funcao: a declaracao sintetica e
+// prependada no topo do programa, entao o construtor ja e um global definido
+// quando a funcao roda.
+func TestGenericStructInstanceFromFunctionBody(t *testing.T) {
+	got := captureVMSource(t, `
+struct Caixa<T>
+    valor: T
+end
+func cria() -> int
+    let local: Caixa<string> = Caixa("abc")
+    return length(local.valor)
+end
+test_report(cria())
+`)
+	expectInt(t, got, 3, "instancia criada dentro de corpo nao-generico")
+}
+
 // Instancia como elemento de array e valor de map: as anotacoes compostas
 // preservam a estrutura externa e a runtime type info do container e completa.
 func TestGenericStructInsideContainers(t *testing.T) {
