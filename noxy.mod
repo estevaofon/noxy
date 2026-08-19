@@ -1,6 +1,6 @@
 module noxy
 
-noxy v0.6.0
+noxy v0.7.0
 
 require github.com/estevaofon/quicksort v0.1.0
 require github.com/estevaofon/noxy_dynamodb v0.1.0
