@@ -1040,14 +1040,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
 
-		// `==`/`!=` sao a UNICA excecao ao auto-deref de operandos (spec
-		// §2.3): dois refs precisam chegar inteiros ate OP_EQUAL para
-		// comparar IDENTIDADE DE SLOT (§2.2.7), e nao o valor apontado.
-		// O caso misto (`ref T` contra `T`, contra `null`) continua lendo o
-		// valor apontado, mas resolvido em runtime por OP_EQUAL, que enxerga
-		// os dois operandos de uma vez — aqui o tipo do lado direito ainda
-		// nao e conhecido quando o deref do esquerdo teria de ser emitido.
-		// Todos os demais operadores seguem dereferenciando neste ponto.
+		// Em `==`/`!=` um operando ref NUNCA e dereferenciado
+		// implicitamente (spec §2.3, excecao 1): dois refs chegam inteiros
+		// ate OP_EQUAL para comparar IDENTIDADE DE SLOT (§2.2.7), ref vs
+		// null pergunta sobre o PROPRIO ref, e o caso misto estatico
+		// ref vs valor e rejeitado logo abaixo (rejectMixedRefComparison)
+		// com hint para o deref explicito. Todos os demais operadores
+		// seguem dereferenciando neste ponto.
 		identityComparison := n.Operator == "==" || n.Operator == "!="
 
 		_, leftType, err := c.Compile(n.Left)
@@ -1074,6 +1073,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(byte(chunk.OP_DEREF))
 			if ref, ok := rightType.(*ast.RefType); ok {
 				rightType = ref.ElementType
+			}
+		}
+
+		// Igualdade estrita de ref: no caso MISTO (um lado estaticamente
+		// `ref T`, o outro um valor conhecido nao-ref) `==`/`!=` nao le o
+		// valor implicitamente — o deref e por conta do programador, como
+		// no `=`. null (pergunta sobre o proprio ref), `any` e tipos
+		// desconhecidos (fronteira dinamica, que pode carregar um ref em
+		// runtime) passam; dois refs comparam identidade em runtime.
+		if identityComparison {
+			if err := c.rejectMixedRefComparison(n, leftType, rightType); err != nil {
+				return nil, nil, err
 			}
 		}
 
@@ -2716,6 +2727,35 @@ func (c *Compiler) derefReadHint(expected, actual ast.NoxyType, rhs ast.Expressi
 		return fmt.Sprintf("\n  hint: use '*%s' to read the referenced value", ident.Value)
 	}
 	return "\n  hint: use '*' to read the referenced value"
+}
+
+// rejectMixedRefComparison aplica a regra "em `==`/`!=` um ref nunca e
+// dereferenciado implicitamente" ao caso misto estatico: exatamente um dos
+// lados e `ref T` e o outro e um valor de tipo conhecido. Ref vs null
+// pergunta sobre o proprio ref, e `any`/tipo desconhecido e fronteira
+// dinamica (pode carregar um ref em runtime, comparacao de identidade
+// legitima) — ambos passam. O erro aponta o deref explicito.
+func (c *Compiler) rejectMixedRefComparison(n *ast.InfixExpression, leftType, rightType ast.NoxyType) error {
+	leftRef := isReferenceType(leftType)
+	rightRef := isReferenceType(rightType)
+	if leftRef == rightRef {
+		return nil
+	}
+	refType, other, refExpr := leftType, rightType, n.Left
+	if rightRef {
+		refType, other, refExpr = rightType, leftType, n.Right
+	}
+	if other == nil || isNullType(other) || other.String() == "any" {
+		return nil
+	}
+	hint := "\n  hint: use '*' to compare the referenced value"
+	if ident, ok := refExpr.(*ast.Identifier); ok {
+		hint = fmt.Sprintf("\n  hint: use '*%s' to compare the referenced value", ident.Value)
+	}
+	return fmt.Errorf(
+		"[line %d] cannot compare %s with %s: a ref is never implicitly dereferenced in '%s'%s",
+		c.currentLine, noxyTypeName(refType), noxyTypeName(other), n.Operator, hint,
+	)
 }
 
 func isReferenceType(t ast.NoxyType) bool {

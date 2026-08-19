@@ -638,7 +638,7 @@ end
 let target: Vertex = Vertex(1)
 let ok: bool = json_loads("null", target)
 if ok then
-    if target == null then test_report(1) else test_report(998) end
+    if *target == null then test_report(1) else test_report(998) end
 else
     test_report(999)
 end`,
@@ -2561,7 +2561,7 @@ func TestContextualReferenceCallsCanFillNullIndexSlots(t *testing.T) {
 			name: "array index",
 			source: `
 func fill(target: ref int) -> void
-    if target == null then
+    if *target == null then
         *target = 42
     end
 end
@@ -2573,7 +2573,7 @@ test_report(stored[0])`,
 			name: "map index",
 			source: `
 func fill(target: ref int) -> void
-    if target == null then
+    if *target == null then
         *target = 42
     end
 end

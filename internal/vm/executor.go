@@ -1020,27 +1020,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_EQUAL:
 			b := vm.pop()
 			a := vm.pop()
-			// Auto-deref ASSIMETRICO. Comparar um `ref T` com algo que nao e
-			// ref (um `T`, um `null`) le o valor apontado, como qualquer
-			// outro uso de ref numa expressao (spec §2.3) — e o que mantem
-			// `no.proximo != null` e `contador == 10` funcionando.
-			// Dois refs, porem, NAO sao dereferenciados: valuesEqual compara
-			// identidade de slot (§2.2.7), a semantica de ponteiro. O
-			// compilador nao emite OP_DEREF para `==`/`!=` justamente para
-			// que os dois casos possam ser distinguidos aqui.
-			if a.Type == value.VAL_REF && b.Type != value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(a)
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				a = resolved
-			} else if b.Type == value.VAL_REF && a.Type != value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(b)
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				b = resolved
-			}
+			// Em `==`/`!=` um ref NUNCA e dereferenciado implicitamente
+			// (spec §2.3, excecao 1): dois refs comparam identidade de slot
+			// (§2.2.7), um ref nulo E o proprio VAL_NULL (entao `r == null`
+			// pergunta sobre o ref, nao sobre o valor apontado — o que
+			// mantem `no.proximo != null` funcionando e torna distinguivel
+			// o ref valido para um slot que contem null), e ref vs valor e
+			// simplesmente diferente. O caso misto estatico e rejeitado
+			// pelo compilador com hint para `*r`; aqui so chega via
+			// fronteira dinamica (`any`), onde a resposta honesta e false.
 			vm.push(value.NewBool(valuesEqual(a, b)))
 		case chunk.OP_EQUAL_INT:
 			b := vm.pop()

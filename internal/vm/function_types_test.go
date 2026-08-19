@@ -119,7 +119,7 @@ struct Node
     next: ref Node
 end
 func fill(node: ref Node) -> void
-    if node == null then
+    if *node == null then
         *node = Node(42, null)
     end
 end

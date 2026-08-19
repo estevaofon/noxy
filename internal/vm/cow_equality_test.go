@@ -152,18 +152,22 @@ main()
 	}
 }
 
-// TestRefEqualityAutoDerefsAgainstNonRef guarda o outro lado da regra: um ref
-// comparado com algo que NAO e ref continua lendo o valor apontado (spec
-// §2.3). Sem isso, `no.proximo != null` e `contador == 10` quebrariam.
-func TestRefEqualityAutoDerefsAgainstNonRef(t *testing.T) {
+// TestRefEqualityNeverImplicitlyDereferences guarda o outro lado da regra
+// (v0.7.1): em `==`/`!=` um ref NUNCA e dereferenciado implicitamente. O
+// caso misto estatico ref vs valor e erro de compilacao (coberto em
+// internal/compiler/ref_equality_strict_test.go); a comparacao de valor se
+// escreve com deref explicito, e ref vs null pergunta sobre o PROPRIO ref
+// — o que mantem `no.proximo != null` funcionando por nulidade do ref, nao
+// por leitura do valor.
+func TestRefEqualityNeverImplicitlyDereferences(t *testing.T) {
 	cases := []struct {
 		name string
 		expr string
 		want bool
 	}{
-		{"ref contra valor igual", "ra == 1", true},
-		{"ref contra valor diferente", "ra == 2", false},
-		{"valor a esquerda", "1 == ra", true},
+		{"deref explicito contra valor igual", "*ra == 1", true},
+		{"deref explicito contra valor diferente", "*ra == 2", false},
+		{"deref explicito a direita", "1 == *ra", true},
 		{"ref valido nao é null", "ra == null", false},
 		{"ref nulo é null", "nulo == null", true},
 	}
