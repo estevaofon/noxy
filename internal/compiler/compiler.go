@@ -66,6 +66,35 @@ type Compiler struct {
 	scopedStructs       []scopedStructBinding
 	programBindings     map[string]ast.NoxyType
 	moduleDiscovery     *moduleDiscoveryState
+	generics            *GenericRegistry // lazy-init: use registryOrInit()
+	moduleName          string           // default "main"; setter usado nas tasks de modulo
+	instances           *instanceQueue   // lazy-init: use instancesOrInit()
+	// pass1 marca o compilador descartavel da primeira passada dos genericos
+	// (§5): interceptacao de call site generico so acontece com ele ligado, e
+	// ele tambem e o guard de recursao do two-pass (um Compile(*ast.Program)
+	// em pass 1 nao reentra na pass 1).
+	pass1 bool
+	// genericReturnHint carrega a anotacao do `let` envolvente para o proximo
+	// call site generico (target-typing do §7). Armado em setGenericReturnHint,
+	// consumido e limpo em compileGenericCallSite.
+	// O mesmo campo serve ao construtor de struct generico (`let c: Caixa<int> =
+	// Caixa([])`), consumido e limpo em compileGenericConstructorSite.
+	genericReturnHint ast.NoxyType
+	// arrayElementHint carrega o tipo de elemento da anotacao do `let`
+	// envolvente para o proximo array literal (target-typing do §3, posicao 3):
+	// `let fs: (func(int) -> int)[] = [dobro, identity]` precisa que cada
+	// elemento identificador nu (`identity`) saiba o alvo `func(int) -> int`
+	// antes de ser compilado. Armado em setArrayElementHint, consumido e limpo
+	// no proprio case de ArrayLiteral.
+	arrayElementHint ast.NoxyType
+	// namespaceImports mapeia o nome local de um `use m` (forma de namespace,
+	// sem select) para o modulo que ele nomeia — §8: "template genérico não é
+	// acessível via namespace". E uma COPIA por compilador (como globals/
+	// structs, nao um ponteiro compartilhado como generics/instances):
+	// um `use` dentro de um corpo de funcao (permitido — ver
+	// TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule) so pode
+	// afetar o escopo daquele corpo, nunca vazar para o compilador pai.
+	namespaceImports map[string]string
 }
 
 type callEmission struct {
@@ -107,6 +136,7 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 		currentLine:  1,
 		FileName:     fileName,
 		moduleRoot:   moduleRoot,
+		moduleName:   "main",
 	}
 	c.currentChunk.FileName = fileName
 	return c
@@ -121,20 +151,29 @@ func NewChild(parent *Compiler) *Compiler {
 	for name, definition := range parent.structs {
 		childStructs[name] = definition
 	}
+	childNamespaceImports := make(map[string]string, len(parent.namespaceImports))
+	for name, module := range parent.namespaceImports {
+		childNamespaceImports[name] = module
+	}
 	c := &Compiler{
-		enclosing:       parent,
-		currentChunk:    chunk.New(),
-		locals:          []Local{},
-		globals:         childGlobals,
-		structs:         childStructs,
-		upvalues:        []Upvalue{},
-		scopeDepth:      0,
-		loops:           []*Loop{},
-		currentLine:     parent.currentLine,
-		FileName:        parent.FileName,
-		moduleRoot:      parent.moduleRoot,
-		programBindings: parent.programBindings,
-		moduleDiscovery: parent.moduleDiscovery,
+		enclosing:        parent,
+		currentChunk:     chunk.New(),
+		locals:           []Local{},
+		globals:          childGlobals,
+		structs:          childStructs,
+		upvalues:         []Upvalue{},
+		scopeDepth:       0,
+		loops:            []*Loop{},
+		currentLine:      parent.currentLine,
+		FileName:         parent.FileName,
+		moduleRoot:       parent.moduleRoot,
+		programBindings:  parent.programBindings,
+		moduleDiscovery:  parent.discoveryState(),
+		generics:         parent.generics,
+		moduleName:       parent.moduleName,
+		instances:        parent.instances,
+		pass1:            parent.pass1,
+		namespaceImports: childNamespaceImports,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -147,11 +186,34 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
+		// Two-pass dos genericos (§5). Fica AQUI, na entrada de *ast.Program,
+		// para que todo caminho que compila um Program — programa principal,
+		// validator de modulo, runtime do `use`, REPL — ganhe o tratamento
+		// sem duplicacao. Programa sem genericos nao paga nada alem da
+		// varredura das declaracoes do topo.
+		if err := c.predeclareGenericTemplates(n.Statements); err != nil {
+			return nil, nil, err
+		}
+		// §8/R8: templates IMPORTADOS entram no registry aqui tambem, cedo —
+		// ver o comentario de predeclareImportedTemplates para o porque
+		// (hasGenerics(), logo abaixo, precisa ja enxergar um template que so
+		// veio de `use m select f`, nao de uma declaracao local).
+		if err := c.predeclareImportedTemplates(n.Statements); err != nil {
+			return nil, nil, err
+		}
+		if !c.pass1 && c.hasGenerics() {
+			if err := c.runGenericsPass1(n); err != nil {
+				return nil, nil, err
+			}
+		}
+
 		sequentialBindings := make(map[string]ast.NoxyType, len(c.globals))
 		for name, bindingType := range c.globals {
 			sequentialBindings[name] = bindingType
 		}
-		c.predeclareStructs(n.Statements)
+		if err := c.predeclareStructs(n.Statements); err != nil {
+			return nil, nil, err
+		}
 		if err := c.predeclareGlobalBindings(n.Statements); err != nil {
 			return nil, nil, err
 		}
@@ -177,10 +239,40 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.LetStmt:
 		c.setLine(n.Token.Line)
+		// §4, terceira familia de hooks: a anotacao pode nomear instancias de
+		// struct generico (`Caixa<int>`, `Caixa<int>[]`, `ref Node<int>`). A
+		// resolucao vem ANTES de tudo — antes do hint, do emitDefaultInit e da
+		// checagem de tipos — e reescreve n.Type in-place para o nome
+		// qualificado, que e o que o pass 2 compila.
+		resolvedAnnotation, err := c.resolveAnnotation(n.Type, n.Token.Line)
+		if err != nil {
+			return nil, nil, err
+		}
+		n.Type = resolvedAnnotation
+
 		var valType ast.NoxyType
 		// Compile initializer
 		if n.Value != nil {
+			// §3 target-typing, posicao 1: o valor do `let` pode ser um
+			// identificador NU nomeando um template de funcao (`let f:
+			// func(int) -> int = identity`) — a anotacao e o alvo concreto que
+			// instancia a genérica antes de qualquer tentativa de compilar o
+			// identificador normalmente (o que hoje leria um global nunca
+			// definido).
+			if err := c.rewriteIfGenericValue(n.Value, n.Type); err != nil {
+				return nil, nil, err
+			}
+			// Target-typing do §7: a anotacao do `let` e o hint para o T que
+			// so aparece no retorno do template. Armado imediatamente antes
+			// (e limpo imediatamente depois) da compilacao do valor.
+			c.setGenericReturnHint(n.Type, n.Value)
+			// §3, posicao 3: elemento de array literal — o tipo de elemento
+			// da anotacao e o alvo para cada identificador nu dentro de `[
+			// ... ]`. Mesma disciplina de armar/limpar do hint acima.
+			c.setArrayElementHint(n.Type, n.Value)
 			_, t, err := c.Compile(n.Value)
+			c.genericReturnHint = nil
+			c.arrayElementHint = nil
 			if err != nil {
 				return nil, nil, err
 			}
@@ -580,13 +672,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				leftType = nil
 			}
 
-			// 2. Compile Value
-			_, valType, err := c.Compile(n.Value)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			// RESOLVE FIELD TYPE:
+			// RESOLVE FIELD TYPE (antes de compilar o valor: §3 target-typing,
+			// posicao 4, precisa do tipo declarado do campo como alvo para
+			// decidir se n.Value e um template de funcao nu):
 			var fieldType ast.NoxyType
 			if prim, ok := leftType.(*ast.PrimitiveType); ok {
 				if structDef, exists := c.structs[prim.Name]; exists {
@@ -597,6 +685,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						}
 					}
 				}
+			}
+
+			// §3 target-typing, posicao 4: `campo.transform = identity` — o
+			// tipo declarado do campo e o alvo concreto.
+			if err := c.rewriteIfGenericValue(n.Value, fieldType); err != nil {
+				return nil, nil, err
+			}
+
+			// 2. Compile Value
+			_, valType, err := c.Compile(n.Value)
+			if err != nil {
+				return nil, nil, err
 			}
 
 			// TYPE-BASED ASSIGNMENT LOGIC:
@@ -641,7 +741,22 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.StructStatement:
+		if len(n.TypeParams) > 0 {
+			if c.scopeDepth > 0 || c.enclosing != nil {
+				return nil, nil, fmt.Errorf("[line %d] declaração genérica só é permitida no top level", n.Token.Line)
+			}
+			if err := c.registerStructTemplate(n.Name, &StructTemplate{Decl: n, Module: c.moduleName}, n.Token.Line); err != nil {
+				return nil, nil, err
+			}
+			return c.currentChunk, nil, nil
+		}
 		c.setLine(n.Token.Line)
+		// §4, terceira familia de hooks: um campo pode anotar um struct generico
+		// (`c: Caixa<int>`), inclusive num struct comum. Resolve in-place nos dois
+		// espelhos antes de derivar o valor do struct e o tipo do construtor.
+		if err := c.resolveStructFieldAnnotations(n, n.Token.Line); err != nil {
+			return nil, nil, err
+		}
 		if c.scopeDepth > 0 {
 			prior, existed := c.structs[n.Name]
 			c.scopedStructs = append(c.scopedStructs, scopedStructBinding{
@@ -725,8 +840,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.ArrayLiteral:
+		// §3 target-typing, posicao 3: consome o hint armado pelo `let`
+		// envolvente (setArrayElementHint) ANTES de compilar qualquer
+		// elemento — leitura unica, para nao vazar num array literal aninhado
+		// dentro de um elemento deste.
+		elementHint := c.arrayElementHint
+		c.arrayElementHint = nil
 		var elemType ast.NoxyType
 		for i, el := range n.Elements {
+			if elementHint != nil {
+				if err := c.rewriteIfGenericValue(el, elementHint); err != nil {
+					return nil, nil, err
+				}
+			}
 			_, t, err := c.Compile(el)
 			if err != nil {
 				return nil, nil, err
@@ -852,6 +978,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, upvalueType, nil
 		} else {
 			// Global
+			// §9/§4: fallback para as posicoes de valor que nenhum hook de
+			// genericos intercepta (map literal, expression statement solto)
+			// — ver o comentario de rejectBareGenericTemplateIdentifier em
+			// generics_target.go. Sombreamento por local/upvalue ja foi
+			// descartado pelos dois ramos acima, entao a mesma regra vale
+			// aqui sem checagem extra.
+			if err := c.rejectBareGenericTemplateIdentifier(n); err != nil {
+				return nil, nil, err
+			}
 			nameConstant := c.makeConstant(value.NewString(n.Value))
 			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
 
@@ -929,6 +1064,21 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(byte(chunk.OP_DEREF))
 			if ref, ok := rightType.(*ast.RefType); ok {
 				rightType = ref.ElementType
+			}
+		}
+
+		// Structs nunca definem operador aritmetico (OP_ADD e companhia, em
+		// runtime, so aceitam numeros — e OP_ADD tambem strings/bytes — nunca
+		// ObjStruct: cai no "operands must be numbers..." generico do
+		// executor). Sem esta checagem, 'a + b' com a,b struct compilava
+		// silenciosamente e so estourava no runtime; dentro do corpo de uma
+		// instancia generica monomorfizada isso escapava por completo da
+		// cadeia de instanciacao do §9 (instantiationChainError so envolve
+		// ERROS DE COMPILACAO). Pegar aqui cedo produz a mensagem exata do
+		// catalogo, com a linha do proprio operador.
+		if arithmeticOperators[n.Operator] {
+			if structName, isStruct := c.structOperandName(leftType, rightType); isStruct {
+				return nil, nil, fmt.Errorf("[line %d] operador '%s' não definido para %s", n.Token.Line, n.Operator, structName)
 			}
 		}
 
@@ -1321,7 +1471,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// nascimento, a captura por closure produz caixa possuidora e o rebind
 		// usa o store contado — Owns volta a coincidir com "tipo nao-ref".
 		c.emitByte(byte(chunk.OP_OWN_LOCAL))
-		c.addOwnedLocal(n.Identifier, nil) // User variable (consumes Item from stack)
+		// Ruling R5: a variavel do laco recebe o tipo do elemento da colecao
+		// quando ele e estaticamente conhecido (array -> elemento, map -> chave,
+		// que e o que o laco produz depois da reescrita para `keys(m)`). Colecao
+		// de tipo desconhecido continua produzindo variavel sem tipo — nil aqui
+		// significa "nao sei", como antes. Sem isso nenhuma chamada generica
+		// ancorada na variavel do laco consegue inferir T.
+		c.addOwnedLocal(n.Identifier, forEachElementType(colType)) // User variable (consumes Item from stack)
 
 		// 9. Compile Body
 		_, _, err = c.Compile(n.Body)
@@ -1554,6 +1710,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.UseStmt:
+		// §9/I1: `use` aninhado (corpo de funcao/lambda) que traga um template
+		// generico e recusado com mensagem acionavel ANTES de qualquer emissao
+		// — ver rejectNestedTemplateImport. Sem isto o template entrava no
+		// registry no meio da compilacao e a chamada batia no guard defensivo
+		// do pass 2, que acusa "bug do compilador" com a linha errada.
+		if err := c.rejectNestedTemplateImport(n); err != nil {
+			return nil, nil, err
+		}
+
 		// 1. Emit Module Name
 		nameConst := c.makeConstant(value.NewString(n.Module))
 		// 2. Emit Import (Loads module and pushes it to stack)
@@ -1566,16 +1731,39 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !loadable && c.enclosing == nil {
 				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'", n.Token.Line, n.Module)
 			}
+			// §8/R8: templates genericos exportados entram no registry
+			// (Module = modulo definidor) em vez de c.globals — importBindingFrom
+			// decide por declaracao. Templates nunca tem valor em runtime (a
+			// declaracao original nao emite bytecode nenhum), entao ficam
+			// ausentes do ExportMap que OP_IMPORT_FROM_ALL le abaixo — sem
+			// tratamento especial aqui: a instrucao so importa as chaves que
+			// EXISTEM no map do modulo, e simplesmente nao ha chave "processa".
+			bindings, _ := c.moduleTopLevelBindings(n.Module)
 			for name := range exports {
-				c.globals[name] = nil
+				if err := c.importBindingFrom(n.Module, bindings, name); err != nil {
+					return nil, nil, err
+				}
 			}
 			c.importModuleStructs(n.Module, nil)
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
 		} else if len(n.Selectors) > 0 {
 			// use pkg select a, b
 			c.importModuleStructs(n.Module, n.Selectors)
+			bindings, _ := c.moduleTopLevelBindings(n.Module)
 			for _, sel := range n.Selectors {
-				c.globals[sel] = nil
+				if err := c.importBindingFrom(n.Module, bindings, sel); err != nil {
+					return nil, nil, err
+				}
+				if isModuleTemplateDeclaration(bindings, sel) {
+					// §8: template generico nao existe como valor em runtime
+					// (sem bytecode proprio) — buscar "sel" como propriedade do
+					// objeto do modulo lancaria "undefined property" (o
+					// ExportMap nunca tem essa chave). O registro acima
+					// (importBindingFrom, no GenericRegistry) e tudo que este
+					// nome precisa: a instancia concreta nasce como declaracao
+					// sintetica comum no two-pass do IMPORTADOR.
+					continue
+				}
 				// DUP the module
 				c.emitByte(byte(chunk.OP_DUP))
 
@@ -1605,7 +1793,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			nameConst := c.makeConstant(value.NewString(bindName))
-			c.globals[bindName] = nil
+			c.importNamespace(n.Module, bindName)
 			c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConst)
 			c.emitByte(byte(chunk.OP_POP)) // Pop module
 		}
@@ -1625,6 +1813,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(byte(chunk.OP_NULL))
 			c.emitByte(byte(chunk.OP_RETURN))
 			return c.currentChunk, nil, nil
+		}
+
+		// §3 target-typing, posicao 2: `return identity` dentro de uma funcao
+		// cujo retorno declarado e um tipo de funcao concreto instancia a
+		// genérica antes da compilacao normal do valor de retorno.
+		if err := c.rewriteIfGenericValue(n.ReturnValue, expected); err != nil {
+			return nil, nil, err
 		}
 
 		_, actual, err := c.Compile(n.ReturnValue)
@@ -1661,8 +1856,24 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, nil, nil
 
 	case *ast.FunctionStatement:
+		if len(n.TypeParams) > 0 {
+			if c.scopeDepth > 0 || c.enclosing != nil {
+				return nil, nil, fmt.Errorf("[line %d] declaração genérica só é permitida no top level", n.Token.Line)
+			}
+			if err := c.registerFuncTemplate(n.Name, &FuncTemplate{Decl: n, Module: c.moduleName}, n.Token.Line); err != nil {
+				return nil, nil, err
+			}
+			return c.currentChunk, nil, nil
+		}
 		c.setLine(n.Token.Line)
 
+		// §4, terceira familia de hooks: parametro/retorno de funcao NAO-generica
+		// podem anotar um struct generico (`func conta(cs: Caixa<int>[]) -> int`).
+		// Resolve antes de registrar o tipo do global — o tipo publicado tem de ser
+		// o mesmo que o pass 2 vai derivar do AST reescrito.
+		if err := c.resolveSignatureAnnotations(n.Parameters, &n.ReturnType, n.Token.Line); err != nil {
+			return nil, nil, err
+		}
 		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
@@ -1686,6 +1897,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		fnName := n.Name
 		if fnName == "" {
 			fnName = "anonymous"
+		}
+		// Mesmo hook do FunctionStatement: a assinatura de um literal tambem pode
+		// anotar instancias de struct generico.
+		if err := c.resolveSignatureAnnotations(n.Parameters, &n.ReturnType, n.Token.Line); err != nil {
+			return nil, nil, err
 		}
 
 		fnObj, fnCompiler, err := c.compileFunction(fnName, n.Parameters, n.Body, n.ReturnType) // Literal return type? n.ReturnType? FunctionLiteral needs return type field if typed. Assuming inferred/any if nil.
@@ -1846,6 +2062,65 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 	}
 
+	// §8/§9: `use m` (namespace, sem select) seguido de `m.processa(...)`.
+	// O template nunca existe como valor em runtime (declaracao generica nao
+	// emite bytecode) e o member access nao carrega tipo estatico nenhum —
+	// sem esta interceptacao o caminho normal so falharia mais tarde, em
+	// runtime, com "undefined property" generico. Checa ANTES da
+	// interceptacao de call site generico abaixo porque o callee aqui e um
+	// *ast.MemberAccessExpression, nunca um *ast.Identifier — os dois hooks
+	// nao competem pelo mesmo formato de callee.
+	if memberCall, isMemberCall := call.Function.(*ast.MemberAccessExpression); isMemberCall {
+		if leftIdent, isIdent := memberCall.Left.(*ast.Identifier); isIdent {
+			if slot, _ := c.resolveLocal(leftIdent.Value); slot == -1 {
+				if upvalue, _ := c.resolveUpvalue(leftIdent.Value); upvalue == -1 {
+					if module, isNamespace := c.namespaceImports[leftIdent.Value]; isNamespace {
+						if c.moduleExportsGenericTemplateName(module, memberCall.Member) {
+							return nil, nil, fmt.Errorf(
+								"[line %d] template genérico '%s' não é acessível via namespace — use select",
+								c.currentLine, memberCall.Member,
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Interceptacao de call site generico (§4): tem de vir ANTES do caminho
+	// normal, que compilaria o callee e leria o tipo CRU do template (com
+	// TypeParamType) do registro de globals. Depois da interceptacao o
+	// identificador ja aponta para a instancia monomorfizada e o caminho
+	// normal resolve um global comum.
+	//
+	// No pass 2 nada dispara: os nomes reescritos nao sao chaves do registro.
+	// Um local/parametro/UPVALUE que sombreia o nome do template tambem nao
+	// dispara — quem vence e o binding mais interno, como no caminho normal.
+	// O guard e isShadowedByLocal (locais E upvalues), o mesmo que as outras
+	// familias de hook usam (generics_target.go): checar so resolveLocal
+	// deixava passar o nome CAPTURADO por uma closure (`let id = dobro`
+	// seguido de `func() ... id(v) ... end`), e a chamada era interceptada
+	// como generica em vez de chamar o valor capturado — codigo errado em
+	// silencio, sem erro nenhum.
+	if callee, ok := call.Function.(*ast.Identifier); ok {
+		registry := c.registryOrInit()
+		if template, isTemplate := registry.Funcs[callee.Value]; isTemplate {
+			if !c.isShadowedByLocal(callee.Value) {
+				if err := c.compileGenericCallSite(call, callee, template); err != nil {
+					return nil, nil, err
+				}
+			}
+		} else if structTemplate, isStructTemplate := registry.Structs[callee.Value]; isStructTemplate {
+			// Construtor de struct generico: `Caixa(41)`. Mesmo hook, mesma regra
+			// de sombreamento — um local ou upvalue com o nome do template vence.
+			if !c.isShadowedByLocal(callee.Value) {
+				if err := c.compileGenericConstructorSite(call, callee, structTemplate); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
+	}
+
 	// Normal call.
 	_, fnType, err := c.Compile(call.Function)
 	if err != nil {
@@ -1890,6 +2165,24 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				}
 				continue
 			}
+		}
+
+		// §3 target-typing, posicao 5 (parte nao-generica: callee comum
+		// recebendo um template de funcao nu, `func aplicaSimples(fn:
+		// func(int)->int)` chamado com `aplicaSimples(identity)`): quando o
+		// tipo do parametro e conhecido e concreto, e o alvo; sem alvo
+		// conhecido (isExact falso), rewriteIfGenericValue erra pedindo
+		// anotacao — exatamente a regra do §9 para identificador de template
+		// em posicao de valor sem tipo concreto. Callees GENERICOS (`aplica`)
+		// ja tiveram seus argumentos-template resolvidos e reescritos em
+		// compileGenericCallSite antes de chegar aqui; o registro nao tem mais
+		// a chave crua, entao este hook e um no-op para eles.
+		var argTarget ast.NoxyType
+		if isExact {
+			argTarget = funcType.Params[i]
+		}
+		if err := c.rewriteIfGenericValue(arg, argTarget); err != nil {
+			return nil, nil, err
 		}
 
 		_, argType, err := c.Compile(arg)

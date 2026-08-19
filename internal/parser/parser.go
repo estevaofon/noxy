@@ -18,6 +18,16 @@ type Parser struct {
 	infixParseFns  map[token.TokenType]func(ast.Expression) ast.Expression
 
 	errors []string
+
+	// activeTypeParams contem os nomes de parametros de tipo (T, U, ...) em
+	// escopo durante o parse de uma declaracao generica (func ou struct).
+	// nil quando fora de uma declaracao generica.
+	activeTypeParams map[string]bool
+
+	// pendingTokens e' uma fila de tokens sinteticos gerados por
+	// splitCompositeGT (ex.: SHIFT_RIGHT dividido em dois GT). nextToken
+	// drena esta fila antes de pedir um novo token ao lexer.
+	pendingTokens []token.Token
 }
 
 func New(l *lexer.Lexer) *Parser {
@@ -93,6 +103,11 @@ func (p *Parser) peekError(t token.TokenType) {
 
 func (p *Parser) nextToken() {
 	p.curToken = p.peekToken
+	if len(p.pendingTokens) > 0 {
+		p.peekToken = p.pendingTokens[0]
+		p.pendingTokens = p.pendingTokens[1:]
+		return
+	}
 	p.peekToken = p.l.NextToken()
 }
 
@@ -693,6 +708,9 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 	case token.BYTES: // This is Literal 'b"..."'.
 		t = &ast.PrimitiveType{Name: "bytes"}
 	case token.IDENTIFIER:
+		if p.activeTypeParams[p.curToken.Literal] {
+			return &ast.TypeParamType{Name: p.curToken.Literal}
+		}
 		name := p.curToken.Literal
 		// Support dot notation for types (e.g. io.File)
 		for p.peekTokenIs(token.DOT) {
@@ -701,6 +719,29 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 				return nil
 			}
 			name += "." + p.curToken.Literal
+		}
+		// Tipo generico em posicao de anotacao: Nome<arg1, arg2>
+		if p.peekTokenIs(token.LT) {
+			p.nextToken() // eat nome; curToken = <
+			args := []ast.NoxyType{}
+			for {
+				p.nextToken() // avanca para o inicio do proximo tipo
+				arg := p.parseType()
+				if arg == nil {
+					return nil
+				}
+				args = append(args, arg)
+				p.splitCompositeGT() // divide >> ou >= pendentes ANTES de checar peek
+				if p.peekTokenIs(token.COMMA) {
+					p.nextToken()
+					continue
+				}
+				break
+			}
+			if !p.expectPeek(token.GT) {
+				return nil
+			}
+			return &ast.GenericType{Name: name, Args: args}
 		}
 		t = &ast.PrimitiveType{Name: name}
 	case token.MAP:
@@ -734,6 +775,24 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return nil
 	}
 	return t
+}
+
+// splitCompositeGT divide tokens compostos que contem '>' quando estamos
+// esperando fechar uma lista de argumentos de tipo (truque C#/Java):
+//
+//	>>  ->  > + >   (Stack<Stack<int>>)
+//	>=  ->  > + =   (let s: Stack<int>= v)
+func (p *Parser) splitCompositeGT() {
+	switch p.peekToken.Type {
+	case token.SHIFT_RIGHT:
+		gt := token.Token{Type: token.GT, Literal: ">", Line: p.peekToken.Line, Column: p.peekToken.Column}
+		p.pendingTokens = append([]token.Token{gt}, p.pendingTokens...)
+		p.peekToken = gt
+	case token.GTE:
+		assign := token.Token{Type: token.ASSIGN, Literal: "=", Line: p.peekToken.Line, Column: p.peekToken.Column + 1}
+		p.pendingTokens = append([]token.Token{assign}, p.pendingTokens...)
+		p.peekToken = token.Token{Type: token.GT, Literal: ">", Line: p.peekToken.Line, Column: p.peekToken.Column}
+	}
 }
 
 func (p *Parser) parseFunctionType() ast.NoxyType {
@@ -1089,6 +1148,28 @@ func (p *Parser) parseCaseBody() *ast.BlockStatement {
 	return block
 }
 
+// parseTypeParameters consome <T, U> apos o nome de uma declaracao generica.
+// curToken esta no nome; ao retornar, curToken esta no GT final.
+func (p *Parser) parseTypeParameters() []string {
+	p.nextToken() // eat <
+	names := []string{}
+	for {
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
+		names = append(names, p.curToken.Literal)
+		if p.peekTokenIs(token.COMMA) {
+			p.nextToken()
+			continue
+		}
+		break
+	}
+	if !p.expectPeek(token.GT) {
+		return nil
+	}
+	return names
+}
+
 func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 	stmt := &ast.FunctionStatement{Token: p.curToken}
 
@@ -1096,6 +1177,19 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 		return nil
 	}
 	stmt.Name = p.curToken.Literal
+
+	// Parametros de tipo opcionais: func nome<T, U>(...)
+	if p.peekTokenIs(token.LT) {
+		stmt.TypeParams = p.parseTypeParameters()
+		if stmt.TypeParams == nil {
+			return nil
+		}
+		p.activeTypeParams = map[string]bool{}
+		for _, name := range stmt.TypeParams {
+			p.activeTypeParams[name] = true
+		}
+		defer func() { p.activeTypeParams = nil }()
+	}
 
 	if !p.expectPeek(token.LPAREN) {
 		return nil
@@ -1440,9 +1534,22 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 	}
 	stmt.Name = p.curToken.Literal
 
+	// Parametros de tipo opcionais: struct Nome<T, U>
+	if p.peekTokenIs(token.LT) {
+		stmt.TypeParams = p.parseTypeParameters()
+		if stmt.TypeParams == nil {
+			return nil
+		}
+		p.activeTypeParams = map[string]bool{}
+		for _, name := range stmt.TypeParams {
+			p.activeTypeParams[name] = true
+		}
+		defer func() { p.activeTypeParams = nil }()
+	}
+
 	stmt.FieldsList = []*ast.StructField{}
 
-	p.nextToken() // move past Name.
+	p.nextToken() // move past Name (or GT, when generic).
 
 	for !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
 		if p.curTokenIs(token.NEWLINE) || p.curTokenIs(token.COMMA) {

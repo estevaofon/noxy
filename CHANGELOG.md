@@ -1,5 +1,103 @@
 # Changelog
 
+## [0.7.0] - 2026-08-18
+
+### Added
+
+- **Genéricos por monomorfização**: funções e structs no top level podem
+  declarar parâmetros de tipo entre `<>` (`func first<T>(arr: T[]) -> T`,
+  `struct Stack<T>`), usáveis em qualquer posição de tipo (parâmetros,
+  retorno, campos, corpo). Toda instanciação é por **inferência a partir do
+  uso** — não existe sintaxe de instanciação explícita em posição de
+  expressão (`first<int>(x)` não existe), o que mantém `<`/`>` sem
+  ambiguidade com os operadores de comparação. Cada instanciação
+  (`Stack<int>`, `Stack<string>`) é um tipo/função nominal **distinto**,
+  monomorfizado em tempo de compilação: o bytecode gerado é idêntico ao de
+  código especializado escrito à mão (provado por teste de igualdade de
+  opcodes), sem overhead de runtime e **nenhuma mudança na VM**. Funções
+  genéricas também circulam como valores de primeira classe via
+  target-typing — anotação de `let`, retorno declarado, elemento de array,
+  campo de struct, argumento de chamada, com unificação bidirecional quando
+  o argumento também é genérico (`aplica(nums, identity)`). Cross-módulo,
+  templates são importáveis via `select`/`select *` (dependências do corpo
+  do template precisam estar visíveis no importador); acessar um template
+  pelo namespace (`use m` seguido de `m.f(...)`) é erro de compilação
+  dedicado. V1 não tem constraints (`T` é irrestrito; o corpo é checado por
+  instanciação), é restrita ao top level (sem genérico aninhado em função) e
+  não permite `T` bindar um tipo `ref` (idioma: declarar o parâmetro como
+  `ref T`). Documentado em `docs/NOXY_LANGUAGE_SPEC.md` §6; spec de design em
+  `docs/superpowers/specs/2026-08-18-generics-design.md`.
+
+  - **Limitação documentada (v1)**: `print`/`%T` de uma instância de struct
+    genérico mostra o nome **qualificado** (`<main::Caixa<int> instance>`),
+    não o nome de exibição (`<Caixa instance>`) — vazamento cosmético
+    aceito, `value.go` usa `Struct.Name` sem distinguir display name de
+    identidade interna. Comportamento de v1 documentado, não um bug.
+
+- Módulo `collections` (`noxy_examples/collections.nx`), escrito em Noxy
+  puro usando os genéricos novos: `map_arr<A, B>`, `filter<T>`, `reduce<T,
+  R>`, `contains_val<T>` — a mesma classe de abstração que antes só existia
+  como builtin (`append`/`length`/`contains`), agora escrevível em código de
+  usuário. (`map` é palavra reservada de tipo — `map[K, V]` — por isso a
+  função de transformação chama-se `map_arr`, não `map`.)
+
+### Changed (BREAKING) — imports tipados
+
+Nomes importados (`use m select ...`/`select *`) passam a carregar o **tipo
+declarado** dos exports em vez de entrar apagados (`nil`) no compilador —
+pré-requisito para a inferência de tipo genérico funcionar sobre dados e
+funções vindos de outro módulo (`primeiro(numeros_importado)`).
+
+- **Código cross-módulo dinâmico que hoje compila com tipo apagado pode
+  passar a falhar em compile-time.** Um argumento cujo tipo estático era
+  `nil` (permissivo por padrão) agora carrega um tipo real — inclusive `any`
+  explícito, que a checagem **estrita** de argumento de chamada (assinatura
+  exata) rejeita onde antes não havia checagem nenhuma. Migração: anotar o
+  valor num `let` intermediário com tipo concreto antes de passá-lo a um
+  parâmetro de assinatura exata (a checagem de `let` é permissiva e emite
+  guarda de tipo em runtime), ou corrigir o erro de tipo latente que a
+  checagem revelou.
+- Um exemplo do corpus foi corrigido por essa via:
+  `noxy_examples/mergesort_with_slice.nx` passava o retorno de
+  `array_utils.slice` (declarado `any`, curry dinâmico) direto como
+  argumento de `merge_sort(arr: int[])`; o fix introduz `let left_slice:
+  int[] = slice(...)` antes da chamada, em vez de mudar `array_utils.nx`
+  (stdlib empacotada com o compilador, fora do escopo de um fix de corpus).
+- Critério de aceite: o corpus `.nx` existente inteiro (167 arquivos)
+  continua compilando e passando após o fix acima —
+  `noxy_examples/run_all_tests_concurrent.nx` reporta 167/167.
+
+### Changed
+
+- A variável de `for ... in` passa a receber o **tipo estático do elemento**
+  da coleção quando ele é conhecido (array → tipo do elemento; map → tipo da
+  chave, que é o que o laço produz). Antes ela entrava sempre sem tipo.
+  Requisito dos genéricos — sem isso, `identity(v)` dentro de um for-each
+  chega à unificação sem âncora e `T` fica sem binding —, mas o efeito é
+  geral: **pode revelar erros de tipo latentes** em código que hoje compila,
+  mesma classe (e mesma migração) da mudança de imports tipados acima.
+  Coleção de tipo desconhecido continua produzindo variável sem tipo.
+
+### Fixed
+
+- **REPL preserva structs declarados entre linhas.** Cada linha recebia um
+  mapa de structs novo, então um `struct Point ... end` digitado numa linha
+  simplesmente não existia na linha seguinte. Bug **pré-existente** (não
+  introduzido pelos genéricos), corrigido junto porque a mesma linha de
+  código passou a persistir também o registry de templates genéricos da
+  sessão (`cmd/noxy/main.go`, spec §5).
+
+- Operadores aritméticos (`+`, `-`, `*`, `/`, `%`) sobre structs agora são
+  erro de **compilação**, não mais crash de runtime. Antes, `a + b` com
+  `a`/`b` struct compilava silenciosamente e só estourava em runtime
+  (`operands must be numbers, strings or bytes`, `internal/vm/executor.go`)
+  quando a linha executava — inclusive dentro do corpo de uma instância
+  genérica monomorfizada, onde o erro escaparia por completo da cadeia de
+  instanciação (que só envolve erros de compilação). Nenhum programa válido
+  existente depende desse comportamento — a VM sempre crashava nesses casos
+  — então nenhum programa quebra; a checagem nova (`internal/compiler`)
+  só torna o erro visível mais cedo, com a linha do próprio operador.
+
 ## [0.6.0] - 2026-08-18
 
 ### Added

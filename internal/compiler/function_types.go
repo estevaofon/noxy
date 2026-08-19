@@ -107,6 +107,35 @@ func callableName(expression ast.Expression) string {
 	return expression.String()
 }
 
+// arithmeticOperators sao os operadores infixos que a VM so executa sobre
+// numeros (e, no caso exclusivo de '+', tambem strings/bytes) — nunca sobre
+// struct. Usado pelo compilador para recusar 'a + b' com operando struct em
+// tempo de compilacao, em vez de deixar estourar no runtime (executor.go,
+// "operands must be numbers...").
+var arithmeticOperators = map[string]bool{
+	"+": true,
+	"-": true,
+	"*": true,
+	"/": true,
+	"%": true,
+}
+
+// structOperandName devolve o nome do primeiro operando (esquerda, depois
+// direita) cujo tipo estatico e um struct registrado em c.structs — "",
+// false quando nenhum dos dois e. Usado pelo InfixExpression para montar a
+// mensagem do catalogo §9 ("operador '+' não definido para Ponto") com o
+// nome do struct ofensor.
+func (c *Compiler) structOperandName(leftType, rightType ast.NoxyType) (string, bool) {
+	for _, t := range [...]ast.NoxyType{leftType, rightType} {
+		if prim, ok := t.(*ast.PrimitiveType); ok {
+			if _, exists := c.structs[prim.Name]; exists {
+				return prim.Name, true
+			}
+		}
+	}
+	return "", false
+}
+
 func unwrapRefType(t ast.NoxyType) ast.NoxyType {
 	if ref, ok := t.(*ast.RefType); ok {
 		return ref.ElementType
@@ -218,16 +247,53 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 	for _, statement := range statements {
 		switch declaration := statement.(type) {
 		case *ast.UseStmt:
-			c.predeclareImport(declaration)
+			if err := c.predeclareImport(declaration); err != nil {
+				return err
+			}
 		case *ast.FunctionStatement:
 			if _, duplicate := seen[declaration.Name]; duplicate {
 				return fmt.Errorf("[line %d] duplicate function '%s'", declaration.Token.Line, declaration.Name)
 			}
 			seen[declaration.Name] = struct{}{}
+			// Genericos (§5): um template NAO tem tipo concreto — seus params
+			// carregam TypeParamType. Registra-lo aqui o copiaria para
+			// c.programBindings, e applyProgramBindings o injetaria de volta em
+			// c.globals durante todo corpo de funcao compilado. A identidade do
+			// template vive no GenericRegistry; quem entra em globals sao as
+			// INSTANCIAS, que o pass 2 prepende como declaracoes comuns e
+			// passam por aqui normalmente.
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
+			// §4, terceira familia de hooks: a assinatura pode anotar um struct
+			// generico. O predeclare e o PRIMEIRO leitor dessas anotacoes (roda
+			// antes de qualquer statement compilar), entao a resolucao tem de
+			// acontecer aqui tambem — senao o tipo publicado carregaria
+			// `Caixa<int>` enquanto o resto do programa fala `main::Caixa<int>`,
+			// e a checagem de tipos de uma chamada adiantada divergiria.
+			if err := c.resolveSignatureAnnotations(declaration.Parameters, &declaration.ReturnType, declaration.Token.Line); err != nil {
+				return err
+			}
 			c.globals[declaration.Name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
 		case *ast.LetStmt:
+			resolved, err := c.resolveAnnotation(declaration.Type, declaration.Token.Line)
+			if err != nil {
+				return err
+			}
+			declaration.Type = resolved
 			c.globals[declaration.Name.Value] = declaration.Type
 		case *ast.StructStatement:
+			// Mesma regra do template de funcao: o construtor de um struct
+			// generico nao tem assinatura concreta antes da substituicao.
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
+			// Campos ja resolvidos por predeclareStructs (que roda antes); a
+			// chamada aqui e o fast path idempotente que mantem este ponto de
+			// leitura correto por si.
+			if err := c.resolveStructFieldAnnotations(declaration, declaration.Token.Line); err != nil {
+				return err
+			}
 			params := make([]ast.NoxyType, 0, len(declaration.FieldsList))
 			for _, field := range declaration.FieldsList {
 				params = append(params, field.Type)
@@ -245,13 +311,29 @@ func newStructFunctionType(name string, params []ast.NoxyType) *ast.FunctionType
 	}
 }
 
-func (c *Compiler) predeclareStructs(statements []ast.Statement) {
+func (c *Compiler) predeclareStructs(statements []ast.Statement) error {
 	for _, statement := range statements {
 		definition, ok := statement.(*ast.StructStatement)
 		if ok {
+			// Genericos (§5): a tabela de structs e consultada por resolucao de
+			// campo e por runtimeTypeInfo, que precisam de tipos concretos. Um
+			// template tem campos com TypeParamType — ele fica so no
+			// GenericRegistry; as instancias monomorfizadas e que sao
+			// StructStatement comuns e entram aqui.
+			if len(definition.TypeParams) > 0 {
+				continue
+			}
+			// §4, terceira familia de hooks: campo que anota um struct generico
+			// resolve aqui, no primeiro leitor da declaracao — a tabela de
+			// structs alimenta resolucao de campo e runtimeTypeInfo, que exigem
+			// tipos concretos e de identidade nominal final.
+			if err := c.resolveStructFieldAnnotations(definition, definition.Token.Line); err != nil {
+				return err
+			}
 			c.structs[definition.Name] = definition
 		}
 	}
+	return nil
 }
 
 func blockGuaranteesReturn(block *ast.BlockStatement) bool {

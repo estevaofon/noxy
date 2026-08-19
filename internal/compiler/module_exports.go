@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"maps"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
@@ -11,16 +12,68 @@ import (
 	"strings"
 )
 
+// moduleDiscoveryState e o estado compartilhado da descoberta de modulos
+// dentro de UMA arvore de compiladores:
+//
+//   - active e o guard de ciclo (um modulo em carga nao pode ser recarregado
+//     por dentro da propria carga);
+//   - loaded e a MEMOIZACAO de loadModuleDeclarations. Sem ela, cada `use`
+//     paga um parse + um Compile completo de validacao do modulo (e,
+//     recursivamente, dos modulos que ele importa) UMA VEZ POR CHAMADOR:
+//     predeclareImportedTemplates (discoverModuleExports +
+//     moduleTopLevelBindings), predeclareImport (idem) e o case *ast.UseStmt
+//     de compiler.go — tudo isso dobrado pelo two-pass dos genericos. Medido
+//     em `use http select *`: 1,4s -> 12,3s. Com o memo o custo volta a UMA
+//     carga por modulo por compilacao.
 type moduleDiscoveryState struct {
 	active map[string]bool
+	loaded map[string]loadedModule
+}
+
+// loadedModule e o resultado memoizado de loadModuleDeclarations: o Program
+// ja parseado E VALIDADO (parseModuleDeclarations roda validator.Compile
+// antes de devolver) ou, para modulo de diretorio, a lista de submodulos.
+//
+// Compartilhar o MESMO *ast.Program entre chamadores e seguro porque a
+// mutacao in-place que o pipeline faz nele (resolveSignatureAnnotations /
+// resolveStructFieldAnnotations, e o merge das instancias monomorfizadas de
+// runGenericsPass1) acontece INTEIRA dentro de parseModuleDeclarations, antes
+// do primeiro retorno — o codigo anterior a este memo ja devolvia o AST
+// pos-mutacao a todo chamador, so que reconstruido do zero a cada vez. Os
+// consumidores (discoverModuleExports, discoverModuleStructs,
+// moduleTopLevelBindings, importBindingFrom) apenas LEEM as declaracoes; o
+// unico que guarda um ponteiro para dentro do modulo e importBindingFrom, ao
+// registrar um template no GenericRegistry, e a monomorfizacao sempre trabalha
+// sobre um CLONE (substituteFunction/substituteStruct) — nunca sobre tpl.Decl.
+type loadedModule struct {
+	program        *ast.Program
+	directoryNames []string
+}
+
+func newModuleDiscoveryState() *moduleDiscoveryState {
+	return &moduleDiscoveryState{
+		active: make(map[string]bool),
+		loaded: make(map[string]loadedModule),
+	}
+}
+
+// discoveryState devolve — criando na primeira chamada — o estado de
+// descoberta deste compilador. Criar UMA VEZ e guardar em c.moduleDiscovery e
+// o que faz o memo de loadModuleDeclarations valer entre os varios chamadores
+// de um mesmo `use` (antes, cada um fabricava um estado descartavel e o memo
+// morreria junto com ele). NewChild e newPass1Compiler propagam o ponteiro,
+// entao a arvore inteira de uma compilacao compartilha um unico cache — o
+// filho de NewChild (corpo de funcao, onde um `use` aninhado tambem compila) e
+// o compilador descartavel do pass 1 dos genericos inclusos.
+func (c *Compiler) discoveryState() *moduleDiscoveryState {
+	if c.moduleDiscovery == nil {
+		c.moduleDiscovery = newModuleDiscoveryState()
+	}
+	return c.moduleDiscovery
 }
 
 func (c *Compiler) discoverModuleExports(module string) (map[string]struct{}, bool) {
-	state := c.moduleDiscovery
-	if state == nil {
-		state = &moduleDiscoveryState{active: make(map[string]bool)}
-	}
-	return c.discoverModuleExportsWithState(module, state)
+	return c.discoverModuleExportsWithState(module, c.discoveryState())
 }
 
 func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDiscoveryState) (map[string]struct{}, bool) {
@@ -95,11 +148,7 @@ func (c *Compiler) discoverModuleStructs(module string) (map[string]*ast.StructS
 	// validator compile spawned to check a nested use statement would start
 	// its own independent, equally cycle-blind discovery, recursing without
 	// bound.
-	state := c.moduleDiscovery
-	if state == nil {
-		state = &moduleDiscoveryState{active: make(map[string]bool)}
-	}
-	return c.discoverModuleStructsWithState(module, state)
+	return c.discoverModuleStructsWithState(module, c.discoveryState())
 }
 
 func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDiscoveryState) (map[string]*ast.StructStatement, bool) {
@@ -150,16 +199,76 @@ func (c *Compiler) importModuleStructs(module string, names []string) {
 	}
 }
 
-func (c *Compiler) predeclareImport(declaration *ast.UseStmt) {
+// rejectNestedTemplateImport recusa, com a mensagem acionavel do §9, um `use`
+// ANINHADO (dentro de corpo de funcao ou de lambda — c.enclosing != nil) que
+// traga um template generico para o escopo.
+//
+// Por que e um erro e nao uma feature: a decisao "este programa precisa do
+// two-pass?" (hasGenerics em Compile(*ast.Program)) e tomada UMA VEZ, na
+// entrada, olhando so os `use` do TOPO (predeclareImportedTemplates varre
+// statements de topo). Um `use` aninhado registra o template no meio da
+// compilacao, DEPOIS que essa decisao ja passou: no pass 1 nada acontece
+// (aquele programa nem entrou no two-pass) e no pass 2 a chamada bate no
+// guard defensivo de compileGenericCallSite, que acusa "bug do compilador de
+// genéricos" com a linha errada — mensagem inutil para quem escreveu o
+// programa. Suportar de verdade exigiria redecidir o two-pass a cada `use`
+// aninhado; ate la, o erro claro (com a saida obvia: mover o `use` para o
+// topo) vale mais que o falso relato de bug.
+//
+// A forma de NAMESPACE (`use m [as alias]`) nunca importa nome nenhum (§8) e
+// portanto nunca traz template: passa direto. Modulo que nao carrega tambem
+// passa direto (bindings vazio) — a tolerancia que
+// TestFunctionBodyOnlyWildcardDoesNotAffectModuleLoadability exige.
+func (c *Compiler) rejectNestedTemplateImport(declaration *ast.UseStmt) error {
+	if c.enclosing == nil {
+		return nil
+	}
+	var names []string
 	switch {
 	case declaration.SelectAll:
 		exports, _ := c.discoverModuleExports(declaration.Module)
+		names = make([]string, 0, len(exports))
 		for name := range exports {
-			c.globals[name] = nil
+			names = append(names, name)
 		}
 	case len(declaration.Selectors) > 0:
+		names = declaration.Selectors
+	default:
+		return nil
+	}
+	bindings, _ := c.moduleTopLevelBindings(declaration.Module)
+	for _, name := range names {
+		if isModuleTemplateDeclaration(bindings, name) {
+			return nestedTemplateImportError(declaration.Token.Line)
+		}
+	}
+	return nil
+}
+
+// nestedTemplateImportError e a mensagem verbatim do §9 para o caso acima.
+func nestedTemplateImportError(line int) error {
+	return fmt.Errorf(
+		"[line %d] template genérico importado dentro de corpo de função não é suportado — mova o 'use' para o top level",
+		line,
+	)
+}
+
+func (c *Compiler) predeclareImport(declaration *ast.UseStmt) error {
+	switch {
+	case declaration.SelectAll:
+		exports, _ := c.discoverModuleExports(declaration.Module)
+		bindings, _ := c.moduleTopLevelBindings(declaration.Module)
+		for name := range exports {
+			if err := c.importBindingFrom(declaration.Module, bindings, name); err != nil {
+				return err
+			}
+		}
+	case len(declaration.Selectors) > 0:
+		bindings, _ := c.moduleTopLevelBindings(declaration.Module)
 		for _, name := range declaration.Selectors {
-			c.globals[name] = nil
+			if err := c.importBindingFrom(declaration.Module, bindings, name); err != nil {
+				return err
+			}
 		}
 	default:
 		name := declaration.Alias
@@ -167,17 +276,248 @@ func (c *Compiler) predeclareImport(declaration *ast.UseStmt) {
 			parts := strings.Split(declaration.Module, ".")
 			name = parts[len(parts)-1]
 		}
+		c.importNamespace(declaration.Module, name)
+	}
+	return nil
+}
+
+// predeclareImportedTemplates registra SO os templates genericos que os
+// `use` statements do TOPO do programa importam (select*/select — a forma
+// de namespace nunca importa template nenhum, §8). Precisa rodar ANTES da
+// decisao hasGenerics()/runGenericsPass1 em Compile(*ast.Program): aquela
+// decisao so olha se o registry ja tem alguma entrada, e o predeclare
+// "de verdade" dos imports (predeclareGlobalBindings -> predeclareImport,
+// que tambem cataloga os globals tipados para programBindings) so roda
+// DEPOIS dessa decisao. Sem este passo adiantado, um programa que so usa
+// genericos IMPORTADOS (nenhum declarado localmente) nunca aciona o
+// two-pass — e a interceptacao de call site em compileCallExpression, que
+// olha o registry sem checar c.pass1, encontraria o template e chamaria
+// compileGenericCallSite fora do pass 1, batendo no erro defensivo "chegou
+// ao pass 2 sem monomorfização" (exatamente o bug pego pelo TDD deste
+// arquivo). Idempotente com a passada completa que roda depois — registrar
+// o mesmo template duas vezes so troca o ponteiro do AST (reparse) por um
+// estruturalmente identico, sem efeito observavel.
+func (c *Compiler) predeclareImportedTemplates(statements []ast.Statement) error {
+	for _, statement := range statements {
+		declaration, ok := statement.(*ast.UseStmt)
+		if !ok {
+			continue
+		}
+		switch {
+		case declaration.SelectAll:
+			exports, _ := c.discoverModuleExports(declaration.Module)
+			bindings, _ := c.moduleTopLevelBindings(declaration.Module)
+			for name := range exports {
+				if !isModuleTemplateDeclaration(bindings, name) {
+					continue
+				}
+				if err := c.importBindingFrom(declaration.Module, bindings, name); err != nil {
+					return err
+				}
+			}
+		case len(declaration.Selectors) > 0:
+			bindings, _ := c.moduleTopLevelBindings(declaration.Module)
+			for _, name := range declaration.Selectors {
+				if !isModuleTemplateDeclaration(bindings, name) {
+					continue
+				}
+				if err := c.importBindingFrom(declaration.Module, bindings, name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// moduleTopLevelBindings analisa (e valida, via loadModuleDeclarations, que
+// ja roda um Compile completo do modulo num validator descartavel — ver
+// parseModuleDeclarations) `module` UMA VEZ e indexa suas declaracoes de
+// topo (func, struct, let) por nome. Existe para que um `use m select *`
+// com N exports nao repita o parse+validate completo do modulo N vezes —
+// cada chamador (predeclareImport, o case *ast.UseStmt de compiler.go)
+// busca aqui uma unica vez por `use` e consulta o mapa por nome depois.
+//
+// As anotacoes de tipo dentro das declaracoes devolvidas ja saem
+// RESOLVIDAS (nomes de instancia qualificados no lugar de GenericType cru):
+// loadModuleDeclarations roda validator.Compile(program) antes de devolver,
+// e resolveSignatureAnnotations/resolveStructFieldAnnotations mutam o AST
+// in-place durante esse Compile — o mesmo mecanismo que faz o proprio
+// modulo compilar corretamente sozinho.
+func (c *Compiler) moduleTopLevelBindings(module string) (map[string]ast.Statement, bool) {
+	program, _, ok := c.loadModuleDeclarations(module, c.discoveryState())
+	if !ok {
+		return nil, false
+	}
+	declarations := make(map[string]ast.Statement)
+	if program == nil {
+		// Modulo de diretorio: sem declaracoes de topo proprias.
+		return declarations, true
+	}
+	for _, statement := range program.Statements {
+		switch declaration := statement.(type) {
+		case *ast.FunctionStatement:
+			declarations[declaration.Name] = declaration
+		case *ast.StructStatement:
+			declarations[declaration.Name] = declaration
+		case *ast.LetStmt:
+			declarations[declaration.Name.Value] = declaration
+		}
+	}
+	return declarations, true
+}
+
+// importBindingFrom registra UM nome importado de module no compilador
+// atual (§8, predeclare tipado + import de templates, R8):
+//
+//   - template generico (TypeParams>0): entra no GenericRegistry com
+//     Module = moduleQualifier(module) — NAO em c.globals, que e so para
+//     valores em runtime. E o registro que faz `use colecoes select
+//     processa` disparar compileGenericCallSite/compileGenericConstructorSite
+//     para "processa" como se fosse um template local, so que instanciando
+//     com Module="colecoes" (identidade de instancia distinta de um
+//     template homonimo de outro modulo — R8).
+//   - func/let/struct comum: entra em c.globals com o TIPO DECLARADO (nao
+//     mais apagado para nil) — e a mudanca central do §8 que destrava
+//     inferencia sobre dado importado (TestImportedDataInference).
+//   - nome que declarations nao resolve (submodulo de diretorio, export
+//     vindo de um `use` aninhado sem entrada propria aqui): mantem o
+//     comportamento anterior a Task 12 (tipo apagado) em vez de quebrar o
+//     import — degrada, nao regride.
+func (c *Compiler) importBindingFrom(module string, declarations map[string]ast.Statement, name string) error {
+	switch declaration := declarations[name].(type) {
+	case *ast.FunctionStatement:
+		if len(declaration.TypeParams) > 0 {
+			return c.registerFuncTemplate(name, &FuncTemplate{Decl: declaration, Module: moduleQualifier(module)}, declaration.Token.Line)
+		}
+		c.globals[name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
+	case *ast.StructStatement:
+		if len(declaration.TypeParams) > 0 {
+			return c.registerStructTemplate(name, &StructTemplate{Decl: declaration, Module: moduleQualifier(module)}, declaration.Token.Line)
+		}
+		params := make([]ast.NoxyType, len(declaration.FieldsList))
+		for index, field := range declaration.FieldsList {
+			params[index] = field.Type
+		}
+		c.globals[name] = newStructFunctionType(declaration.Name, params)
+	case *ast.LetStmt:
+		c.globals[name] = declaration.Type
+	default:
 		c.globals[name] = nil
+	}
+	return nil
+}
+
+// importedBindingType devolve o tipo declarado, no modulo definidor, de um
+// binding NAO-generico exportado por module — a metade "modulo definidor"
+// da checagem de identidade do §8 (validateImportedTemplateScope, em
+// generics.go): o mesmo dado que importBindingFrom usa para popular
+// c.globals no IMPORTADOR, olhado da perspectiva de quem define. ok=false
+// para um nome que e um template generico (sem tipo de valor — ver
+// validateImportedTemplateScope, que trata esse caso separadamente
+// consultando o registry) ou que module simplesmente nao declara.
+func (c *Compiler) importedBindingType(module, name string) (ast.NoxyType, bool) {
+	bindings, ok := c.moduleTopLevelBindings(module)
+	if !ok {
+		return nil, false
+	}
+	switch declaration := bindings[name].(type) {
+	case *ast.FunctionStatement:
+		if len(declaration.TypeParams) > 0 {
+			return nil, false
+		}
+		return newFunctionType(declaration.Parameters, declaration.ReturnType), true
+	case *ast.StructStatement:
+		if len(declaration.TypeParams) > 0 {
+			return nil, false
+		}
+		params := make([]ast.NoxyType, len(declaration.FieldsList))
+		for index, field := range declaration.FieldsList {
+			params[index] = field.Type
+		}
+		return newStructFunctionType(declaration.Name, params), true
+	case *ast.LetStmt:
+		return declaration.Type, true
+	default:
+		return nil, false
 	}
 }
 
+// importNamespace registra `use m [as alias]` (forma de namespace, sem
+// select): o modulo entra em c.globals como objeto opaco (sem tipo
+// estatico — nao ha "tipo de modulo" na linguagem, e por isso o nome
+// continua apagado para nil aqui, ao contrario de importBindingFrom) e o
+// par alias->modulo fica em c.namespaceImports, para que compileCallExpression
+// recuse `m.processa(...)` em tempo de compilacao (§8/§9: "não é acessível
+// via namespace") em vez de falhar em runtime com uma mensagem generica de
+// propriedade nao encontrada.
+func (c *Compiler) importNamespace(module, bindName string) {
+	c.globals[bindName] = nil
+	if c.namespaceImports == nil {
+		c.namespaceImports = make(map[string]string)
+	}
+	c.namespaceImports[bindName] = module
+}
+
+// moduleExportsGenericTemplateName responde se module declara, no seu top
+// level, um template generico (func ou struct) chamado name — a consulta
+// que o erro de namespace do §9 faz antes de recusar `m.name(...)`.
+func (c *Compiler) moduleExportsGenericTemplateName(module, name string) bool {
+	bindings, ok := c.moduleTopLevelBindings(module)
+	if !ok {
+		return false
+	}
+	return isModuleTemplateDeclaration(bindings, name)
+}
+
+// isModuleTemplateDeclaration responde se declarations[name] e um template
+// generico (func ou struct com TypeParams>0) — usado tanto pelo erro de
+// namespace quanto pelo case *ast.UseStmt de compiler.go (para pular o
+// GET_PROPERTY de runtime num `select` que nomeia um template, que nunca
+// tem chave no ExportMap do modulo).
+func isModuleTemplateDeclaration(declarations map[string]ast.Statement, name string) bool {
+	switch declaration := declarations[name].(type) {
+	case *ast.FunctionStatement:
+		return len(declaration.TypeParams) > 0
+	case *ast.StructStatement:
+		return len(declaration.TypeParams) > 0
+	default:
+		return false
+	}
+}
+
+// loadModuleDeclarations resolve, parseia e VALIDA um modulo, memoizando o
+// resultado em state.loaded (ver moduleDiscoveryState).
+//
+// So SUCESSOS entram no cache. Uma falha pode ser CONTEXTUAL: o guard de
+// ciclo (state.active) faz um modulo que carrega perfeitamente sozinho
+// devolver false quando alcancado por dentro da propria carga, e memoizar
+// esse false condenaria o modulo pelo resto da compilacao. O inverso nao
+// existe — estar dentro de uma recursao so pode fazer FALHAR, nunca
+// suceder —, entao um sucesso e sempre valido para qualquer contexto.
 func (c *Compiler) loadModuleDeclarations(module string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
+	if cached, hit := state.loaded[module]; hit {
+		return cached.program, cached.directoryNames, true
+	}
 	if state.active[module] {
 		return nil, nil, false
 	}
 	state.active[module] = true
 	defer delete(state.active, module)
 
+	program, directoryNames, ok := c.resolveModuleDeclarations(module, state)
+	if ok {
+		if state.loaded == nil {
+			state.loaded = make(map[string]loadedModule)
+		}
+		state.loaded[module] = loadedModule{program: program, directoryNames: directoryNames}
+	}
+	return program, directoryNames, ok
+}
+
+// resolveModuleDeclarations e o corpo nao-memoizado de loadModuleDeclarations:
+// procura o arquivo/diretorio/embed do modulo e delega o parse+validacao.
+func (c *Compiler) resolveModuleDeclarations(module string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
 	pathName := strings.ReplaceAll(module, ".", string(filepath.Separator))
 	for _, candidate := range c.moduleFileCandidates(pathName) {
 		info, err := os.Stat(candidate)

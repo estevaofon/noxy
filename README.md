@@ -36,6 +36,7 @@ be mutable.
 - ✅ Value semantics with copy-on-write (composites are independent values; `ref` is the only sharing mechanism)
 - ✅ First-class functions
 - ✅ Closures
+- ✅ Generics with zero runtime cost (monomorphization: `func first<T>(arr: T[]) -> T`, `struct Stack<T>`, always inferred from usage)
 - ✅ Concurrency (noxy routines) [docs/CONCURRENCY.md](docs/CONCURRENCY.md)
 - ✅ Garbage collection
 - ✅ Built-in modules (io, net, http, sqlite)
@@ -73,7 +74,7 @@ go run ./cmd/noxy/main.go program.nx
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.6.0
+Noxy REPL v0.7.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
@@ -222,6 +223,32 @@ print(b[0])  // 104 (ASCII 'h')
 
 let from_str: bytes = to_bytes("text")
 let from_int: bytes = to_bytes(65)  // b"A"
+```
+
+### Generics
+
+Generic functions and structs are monomorphized at compile time — zero
+runtime cost, always instantiated by inference (no explicit `first<int>(x)`
+syntax). See [NOXY_LANGUAGE_SPEC.md §6](docs/NOXY_LANGUAGE_SPEC.md) for the
+full contract.
+
+```noxy
+struct Stack<T>
+    items: T[]
+end
+
+func push<T>(s: ref Stack<T>, item: T)
+    append(s.items, item)
+end
+
+func peek<T>(s: Stack<T>) -> T
+    return s.items[length(s.items) - 1]
+end
+
+let ints: Stack<int> = Stack([])   // T inferred from the `let` annotation
+push(ref ints, 10)
+push(ref ints, 20)
+print(peek(ints))  // 20
 ```
 
 ## Builtin Functions

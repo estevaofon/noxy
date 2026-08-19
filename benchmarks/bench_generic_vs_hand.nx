@@ -1,0 +1,75 @@
+// bench_generic_vs_hand: mesmo laco quente identico via funcao generica e
+// via funcao especializada a mao. Gate: razao <= 1.05 (spec S11, R4 do
+// controller da fase de genericos — folga de ruido sobre o 1.0x; a garantia
+// dura de custo-zero e o teste de igualdade de bytecode da Task 8).
+//
+// So roda no binario com suporte a genericos (o binario develop nao faz
+// parse de "<T>"). Por isso a medicao usa relogio interno (time_now_ms)
+// dentro de um unico processo, em vez do Measure-Command externo dos outros
+// benches: o gate de 5% e apertado demais para o ruido de spawn de processo
+// (que os outros benches evitam comparando o MESMO overhead de startup dos
+// dois lados). Repita o processo inteiro N vezes e tire a mediana de
+// GEN_MS/HAND_MS entre execucoes, como no resto da suite.
+//
+// Ordem ABBA (gen, hand, hand, gen), cada metade com n/2 iteracoes: uma
+// medicao AB simples (gen sempre primeiro) mostrou deriva sistematica de ate
+// +9% entre sessoes na mesma maquina, maior que o piso de ruido de ~1-4%
+// documentado no resto da suite — a segunda funcao chamada dentro do mesmo
+// processo tende a herdar cache/branch-predictor "quente" da primeira. ABBA
+// da as duas funcoes a mesma posicao media (2,5) na sequencia, cancelando
+// qualquer deriva linear dentro do processo.
+func soma_gen<T>(arr: T[], n: int) -> int
+    let acc: int = 0
+    let i: int = 0
+    while i < n do
+        acc = acc + length(arr)
+        i = i + 1
+    end
+    return acc
+end
+
+func soma_hand(arr: int[], n: int) -> int
+    let acc: int = 0
+    let i: int = 0
+    while i < n do
+        acc = acc + length(arr)
+        i = i + 1
+    end
+    return acc
+end
+
+func main()
+    let data: int[]
+    let i: int = 0
+    while i < 64 do
+        append(data, i)
+        i = i + 1
+    end
+    let half_n: int = 1500000
+
+    // Aquecimento: garante que a instanciacao/monomorfizacao ja aconteceu
+    // antes da janela medida (o teste de igualdade de bytecode da Task 8 ja
+    // prova que a instanciacao acontece em tempo de compilacao, nao em
+    // runtime — isto e so para tirar qualquer efeito de cache de disco/OS).
+    let warm_gen: int = soma_gen(data, 1000)
+    let warm_hand: int = soma_hand(data, 1000)
+
+    let t0: int = time_now_ms()
+    let g1: int = soma_gen(data, half_n)
+    let t1: int = time_now_ms()
+    let h1: int = soma_hand(data, half_n)
+    let t2: int = time_now_ms()
+    let h2: int = soma_hand(data, half_n)
+    let t3: int = time_now_ms()
+    let g2: int = soma_gen(data, half_n)
+    let t4: int = time_now_ms()
+
+    let gen_ms: int = (t1 - t0) + (t4 - t3)
+    let hand_ms: int = (t2 - t1) + (t3 - t2)
+
+    print(f"GEN_MS:{gen_ms}")
+    print(f"HAND_MS:{hand_ms}")
+    print(f"CHECKSUM:{g1 + g2 + h1 + h2 + warm_gen + warm_hand}")
+end
+
+main()

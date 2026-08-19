@@ -1,0 +1,17 @@
+// startup_generics: variante do bench de startup (benchmarks/cross_runtime/
+// startup.nx) usando genericos — 1 template + 2 instanciacoes + print. Mede
+// o custo end-to-end (parse, deteccao "ha genericos?", pass 1 de
+// monomorfizacao, compile, run) contra o piso de startup sem genericos.
+// Gate: sem regressao material do caso Lambda (spec S11); sinalizar delta
+// > +15ms mesmo sem gate duro (ver task-16-brief).
+struct Caixa<T>
+    valor: T
+end
+
+func main()
+    let a: Caixa<int> = Caixa(1)
+    let b: Caixa<string> = Caixa("x")
+    print(f"CHECKSUM:{a.valor}")
+end
+
+main()

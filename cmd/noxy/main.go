@@ -140,8 +140,18 @@ func startREPL(showDisasm bool) {
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
 	scanner := bufio.NewScanner(os.Stdin)
 
-	// Persist globals across REPL lines
+	// Persist globals, struct definitions (comuns e instancias monomorfizadas
+	// de generico) e o registry de templates genericos entre linhas do REPL
+	// (spec §5) — os tres compoem o estado de sessao. replStructs conserta um
+	// bug pre-existente: antes desta task, cada linha recebia um mapa de
+	// structs NOVO, entao um `struct Point ... end` numa linha desaparecia na
+	// linha seguinte. replGenerics faz o REPL enxergar na proxima linha um
+	// template genérico (`struct Caixa<T>`/`func id<T>`) declarado numa linha
+	// anterior — sem ele, SetGenericState nunca era chamado e cada linha via
+	// um GenericRegistry vazio.
 	replGlobals := make(map[string]ast.NoxyType)
+	replStructs := make(map[string]*ast.StructStatement)
+	replGenerics := compiler.NewGenericRegistry()
 
 	var inputBuffer string
 
@@ -229,7 +239,8 @@ func startREPL(showDisasm bool) {
 		}
 
 		// 3. Compile
-		c := compiler.NewWithState(replGlobals, make(map[string]*ast.StructStatement), "REPL")
+		c := compiler.NewWithState(replGlobals, replStructs, "REPL")
+		c.SetGenericState(replGenerics)
 		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)

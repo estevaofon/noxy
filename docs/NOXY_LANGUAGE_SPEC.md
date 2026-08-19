@@ -23,7 +23,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 | Category | Keywords |
 |----------|----------|
 | Declarations | `let`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer` |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer`, `when`, `case`, `default` |
 | Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
@@ -528,7 +528,309 @@ end
 
 ---
 
-## 6. Control Flow
+## 6. Generics
+
+Noxy supports generic functions and structs, monomorphized at compile time:
+each instantiation (`Stack<int>`, `Stack<string>`) is compiled into its own
+concrete, fully-typed code. There is no runtime type erasure and no runtime
+overhead compared to code written by hand for a single type — this is a
+compile-time feature only.
+
+### 6.1 Declaring generic functions and structs
+
+Type parameters are listed in `<>` right after the name and can be used
+anywhere a type is expected — parameters, return type, fields, and the body:
+
+```noxy
+func first<T>(arr: T[]) -> T
+    return arr[0]
+end
+
+struct Stack<T>
+    items: T[]
+end
+```
+
+A generic type only appears in **type position** — annotations, fields,
+return types (`Stack<int>`, `Node<string>`, `Stack<Stack<int>>`). There is no
+explicit instantiation syntax in expression position; `first<int>(x)` does
+not exist as syntax, which keeps `<`/`>` unambiguous with the comparison
+operators.
+
+Structs can reference themselves through a type parameter, exactly like the
+non-generic self-reference in §5:
+
+```noxy
+struct Node<T>
+    value: T
+    next: ref Node<T>
+end
+
+let n2: Node<int> = Node(2, null)
+let n1: Node<int> = Node(1, ref n2)
+print(n1.next.value) // 2
+```
+
+### 6.2 Instantiation is always by inference
+
+There is no explicit instantiation syntax. Every use of a generic function or
+struct infers its type parameters from context:
+
+```noxy
+struct Stack<T>
+    items: T[]
+end
+
+func push<T>(s: ref Stack<T>, item: T)
+    append(s.items, item)
+end
+
+func peek<T>(s: Stack<T>) -> T
+    return s.items[length(s.items) - 1]
+end
+
+let ints: Stack<int> = Stack([])   // T from the `let` annotation — the
+                                    // constructor argument ([]) is empty and
+                                    // carries no type information by itself
+push(ref ints, 10)
+push(ref ints, 20)
+print(peek(ints)) // 20
+```
+
+This works because every `let` in Noxy already requires a type annotation —
+the language already forces the caller to write the information inference
+needs. `Stack<int>` and `Stack<string>` are distinct nominal struct types;
+using one where the other is expected is a compile-time type error, the same
+as any other struct mismatch.
+
+Nested instantiation resolves inside-out — `Caixa<int>` is instantiated
+before `Caixa<Caixa<int>>` needs it:
+
+```noxy
+struct Caixa<T>
+    valor: T
+end
+
+let dupla: Caixa<Caixa<int>> = Caixa(Caixa(9))
+dupla.valor.valor = dupla.valor.valor + 1
+print(dupla.valor.valor) // 10
+```
+
+Generic structs keep Noxy's ordinary copy-on-write value semantics — a copy of
+`Caixa<Caixa<int>>` never mutates the original, at any depth:
+
+```noxy
+let outra: Caixa<Caixa<int>> = dupla
+outra.valor.valor = 100
+print(dupla.valor.valor) // still 10 — the copy does not reach the original
+```
+
+### 6.3 Generic functions as values (target-typing)
+
+A generic function can be used as a plain function value — assigned,
+returned, stored in an array, passed as an argument — as long as the
+surrounding context gives it a **concrete target type**. Instantiation
+happens at the point the generic becomes a value:
+
+```noxy
+func identity<T>(x: T) -> T
+    return x
+end
+
+// `let` annotation is the target
+let f: func(int) -> int = identity
+print(f(5)) // 5
+
+// return type of the enclosing function is the target
+func escolhe() -> func(int) -> int
+    return identity
+end
+
+// array element type is the target (parentheses required — see §4.2)
+let fs: (func(int) -> int)[] = [identity]
+```
+
+When a generic function is passed as an argument to another generic function,
+Noxy unifies both signatures together: the non-generic arguments resolve
+first, and the resulting (possibly still partial) expected type is unified
+against the argument function's own signature, propagating bindings in both
+directions:
+
+```noxy
+func aplica<A, B>(arr: A[], fn: func(A) -> B) -> B[]
+    let out: B[] = []
+    for item in arr do
+        append(out, fn(item))
+    end
+    return out
+end
+
+let nums: int[] = [1, 2, 3]
+let mesmos: int[] = aplica(nums, identity) // A=int from `nums`, then
+                                             // func(A)->B unified against
+                                             // identity's func(T)->T gives B=int
+```
+
+A generic function cannot become a value where the compiler has no concrete
+type to instantiate against — a bare `func` annotation, `any`, or a chain of
+generics with nothing anchoring the middle. These are exactly the positions
+where an ordinary function value would already lose static checking:
+
+```noxy
+let g: func = identity   // ERROR: 'identity' needs a concrete type — annotate
+                          // the full signature or call it directly
+```
+
+### 6.4 Cross-module rules
+
+A template's free identifiers — helper functions, other generics — must
+resolve inside the module that defines it. Because the instance is compiled
+in the importer's context, the importer must also have those dependencies
+visible:
+
+| Import form | Dependencies visible? | Result |
+|---|---|---|
+| `use m select *` | yes — everything enters the importer's globals | always works |
+| `use m select f` (selective) | only if imported together | actionable error: *add it to the select list or use `select *`* |
+| `use m` (namespace) | n/a | calling the template via `m.f(...)` is a compile-time error |
+
+```noxy
+// colecoes.nx
+func ajuda(x: int) -> int
+    return x + 1
+end
+func processa<T>(arr: T[]) -> int
+    return ajuda(length(arr))
+end
+```
+
+```noxy
+// main.nx — selective import missing the dependency
+use colecoes select processa
+let ns: int[] = [1]
+processa(ns)   // ERROR: 'processa<...>' needs 'ajuda' from 'colecoes' —
+               // add it to the select list or use `select *`
+
+// fixed: import the dependency alongside the template
+use colecoes select processa, ajuda
+let ns: int[] = [1, 2]
+processa(ns)   // OK
+```
+
+Templates themselves are **not accessible through the namespace form**: since
+a template never exists as a runtime value, member access cannot resolve it.
+
+```noxy
+use colecoes
+let nums: int[] = [1]
+colecoes.processa(nums) // ERROR: generic template 'processa' is not
+                         // accessible via namespace access — use `select`
+```
+
+Imported names carry their **declared type** to the importer, so a generic
+call can infer its type parameters from data or functions defined in another
+module:
+
+```noxy
+// dados.nx
+let numeros: int[] = [5, 6]
+```
+
+```noxy
+// main.nx
+use dados select numeros
+func primeiro<T>(arr: T[]) -> T
+    return arr[0]
+end
+print(primeiro(numeros)) // 5 — T inferred from the imported `numeros`
+```
+
+> Imported names now carry their real declared type to the importer instead
+> of an erased one. Existing cross-module code that relied on the erased type
+> being permissive can start failing to compile — see the 0.7.0 entry in
+> `CHANGELOG.md` for the migration note.
+
+### 6.5 v1 limitations
+
+- **No constraints.** A type parameter `T` is unconstrained; the body is
+  checked **per instantiation**. `soma<T>(a: T, b: T) -> T` with `a + b` in
+  the body compiles fine when called with `int`, and fails — pointing at the
+  call site that produced the failing instantiation — when called with a
+  struct that has no `+` operator:
+
+  ```noxy
+  struct Ponto
+      x: int
+  end
+  func soma<T>(a: T, b: T) -> T
+      return a + b
+  end
+  soma(1, 2)                    // OK — soma<int>
+  soma(Ponto(1), Ponto(2))      // ERROR: soma<Ponto> (instantiated at this
+                                 // line): operator '+' is not defined for Ponto
+  ```
+
+- **Top level only.** A `func` or `struct` declared with type parameters
+  cannot be nested inside a function body.
+
+- **`T` cannot bind a `ref` type.** Passing a `ref` value where `T` would
+  bind to `ref X` is a compile-time error; declare the parameter as `ref T`
+  instead when the generic needs to receive a reference:
+
+  ```noxy
+  func identity<T>(x: T) -> T
+      return x
+  end
+  let r: ref int = null
+  let v: ref int = identity(r)   // ERROR: T cannot be a ref type
+
+  func identity_ref<T>(x: ref T) -> ref T  // idiomatic form: `ref` is
+      return x                              // explicit, T binds to int
+  end
+  ```
+
+- **`func` and `any` are not valid instantiation targets**, as shown in §6.3
+  — Noxy never falls back to instantiating a generic implicitly as `any`.
+  Type inference that cannot resolve a type parameter is always a
+  compile-time error, never a silent `any`; this includes trying to infer a
+  type solely from a `null` argument (`identity(null)` with no other anchor
+  is a compile-time error too).
+
+A generic struct instance is an ordinary struct value everywhere else in the
+language — no special-casing needed for f-strings, `json_dumps`, or as a
+channel payload sent and received with the `when`/`case` construct described
+below:
+
+```noxy
+struct Caixa<T>
+    valor: T
+end
+let c: Caixa<int> = Caixa(7)
+let ch: any = make_chan(1)
+chan_send(ch, c)
+let recebida: Caixa<int>
+when
+    case bound = chan_recv(ch) then
+        recebida = bound
+    default
+        recebida = Caixa(-1)
+end
+print(recebida.valor * 6) // 42 — the whole Caixa<int> traveled through the
+                           // channel, not just its field
+```
+
+> **Note:** `map` is a type keyword (`map[K, V]`), so it cannot be used as the
+> name of a generic function. The standard idiom, used by the `collections`
+> module, is to call the transformation function `map_arr` instead:
+> `func map_arr<A, B>(arr: A[], fn: func(A) -> B) -> B[]`.
+
+> **Cosmetic note:** printing a generic struct instance shows its qualified
+> name, e.g. `<main::Caixa<int> instance>` instead of `<Caixa instance>`.
+> This is documented v1 behavior, not a bug.
+
+---
+
+## 7. Control Flow
 
 ### If-Then-Else
 ```noxy
@@ -622,9 +924,61 @@ Those suppressed errors cannot participate in defer aggregation; only runtime
 errors observable from the deferred call are aggregated. Likewise, the
 ordinary result from `io.close_result(...)` is discarded when deferred.
 
+### When / Channel Select
+
+`when` evaluates a set of channel operations and runs the body of the first
+`case` that is ready, exactly once:
+
+```noxy
+let ch1: any = make_chan(1)
+let ch2: any = make_chan(1)
+
+chan_send(ch1, "hello")
+when
+    case msg = chan_recv(ch1) then
+        print("Received from ch1:", msg)
+    case chan_recv(ch2) then
+        print("Received from ch2")
+    default
+        print("Default case (should not happen if ch1 ready)")
+end
+```
+
+Each `case` is one of:
+
+- `case <var> = chan_recv(<chan>) then` — receives and binds the value to a
+  new variable, scoped to that case's body.
+- `case chan_recv(<chan>) then` — receives and discards the value, useful
+  when only the channel's readiness matters.
+- `case chan_send(<chan>, <value>) then` — succeeds when the send can
+  complete immediately.
+
+An optional `default` case runs immediately when no other case is ready,
+making the `when` non-blocking. Without `default`, `when` blocks until one
+case becomes ready:
+
+```noxy
+let ch3: any = make_chan()
+let ch4: any = make_chan()
+
+spawn(sender, ch3, "delayed_msg_3", 100)
+spawn(sender, ch4, "delayed_msg_4", 50)
+
+when
+    case m1 = chan_recv(ch3) then
+        print("Got from ch3:", m1)
+    case m2 = chan_recv(ch4) then
+        print("Got from ch4:", m2)
+end
+```
+
+Any value a channel can carry — including a generic struct instance such as
+`Caixa<int>` (§6) — travels through `chan_send`/`chan_recv` and is received
+by `when`/`case` exactly like any other value.
+
 ---
 
-## 7. Expressions
+## 8. Expressions
 
 ### Mathematical
 `+`, `-`, `*`, `/`, `%`
@@ -646,7 +1000,7 @@ ordinary result from `io.close_result(...)` is discarded when deferred.
 
 ---
 
-## 8. F-Strings
+## 9. F-Strings
 
 String interpolation with `f"..."`.
 
@@ -655,7 +1009,7 @@ let name: string = "Noxy"
 print(f"Hello, {name}!")
 ```
 
-## 9. Built-in Functions
+## 10. Built-in Functions
 
 ### I/O
 - `print(expr)`: Prints to stdout.
@@ -762,7 +1116,7 @@ Supervised tasks share globals, module state, runtime resources, closure environ
 
 ---
 
-## 10. Module System
+## 11. Module System
 
 ### Basic Import
 ```noxy
@@ -784,7 +1138,7 @@ print(to_upper("hello"))
 
 ---
 
-## 11. Standard Library
+## 12. Standard Library
 
 Noxy comes with a comprehensive standard library. Available modules include:
 

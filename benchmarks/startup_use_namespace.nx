@@ -1,0 +1,9 @@
+// startup_use_namespace: par de startup_use_selectall.nx na forma de
+// namespace (`use m`, sem select). Importa zero nomes, mas ainda paga a carga
+// do modulo e das suas dependencias — por isso sofria a mesma amplificacao do
+// finding C1 (mais branda: 4x em vez de 8x, por ter menos chamadores por
+// `use`). Serve para separar "custo de carregar o modulo" de "custo de ligar
+// os nomes importados".
+use http
+
+print("CHECKSUM:1")
