@@ -373,6 +373,31 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		}
 		return vm.walkRuntimeValueType(resolved, schema.Element, apply, seen)
 	case value.TYPE_STRUCT:
+		// Fronteira dinâmica de envelope-como-map (call_result / errors.nx,
+		// design doc §Representation): um native sem assinatura devolve um
+		// *value.ObjMap fisicamente — nunca um ObjInstance — e o contrato
+		// tipado (`let r: CallResult = ...`) vale pelo campo, não pelo nome
+		// nominal (errors.nx: "vale pelo contrato de campos"). Aceita aqui
+		// se TODO campo de schema.Fields existe no map com tipo
+		// recursivamente compatível; chaves extras no map são ignoradas.
+		// Deliberadamente NÃO estampa RuntimeType no map (ObjMap.RuntimeType
+		// seguiria intocado) — cada marcação revalida do zero, evitando a
+		// pergunta de CAS "mesmo map validado contra struct diferente
+		// depois". O caminho ObjInstance abaixo (nominal, por Struct.Name)
+		// continua byte-a-byte o de sempre.
+		if mapping, ok := actual.Obj.(*value.ObjMap); ok && actual.Type == value.VAL_OBJ && mapping != nil {
+			if runtimeValueTypeSeen(mapping, schema, seen) {
+				return true
+			}
+			snapshot := mapping.Snapshot()
+			for name, fieldSchema := range schema.Fields {
+				field, exists := snapshot[name]
+				if !exists || !vm.walkRuntimeValueType(field, fieldSchema, apply, seen) {
+					return false
+				}
+			}
+			return true
+		}
 		instance, ok := actual.Obj.(*value.ObjInstance)
 		if actual.Type != value.VAL_OBJ || !ok || instance == nil || instance.Struct == nil || instance.Struct.Name != schema.Name {
 			return false

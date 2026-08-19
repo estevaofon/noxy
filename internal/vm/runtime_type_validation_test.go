@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -123,5 +124,154 @@ func TestMarkerStillWalksUntaggedArray(t *testing.T) {
 	}
 	if array.Obj.(*value.ObjArray).RuntimeType.Load() != nil {
 		t.Fatal("tag foi gravada apesar da validação ter falhado")
+	}
+}
+
+// Fronteira dinâmica de envelope-como-map (call_result / errors.nx): o
+// envelope físico é sempre um *value.ObjMap (design doc §Representation), mas
+// CallResult tem um campo composto aninhado (failure: Failure, cujo próprio
+// causes: Failure[] é array) — diferente de IntResult, que não tem campo
+// composto e por isso nunca dispara marcação em runtime. Isto obriga o caso
+// TYPE_STRUCT de walkRuntimeValueType a aceitar um map estruturalmente
+// compatível (contrato de campos, sem checagem nominal), sem estampar
+// RuntimeType no próprio map — cada marcação revalida do zero.
+
+func failureStructSchema() *value.RuntimeTypeInfo {
+	stringT := &value.RuntimeTypeInfo{Kind: value.TYPE_STRING}
+	schema := &value.RuntimeTypeInfo{Kind: value.TYPE_STRUCT, Name: "Failure"}
+	schema.Fields = map[string]*value.RuntimeTypeInfo{
+		"kind":    stringT,
+		"message": stringT,
+		"stack":   stringT,
+		"causes":  {Kind: value.TYPE_ARRAY, Element: schema},
+	}
+	return schema
+}
+
+func callResultStructSchema() *value.RuntimeTypeInfo {
+	return &value.RuntimeTypeInfo{
+		Kind: value.TYPE_STRUCT,
+		Name: "CallResult",
+		Fields: map[string]*value.RuntimeTypeInfo{
+			"ok":      {Kind: value.TYPE_BOOL},
+			"value":   {Kind: value.TYPE_ANY},
+			"failure": failureStructSchema(),
+		},
+	}
+}
+
+// (a) um map com todo campo do esquema presente e recursivamente compatível
+// satisfaz um contrato de struct com campo composto aninhado.
+func TestMarkerAcceptsStructurallyMatchingMapAtStructBoundary(t *testing.T) {
+	machine := New()
+	envelope := value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewBool(true),
+		"value":   value.NewInt(42),
+		"failure": value.NewNull(),
+	})
+	if !machine.markRuntimeValueType(envelope, callResultStructSchema()) {
+		t.Fatal("map com todo campo do esquema presente e compatível deveria satisfazer o contrato de struct")
+	}
+}
+
+// (b) map faltando campo do esquema é rejeitado.
+func TestMarkerRejectsMapMissingStructField(t *testing.T) {
+	machine := New()
+	envelope := value.NewMapWithData(map[string]value.Value{
+		"ok":    value.NewBool(true),
+		"value": value.NewInt(42),
+		// "failure" ausente.
+	})
+	if machine.markRuntimeValueType(envelope, callResultStructSchema()) {
+		t.Fatal("map faltando campo declarado do esquema deveria ser rejeitado")
+	}
+}
+
+// (b) map com campo de tipo errado é rejeitado.
+func TestMarkerRejectsMapWithWrongFieldType(t *testing.T) {
+	machine := New()
+	envelope := value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewString("not a bool"),
+		"value":   value.NewInt(42),
+		"failure": value.NewNull(),
+	})
+	if machine.markRuntimeValueType(envelope, callResultStructSchema()) {
+		t.Fatal("map com campo de tipo incompatível com o esquema deveria ser rejeitado")
+	}
+}
+
+// (a)+(b) fim a fim, com o struct real `CallResult` do módulo `errors` (o
+// mesmo cujo campo `failure: Failure` aninha `causes: Failure[]` e por isso
+// dispara o marcador em runtime — diferente de IntResult). Um native de teste
+// próprio produz o map dinamicamente, sem depender do native call_result: o
+// mecanismo sob teste é genérico, não específico à feature call_result.
+func TestLetStructAnnotationOverDynamicMapEnvelope(t *testing.T) {
+	machine := New()
+	machine.DefineNative("__test_dynamic_envelope_ok", func(args []value.Value) value.Value {
+		return value.NewMapWithData(map[string]value.Value{
+			"ok":      value.NewBool(true),
+			"value":   value.NewInt(42),
+			"failure": value.NewNull(),
+		})
+	})
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	source := `
+use errors select *
+let r: CallResult = __test_dynamic_envelope_ok()
+test_report(to_str(r.ok) + "|" + to_str(r.value))
+`
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatalf("map matching CallResult's field contract should satisfy the struct-typed let: %v", err)
+	}
+	text, _ := captured.Obj.(string)
+	if text != "true|42" {
+		t.Fatalf("unexpected report: %q", text)
+	}
+}
+
+// (b) fim a fim: um map faltando o campo `failure` do contrato de CallResult
+// é rejeitado com o erro de marcador já existente — o mesmo caminho que hoje
+// rejeita qualquer conflito estrutural.
+func TestLetStructAnnotationRejectsStructurallyMismatchedMap(t *testing.T) {
+	machine := New()
+	machine.DefineNative("__test_dynamic_envelope_bad", func(args []value.Value) value.Value {
+		return value.NewMapWithData(map[string]value.Value{
+			"ok":    value.NewBool(true),
+			"value": value.NewInt(42),
+			// "failure" ausente de propósito.
+		})
+	})
+	source := `
+use errors select *
+let r: CallResult = __test_dynamic_envelope_bad()
+`
+	err := interpretVMSource(t, machine, source)
+	if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {
+		t.Fatalf("want the existing marker-rejection error, got: %v", err)
+	}
+}
+
+// (c) uma ObjInstance real de struct com NOME errado continua rejeitada — o
+// caminho nominal para instâncias reais não muda.
+func TestMarkerRejectsRealInstanceOfWrongStructName(t *testing.T) {
+	machine := New()
+	schema := &value.RuntimeTypeInfo{
+		Kind:   value.TYPE_STRUCT,
+		Name:   "CallResult",
+		Fields: map[string]*value.RuntimeTypeInfo{},
+	}
+	otherDefinition := &value.ObjStruct{Name: "SomethingElse", Fields: []string{}}
+	instance := value.Value{
+		Type: value.VAL_OBJ,
+		Obj:  &value.ObjInstance{Struct: otherDefinition, Fields: map[string]value.Value{}},
+	}
+	if machine.markRuntimeValueType(instance, schema) {
+		t.Fatal("uma ObjInstance de struct com nome diferente do esquema deveria continuar rejeitada (caminho nominal intocado)")
 	}
 }
