@@ -195,6 +195,115 @@ func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
 	}
 }
 
+// TestCallResultAggregatesDeferFailures cobre a agregacao ponta-a-ponta: o
+// corpo falha (to_int com string invalida), o defer de limpeza registrado no
+// corpo TAMBEM falha durante o unwind, e a falha diferida precisa aparecer em
+// r.failure.causes[0] com kind "runtime", a mensagem original preservada, e o
+// stack carregando "defer registration" como frame mais externo (a
+// localizacao de REGISTRO do defer, nao a de falha).
+func TestCallResultAggregatesDeferFailures(t *testing.T) {
+	source := `
+func limpeza_ruim()
+    to_int("defer-quebrado")
+end
+
+func corpo() -> int
+    defer limpeza_ruim()
+    return to_int("primario")
+end
+
+let r: any = call_result(corpo)
+let causa: any = r.failure.causes[0]
+test_report(to_str(length(r.failure.causes)) + "|" + causa.kind + "|" + causa.message + "|" + causa.stack)
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	parts := strings.SplitN(text, "|", 4)
+	if len(parts) != 4 || parts[0] != "1" || parts[1] != "runtime" {
+		t.Fatalf("unexpected report: %q", text)
+	}
+	if !strings.Contains(parts[2], "defer-quebrado") {
+		t.Fatalf("cause message should carry the deferred failure: %q", parts[2])
+	}
+	if !strings.Contains(parts[3], "defer registration") {
+		t.Fatalf("cause stack must carry the registration location as outermost frame: %q", parts[3])
+	}
+}
+
+// TestCallResultCleanupFirstFailure cobre o caso "cleanup as first failure"
+// (design §2): o corpo TERMINA COM SUCESSO (return 42) mas o defer de
+// limpeza falha durante o unwind — cleanup-first promove essa falha diferida
+// a falha PRIMARIA do envelope (ok=false, value=null), descartando o valor
+// computado, com zero causes (nao ha falha primaria original para aninhar
+// sob ela).
+func TestCallResultCleanupFirstFailure(t *testing.T) {
+	source := `
+func limpeza_ruim()
+    to_int("so-o-defer-quebra")
+end
+
+func corpo() -> int
+    defer limpeza_ruim()
+    return 42
+end
+
+let r: any = call_result(corpo)
+test_report(to_str(r.ok) + "|" + to_str(r.value == null) + "|" + r.failure.message + "|" + to_str(length(r.failure.causes)))
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	parts := strings.SplitN(text, "|", 4)
+	if len(parts) != 4 || parts[0] != "false" || parts[1] != "true" || parts[3] != "0" {
+		t.Fatalf("cleanup-first must discard the computed value and promote the deferred failure: %q", text)
+	}
+	if !strings.Contains(parts[2], "so-o-defer-quebra") {
+		t.Fatalf("primary failure should be the deferred one: %q", parts[2])
+	}
+}
+
+// TestCallResultCallerDefersUnaffected cobre isolamento do frame chamador: a
+// captura de falha em call_result(corpo) NAO deve interromper a execucao do
+// chamador nem disparar prematuramente o defer do PROPRIO chamador — a
+// execucao continua apos a captura (append "depois-da-captura" roda) e o
+// defer do chamador so dispara quando a FUNCAO CHAMADORA retorna (append
+// "caller-defer" fica por ultimo). Vehicle sem adaptacao: `trilha` e o global
+// mutado por append de dentro de func e closure exatamente como no brief —
+// verificado a parte (fora do arquivo final de teste) que mutacao de global
+// via append dentro de funcoes chega visivel ao `let` de nivel superior
+// (mesmo padrao de TestGlobalPathMutationStillWorks em
+// value_semantics_test.go, so que via chamada de native com parametro ref
+// em vez de indexacao direta); a ressalva do brief sobre CoW/global nao se
+// materializou aqui, entao a asserção original fica com o vetor de prova
+// mais direto.
+func TestCallResultCallerDefersUnaffected(t *testing.T) {
+	source := `
+let trilha: string[] = []
+
+func marca(rotulo: string)
+    append(trilha, rotulo)
+end
+
+func corpo() -> int
+    return to_int("x")
+end
+
+func chamador() -> string
+    defer marca("caller-defer")
+    let r: any = call_result(corpo)
+    append(trilha, "depois-da-captura")
+    return to_str(r.ok)
+end
+
+let ok_text: string = chamador()
+test_report(ok_text + "|" + trilha[0] + "|" + trilha[1])
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	if text != "false|depois-da-captura|caller-defer" {
+		t.Fatalf("caller frame must be unaffected by the capture: %q", text)
+	}
+}
+
 func TestCallResultMisuseRaisesSynchronously(t *testing.T) {
 	cases := []struct {
 		name, source, wantErr string
