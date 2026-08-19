@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
@@ -96,6 +97,19 @@ func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err err
 	}()
 
 	ownerFrameCount := vm.frameCount
+	// Registrado DEPOIS do defer de cleanup acima: defers do Go rodam LIFO,
+	// entao num panico este corpo roda PRIMEIRO (hardUnwindTo restaura os
+	// frames acima da fronteira) e SO ENTAO o cleanup acima roda (restaura a
+	// janela da pilha e solta os argumentos preparados). Se a ordem fosse
+	// invertida o cleanup rodaria sobre frames que o unwind ainda nao
+	// desfez — vm.stackTop e vm.frameCount ficariam inconsistentes.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			vm.hardUnwindTo(ownerFrameCount)
+			result = value.NewNull()
+			err = &boundaryPanicError{payload: fmt.Sprint(recovered), stack: string(debug.Stack())}
+		}
+	}()
 	vm.push(call.Callee)
 	for _, argument := range call.Arguments {
 		vm.push(argument)
@@ -110,11 +124,52 @@ func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err err
 		if runErr := vm.run(ownerFrameCount+1, &result); runErr != nil {
 			return value.NewNull(), runErr
 		}
+		// RC: o envelope ok (callResultOkEnvelope) guarda `result` no campo
+		// "value" via NewMapWithData, que — ao contrario de OP_MAP/OP_ARRAY —
+		// NAO retem os valores que recebe. Sem este retain, uma composta
+		// devolvida sem dono previo (Owners=0, caso comum de um retorno
+		// fresco) apareceria com Owners=1 apos o PRIMEIRO `let` no lado Noxy
+		// que capturar r.value; IsShared ficaria falso e uma mutacao nesse
+		// primeiro binding aconteceria in-place, vazando para qualquer outra
+		// leitura de r.value (mesmo objeto, guardado por referencia no mapa)
+		// — corrupcao comprovada por TestCallResultValueSemantics antes deste
+		// retain ("100|100|3" em vez de "1|100|3"). O retain aqui da ao
+		// envelope o mesmo dono-duravel que OP_MAP teria registrado se este
+		// valor tivesse sido escrito por bytecode Noxy comum.
+		value.Retain(result)
 		return result, nil
 	}
-	// native/construtor: sem frame novo; resultado no topo da pilha.
-	return vm.peek(0), nil
+	// native/construtor: sem frame novo; resultado no topo da pilha. Mesmo
+	// retain do ramo acima, mesma justificativa.
+	result = vm.peek(0)
+	value.Retain(result)
+	return result, nil
 }
+
+// boundaryPanicError transporta um panico de Go recuperado na fronteira; o
+// envelope o converte em Failure{kind: "panic"}. Nunca escapa da fronteira.
+type boundaryPanicError struct {
+	payload string
+	stack   string
+}
+
+func (err *boundaryPanicError) Error() string { return err.payload }
+
+// hardUnwindTo libera os frames acima de target sem executar defers Noxy —
+// depois de um panico de Go o estado desses frames e suspeito; espelha a
+// fronteira de task, que tambem nao roda defers no caminho de panico (o VM
+// filho e abandonado). Truncar Deferred antes de finalizar reusa o funil
+// unico de release (Owned/upvalues) sem rodar codigo Noxy.
+func (vm *VM) hardUnwindTo(target int) {
+	for vm.frameCount > target {
+		if frame := vm.currentFrame; frame != nil {
+			frame.Deferred = frame.Deferred[:0]
+		}
+		vm.finalizeCurrentFrame(frameOutcome{Err: errBoundaryPanic})
+	}
+}
+
+var errBoundaryPanic = fmt.Errorf("call_result: unwinding after Go panic")
 
 func callResultOkEnvelope(result value.Value) value.Value {
 	return value.NewMapWithData(map[string]value.Value{
@@ -138,6 +193,14 @@ func callResultFailureEnvelope(err error) value.Value {
 // (Primary nil) promove a PRIMEIRA falha diferida a primaria e agrega as
 // demais sob as causes dela (design §2, "Cleanup as first failure").
 func failureMap(err error) value.Value {
+	if panicErr, ok := err.(*boundaryPanicError); ok {
+		return value.NewMapWithData(map[string]value.Value{
+			"kind":    value.NewString("panic"),
+			"message": value.NewString(panicErr.payload),
+			"stack":   value.NewString(panicErr.stack),
+			"causes":  value.NewArray([]value.Value{}),
+		})
+	}
 	if unwind, ok := err.(*UnwindError); ok {
 		if unwind.Primary != nil {
 			return failureMapWithCauses(unwind.Primary, unwind.Deferred)

@@ -304,6 +304,86 @@ test_report(ok_text + "|" + trilha[0] + "|" + trilha[1])
 	}
 }
 
+func TestCallResultCapturesGoPanic(t *testing.T) {
+	machine := New()
+	machine.DefineNative("explode", func(args []value.Value) value.Value {
+		panic("boom-nativo")
+	})
+	source := `
+func corpo() -> int
+    explode()
+    return 1
+end
+let r: any = call_result(corpo)
+test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message)
+`
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	text, _ := captured.Obj.(string)
+	if !strings.HasPrefix(text, "false|panic|") || !strings.Contains(text, "boom-nativo") {
+		t.Fatalf("panic must be captured as kind=panic: %q", text)
+	}
+}
+
+func TestCallResultNestedBoundaries(t *testing.T) {
+	source := `
+func interna() -> int
+    return to_int("x")
+end
+func externa() -> string
+    let r: any = call_result(interna)
+    return "interna-capturou:" + to_str(r.ok)
+end
+let fora: any = call_result(externa)
+test_report(to_str(fora.ok) + "|" + fora.value)
+`
+	reported := captureVMSource(t, source)
+	if text, _ := reported.Obj.(string); text != "true|interna-capturou:false" {
+		t.Fatalf("nearest boundary must capture: %q", text)
+	}
+}
+
+func TestCallResultNoRollback(t *testing.T) {
+	source := `
+func muta_e_quebra(alvo: ref int) -> int
+    *alvo = 99
+    return to_int("x")
+end
+let caixa: int = 1
+let r: any = call_result(muta_e_quebra, ref caixa)
+test_report(to_str(r.ok) + "|" + to_str(caixa))
+`
+	reported := captureVMSource(t, source)
+	if text, _ := reported.Obj.(string); text != "false|99" {
+		t.Fatalf("mutations before the failure must remain (no rollback): %q", text)
+	}
+}
+
+func TestCallResultValueSemantics(t *testing.T) {
+	source := `
+func faz_array() -> int[]
+    return [1, 2, 3]
+end
+let r: any = call_result(faz_array)
+let copia: int[] = r.value
+copia[0] = 100
+let original: any = r.value
+test_report(to_str(original[0]) + "|" + to_str(copia[0]) + "|" + to_str(length(original)))
+`
+	reported := captureVMSource(t, source)
+	if text, _ := reported.Obj.(string); text != "1|100|3" {
+		t.Fatalf("composite value must obey CoW semantics without corruption: %q", text)
+	}
+}
+
 func TestCallResultMisuseRaisesSynchronously(t *testing.T) {
 	cases := []struct {
 		name, source, wantErr string
