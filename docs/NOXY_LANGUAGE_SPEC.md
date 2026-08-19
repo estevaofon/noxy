@@ -1123,7 +1123,16 @@ precedent: `fmt("%T", r)` reports `map`, and the envelope does not compare
 equal to a hand-constructed `CallResult(...)` instance. Promoting the
 envelopes (this one and `task_await`'s) to genuine struct instances is a
 single future change, gated on natives being able to construct
-stdlib-declared structs.
+stdlib-declared structs. The annotation is nonetheless honored, and by a
+general rule rather than a special case for this envelope: wherever a struct
+shape is expected at a dynamic-boundary annotation or marker, the runtime
+type validator admits any structurally matching map — every field the struct
+declares present, each recursively compatible with the declared field type —
+without nominal checking, and without stamping the map as that struct. The
+admission stops at nominal gates: task-argument validation (`spawn_task`) and
+every other check that requires a real struct instance still reject a map, so
+a `CallResult` envelope passed as a typed task argument fails today;
+unifying the two matchers is tracked as follow-up.
 
 **What the boundary does not change.**
 

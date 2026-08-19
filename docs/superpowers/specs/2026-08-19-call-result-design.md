@@ -216,11 +216,18 @@ equal to a hand-constructed `CallResult(...)` instance. Promoting the
 envelopes (this one and `task_await`'s) to genuine struct instances is a
 single future change, gated on natives being able to construct
 stdlib-declared structs — see "Relation to the task boundary". The typed
-annotation (`let r: CallResult = ...`) is honored by the runtime type
-validator accepting a structurally matching map wherever a struct shape is
-expected at the dynamic boundary; the `IntResult` precedent never exercised
-this path because it has no composite field, and the `call_result`
-implementation extended the validator accordingly.
+annotation (`let r: CallResult = ...`) is honored by a general rule rather
+than a special case for this envelope: wherever a struct shape is expected at
+a dynamic-boundary annotation or marker, the runtime type validator admits any
+structurally matching map — every field the struct declares present, each
+recursively compatible with the declared field type — without nominal
+checking, and without stamping the map as that struct. The `IntResult`
+precedent never exercised this path because it has no composite field, and the
+`call_result` implementation extended the validator accordingly. The admission
+stops at nominal gates: task-argument validation (`spawn_task`) and every
+other check that requires a real struct instance still reject a map, so a
+`CallResult` envelope passed as a typed task argument fails today; unifying
+the two matchers is tracked as follow-up.
 
 **What the boundary does not change.**
 
@@ -361,6 +368,14 @@ would be the third.
   with the envelope discarded is the empty-catch antipattern; a compile-time
   diagnostic (precedent: Rust's `#[must_use]`) is future work — the compiler
   knows the native's name.
+- **Matcher unification.** Two type matchers disagree about the envelope: the
+  runtime type validator admits any structurally matching map where a struct
+  shape is expected, while task-argument validation (`spawn_task`) and the
+  other nominal gates demand a real struct instance — so `let r: CallResult =
+  call_result(f)` is accepted and `spawn_task(g, r)` with a `CallResult`
+  parameter is not. Unifying them is follow-up work; promoting the envelopes
+  to genuine struct instances would dissolve the split instead, which makes
+  the two items worth sequencing together.
 - **Callback-native audit.** The "through native frames" rule requires every
   callback-invoking native to forward Noxy failures; implementation must
   audit the existing ones (HTTP server handlers foremost) and add a
