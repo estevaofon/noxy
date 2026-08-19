@@ -384,6 +384,89 @@ test_report(to_str(original[0]) + "|" + to_str(copia[0]) + "|" + to_str(length(o
 	}
 }
 
+// TestCallResultPanicSkipsPendingNoxyDeferAndReleasesCapturedArgs cobre o
+// achado do review em hardUnwindTo (fix loop): um defer Noxy pendente nos
+// frames abandonados pelo panico NAO pode rodar (defer.Deferred truncado sem
+// invocacao — mesma promessa do design para task, "VM filho e abandonado"),
+// E o argumento composto que esse defer capturou em prepareDeferredCall
+// (retainPreparedArguments, defer.go:35/101-110) precisa ser liberado mesmo
+// sem invocacao, senao o dono fica vazado (composto permanece IsShared para
+// sempre — clona a cada mutacao, e um ref vivo para o slot original divergia
+// do clone).
+//
+// A asserção de RC usa delta, nao valor absoluto: probe_capture e um native
+// nao assinado e nao listado em readonlyNatives, entao o caminho conservador
+// de callValue (calls.go) ja aplica um retain PERMANENTE (nunca solto) sobre
+// o mapa so por passa-lo como argumento de chamada comum — isso soma ao
+// retain do proprio `let m` local. `baseline` captura Owners(m) LOGO APOS
+// essa chamada (antes do defer ser registrado), refletindo os dois retains
+// que nao tem nada a ver com o defer. Depois do defer, Owners = baseline+1
+// (captura do defer). O panico dispara hardUnwindTo, que SEMPRE libera o
+// binding local `m` (frame.Owned, teardown incondicional de frame) — isso
+// sozinho already devolveria Owners a baseline mesmo SEM soltar a captura do
+// defer, entao um teste que so verificasse "Owners == baseline" nao pegaria
+// o vazamento (e o motivo de precisar do baseline capturado ANTES do
+// registro do defer, nao depois: com o vazamento, o valor final coincide
+// com baseline por acidente). O fix soma mais um release (o da captura do
+// defer): o valor final correto e baseline-1. Sem o fix desta rodada de
+// review (frame.Deferred = frame.Deferred[:0] sem release), o valor final
+// fica em baseline — este teste falha exatamente contra o codigo antigo e
+// passa contra o fix.
+func TestCallResultPanicSkipsPendingNoxyDeferAndReleasesCapturedArgs(t *testing.T) {
+	machine := New()
+	machine.DefineNative("explode", func(args []value.Value) value.Value {
+		panic("boom-com-defer-pendente")
+	})
+	var capturedMap value.Value
+	var baseline int32
+	machine.DefineNative("probe_capture", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			capturedMap = args[0]
+			baseline = value.OwnersCount(args[0])
+		}
+		return value.NewNull()
+	})
+	source := `
+let trilha: string[] = []
+
+func marca(rotulo: string)
+    append(trilha, rotulo)
+end
+
+func cleanup(m: map[string, int])
+    marca("cleanup-nao-deveria-rodar")
+end
+
+func corpo() -> int
+    let m: map[string, int] = {"a": 1}
+    probe_capture(m)
+    defer cleanup(m)
+    explode()
+    return 1
+end
+
+let r: any = call_result(corpo)
+test_report(to_str(r.ok) + "|" + to_str(length(trilha)))
+`
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	text, _ := captured.Obj.(string)
+	if text != "false|0" {
+		t.Fatalf("pending Noxy defer must NOT run on the panic path: %q", text)
+	}
+	if got := value.OwnersCount(capturedMap); got != baseline-1 {
+		t.Fatalf("hardUnwindTo must release the pending defer's captured composite argument: baseline=%d, want %d, got %d", baseline, baseline-1, got)
+	}
+}
+
 func TestCallResultMisuseRaisesSynchronously(t *testing.T) {
 	cases := []struct {
 		name, source, wantErr string

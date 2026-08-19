@@ -160,9 +160,34 @@ func (err *boundaryPanicError) Error() string { return err.payload }
 // fronteira de task, que tambem nao roda defers no caminho de panico (o VM
 // filho e abandonado). Truncar Deferred antes de finalizar reusa o funil
 // unico de release (Owned/upvalues) sem rodar codigo Noxy.
+//
+// Nao rodar os PreparedCall pendentes NAO significa que a captura deles pode
+// ser esquecida: prepareDeferredCall ja reteve (retainPreparedArguments,
+// defer.go:35/101-110) cada argumento composto nao-ref no REGISTRO do defer —
+// o unico lugar que desfaz isso hoje e o cleanup de invokePreparedCall
+// (defer.go:165-169), que so roda se a chamada for de fato invocada. Pular a
+// invocacao sem soltar essa retencao vaza um dono por argumento composto de
+// cada defer pendente nos frames abandonados: o valor fica IsShared para
+// sempre (clona a cada mutacao) e, pior, um ref vivo que ainda aponte para o
+// slot original diverge do clone. Por isso cada PreparedCall e liberado aqui
+// (mesma condicao de invokePreparedCall — so VAL_FUNCTION reteve na captura;
+// native usou copia ansiosa, construtor nao reteve nada) antes do slice ser
+// truncado; cada entrada tambem e zerada (nao so descartada por indice) para
+// nao prender o PreparedCall antigo no array de suporte reusado — o mesmo
+// padrao de vazamento que os comentarios de unwind.go documentam para
+// frame.Owned.
 func (vm *VM) hardUnwindTo(target int) {
 	for vm.frameCount > target {
 		if frame := vm.currentFrame; frame != nil {
+			for i := range frame.Deferred {
+				call := frame.Deferred[i]
+				if call.Callee.Type == value.VAL_FUNCTION {
+					if closure, ok := call.Callee.Obj.(*value.ObjClosure); ok && closure != nil && closure.Function != nil {
+						vm.releasePreparedArguments(call.Arguments, closure.Function.Params)
+					}
+				}
+				frame.Deferred[i] = PreparedCall{}
+			}
 			frame.Deferred = frame.Deferred[:0]
 		}
 		vm.finalizeCurrentFrame(frameOutcome{Err: errBoundaryPanic})
