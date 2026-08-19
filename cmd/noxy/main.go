@@ -136,6 +136,15 @@ func startREPL(showDisasm bool) {
 	fmt.Printf("Noxy REPL %s\n", version.Version)
 	fmt.Println("Type 'exit' to quit.")
 
+	// Prompt roxo como no REPL do Python 3.13 (bold magenta). So colore quando
+	// stdout e um terminal capaz de ANSI — em pipe/arquivo os bytes de escape
+	// sujariam a saida — e a convencao NO_COLOR desliga a cor.
+	prompt, contPrompt := ">>> ", "... "
+	if os.Getenv("NO_COLOR") == "" && console.EnableANSIStdout() {
+		prompt = "\x1b[1;35m>>> \x1b[0m"
+		contPrompt = "\x1b[1;35m... \x1b[0m"
+	}
+
 	// Shared VM for persistence
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
 	scanner := bufio.NewScanner(os.Stdin)
@@ -161,9 +170,9 @@ func startREPL(showDisasm bool) {
 		console.EnsureLineInput()
 
 		if inputBuffer == "" {
-			fmt.Print(">>> ")
+			fmt.Print(prompt)
 		} else {
-			fmt.Print("... ")
+			fmt.Print(contPrompt)
 		}
 		os.Stdout.Sync()
 

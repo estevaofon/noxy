@@ -40,3 +40,23 @@ func ensureLineInputMode(handle windows.Handle) error {
 	}
 	return windows.SetConsoleMode(handle, want)
 }
+
+// EnableANSIStdout reports whether stdout can render ANSI escape sequences,
+// enabling ENABLE_VIRTUAL_TERMINAL_PROCESSING on the console when needed
+// (Windows Terminal ja liga por padrao; conhost classico nao). Returns false
+// when stdout is not a Windows console (pipe, file, MSYS terminal), keeping
+// escape bytes out of redirected output.
+func EnableANSIStdout() bool {
+	return enableVTOutput(windows.Handle(os.Stdout.Fd())) == nil
+}
+
+func enableVTOutput(handle windows.Handle) error {
+	var mode uint32
+	if err := windows.GetConsoleMode(handle, &mode); err != nil {
+		return err
+	}
+	if mode&windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
+		return nil
+	}
+	return windows.SetConsoleMode(handle, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+}
