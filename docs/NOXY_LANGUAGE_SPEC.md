@@ -1055,35 +1055,97 @@ else
 end
 ```
 
-**Callable and validation.** `fn` may be any callable value: a typed Noxy
-function or closure, a function value held as an exact or bare `func`, a
-struct constructor, or a native. (A native reaches the boundary as `any` or
-in argument position; the compiler does not admit `let f: func = to_int`.)
-Passing a non-callable is a synchronous runtime error in the caller.
-Arguments are evaluated in the caller's frame, before the boundary exists; an
-error during argument evaluation is not captured. Where the callee exposes
-parameter metadata — typed Noxy functions and closures, struct constructors,
-signed natives — arity and parameter-mode mismatches are synchronous runtime
-errors in the caller. The timing mirrors `spawn_task`'s synchronous
+**Signature.**
+
+```noxy
+call_result(fn, ...args)   // -> CallResult
+```
+
+`fn` is the callable to invoke — always the first argument. `...args` are
+zero or more arguments of any Noxy type (scalars, strings, bytes, arrays,
+maps, struct instances, `null`, explicit `ref`s), forwarded to `fn` exactly
+as a direct call would forward them.
+
+**Accepted callables.** Every category of callable value the language has is
+a valid `fn`. What varies is only *when* a misuse (wrong arity, wrong
+argument type, wrong parameter mode) is reported:
+
+| `fn` | Example | Misuse is reported… |
+|---|---|---|
+| Typed Noxy function | `call_result(dobro, 21)` | synchronously, in the caller |
+| Closure / function literal | `call_result(func() -> int … end)` | synchronously, in the caller |
+| Function value (exact or bare `func`) | `let f: func(int) -> int = dobro` then `call_result(f, 21)` | synchronously, in the caller |
+| Struct constructor | `call_result(Ponto, 3, 4)` | synchronously (field count and field types) |
+| Signed native | `call_result(to_int, entrada)` | synchronously, in the caller |
+| Legacy unsigned native | — | during invocation; the failure is **captured** |
+
+Passing a non-callable is a synchronous runtime error in the caller
+(`call_result expects a callable, got <type>`). A misuse reported
+synchronously raises in the caller like any other runtime error — it is
+never wrapped in an envelope, because a wrong call site is a bug in the
+program, not data. Only legacy natives without parameter metadata cannot be
+pre-validated: their misuse surfaces inside the invocation and is captured,
+indistinguishable from a failure of the callee's own body. (A native
+reaches the boundary as `any` or in argument position; the compiler does not
+admit `let f: func = to_int`.) The timing mirrors `spawn_task`'s synchronous
 validation; the domain is wider — `spawn_task` accepts only Noxy functions
 and closures, while `call_result` also accepts constructors and natives.
-Callees without metadata (legacy untyped natives) validate during invocation,
-so those failures are captured and are indistinguishable from failures of the
-callee's own body. *Compatibility note:* giving a legacy native a signature
-in a later release moves its misuse failures from captured to synchronous —
-an observable change that rides the signing, and one more reason to sign
-natives eagerly.
+*Compatibility note:* giving a legacy native a signature in a later release
+moves its misuse failures from captured to synchronous — an observable
+change that rides the signing, and one more reason to sign natives eagerly.
 
 For a struct constructor, a completed call yields the constructed instance as
 `value`, under the constructor semantics the defer section already gives that
 callee category.
 
-**Argument semantics are unchanged.** Arguments follow §4.3 exactly as in a
-direct call: composite values are independent copy-on-write values, explicit
-`ref` arguments keep reference identity. `call_result` adds no isolation — it
-is the same call, wearing a boundary.
+```noxy
+use errors select *
 
-**Envelope.** `call_result` returns a `CallResult` (module `errors`):
+struct Ponto
+    x: int
+    y: int
+end
+
+func deposita(saldo: ref int, valor: int)
+    *saldo = *saldo + valor
+end
+
+let c: CallResult = call_result(Ponto, 3, 4)      // constructor: value is the instance
+let p: any = c.value                               // p.x == 3, p.y == 4
+
+let saldo: int = 100
+call_result(deposita, ref saldo, 30)               // explicit ref keeps identity: saldo == 130
+```
+
+**Arguments.** Arguments are evaluated in the caller's frame, before the
+boundary exists; an error raised while *evaluating* an argument expression is
+not captured. Passing follows §4.3 exactly as in a direct call: composite
+values are independent copy-on-write values in the callee, and `ref`
+arguments keep reference identity. Because `call_result` is a dynamic
+boundary, a reference must be written explicitly as `ref value` (§4.2) —
+`call_result(deposita, saldo, 30)` passes a plain copy and never manufactures
+a reference. Where the callee exposes parameter metadata, the number of
+`...args` must match its arity, and each argument must satisfy the declared
+parameter type and mode — checked synchronously, per the table above.
+`call_result` adds no isolation — it is the same call, wearing a boundary.
+
+**Envelope.** `call_result` always returns a `CallResult` (module `errors`);
+it never raises for anything that happens *inside* `fn`:
+
+| Field | Type | `fn` completes | Failure captured |
+|---|---|---|---|
+| `ok` | `bool` | `true` | `false` |
+| `value` | `any` | `fn`'s return value; `null` for `void` | `null` |
+| `failure` | `Failure` | `null` | the primary failure |
+
+| `Failure` field | Type | Content |
+|---|---|---|
+| `kind` | `string` | `"runtime"` (Noxy runtime error) or `"panic"` (recovered Go panic) |
+| `message` | `string` | the error message, clean of usage advice |
+| `stack` | `string` | Noxy stack at the failure point for `"runtime"`; Go stack for `"panic"` |
+| `causes` | `Failure[]` | deferred failures aggregated during the unwinding, LIFO; empty otherwise |
+
+In detail:
 
 - `fn` completes: `ok = true`, `value` is its return value (`null` for a
   `void` return), `failure = null`. A composite `value` preserves the identity

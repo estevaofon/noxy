@@ -1,10 +1,14 @@
-// stdlib/errors.nx - Formas do envelope da fronteira sincrona de erro.
+// errors.nx - Formas do envelope da fronteira sincrona de erro.
 //
 // call_result e um nativo global; estes structs dao nome e contrato de campos
 // ao envelope que ele devolve. Fisicamente o envelope e um MAP na fronteira
 // dinamica (mesmo precedente de IntResult em convert.nx): fmt("%T") reporta
 // "map" e ele nao compara igual a um CallResult construido a mao. A anotacao
 // tipada (`let r: CallResult = ...`) vale pelo contrato de campos.
+//
+// Referencia completa (callables aceitos, semantica dos argumentos, misuse
+// sincrono vs falha capturada, agregacao de defer, cobertura de panico):
+// docs/NOXY_LANGUAGE_SPEC.md, secao "The error boundary: call_result".
 
 struct Failure
     kind: string       // "runtime" | "panic"
