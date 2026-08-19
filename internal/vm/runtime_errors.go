@@ -183,3 +183,14 @@ func renderErrorCause(prefix string, cause error) string {
 func indentError(text, indent string) string {
 	return indent + strings.ReplaceAll(text, "\n", "\n"+indent)
 }
+
+// AdvisedError separa o conselho de uso da mensagem de erro capturável: o
+// texto do erro fica limpo (Failure.message, task failure map), e só a saída
+// fatal do topo (cmd/noxy) imprime o Advice.
+type AdvisedError struct {
+	Err    error
+	Advice string
+}
+
+func (err *AdvisedError) Error() string { return err.Err.Error() }
+func (err *AdvisedError) Unwrap() error { return err.Err }

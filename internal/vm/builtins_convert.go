@@ -136,7 +136,10 @@ func (vm *VM) defineConvertBuiltins() {
 		}
 		converted, convertErr := convertValueToInt(args[0])
 		if convertErr != nil {
-			return value.NewNull(), fmt.Errorf("to_int: %w; use to_int_result to handle failure", convertErr)
+			return value.NewNull(), &AdvisedError{
+				Err:    fmt.Errorf("to_int: %w", convertErr),
+				Advice: "use to_int_result to handle failure",
+			}
 		}
 		return value.NewInt(converted), nil
 	})
@@ -147,7 +150,10 @@ func (vm *VM) defineConvertBuiltins() {
 		}
 		converted, convertErr := convertValueToFloat(args[0])
 		if convertErr != nil {
-			return value.NewNull(), fmt.Errorf("to_float: %w; use to_float_result to handle failure", convertErr)
+			return value.NewNull(), &AdvisedError{
+				Err:    fmt.Errorf("to_float: %w", convertErr),
+				Advice: "use to_float_result to handle failure",
+			}
 		}
 		return value.NewFloat(converted), nil
 	})

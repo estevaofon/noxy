@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -277,8 +278,8 @@ func TestToIntRaisesOnUnconvertibleInput(t *testing.T) {
 			if !strings.HasPrefix(message, "to_int: ") {
 				t.Fatalf("message = %q, want it to name the function", message)
 			}
-			if !strings.Contains(message, "use to_int_result to handle failure") {
-				t.Fatalf("message = %q, want the recoverable alternative", message)
+			if !strings.Contains(message, "cannot convert") {
+				t.Fatalf("message = %q, want to describe the conversion failure", message)
 			}
 		})
 	}
@@ -319,8 +320,11 @@ func TestToFloatRaisesOnUnconvertibleInput(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			message := requireStrictConversionError(t, machine, "to_float", test.input)
-			if !strings.Contains(message, "use to_float_result to handle failure") {
-				t.Fatalf("message = %q, want the recoverable alternative", message)
+			if !strings.HasPrefix(message, "to_float: ") {
+				t.Fatalf("message = %q, want it to name the function", message)
+			}
+			if !strings.Contains(message, "cannot convert") {
+				t.Fatalf("message = %q, want to describe the conversion failure", message)
 			}
 		})
 	}
@@ -461,5 +465,20 @@ func TestToStrBoundsTheEchoedPayload(t *testing.T) {
 	}
 	if len([]rune(err.Error())) > 200 {
 		t.Fatalf("message is %d characters, want a bounded message", len([]rune(err.Error())))
+	}
+}
+
+func TestToIntAdvisedError(t *testing.T) {
+	machine := New()
+	err := interpretVMSource(t, machine, `to_int("abc")`)
+	if err == nil {
+		t.Fatal("expected runtime error")
+	}
+	if strings.Contains(err.Error(), "use to_int_result") {
+		t.Fatalf("advisory suffix leaked into capturable message: %v", err)
+	}
+	var advised *AdvisedError
+	if !errors.As(err, &advised) || advised.Advice != "use to_int_result to handle failure" {
+		t.Fatalf("advice not carried structurally: %v", err)
 	}
 }
