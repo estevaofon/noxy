@@ -1,0 +1,75 @@
+// erro_com_cleanup.nx — erro recuperavel COM cleanup garantido em Noxy.
+// A regra: erro esperado viaja como Result<T> e sai da funcao por return,
+// entao os `defer` pendentes RODAM no caminho de erro. `exit()` so no topo,
+// depois de tudo desmontado — exit() e os.Exit: mata o processo sem rodar
+// defer nenhum.
+use io
+use sys select exit
+
+struct Result<T>
+    ok: bool,
+    valor: T,
+    erro: string
+end
+
+func sucesso<T>(valor: T) -> Result<T>
+    return Result(true, valor, "")
+end
+
+func falha<T>(msg: string) -> Result<T>
+    let vazio: T
+    return Result(false, vazio, msg)
+end
+
+func fecha_com_log(file: io.File, nome: string) -> void
+    io.close(file)
+    print(f"  [cleanup] arquivo '{nome}' fechado")
+end
+
+// Grava um relatorio; pode falhar DEPOIS de ja ter aberto o recurso.
+// O defer garante o fechamento nos DOIS caminhos: sucesso e erro.
+func grava_relatorio(caminho: string, linhas: string[]) -> Result<int>
+    let file: io.File = io.open(caminho, "w")
+    if !file.open then
+        let r: Result<int> = falha(f"nao consegui abrir '{caminho}'")
+        return r
+    end
+    defer fecha_com_log(file, caminho)   // <- registrado APOS abrir com sucesso
+
+    if length(linhas) == 0 then
+        // Caminho de erro: retornamos um Result e o defer acima RODA
+        // no unwind do return — o arquivo nao fica aberto/lockado.
+        let r: Result<int> = falha("relatorio vazio: nada a gravar")
+        return r
+    end
+
+    let gravadas: int = 0
+    for linha in linhas do
+        io.write(file, linha + "\n")
+        gravadas = gravadas + 1
+    end
+    return sucesso(gravadas)             // caminho feliz: defer roda aqui tambem
+end
+
+// --- Uso: o chamador decide; o processo so morre no TOPO ---
+
+print("1) caminho feliz:")
+let linhas: string[] = ["total: 42", "erros: 0"]
+let ok: Result<int> = grava_relatorio("relatorio_demo.txt", linhas)
+print(f"  ok={ok.ok}, linhas gravadas={ok.valor}")
+
+print("2) caminho de erro (recurso ja aberto quando o erro acontece):")
+let vazio: string[] = []
+let err: Result<int> = grava_relatorio("relatorio_demo.txt", vazio)
+print(f"  ok={err.ok}, erro={err.erro}")
+
+// Limpeza do artefato da demo
+io.remove("relatorio_demo.txt")
+
+// So AQUI, com todos os defers ja executados, decidimos o exit code.
+// Se troca-se o `return r` la dentro por exit(1), o "[cleanup]" do
+// caminho 2 nunca imprimiria — os.Exit nao roda defer.
+if err.ok == false then
+    print("3) saindo com codigo de erro no topo, depois do cleanup")
+    exit(1)
+end
