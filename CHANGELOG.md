@@ -1,6 +1,50 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.1] - 2026-08-19
+
+### Fixed (BREAKING) — Igualdade estrita de ref: `==`/`!=` nunca dereferencia implicitamente
+
+- **O caso misto `ref` vs valor virou erro de compilação com hint.** Completa
+  a regra iniciada pela correção de identidade abaixo: em `==`/`!=` um
+  operando `ref` nunca é dereferenciado implicitamente. O `=` já recusava
+  conversão implícita de ref nas duas direções pelo mesmo motivo — o
+  significado deve ser evidente na sintaxe, nunca decidido por tipos que não
+  aparecem no código. Antes, `x == y` perguntava identidade ou valor
+  dependendo dos tipos estáticos dos dois lados; agora cada pergunta tem sua
+  sintaxe:
+
+  ```noxy
+  ra == rb     // identidade de slot
+  ra == null   // o próprio ref é nulo?
+  *ra == 1     // valor apontado, explícito
+  ra == 1      // ERRO: cannot compare ref int with int: a ref is never
+               //       implicitly dereferenced in '=='
+               //   hint: use '*ra' to compare the referenced value
+  ```
+
+- **A ambiguidade do null foi resolvida de graça pela mesma regra**: um ref
+  VÁLIDO apontando para um slot que contém `null` não é mais "igual a null"
+  — `r == null` pergunta sobre o próprio ref e `*r == null` sobre o valor
+  apontado, duas perguntas que o deref implícito tornava indistinguíveis. O
+  padrão comum `no.proximo != null` continua funcionando idêntico (o
+  terminador é um ref nulo de verdade).
+
+- Em runtime, `OP_EQUAL` deixou de resolver o caso misto: na fronteira
+  dinâmica (ex.: campo `ref` lido via membro de `any`), ref vs valor é
+  simplesmente diferente (`false`), e ref vs ref segue por identidade.
+
+- Migração: comparações mistas quebram **em compilação**, com o hint
+  apontando o conserto (`*r`). Código que usava `r == null` para perguntar
+  "o slot apontado está vazio?" (padrão fill-null-slot) migra para
+  `*r == null` — no repositório, isso alcançou exatamente 4 dos 170
+  exemplos (`bst.nx`, `binary_tree.nx`, `linked_list.nx`,
+  `test_explicit_deref.nx`), migrados nesta release; travessias com
+  `cur != null`/`no.proximo != null` não mudam. Spec atualizada: §2.2
+  (regra 7) e §2.3 (exceção 1 reescrita, com o par
+  `r == null`/`*r == null`). Testes:
+  `internal/compiler/ref_equality_strict_test.go`,
+  `internal/vm/ref_equality_strict_runtime_test.go` e as suítes de
+  semântica em `noxy_examples/`.
 
 ### Fixed (BREAKING) — `==`/`!=` entre dois `ref` compara identidade
 
@@ -25,14 +69,12 @@
   ra == rb    // antes: true   agora: false  (slots distintos)
   ```
 
-  O caso **misto** é deliberadamente preservado: um `ref` comparado contra um
-  não-`ref` continua fazendo auto-deref e lendo o valor apontado, agora
-  resolvido em runtime por `OP_EQUAL` (que enxerga os dois operandos de uma
-  vez, ao contrário do compilador, que ainda não conhece o tipo do lado
-  direito quando o deref do esquerdo precisaria ser emitido). Isso mantém
-  intactos `no.proximo != null`, `res.err != null` e `contador == 10` — os
-  169 exemplos de `noxy_examples/` passam sem alteração, incluindo listas
-  encadeadas, BST e grafos.
+  O caso **misto** (ref contra não-ref) chegou a ser preservado com
+  auto-deref em runtime, mas ainda nesta release a regra foi completada e
+  ele passou a ser rejeitado em compilação — ver "Igualdade estrita de ref"
+  abaixo, que descreve a semântica final: `no.proximo != null` continua
+  intacto (nulidade do próprio ref), e `contador == 10` migra para
+  `*contador == 10`.
 
   Migração: código que dependia de `ref == ref` como comparação de valor deve
   dereferenciar explicitamente um dos lados (`*ra == *rb`) ou comparar contra
@@ -67,7 +109,7 @@
   "ordenacao de strings" da suíte de semântica.
 
 - `noxy_examples/language_semantics_test2.nx`: parte 2 da suíte de semântica
-  (129 asserções em 12 grupos — conversões numéricas, structs de resultado do
+  (131 asserções em 12 grupos — conversões numéricas, structs de resultado do
   `convert`, `fmt`, as três formas de import, stdlib `strings` por code
   point, ordenação de strings, `bytes` por octeto, arrays fixos e containers
   aninhados, listas ligadas com `ref Node`/`GNode<T>`, `ref` avançado
