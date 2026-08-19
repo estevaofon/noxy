@@ -62,6 +62,65 @@ test_report(fmt("%T", r))
 	}
 }
 
+func TestCallResultCapturesRuntimeError(t *testing.T) {
+	source := `
+use errors select *
+
+func quebra(texto: string) -> int
+    return to_int(texto)
+end
+
+let r: CallResult = call_result(quebra, "abc")
+let depois: int = 40 + 2
+test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message + "|" + to_str(length(r.failure.causes)) + "|" + to_str(r.value == null) + "|" + to_str(depois))
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	parts := strings.Split(text, "|")
+	if len(parts) != 6 || parts[0] != "false" || parts[1] != "runtime" || parts[3] != "0" || parts[4] != "true" || parts[5] != "42" {
+		t.Fatalf("unexpected report: %q", text)
+	}
+	if !strings.Contains(parts[2], "cannot convert") || strings.Contains(parts[2], "use to_int_result") {
+		t.Fatalf("message wrong or advisory suffix leaked: %q", parts[2])
+	}
+}
+
+func TestCallResultFailureStackExcludesBoundary(t *testing.T) {
+	source := `
+func fundo() -> int
+    return to_int("x")
+end
+func meio() -> int
+    return fundo()
+end
+let r: any = call_result(meio)
+test_report(r.failure.stack)
+`
+	reported := captureVMSource(t, source)
+	stack, _ := reported.Obj.(string)
+	if !strings.Contains(stack, "in fundo") || !strings.Contains(stack, "in meio") {
+		t.Fatalf("stack missing inner frames: %q", stack)
+	}
+	if strings.Contains(stack, "call_result") {
+		t.Fatalf("stack must stop before the boundary frame: %q", stack)
+	}
+}
+
+func TestCallResultCapturesStackOverflow(t *testing.T) {
+	source := `
+func infinita() -> int
+    return infinita()
+end
+let r: any = call_result(infinita)
+test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message)
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	if !strings.HasPrefix(text, "false|runtime|") || !strings.Contains(text, "stack overflow") {
+		t.Fatalf("frame exhaustion should be captured: %q", text)
+	}
+}
+
 func TestCallResultMisuseRaisesSynchronously(t *testing.T) {
 	cases := []struct {
 		name, source, wantErr string

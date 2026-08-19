@@ -124,11 +124,81 @@ func callResultOkEnvelope(result value.Value) value.Value {
 	})
 }
 
-// placeholder ate a Task 5 (mantem o pacote compilando):
 func callResultFailureEnvelope(err error) value.Value {
 	return value.NewMapWithData(map[string]value.Value{
 		"ok":      value.NewBool(false),
 		"value":   value.NewNull(),
-		"failure": value.NewNull(),
+		"failure": failureMap(err),
 	})
+}
+
+// failureMap converte a arvore de erro do unwinding no shape Failure.
+// UnwindError com Primary vira a falha primaria com cada DeferredError em
+// causes (ordem LIFO ja garantida por finalizeCurrentFrame); cleanup-first
+// (Primary nil) promove a PRIMEIRA falha diferida a primaria e agrega as
+// demais sob as causes dela (design §2, "Cleanup as first failure").
+func failureMap(err error) value.Value {
+	if unwind, ok := err.(*UnwindError); ok {
+		if unwind.Primary != nil {
+			return failureMapWithCauses(unwind.Primary, unwind.Deferred)
+		}
+		if len(unwind.Deferred) > 0 {
+			primary := deferredFailureMap(&unwind.Deferred[0], unwind.Deferred[1:])
+			return primary
+		}
+	}
+	if deferred, ok := err.(*DeferredError); ok {
+		return deferredFailureMap(deferred, nil)
+	}
+	if deferred, ok := err.(DeferredError); ok {
+		return deferredFailureMap(&deferred, nil)
+	}
+	return failureMapWithCauses(err, nil)
+}
+
+func failureMapWithCauses(primary error, deferred []DeferredError) value.Value {
+	causes := make([]value.Value, 0, len(deferred))
+	for index := range deferred {
+		causes = append(causes, deferredFailureMap(&deferred[index], nil))
+	}
+	message := ""
+	if primary != nil {
+		message = primary.Error()
+	}
+	return value.NewMapWithData(map[string]value.Value{
+		"kind":    value.NewString("runtime"),
+		"message": value.NewString(message),
+		"stack":   value.NewString(deepestRuntimeStack(primary)),
+		"causes":  value.NewArray(causes),
+	})
+}
+
+// deferredFailureMap constroi a Failure de uma falha diferida: a causa vira a
+// falha (aninhando as proprias causes dela recursivamente via failureMap) e a
+// localizacao de REGISTRO do defer entra como frame mais externo do stack —
+// forma-envelope da promessa da spec de defer ("with its registration
+// location"). siblings sao falhas diferidas posteriores promovidas para as
+// causes desta (apenas no caso cleanup-first).
+func deferredFailureMap(deferred *DeferredError, siblings []DeferredError) value.Value {
+	failure := failureMap(deferred.Cause)
+	mapping := failure.Obj.(*value.ObjMap)
+
+	stackValue, _ := mapping.Get("stack")
+	stack, _ := stackValue.Obj.(string)
+	registrationFrame := fmt.Sprintf("[%s] defer registration", deferred.Registration)
+	if stack == "" {
+		stack = registrationFrame
+	} else {
+		stack = stack + "\n" + registrationFrame
+	}
+	mapping.Set("stack", value.NewString(stack))
+
+	if len(siblings) > 0 {
+		causes := make([]value.Value, 0, len(siblings))
+		for index := range siblings {
+			causes = append(causes, deferredFailureMap(&siblings[index], nil))
+		}
+		mapping.Set("causes", value.NewArray(causes))
+	}
+	return failure
 }
