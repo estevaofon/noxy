@@ -9,6 +9,7 @@ import (
 
 func (vm *VM) defineConcurrencyBuiltins() {
 	vm.defineTaskBuiltins()
+	vm.defineCallResultBuiltins()
 
 	// Concurrency Primitives
 	vm.DefineContextualNative("spawn", func(context value.NativeContext, args []value.Value) (value.Value, error) {

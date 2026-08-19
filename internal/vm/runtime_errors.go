@@ -101,9 +101,21 @@ func sourceLocation(c *chunk.Chunk, ip int) SourceLocation {
 	return location
 }
 
+// captureNoxyStack renderiza os frames Noxy vivos, do mais recente para o mais
+// antigo. Para em vm.stackCaptureFloor — 0 fora de uma fronteira de
+// call_result, ou seja, pilha completa como sempre; dentro da fronteira, o
+// piso e o frame count do chamador, o que corta exatamente os frames abaixo
+// (e inclusive) do ponto onde call_result foi chamado.
 func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
-	frames := make([]string, 0, vm.frameCount)
-	for i := vm.frameCount - 1; i >= 0; i-- {
+	floor := vm.stackCaptureFloor
+	if floor < 0 {
+		floor = 0
+	}
+	if floor > vm.frameCount {
+		floor = vm.frameCount
+	}
+	frames := make([]string, 0, vm.frameCount-floor)
+	for i := vm.frameCount - 1; i >= floor; i-- {
 		frame := &vm.frames[i]
 		if frame.Closure == nil || frame.Closure.Function == nil {
 			continue
@@ -183,3 +195,14 @@ func renderErrorCause(prefix string, cause error) string {
 func indentError(text, indent string) string {
 	return indent + strings.ReplaceAll(text, "\n", "\n"+indent)
 }
+
+// AdvisedError separa o conselho de uso da mensagem de erro capturável: o
+// texto do erro fica limpo (Failure.message, task failure map), e só a saída
+// fatal do topo (cmd/noxy) imprime o Advice.
+type AdvisedError struct {
+	Err    error
+	Advice string
+}
+
+func (err *AdvisedError) Error() string { return err.Err.Error() }
+func (err *AdvisedError) Unwrap() error { return err.Err }

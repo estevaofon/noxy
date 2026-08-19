@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -269,6 +270,10 @@ func startREPL(showDisasm bool) {
 		// VM.Interpret resets stack but keeps globals (which we want).
 		if err := machine.Interpret(chunk); err != nil {
 			fmt.Printf("Runtime error: %s\n", err)
+			var advised *vm.AdvisedError
+			if errors.As(err, &advised) {
+				fmt.Printf("hint: %s\n", advised.Advice)
+			}
 		}
 
 		inputBuffer = "" // Reset buffer after execution
@@ -336,6 +341,10 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Printf("Runtime error: %s\n", err)
+		var advised *vm.AdvisedError
+		if errors.As(err, &advised) {
+			fmt.Printf("hint: %s\n", advised.Advice)
+		}
 		return 1
 	}
 	return 0

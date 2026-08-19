@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.7.2] - 2026-08-19
+
+### Added — `call_result`: fronteira síncrona de erro
+
+- Novo nativo global `call_result(fn, ...args)` converte uma falha de runtime
+  que desenrola de `fn` em valor: envelope `{ok, value, failure}` com
+  `failure = {kind, message, stack, causes}` — o mesmo vocabulário da
+  fronteira de task, estendido com as falhas de defer agregadas (`causes`,
+  ordem LIFO, localização de registro no stack). Misuse (não-callable,
+  aridade/modos/campos errados onde há metadata) levanta síncrono no
+  chamador. Panics de Go viram `kind="panic"`; fatais do runtime Go seguem
+  fatais. Sem rollback: mutações via `ref`/globais/upvalues permanecem.
+- Novo módulo stdlib `errors` com os shapes `Failure` e `CallResult`
+  (fisicamente o envelope é um map na fronteira dinâmica, como `IntResult`).
+- O validador de tipo em runtime passou a aceitar, na fronteira dinâmica, um
+  map estruturalmente compatível onde um struct é esperado (todo campo do
+  schema precisa existir no map com tipo recursivamente compatível) — sem
+  isso `let r: CallResult = call_result(...)` não tiparia: `CallResult`
+  aninha `failure: Failure`, que por sua vez tem `causes: Failure[]`, campo
+  composto que o precedente `IntResult` nunca tinha e por isso nunca
+  exercitou esse caminho do validador.
+- Gêmeos `_result` agora são escrevíveis em noxy puro (ver
+  `noxy_examples/result_pattern.nx`).
+
+### Changed
+
+- `to_int`/`to_float`: o sufixo "; use to_int_result to handle failure" saiu
+  da mensagem de erro (agora limpa e capturável) e virou `hint:` impresso
+  apenas na saída fatal do topo.
+
+### Deprecated
+
+- Módulo `result` (`use result`): substituído pela convenção `_result` +
+  módulo `errors`. Remoção na próxima release.
+
 ## [0.7.1] - 2026-08-19
 
 ### Fixed (BREAKING) — Igualdade estrita de ref: `==`/`!=` nunca dereferencia implicitamente
