@@ -196,6 +196,36 @@ func (vm *VM) hardUnwindTo(target int) {
 
 var errBoundaryPanic = fmt.Errorf("call_result: unwinding after Go panic")
 
+// retainingMap e retainingArray espelham OP_MAP/OP_ARRAY (executor.go,
+// "elemento e dono duravel"): o composto pai vira dono duravel de cada filho
+// composto que guarda. value.NewMapWithData/value.NewArray, ao contrario dos
+// opcodes, NAO retem o que recebem — sem estes funis a arvore de Failure
+// nasceria com Owners=0 nos filhos e o PRIMEIRO `let` do lado Noxy que
+// capturasse r.failure (ou uma entrada de causes) levaria o filho a Owners=1:
+// IsShared falso, mutacao aplicada in-place e o envelope reescrito por baixo
+// (corrupcao comprovada — ver TestCallResultFailureAliasDoesNotMutateEnvelope
+// e TestCallResultCauseAliasDoesNotMutateEnvelope). Com o retain do pai, o
+// mesmo `let` chega a Owners=2 e a mutacao clona, como em qualquer composto
+// escrito por bytecode Noxy comum. Strings e escalares dispensam o funil:
+// ownersOf so rastreia compostos, entao Retain neles e no-op.
+func retainingMap(data map[string]value.Value) value.Value {
+	for _, item := range data {
+		value.Retain(item)
+	}
+	return value.NewMapWithData(data)
+}
+
+func retainingArray(elements []value.Value) value.Value {
+	for _, element := range elements {
+		value.Retain(element)
+	}
+	return value.NewArray(elements)
+}
+
+// callResultOkEnvelope NAO usa retainingMap de proposito: `result` ja foi
+// retido por invokeBoundaryCall (comentario "RC" la), e um segundo retain
+// aqui deixaria o valor eternamente IsShared — clonaria a cada mutacao. Os
+// outros dois campos sao escalares.
 func callResultOkEnvelope(result value.Value) value.Value {
 	return value.NewMapWithData(map[string]value.Value{
 		"ok":      value.NewBool(true),
@@ -205,7 +235,7 @@ func callResultOkEnvelope(result value.Value) value.Value {
 }
 
 func callResultFailureEnvelope(err error) value.Value {
-	return value.NewMapWithData(map[string]value.Value{
+	return retainingMap(map[string]value.Value{
 		"ok":      value.NewBool(false),
 		"value":   value.NewNull(),
 		"failure": failureMap(err),
@@ -219,11 +249,11 @@ func callResultFailureEnvelope(err error) value.Value {
 // demais sob as causes dela (design §2, "Cleanup as first failure").
 func failureMap(err error) value.Value {
 	if panicErr, ok := err.(*boundaryPanicError); ok {
-		return value.NewMapWithData(map[string]value.Value{
+		return retainingMap(map[string]value.Value{
 			"kind":    value.NewString("panic"),
 			"message": value.NewString(panicErr.payload),
 			"stack":   value.NewString(panicErr.stack),
-			"causes":  value.NewArray([]value.Value{}),
+			"causes":  retainingArray([]value.Value{}),
 		})
 	}
 	if unwind, ok := err.(*UnwindError); ok {
@@ -253,11 +283,11 @@ func failureMapWithCauses(primary error, deferred []DeferredError) value.Value {
 	if primary != nil {
 		message = primary.Error()
 	}
-	return value.NewMapWithData(map[string]value.Value{
+	return retainingMap(map[string]value.Value{
 		"kind":    value.NewString("runtime"),
 		"message": value.NewString(message),
 		"stack":   value.NewString(deepestRuntimeStack(primary)),
-		"causes":  value.NewArray(causes),
+		"causes":  retainingArray(causes),
 	})
 }
 
@@ -286,13 +316,30 @@ func deferredFailureMap(deferred *DeferredError, siblings []DeferredError) value
 		// (o Cause dela era um *UnwindError com seu proprio Deferred) —
 		// preserva-las primeiro e so entao anexa os siblings (falhas
 		// diferidas posteriores no mesmo frame, cleanup-first) por cima.
+		previous, hadPrevious := mapping.Get("causes")
 		inner := existingCauses(mapping)
 		causes := make([]value.Value, 0, len(inner)+len(siblings))
+		// RC: os herdados apenas TROCAM de array — o retain que o array
+		// antigo registrou passa a valer pelo novo, entao re-reter aqui seria
+		// um dono a mais que ninguem solta (composto IsShared para sempre,
+		// clonando a cada mutacao).
 		causes = append(causes, inner...)
 		for index := range siblings {
-			causes = append(causes, deferredFailureMap(&siblings[index], nil))
+			sibling := deferredFailureMap(&siblings[index], nil)
+			value.Retain(sibling) // filho novo: o array vira dono duravel
+			causes = append(causes, sibling)
 		}
-		mapping.Set("causes", value.NewArray(causes))
+		// RC: ObjMap.Set NAO solta o valor sobrescrito (bindingStore.set so
+		// escreve) — quem faz retain-novo/release-velho no map-set do Noxy e
+		// o funil de OP_SET_INDEX no executor. Aqui a troca e a mao e segue a
+		// mesma ordem: o array novo ganha `mapping` como dono ANTES do antigo
+		// perder o dele (nunca soltar primeiro; um dec a mais nao tem volta).
+		replacement := value.NewArray(causes)
+		value.Retain(replacement)
+		mapping.Set("causes", replacement)
+		if hadPrevious {
+			value.Release(previous)
+		}
 	}
 	return failure
 }

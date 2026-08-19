@@ -384,6 +384,61 @@ test_report(to_str(original[0]) + "|" + to_str(copia[0]) + "|" + to_str(length(o
 	}
 }
 
+// TestCallResultFailureAliasDoesNotMutateEnvelope espelha
+// TestCallResultValueSemantics no ramo de FALHA: a arvore de Failure e
+// construida por Go (NewMapWithData/NewArray), que — ao contrario de
+// OP_MAP/OP_ARRAY — nao retem os filhos compostos. Sem o retain do pai, o
+// mapa `failure` chegava ao Noxy com Owners=0; o primeiro `let f: any =
+// r.failure` o levava a Owners=1, IsShared ficava falso e `f["message"] =
+// ...` mutava IN-PLACE o mesmo objeto guardado no envelope — r.failure.message
+// passava a ler "hacked". Com o envelope como dono duravel, o `let` chega a
+// Owners=2 e a mutacao clona (CoW), deixando o envelope intacto.
+func TestCallResultFailureAliasDoesNotMutateEnvelope(t *testing.T) {
+	source := `
+func quebra(texto: string) -> int
+    return to_int(texto)
+end
+let r: any = call_result(quebra, "abc")
+let f: any = r.failure
+f["message"] = "hacked"
+test_report(to_str(r.failure.message == "hacked") + "|" + to_str(f.message))
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	parts := strings.SplitN(text, "|", 2)
+	if len(parts) != 2 || parts[0] != "false" {
+		t.Fatalf("alias mutation must not rewrite the envelope's failure map: %q", text)
+	}
+	if parts[1] != "hacked" {
+		t.Fatalf("the alias itself must carry the mutation (CoW clone): %q", text)
+	}
+}
+
+// TestCallResultCauseAliasDoesNotMutateEnvelope: mesma corrupcao, um nivel
+// mais fundo — o mapa de causa vive dentro do array `causes`, que por sua vez
+// vive dentro do mapa `failure`. Exige que TANTO o array quanto cada mapa de
+// causa tenham dono duravel registrado na construcao.
+func TestCallResultCauseAliasDoesNotMutateEnvelope(t *testing.T) {
+	source := `
+func limpeza_ruim()
+    to_int("defer-quebrado")
+end
+func corpo() -> int
+    defer limpeza_ruim()
+    return to_int("primario")
+end
+let r: any = call_result(corpo)
+let c: any = r.failure.causes[0]
+c["kind"] = "hacked"
+test_report(to_str(r.failure.causes[0].kind == "hacked") + "|" + to_str(c.kind) + "|" + to_str(length(r.failure.causes)))
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	if text != "false|hacked|1" {
+		t.Fatalf("alias mutation on a cause map must not rewrite the envelope: %q", text)
+	}
+}
+
 // TestCallResultPanicSkipsPendingNoxyDeferAndReleasesCapturedArgs cobre o
 // achado do review em hardUnwindTo (fix loop): um defer Noxy pendente nos
 // frames abandonados pelo panico NAO pode rodar (defer.Deferred truncado sem
