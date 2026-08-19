@@ -2,8 +2,11 @@
 package vm
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"noxy-vm/internal/value"
 )
 
 func TestErrorsModuleShapes(t *testing.T) {
@@ -118,6 +121,77 @@ test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message)
 	text, _ := reported.Obj.(string)
 	if !strings.HasPrefix(text, "false|runtime|") || !strings.Contains(text, "stack overflow") {
 		t.Fatalf("frame exhaustion should be captured: %q", text)
+	}
+}
+
+// TestFailureMapMergesInnerCausesWithSiblingsOnPromotion cobre um bug real:
+// no caso cleanup-first, deferredFailureMap promove o primeiro DeferredError
+// a falha primaria. Se a Cause desse promovido ja e um *UnwindError com seu
+// proprio Primary+Deferred (i.e. a falha promovida ja tinha causes proprias
+// aninhadas), o merge com os siblings (falhas diferidas posteriores no mesmo
+// frame) precisa PRESERVAR essas causes internas e so anexar os siblings por
+// cima — nunca substituir. Constroi a arvore de erro diretamente em Go (via
+// failureMap) porque replicar "defer cujo Cause e um UnwindError aninhado"
+// de forma confiavel a partir de fonte Noxy exigiria coordenar timing de
+// falhas concorrentes de defer; a arvore de erro e o dado relevante aqui, nao
+// o caminho de execucao que a produz.
+func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
+	innerSibling := DeferredError{
+		Registration: SourceLocation{File: "inner.nx", Line: 3},
+		Cause:        errors.New("inner sibling failure"),
+	}
+	promoted := DeferredError{
+		Registration: SourceLocation{File: "outer.nx", Line: 5},
+		Cause: &UnwindError{
+			Primary:  errors.New("inner primary failure"),
+			Deferred: []DeferredError{innerSibling},
+		},
+	}
+	outerSibling := DeferredError{
+		Registration: SourceLocation{File: "outer.nx", Line: 9},
+		Cause:        errors.New("outer sibling failure"),
+	}
+	unwind := &UnwindError{
+		Primary:  nil,
+		Deferred: []DeferredError{promoted, outerSibling},
+	}
+
+	result := failureMap(unwind)
+	mapping, ok := result.Obj.(*value.ObjMap)
+	if !ok {
+		t.Fatalf("failureMap did not return a map: %#v", result)
+	}
+	message, _ := mapping.Get("message")
+	if text, _ := message.Obj.(string); text != "inner primary failure" {
+		t.Fatalf("promoted primary should keep the inner UnwindError's message, got %q", text)
+	}
+
+	causesValue, ok := mapping.Get("causes")
+	if !ok {
+		t.Fatalf("promoted failure missing causes key")
+	}
+	array, ok := causesValue.Obj.(*value.ObjArray)
+	if !ok {
+		t.Fatalf("causes is not an array: %#v", causesValue)
+	}
+	if len(array.Elements) != 2 {
+		t.Fatalf("want 2 causes (1 inner + 1 outer sibling), got %d: %#v", len(array.Elements), array.Elements)
+	}
+
+	causeMessage := func(v value.Value) string {
+		m, ok := v.Obj.(*value.ObjMap)
+		if !ok {
+			t.Fatalf("cause is not a map: %#v", v)
+		}
+		msg, _ := m.Get("message")
+		text, _ := msg.Obj.(string)
+		return text
+	}
+	if got := causeMessage(array.Elements[0]); got != "inner sibling failure" {
+		t.Fatalf("first cause should be the promoted failure's own inner cause, got %q", got)
+	}
+	if got := causeMessage(array.Elements[1]); got != "outer sibling failure" {
+		t.Fatalf("second cause should be the outer sibling, got %q", got)
 	}
 }
 

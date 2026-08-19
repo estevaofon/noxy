@@ -194,11 +194,33 @@ func deferredFailureMap(deferred *DeferredError, siblings []DeferredError) value
 	mapping.Set("stack", value.NewString(stack))
 
 	if len(siblings) > 0 {
-		causes := make([]value.Value, 0, len(siblings))
+		// merge, nao substitui: a falha promovida ja pode ter causes proprias
+		// (o Cause dela era um *UnwindError com seu proprio Deferred) —
+		// preserva-las primeiro e so entao anexa os siblings (falhas
+		// diferidas posteriores no mesmo frame, cleanup-first) por cima.
+		inner := existingCauses(mapping)
+		causes := make([]value.Value, 0, len(inner)+len(siblings))
+		causes = append(causes, inner...)
 		for index := range siblings {
 			causes = append(causes, deferredFailureMap(&siblings[index], nil))
 		}
 		mapping.Set("causes", value.NewArray(causes))
 	}
 	return failure
+}
+
+// existingCauses le o array "causes" ja presente num mapa Failure recem
+// construido por failureMap — sempre presente (failureMapWithCauses e
+// deferredFailureMap ambos o preenchem, mesmo vazio) mas lido com defesa
+// contra shape inesperado.
+func existingCauses(mapping *value.ObjMap) []value.Value {
+	causesValue, ok := mapping.Get("causes")
+	if !ok {
+		return nil
+	}
+	array, ok := causesValue.Obj.(*value.ObjArray)
+	if !ok || array == nil {
+		return nil
+	}
+	return array.Elements
 }
