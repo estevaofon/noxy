@@ -53,15 +53,82 @@ func (vm *VM) prepareBoundaryCall(callee value.Value, args []value.Value) (Prepa
 	return prepared, nil
 }
 
-// runCallBoundary: corpo completado nas Tasks 4-7. Nesta task, apenas valida
-// e devolve null, desfazendo a retencao de preparacao para nao vazar RC.
+// runCallBoundary: corpo completado nas Tasks 4-7. Nesta task, invoca a
+// chamada preparada e envelopa o resultado no caminho ok; o mapeamento de
+// falha real chega na Task 5 (placeholder abaixo mantem o pacote compilando).
 func (vm *VM) runCallBoundary(callee value.Value, args []value.Value) (value.Value, error) {
 	prepared, err := vm.prepareBoundaryCall(callee, args)
 	if err != nil {
 		return value.NewNull(), err
 	}
-	if closure, ok := prepared.Callee.Obj.(*value.ObjClosure); ok && prepared.Callee.Type == value.VAL_FUNCTION {
-		vm.releasePreparedArguments(prepared.Arguments, closure.Function.Params)
+	result, callErr := vm.invokeBoundaryCall(prepared)
+	if callErr != nil {
+		return callResultFailureEnvelope(callErr), nil // Task 5
 	}
-	return value.NewNull(), nil
+	return callResultOkEnvelope(result), nil
+}
+
+// invokeBoundaryCall espelha invokePreparedCall (defer.go) com duas
+// diferencas: captura o resultado (terminalResult para closures; topo da
+// pilha para native/construtor) e nao descarta o valor no cleanup — o
+// envelope o carrega. O release da retencao de closure e identico.
+func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err error) {
+	base := vm.stackTop
+	if base < 0 || base >= len(vm.stack) || len(call.Arguments) > len(vm.stack)-base-1 {
+		return value.NewNull(), vm.runtimeErrorAtCurrentFrame("stack overflow while invoking call_result")
+	}
+	result = value.NewNull()
+	temporaryTop := base
+	defer func() {
+		cleanupTop := vm.stackTop
+		if temporaryTop > cleanupTop {
+			cleanupTop = temporaryTop
+		}
+		for i := base; i < cleanupTop; i++ {
+			vm.stack[i] = value.Value{}
+		}
+		vm.stackTop = base
+		if call.Callee.Type == value.VAL_FUNCTION {
+			if closure, ok := call.Callee.Obj.(*value.ObjClosure); ok && closure != nil && closure.Function != nil {
+				vm.releasePreparedArguments(call.Arguments, closure.Function.Params)
+			}
+		}
+	}()
+
+	ownerFrameCount := vm.frameCount
+	vm.push(call.Callee)
+	for _, argument := range call.Arguments {
+		vm.push(argument)
+	}
+	temporaryTop = vm.stackTop
+
+	ok, err := vm.callPreparedValue(call.Callee, len(call.Arguments), nil, 0)
+	if !ok {
+		return value.NewNull(), err
+	}
+	if vm.frameCount > ownerFrameCount {
+		if runErr := vm.run(ownerFrameCount+1, &result); runErr != nil {
+			return value.NewNull(), runErr
+		}
+		return result, nil
+	}
+	// native/construtor: sem frame novo; resultado no topo da pilha.
+	return vm.peek(0), nil
+}
+
+func callResultOkEnvelope(result value.Value) value.Value {
+	return value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewBool(true),
+		"value":   result,
+		"failure": value.NewNull(),
+	})
+}
+
+// placeholder ate a Task 5 (mantem o pacote compilando):
+func callResultFailureEnvelope(err error) value.Value {
+	return value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewBool(false),
+		"value":   value.NewNull(),
+		"failure": value.NewNull(),
+	})
 }

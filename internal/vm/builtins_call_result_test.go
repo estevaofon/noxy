@@ -22,6 +22,46 @@ test_report(nested.causes[0].message + "|" + to_str(r.ok) + "|" + to_str(r.value
 	}
 }
 
+func TestCallResultOkPaths(t *testing.T) {
+	source := `
+use errors select *
+
+func dobro(x: int) -> int
+    return x * 2
+end
+
+func nada()
+end
+
+struct P
+    x: int
+end
+
+let a: CallResult = call_result(dobro, 21)
+let b: CallResult = call_result(to_int, "5")
+let c: CallResult = call_result(P, 7)
+let d: CallResult = call_result(nada)
+let inst: any = c.value
+test_report(to_str(a.ok) + "|" + to_str(a.value) + "|" + to_str(b.value) + "|" + to_str(inst.x) + "|" + to_str(d.ok) + "|" + to_str(d.value == null) + "|" + to_str(a.failure == null))
+`
+	reported := captureVMSource(t, source)
+	text, _ := reported.Obj.(string)
+	if text != "true|42|5|7|true|true|true" {
+		t.Fatalf("unexpected report: %q", text)
+	}
+}
+
+func TestCallResultEnvelopeIsMap(t *testing.T) {
+	source := `
+let r: any = call_result(to_int, "5")
+test_report(fmt("%T", r))
+`
+	reported := captureVMSource(t, source)
+	if text, _ := reported.Obj.(string); text != "map" {
+		t.Fatalf("envelope should be a map at the dynamic boundary, got %q", text)
+	}
+}
+
 func TestCallResultMisuseRaisesSynchronously(t *testing.T) {
 	cases := []struct {
 		name, source, wantErr string
