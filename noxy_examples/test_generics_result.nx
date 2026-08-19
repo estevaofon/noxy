@@ -1,0 +1,105 @@
+// test_generics_result.nx — tratamento de erros com Result<T> generico.
+// Antes dos genericos, cada biblioteca inventava o proprio par de structs
+// (PutResult, LookupResult, ...) porque um Result reutilizavel cairia em
+// `any` e perderia a checagem de tipos. Com monomorfizacao, UM struct
+// Result<T> serve para todo tipo, com erro de compilacao se os tipos nao
+// baterem — o padrao que o NoxyDB pode adotar no lugar dos structs ad-hoc.
+use sys select *
+
+let passed: int = 0
+let failed: int = 0
+
+func check(name: string, condition: bool) -> void
+    if condition then
+        passed = passed + 1
+        print("PASS: " + name)
+    else
+        failed = failed + 1
+        print("FAIL: " + name)
+    end
+end
+
+// --- O tipo: um Result para todos ---
+
+struct Result<T>
+    ok: bool,
+    valor: T,
+    erro: string
+end
+
+func sucesso<T>(valor: T) -> Result<T>
+    return Result(true, valor, "")
+end
+
+func falha<T>(msg: string) -> Result<T>
+    // T so aparece no retorno: quem chama resolve T pela anotacao do let
+    // (target-typing). O campo valor recebe o zero do tipo instanciado.
+    let vazio: T
+    return Result(false, vazio, msg)
+end
+
+// valor_ou: o "unwrap_or" — extrai o valor ou devolve um padrao.
+func valor_ou<T>(r: Result<T>, padrao: T) -> T
+    if r.ok then
+        return r.valor
+    end
+    return padrao
+end
+
+// --- Funcoes que falham de verdade ---
+
+// Nao-generica devolvendo Result<int>: o caso comum de API concreta.
+func divide_seguro(a: int, b: int) -> Result<int>
+    if b == 0 then
+        let r: Result<int> = falha("divisao por zero")
+        return r
+    end
+    return sucesso(a / b)
+end
+
+// Generica devolvendo Result<T>: um acessor seguro que funciona para
+// qualquer array — impossivel de escrever antes sem cair em `any`.
+func primeiro_seguro<T>(arr: T[]) -> Result<T>
+    if length(arr) == 0 then
+        let r: Result<T> = falha("array vazio")
+        return r
+    end
+    return sucesso(arr[0])
+end
+
+// --- Caminho feliz e caminho de erro, int ---
+
+let ok_div: Result<int> = divide_seguro(10, 2)
+check("divide_seguro(10,2) e ok", ok_div.ok)
+check("divide_seguro(10,2) valor 5", ok_div.valor == 5)
+check("divide_seguro(10,2) sem erro", ok_div.erro == "")
+
+let err_div: Result<int> = divide_seguro(1, 0)
+check("divide_seguro(1,0) nao e ok", err_div.ok == false)
+check("divide_seguro(1,0) descreve o erro", err_div.erro == "divisao por zero")
+
+// --- O mesmo Result para outro tipo, sem duplicar nada ---
+
+let nomes: string[] = ["ana", "bia"]
+let ok_nome: Result<string> = primeiro_seguro(nomes)
+check("primeiro_seguro em string[] e ok", ok_nome.ok)
+check("primeiro_seguro devolve ana", ok_nome.valor == "ana")
+
+let vazio_int: int[] = []
+let err_prim: Result<int> = primeiro_seguro(vazio_int)
+check("primeiro_seguro em [] falha", err_prim.ok == false)
+check("primeiro_seguro em [] explica", err_prim.erro == "array vazio")
+
+// --- Composicao: valor_ou encadeado direto na chamada ---
+
+check("valor_ou no caminho feliz", valor_ou(divide_seguro(20, 4), -1) == 5)
+check("valor_ou no caminho de erro", valor_ou(divide_seguro(20, 0), -1) == -1)
+check("valor_ou com string", valor_ou(primeiro_seguro(nomes), "ninguem") == "ana")
+
+// --- Resumo ---
+
+print("")
+print(f"passed: {passed}, failed: {failed}")
+if failed > 0 then
+    sys_exit(1)
+end
