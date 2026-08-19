@@ -257,6 +257,43 @@ let r: CallResult = __test_dynamic_envelope_bad()
 	}
 }
 
+// (a) o outro lado do contrato estrutural: a checagem é "todo campo do
+// esquema está presente e compatível", NÃO "os conjuntos de chaves são
+// iguais". Um map com todos os campos de CallResult MAIS uma chave estranha
+// satisfaz a anotação — chaves extras são ignoradas, como o comentário do
+// caso TYPE_STRUCT em walkRuntimeValueType promete. Pinado porque a direção
+// oposta (exigir igualdade de chaves) é uma regressão fácil de introduzir e
+// quebraria qualquer envelope que ganhe um campo novo depois.
+func TestLetStructAnnotationIgnoresExtraMapKeys(t *testing.T) {
+	machine := New()
+	machine.DefineNative("__test_dynamic_envelope_extra", func(args []value.Value) value.Value {
+		return value.NewMapWithData(map[string]value.Value{
+			"ok":      value.NewBool(true),
+			"value":   value.NewInt(42),
+			"failure": value.NewNull(),
+			"extra":   value.NewString("nao declarado em CallResult"),
+		})
+	})
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	source := `
+use errors select *
+let r: CallResult = __test_dynamic_envelope_extra()
+test_report(to_str(r.ok) + "|" + to_str(r.value) + "|" + to_str(r.extra))
+`
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatalf("extra keys must not break the struct-typed binding: %v", err)
+	}
+	if text, _ := captured.Obj.(string); text != "true|42|nao declarado em CallResult" {
+		t.Fatalf("unexpected report: %q", text)
+	}
+}
+
 // As três acima só exercitam o campo composto "failure" quando ele é null —
 // walkRuntimeValueType:311-313 aceita VAL_NULL contra TYPE_STRUCT de
 // imediato, então o schema aninhado de Failure (causes: Failure[]

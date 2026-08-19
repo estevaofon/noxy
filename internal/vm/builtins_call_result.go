@@ -54,9 +54,11 @@ func (vm *VM) prepareBoundaryCall(callee value.Value, args []value.Value) (Prepa
 	return prepared, nil
 }
 
-// runCallBoundary: corpo completado nas Tasks 4-7. Nesta task, invoca a
-// chamada preparada e envelopa o resultado no caminho ok; o mapeamento de
-// falha real chega na Task 5 (placeholder abaixo mantem o pacote compilando).
+// runCallBoundary e a fronteira inteira em tres passos: valida (erro de
+// misuse sobe para o chamador — nunca vira envelope), invoca, e envelopa. O
+// invariante que a assinatura carrega: depois de prepareBoundaryCall passar,
+// esta funcao so devolve erro se a propria fronteira estiver quebrada — toda
+// falha do callee vira CallResult{ok: false}.
 func (vm *VM) runCallBoundary(callee value.Value, args []value.Value) (value.Value, error) {
 	prepared, err := vm.prepareBoundaryCall(callee, args)
 	if err != nil {
@@ -64,7 +66,7 @@ func (vm *VM) runCallBoundary(callee value.Value, args []value.Value) (value.Val
 	}
 	result, callErr := vm.invokeBoundaryCall(prepared)
 	if callErr != nil {
-		return callResultFailureEnvelope(callErr), nil // Task 5
+		return callResultFailureEnvelope(callErr), nil
 	}
 	return callResultOkEnvelope(result), nil
 }
