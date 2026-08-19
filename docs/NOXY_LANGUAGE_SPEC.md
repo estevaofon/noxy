@@ -24,7 +24,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 |----------|----------|
 | Declarations | `let`, `func`, `struct` |
 | Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer`, `when`, `case`, `default` |
-| Types | `int`, `float`, `string`, `str`, `bool`, `void`, `ref`, `bytes`, `func` |
+| Types | `int`, `float`, `string`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
 | Specials | `zeros` |
