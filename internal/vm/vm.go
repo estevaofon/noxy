@@ -67,6 +67,15 @@ type VM struct {
 	frameCount   int
 	currentFrame *CallFrame
 
+	// stackCaptureFloor e o indice do frame mais baixo que captureNoxyStack
+	// pode incluir. Zero (padrao) = pilha inteira, o comportamento historico
+	// de todo erro fatal de topo. So a fronteira de call_result o levanta,
+	// pelo tempo da chamada capturada, para cumprir a promessa da spec de que
+	// Failure.stack vai do ponto de falha ate — excluindo — o frame que
+	// chamou call_result. Por-VM (tasks rodam em VM proprio), salvo e
+	// restaurado pela fronteira, entao fronteiras aninhadas empilham pisos.
+	stackCaptureFloor int
+
 	chunk *chunk.Chunk // Removed, accessed via frame
 	ip    int          // Removed, accessed via frame (or cached)
 

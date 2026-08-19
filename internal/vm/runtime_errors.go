@@ -101,9 +101,21 @@ func sourceLocation(c *chunk.Chunk, ip int) SourceLocation {
 	return location
 }
 
+// captureNoxyStack renderiza os frames Noxy vivos, do mais recente para o mais
+// antigo. Para em vm.stackCaptureFloor — 0 fora de uma fronteira de
+// call_result, ou seja, pilha completa como sempre; dentro da fronteira, o
+// piso e o frame count do chamador, o que corta exatamente os frames abaixo
+// (e inclusive) do ponto onde call_result foi chamado.
 func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
-	frames := make([]string, 0, vm.frameCount)
-	for i := vm.frameCount - 1; i >= 0; i-- {
+	floor := vm.stackCaptureFloor
+	if floor < 0 {
+		floor = 0
+	}
+	if floor > vm.frameCount {
+		floor = vm.frameCount
+	}
+	frames := make([]string, 0, vm.frameCount-floor)
+	for i := vm.frameCount - 1; i >= floor; i-- {
 		frame := &vm.frames[i]
 		if frame.Closure == nil || frame.Closure.Function == nil {
 			continue

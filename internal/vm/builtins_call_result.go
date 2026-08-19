@@ -97,6 +97,20 @@ func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err err
 	}()
 
 	ownerFrameCount := vm.frameCount
+	// A spec promete que Failure.stack cobre "the frames from the failure
+	// point down to, and excluding, the call_result frame itself". Quem sabe
+	// onde fica esse corte e a fronteira, nao captureNoxyStack: enquanto a
+	// chamada capturada roda, o piso vale ownerFrameCount e todo stack
+	// capturado la dentro (inclusive os das falhas diferidas montadas durante
+	// o unwind) para no primeiro frame acima do chamador. Piso por indice, e
+	// nao pos-processamento do texto: captureNoxyStack pula frames sem
+	// Closure/Function, entao "corte as N ultimas linhas" nao teria
+	// correspondencia confiavel com N frames de chamador. Salvo/restaurado
+	// para nao vazar para o chamador (e para aninhar fronteiras); erro fatal
+	// de topo segue com a pilha inteira, piso 0.
+	previousStackFloor := vm.stackCaptureFloor
+	vm.stackCaptureFloor = ownerFrameCount
+	defer func() { vm.stackCaptureFloor = previousStackFloor }()
 	// Registrado DEPOIS do defer de cleanup acima: defers do Go rodam LIFO,
 	// entao num panico este corpo roda PRIMEIRO (hardUnwindTo restaura os
 	// frames acima da fronteira) e SO ENTAO o cleanup acima roda (restaura a

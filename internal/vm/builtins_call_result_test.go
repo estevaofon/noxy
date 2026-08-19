@@ -88,6 +88,13 @@ test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message + "|" 
 	}
 }
 
+// TestCallResultFailureStackExcludesBoundary pina a promessa da spec ("a
+// 'runtime' stack covers the frames from the failure point down to, and
+// excluding, the call_result frame itself"): a pilha capturada tem os frames
+// ACIMA da fronteira e nenhum do chamador. O chamador ganha nome proprio
+// (`chamador_externo`) justamente para poder afirmar a AUSENCIA dele — antes
+// do piso de captura, r.failure.stack trazia "in chamador_externo" e "in
+// script" junto.
 func TestCallResultFailureStackExcludesBoundary(t *testing.T) {
 	source := `
 func fundo() -> int
@@ -96,16 +103,58 @@ end
 func meio() -> int
     return fundo()
 end
-let r: any = call_result(meio)
-test_report(r.failure.stack)
+func chamador_externo() -> string
+    let r: any = call_result(meio)
+    return r.failure.stack
+end
+test_report(chamador_externo())
 `
 	reported := captureVMSource(t, source)
 	stack, _ := reported.Obj.(string)
 	if !strings.Contains(stack, "in fundo") || !strings.Contains(stack, "in meio") {
 		t.Fatalf("stack missing inner frames: %q", stack)
 	}
+	if strings.Contains(stack, "in chamador_externo") {
+		t.Fatalf("stack must exclude the caller frame that invoked call_result: %q", stack)
+	}
+	if strings.Contains(stack, "in script") {
+		t.Fatalf("stack must exclude the frames below the boundary: %q", stack)
+	}
 	if strings.Contains(stack, "call_result") {
 		t.Fatalf("stack must stop before the boundary frame: %q", stack)
+	}
+}
+
+// TestCallResultStackFloorIsRestoredAfterBoundary garante que o piso de
+// captura e estritamente local a fronteira: uma fronteira que ja retornou nao
+// pode deixar o piso dela para tras. A primeira chamada (bem sucedida) sobe e
+// desce o piso; a segunda tem que enxergar exatamente os frames acima de si
+// mesma — nem menos (piso vazado alto) nem mais (piso vazado baixo traria "in
+// externa"). O caso "sem fronteira nenhuma = pilha inteira" segue coberto por
+// TestRuntimeErrorRemainsTypedThroughImportFailure (task_execution_test.go),
+// que exige "in script" no Stack de um erro fora de qualquer call_result.
+func TestCallResultStackFloorIsRestoredAfterBoundary(t *testing.T) {
+	source := `
+func inofensiva() -> int
+    return 1
+end
+func dentro() -> int
+    return to_int("x")
+end
+func externa() -> string
+    let ignorado: any = call_result(inofensiva)
+    let r: any = call_result(dentro)
+    return r.failure.stack
+end
+test_report(externa())
+`
+	reported := captureVMSource(t, source)
+	stack, _ := reported.Obj.(string)
+	if !strings.Contains(stack, "in dentro") {
+		t.Fatalf("stack missing the failing frame: %q", stack)
+	}
+	if strings.Contains(stack, "in externa") || strings.Contains(stack, "in script") {
+		t.Fatalf("floor must be restored to the outer boundary's own value, not leaked: %q", stack)
 	}
 }
 
@@ -200,7 +249,10 @@ func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
 // corpo TAMBEM falha durante o unwind, e a falha diferida precisa aparecer em
 // r.failure.causes[0] com kind "runtime", a mensagem original preservada, e o
 // stack carregando "defer registration" como frame mais externo (a
-// localizacao de REGISTRO do defer, nao a de falha).
+// localizacao de REGISTRO do defer, nao a de falha). O chamador tem nome
+// proprio para tambem exigir que o piso de captura da fronteira valha para os
+// stacks das causas — truncados nos frames acima da fronteira — SEM comer a
+// linha sintetica de registro, que e concatenada depois da truncagem.
 func TestCallResultAggregatesDeferFailures(t *testing.T) {
 	source := `
 func limpeza_ruim()
@@ -212,9 +264,13 @@ func corpo() -> int
     return to_int("primario")
 end
 
-let r: any = call_result(corpo)
-let causa: any = r.failure.causes[0]
-test_report(to_str(length(r.failure.causes)) + "|" + causa.kind + "|" + causa.message + "|" + causa.stack)
+func chamador_do_defer() -> string
+    let r: any = call_result(corpo)
+    let causa: any = r.failure.causes[0]
+    return to_str(length(r.failure.causes)) + "|" + causa.kind + "|" + causa.message + "|" + causa.stack
+end
+
+test_report(chamador_do_defer())
 `
 	reported := captureVMSource(t, source)
 	text, _ := reported.Obj.(string)
@@ -227,6 +283,12 @@ test_report(to_str(length(r.failure.causes)) + "|" + causa.kind + "|" + causa.me
 	}
 	if !strings.Contains(parts[3], "defer registration") {
 		t.Fatalf("cause stack must carry the registration location as outermost frame: %q", parts[3])
+	}
+	if !strings.Contains(parts[3], "in limpeza_ruim") || !strings.Contains(parts[3], "in corpo") {
+		t.Fatalf("cause stack must keep the frames above the boundary: %q", parts[3])
+	}
+	if strings.Contains(parts[3], "in chamador_do_defer") || strings.Contains(parts[3], "in script") {
+		t.Fatalf("cause stack must be truncated at the boundary too: %q", parts[3])
 	}
 }
 
