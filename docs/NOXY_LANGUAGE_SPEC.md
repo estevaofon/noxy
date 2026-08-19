@@ -114,8 +114,9 @@ Arrays, maps, and structs are composite **values**. Every binding without
 7. **`==`/`!=` on composites is structural** (recursive by content). `ref`
    values compare by slot identity and are not dereferenced — both as fields
    nested inside a composite and as the two operands of a direct comparison.
-   A `ref` compared against a *non*-`ref` (a plain value, `null`) is the one
-   shape that still auto-dereferences; see §2.3.
+   A `ref` compared against `null` asks whether the reference *itself* is
+   null, and a `ref` compared against a plain value is a compile-time error:
+   the read must be explicit (`*r == value`); see §2.3.
 8. Closures capture *variables* (slots); captured-variable aliasing is
    unchanged and orthogonal to value semantics.
 
@@ -237,14 +238,21 @@ print(r)             // Prints 10
 This applies to both Local Variables and Struct Fields.
 
 Auto-dereference has exactly **two exceptions**, described below: `==`/`!=`
-between two references, and the right-hand side of a plain assignment.
+with a reference operand, and the right-hand side of a plain assignment.
 
-**Exception 1: `==` and `!=` between two references.** Auto-dereference
-answers "what value is there?", which is the wrong question when *both* sides
-are references — there the question is about identity. So when both operands
-are statically `ref T`, the comparison is by **slot identity** (§2.2, rule 7)
-and neither side is dereferenced. Every other shape keeps auto-dereference,
-including a reference compared against a plain value or against `null`:
+**Exception 1: `==` and `!=` with a reference operand.** Auto-dereference
+answers "what value is there?", which is the wrong question for equality on
+references — there the questions are about *identity* and *nullity*. In
+`==`/`!=` a reference operand is **never** implicitly dereferenced:
+
+- **two references** compare by **slot identity** (§2.2, rule 7);
+- a reference compared against **`null`** asks whether the reference
+  *itself* is null — which keeps `node.next != null` working, and makes a
+  valid reference to a slot that *contains* null distinguishable from a
+  null reference (`r == null` asks about the ref, `*r == null` about the
+  pointed value — two questions that implicit dereference used to conflate);
+- a reference compared against a **plain value** is a compile-time error
+  with a hint — write the read explicitly, as in assignment.
 
 ```noxy
 let a: int = 1
@@ -255,10 +263,13 @@ let ra2: ref int = ref a
 
 ra == ra2   // true  — same slot
 ra == rb    // false — different slots, even though both hold 1
-ra == 1     // true  — mixed: auto-deref reads the pointed value
-ra == null  // false — mixed: the reference is valid
+*ra == 1    // true  — explicit dereference reads the pointed value
+ra == 1     // ERROR: cannot compare ref int with int: a ref is never
+            //        implicitly dereferenced in '=='
+            //   hint: use '*ra' to compare the referenced value
+ra == null  // false — the reference itself is valid
 
-node.next != null   // unchanged: the usual null test on a `ref` field
+node.next != null   // unchanged: asks whether the `ref` field is null
 ```
 
 `addr(ref x)` remains available when you want that identity as a printable
@@ -1458,6 +1469,6 @@ register, roll back, poison, or close the resource again.
     - **Reference Parameters**: A parameter declared with `ref` shares the caller's slot — the only sharing mechanism.
 
 ---
-*Version: 0.4.0*
+*Version: 0.7.1*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*

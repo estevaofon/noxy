@@ -98,7 +98,7 @@ root.left.right = Node(5, null, null)
 // 4   5 
 
 func pre_order(node: ref Node, array: ref DynamicArray) -> void
-  if node != null then
+  if *node != null then
     adicionar_elemento(array, node.data)
     pre_order(node.left, array)
     pre_order(node.right, array)

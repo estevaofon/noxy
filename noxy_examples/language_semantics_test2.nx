@@ -382,6 +382,15 @@ func test_listas_ligadas()
     p = Ponto(1, 2)
     check(p != null, "instancia real nao e null")
     check_int(p.x, 1, "campos acessiveis apos sair do null")
+
+    // Igualdade estrita de ref: '== null' pergunta sobre o PROPRIO ref.
+    // Um ref VALIDO para um slot que contem null nao e null; a pergunta
+    // sobre o valor apontado e '*r == null'. As duas perguntas, antes
+    // indistinguiveis, agora tem cada uma sua sintaxe.
+    let vaga: Ponto = null
+    let rv: ref Ponto = ref vaga
+    check(rv != null, "ref valido para slot com null nao e null")
+    check(*rv == null, "'*r == null' pergunta sobre o valor apontado")
 end
 
 // ------------------------------------------------------------

@@ -15,8 +15,8 @@ func verify_syntax(r: ref int)
     *r = 100
     print(f"Updated value via *r: {*r}") // *r in expression is valid (though r works too)
     
-    // 2. Read (r works as value)
-    if r == 100 then
+    // 2. Read via explicit deref ('==' never auto-derefs a ref operand)
+    if *r == 100 then
         print("PASS: Update worked")
     else
         print(f"FAIL: Expected 100, got {r}")

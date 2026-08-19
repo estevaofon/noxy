@@ -362,13 +362,15 @@ func test_igualdade()
     y = 5
     check(rx != ry, "identidade nao muda quando os valores voltam a coincidir")
 
-    // Ja o caso MISTO -- ref contra nao-ref -- continua lendo o valor
-    // apontado, como qualquer outro uso de ref numa expressao.
-    check(rx == 5, "ref contra valor faz auto-deref")
-    check(5 == rx, "auto-deref tambem com o ref a direita")
-    check(rx != 6, "auto-deref no caso negativo")
+    // O caso MISTO -- ref contra nao-ref -- e erro de COMPILACAO com hint
+    // ('rx == 5' nao compila): em '=='/'!=' um ref nunca e dereferenciado
+    // implicitamente, como o '=' ja recusava conversao implicita de ref.
+    // A comparacao de valor pede o deref explicito.
+    check(*rx == 5, "deref explicito compara o valor apontado")
+    check(5 == *rx, "deref explicito com o valor a esquerda")
+    check(*rx != 6, "deref explicito no caso negativo")
 
-    // E o teste de nulidade pergunta sobre o proprio ref.
+    // E o teste de nulidade pergunta sobre o PROPRIO ref, sem deref.
     let nulo: ref int = null
     check(nulo == null, "ref nulo é null")
     check(rx != null, "ref valido nao é null")

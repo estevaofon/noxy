@@ -4,7 +4,9 @@ struct Node
 end
 
 func _append(node: ref Node, valor: int)
-    if node == null then
+    // '*node == null' pergunta se o SLOT apontado esta vazio (padrao
+    // fill-null-slot); 'node == null' perguntaria sobre o proprio ref.
+    if *node == null then
         *node = Node(valor, null)
     else
         _append(node.proximo, valor)
