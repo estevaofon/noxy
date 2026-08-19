@@ -603,6 +603,17 @@ struct Node
 end
 ```
 
+A struct may also reference itself through an **array field without `ref`**:
+value semantics without `ref` cannot form a cycle, so no `ref` is needed to
+keep construction well-founded.
+
+```noxy
+struct Failure
+    kind: string
+    causes: Failure[]
+end
+```
+
 ---
 
 ## 6. Generics
@@ -1001,6 +1012,173 @@ Those suppressed errors cannot participate in defer aggregation; only runtime
 errors observable from the deferred call are aggregated. Likewise, the
 ordinary result from `io.close_result(...)` is discarded when deferred.
 
+### Errors: raise for bugs, results for data
+
+Noxy has two failure channels, and they are not interchangeable.
+
+A **runtime error** means the program is wrong: an impossible conversion of a
+value the program itself produced, an out-of-range index, a violated native
+contract. It unwinds call frames, runs deferred calls along the way, and —
+unobserved — terminates the script with a diagnostic.
+
+A **result struct** means the input was allowed to be bad: untrusted text,
+user input, wire data. Failure is an expected outcome, so it is data — an
+`ok` flag the caller must branch on. Because Noxy functions return a single
+value, the result struct occupies the place of Go's `value, err` pair.
+
+API design rule: an operation whose failure indicates a caller bug raises; an
+operation whose failure is an expected outcome of untrusted data returns a
+result struct. When both kinds of caller exist, provide the raising form and a
+`_result` twin: `to_int` / `to_int_result`, `io.close` / `io.close_result`.
+
+Two boundaries convert the first channel into the second, and they are the
+only two: the supervised-task boundary (`spawn_task` / `task_await`), and the
+synchronous `call_result` described next. Advisory hints such as "use
+to_int_result to handle failure" belong to the top-level fatal diagnostic
+output, not to the raised message itself — a captured `Failure.message`
+carries the error, not usage advice.
+
+### The error boundary: `call_result`
+
+`call_result(fn, ...args)` invokes a callable and converts a runtime failure
+that unwinds out of it into a value:
+
+```noxy
+use errors select *
+
+let r: CallResult = call_result(to_int, entrada)
+if r.ok then
+    let n: int = to_int(r.value)   // narrowing only: r.value is already int
+    print(n)
+else
+    print("entrada inválida: " + r.failure.message)
+end
+```
+
+**Callable and validation.** `fn` may be any callable value: a typed Noxy
+function or closure, a function value held as an exact or bare `func`, a
+struct constructor, or a native. (A native reaches the boundary as `any` or
+in argument position; the compiler does not admit `let f: func = to_int`.)
+Passing a non-callable is a synchronous runtime error in the caller.
+Arguments are evaluated in the caller's frame, before the boundary exists; an
+error during argument evaluation is not captured. Where the callee exposes
+parameter metadata — typed Noxy functions and closures, struct constructors,
+signed natives — arity and parameter-mode mismatches are synchronous runtime
+errors in the caller. The timing mirrors `spawn_task`'s synchronous
+validation; the domain is wider — `spawn_task` accepts only Noxy functions
+and closures, while `call_result` also accepts constructors and natives.
+Callees without metadata (legacy untyped natives) validate during invocation,
+so those failures are captured and are indistinguishable from failures of the
+callee's own body. *Compatibility note:* giving a legacy native a signature
+in a later release moves its misuse failures from captured to synchronous —
+an observable change that rides the signing, and one more reason to sign
+natives eagerly.
+
+For a struct constructor, a completed call yields the constructed instance as
+`value`, under the constructor semantics the defer section already gives that
+callee category.
+
+**Argument semantics are unchanged.** Arguments follow §4.3 exactly as in a
+direct call: composite values are independent copy-on-write values, explicit
+`ref` arguments keep reference identity. `call_result` adds no isolation — it
+is the same call, wearing a boundary.
+
+**Envelope.** `call_result` returns a `CallResult` (module `errors`):
+
+- `fn` completes: `ok = true`, `value` is its return value (`null` for a
+  `void` return), `failure = null`. A composite `value` preserves the identity
+  an ordinary call would give it.
+- A runtime failure unwinds out of `fn`: deferred calls registered by `fn` and
+  its nested frames run under the normal unwinding rules, the unwinding stops
+  at the `call_result` frame, and the envelope is `ok = false`,
+  `value = null`, with `failure` describing the primary error.
+- `failure.kind` is `"runtime"` for a Noxy runtime error (with a Noxy stack
+  captured at the failure point) or `"panic"` for a recovered Go panic (with a
+  Go stack) — the same vocabulary as the task boundary. A `"runtime"` stack
+  covers the frames from the failure point down to, and excluding, the
+  `call_result` frame itself.
+- `failure.causes` holds deferred failures observed during that unwinding, in
+  LIFO execution order, each a `Failure` whose own `causes` nest further, per
+  the defer section's aggregation rules. It is empty when no deferred call
+  failed. Each cause's `stack` is captured at that deferred failure point and
+  carries the deferred call's registration location as its outermost frame —
+  the envelope form of the defer section's promise that each deferred failure
+  is collected "with its registration location".
+- Cleanup as first failure: if `fn` returns successfully but one of its
+  deferred calls raises, the boundary reports `ok = false` and the computed
+  return value is discarded, mirroring "converts an otherwise successful
+  return into a runtime error" in the defer section. The first deferred
+  failure is the primary `failure`; deferred failures observed after it
+  aggregate under the primary's `causes` in LIFO order, each nesting its own
+  `causes` further.
+
+**Representation.** `call_result` is a native, and natives return values
+across the dynamic boundary (§4.2). Like every result envelope a native
+produces today (`convert_to_int_result` and its `IntResult`), the envelope is
+physically a map whose fields match the declared shapes; the `errors` module
+declarations exist so Noxy code can annotate (`let r: CallResult = ...`) and
+so the field names are a compile-checkable contract at typed use sites. The
+consequences are observable and identical to the existing `IntResult`
+precedent: `fmt("%T", r)` reports `map`, and the envelope does not compare
+equal to a hand-constructed `CallResult(...)` instance. Promoting the
+envelopes (this one and `task_await`'s) to genuine struct instances is a
+single future change, gated on natives being able to construct
+stdlib-declared structs.
+
+**What the boundary does not change.**
+
+- The caller's own deferred calls and frames are unaffected; after
+  `call_result` returns, execution continues normally.
+- Boundaries nest: a failure is captured by the nearest enclosing
+  `call_result` frame.
+- Detached routines started by `fn` via `spawn` keep running after capture,
+  per the `spawn` contract.
+- `call_result` is an ordinary call and is legal anywhere a call is,
+  including module initialization; frame rules follow the defer section
+  unchanged.
+- **Through native frames.** A failure raised in Noxy code that a native
+  invoked (a callback, an HTTP handler) propagates through the intervening
+  native frame to the nearest boundary; the native observes the failure
+  through its existing error path and releases its resources before
+  propagation continues. A callback-invoking native must forward Noxy
+  failures, never swallow them.
+- **No rollback.** Mutations `fn` performed before failing — through `ref`
+  arguments, globals, closure upvalues, or native resources — remain. Noxy's
+  copy-on-write value semantics can suggest that everything is isolated; the
+  boundary is control flow, not a transaction. The risky shape has a name:
+  a callable that mutates `ref` arguments, globals, or upvalues can leave a
+  broken invariant behind when captured mid-flight — prefer value-in/value-out
+  callables under a boundary, and treat mutating ones as candidates for
+  explicit coordination, exactly as across the task boundary.
+- **Panic coverage.** Go panics are recovered in the executing routine only,
+  not in independent goroutines started by native code — the same coverage
+  rule as supervised tasks. Exhaustion of the VM's Noxy frame limit is an
+  ordinary runtime error and is capturable (`kind = "runtime"`): by the time
+  the boundary observes it, unwinding has already freed frames. Conditions
+  the Go runtime treats as unrecoverable (fatal errors such as concurrent map
+  writes, Go stack exhaustion, out of memory) remain process-fatal; no
+  boundary observes them. The recover covers the invocation of `fn` itself;
+  a Go panic raised outside it (argument preparation, envelope construction)
+  remains process-fatal like any other unrecovered panic.
+
+**Intended idiom.** `call_result` exists to build named `_result` twins, not
+to decorate call sites. The inline form over a closure is legal:
+
+```noxy
+let r: CallResult = call_result(func() -> int
+    return to_int(campo) * fator
+end)
+```
+
+but the idiom is wrap-and-name: a `_result` function with a typed result
+struct is a contract; an inline boundary is a site the reader must decode. The
+boundary's design leans on auditability — `call_result` is one grep away from
+every place errors become data — and on the envelope being deliberately
+untyped (`value: any`), so a named twin that narrows the value is always the
+more comfortable form. Discarding the envelope — `call_result(f, x)` as a
+bare statement — swallows every failure `f` can produce and is almost
+certainly a bug; a compile-time diagnostic for it is tracked as follow-up.
+
 ### When / Channel Select
 
 `when` evaluates a set of channel operations and runs the body of the first
@@ -1107,8 +1285,8 @@ print(f"Hello, {name}!")
 
 ### Conversões numéricas
 
-`to_int` e `to_float` **levantam erro de runtime** quando a conversão é
-impossível. Use-os quando uma falha seria um bug do programa.
+A regra geral levantar-vs-`_result` está em *Errors: raise for bugs, results
+for data*.
 
 ```noxy
 to_int(5.9)      // 5, truncamento em direção a zero
@@ -1117,9 +1295,6 @@ to_int("5.5")    // erro: uma string decimal não é um inteiro
 to_int("abc")    // erro
 to_int(true)     // erro: bool não é número em Noxy
 ```
-
-Para entrada não confiável, use a forma `_result`, do módulo `convert`, que
-nunca levanta:
 
 ```noxy
 use convert select *
@@ -1131,10 +1306,6 @@ else
     print("PORT inválida: " + porta.error)
 end
 ```
-
-Essa é a mesma convenção de `io.close` / `io.close_result`. Como funções Noxy
-têm retorno único, o struct de resultado ocupa o lugar do par `value, err` do
-Go.
 
 Validar antes de converter não é uma alternativa correta: `is_digit` aceita
 `"9999999999999999999"`, que estoura `int64`, e não há como checar o intervalo
@@ -1239,6 +1410,7 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `crypto` | Cryptographic functions (hashing, UUID) |
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
+| `errors` | Error boundary envelope shapes (Failure, CallResult) |
 
 ### Strings
 

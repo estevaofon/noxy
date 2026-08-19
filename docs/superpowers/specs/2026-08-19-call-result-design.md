@@ -215,7 +215,12 @@ precedent: `fmt("%T", r)` reports `map`, and the envelope does not compare
 equal to a hand-constructed `CallResult(...)` instance. Promoting the
 envelopes (this one and `task_await`'s) to genuine struct instances is a
 single future change, gated on natives being able to construct
-stdlib-declared structs — see "Relation to the task boundary".
+stdlib-declared structs — see "Relation to the task boundary". The typed
+annotation (`let r: CallResult = ...`) is honored by the runtime type
+validator accepting a structurally matching map wherever a struct shape is
+expected at the dynamic boundary; the `IntResult` precedent never exercised
+this path because it has no composite field, and the `call_result`
+implementation extended the validator accordingly.
 
 **What the boundary does not change.**
 
@@ -249,7 +254,9 @@ stdlib-declared structs — see "Relation to the task boundary".
   the boundary observes it, unwinding has already freed frames. Conditions
   the Go runtime treats as unrecoverable (fatal errors such as concurrent map
   writes, Go stack exhaustion, out of memory) remain process-fatal; no
-  boundary observes them.
+  boundary observes them. The recover covers the invocation of `fn` itself;
+  a Go panic raised outside it (argument preparation, envelope construction)
+  remains process-fatal like any other unrecovered panic.
 
 **Intended idiom.** `call_result` exists to build named `_result` twins, not
 to decorate call sites. The inline form over a closure is legal:
