@@ -257,6 +257,83 @@ let r: CallResult = __test_dynamic_envelope_bad()
 	}
 }
 
+// As três acima só exercitam o campo composto "failure" quando ele é null —
+// walkRuntimeValueType:311-313 aceita VAL_NULL contra TYPE_STRUCT de
+// imediato, então o schema aninhado de Failure (causes: Failure[]
+// autorreferente incluso) nunca era percorrido pelo ramo novo de map. As três
+// a seguir cobrem exatamente esse caminho: failure populado (profundidade 1),
+// causes com uma entrada Failure-shaped (profundidade >= 2), e um campo
+// aninhado com tipo errado (prova que a rejeição por profundidade funciona).
+
+// (recursão, positivo) failure populado como map (kind/message/stack/causes)
+// satisfaz o schema aninhado de Failure — não passa mais só pelo atalho null.
+func TestMarkerAcceptsMapWithPopulatedNestedFailureMap(t *testing.T) {
+	machine := New()
+	failure := value.NewMapWithData(map[string]value.Value{
+		"kind":    value.NewString("runtime"),
+		"message": value.NewString("boom"),
+		"stack":   value.NewString("st"),
+		"causes":  value.NewArray(nil),
+	})
+	envelope := value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewBool(false),
+		"value":   value.NewNull(),
+		"failure": failure,
+	})
+	if !machine.markRuntimeValueType(envelope, callResultStructSchema()) {
+		t.Fatal("map com failure populado (map kind/message/stack/causes) deveria satisfazer o schema aninhado de Failure")
+	}
+}
+
+// (recursão, positivo) causes contém uma entrada Failure-shaped (map), então
+// o walk desce por Failure.causes: Failure[] -> elemento Failure -> seus
+// próprios campos: profundidade >= 2, exercitando o schema autorreferente que
+// failureStructSchema() constrói.
+func TestMarkerAcceptsMapWithSelfReferentialCausesEntry(t *testing.T) {
+	machine := New()
+	nestedCause := value.NewMapWithData(map[string]value.Value{
+		"kind":    value.NewString("runtime"),
+		"message": value.NewString("inner"),
+		"stack":   value.NewString("st2"),
+		"causes":  value.NewArray(nil),
+	})
+	failure := value.NewMapWithData(map[string]value.Value{
+		"kind":    value.NewString("runtime"),
+		"message": value.NewString("outer"),
+		"stack":   value.NewString("st1"),
+		"causes":  value.NewArray([]value.Value{nestedCause}),
+	})
+	envelope := value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewBool(false),
+		"value":   value.NewNull(),
+		"failure": failure,
+	})
+	if !machine.markRuntimeValueType(envelope, callResultStructSchema()) {
+		t.Fatal("map cujo failure.causes contém uma entrada Failure-shaped deveria satisfazer o schema autorreferente em profundidade >= 2")
+	}
+}
+
+// (recursão, negativo) failure.kind com tipo errado (int em vez de string) —
+// prova que o walk recursivo realmente rejeita em profundidade, não só na
+// superfície do map raiz.
+func TestMarkerRejectsMapWithWrongNestedFieldType(t *testing.T) {
+	machine := New()
+	failure := value.NewMapWithData(map[string]value.Value{
+		"kind":    value.NewInt(1), // errado: schema espera string
+		"message": value.NewString("boom"),
+		"stack":   value.NewString("st"),
+		"causes":  value.NewArray(nil),
+	})
+	envelope := value.NewMapWithData(map[string]value.Value{
+		"ok":      value.NewBool(false),
+		"value":   value.NewNull(),
+		"failure": failure,
+	})
+	if machine.markRuntimeValueType(envelope, callResultStructSchema()) {
+		t.Fatal("map com failure.kind de tipo errado deveria ser rejeitado pelo walk recursivo em profundidade")
+	}
+}
+
 // (c) uma ObjInstance real de struct com NOME errado continua rejeitada — o
 // caminho nominal para instâncias reais não muda.
 func TestMarkerRejectsRealInstanceOfWrongStructName(t *testing.T) {
