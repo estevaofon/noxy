@@ -491,7 +491,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				} else {
 					// Standard Value Assignment (int = int)
 					if !c.areTypesCompatible(localType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s%s", c.currentLine, ident.Value, localType.String(), valType.String(), c.derefReadHint(localType, valType, n.Value))
 					}
 					if err := c.emitRuntimeValueType(localType); err != nil {
 						return nil, nil, err
@@ -516,8 +516,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				}
 				if !c.areTypesCompatible(upvalueType, valType) {
 					return nil, nil, fmt.Errorf(
-						"[line %d] type mismatch in assignment to '%s': expected %s, got %s",
-						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType),
+						"[line %d] type mismatch in assignment to '%s': expected %s, got %s%s",
+						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType), c.derefReadHint(upvalueType, valType, n.Value),
 					)
 				}
 				if err := c.emitRuntimeValueType(upvalueType); err != nil {
@@ -560,7 +560,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 					// Standard Global Assignment
 					if !c.areTypesCompatible(globalType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s", c.currentLine, ident.Value, globalType.String(), valType.String())
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s%s", c.currentLine, ident.Value, globalType.String(), valType.String(), c.derefReadHint(globalType, valType, n.Value))
 					}
 					if err := c.emitRuntimeValueType(globalType); err != nil {
 						return nil, nil, err
@@ -626,7 +626,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), arrType.ElementType, valType)
 				}
 				if !c.areTypesCompatible(arrType.ElementType, valType) {
-					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s", c.currentLine, arrType.ElementType.String(), valType.String())
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s%s", c.currentLine, arrType.ElementType.String(), valType.String(), c.derefReadHint(arrType.ElementType, valType, n.Value))
 				}
 			} else if mapType, ok := leftType.(*ast.MapType); ok {
 				assignedType = mapType.ValueType
@@ -639,7 +639,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), mapType.ValueType, valType)
 				}
 				if !c.areTypesCompatible(mapType.ValueType, valType) {
-					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s", c.currentLine, mapType.ValueType.String(), valType.String())
+					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s%s", c.currentLine, mapType.ValueType.String(), valType.String(), c.derefReadHint(mapType.ValueType, valType, n.Value))
 				}
 			} else {
 				if leftType != nil && leftType.String() != "any" {
@@ -722,7 +722,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				} else {
 					// Standard Field
 					if !c.areTypesCompatible(fieldType, valType) {
-						return nil, nil, fmt.Errorf("[line %d] type mismatch in field assignment: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
+						return nil, nil, fmt.Errorf("[line %d] type mismatch in field assignment: expected %s, got %s%s", c.currentLine, fieldType.String(), valType.String(), c.derefReadHint(fieldType, valType, n.Value))
 					}
 				}
 				if err := c.emitRuntimeValueType(fieldType); err != nil {
@@ -2694,6 +2694,28 @@ func referenceAssignmentTypeError(line int, name string, expected, actual ast.No
 		"[line %d] cannot assign %s to %s\n  hint: use '*%s = ...' to update the referenced value",
 		line, noxyTypeName(actual), noxyTypeName(expected), name,
 	)
+}
+
+// derefReadHint e o espelho de referenceAssignmentTypeError para a direcao
+// inversa: RHS `ref T` num alvo que espera `T`. Atribuicao nao faz
+// auto-deref (spec §2.3, Type-Based Assignment) — a leitura pede '*'
+// explicito. Devolve "" quando o deref nao consertaria o programa, para o
+// mismatch generico nao sugerir orientacao errada.
+func (c *Compiler) derefReadHint(expected, actual ast.NoxyType, rhs ast.Expression) string {
+	refVal, isRef := actual.(*ast.RefType)
+	if !isRef || expected == nil {
+		return ""
+	}
+	if _, expectedIsRef := expected.(*ast.RefType); expectedIsRef {
+		return ""
+	}
+	if !c.areTypesCompatible(expected, refVal.ElementType) {
+		return ""
+	}
+	if ident, ok := rhs.(*ast.Identifier); ok {
+		return fmt.Sprintf("\n  hint: use '*%s' to read the referenced value", ident.Value)
+	}
+	return "\n  hint: use '*' to read the referenced value"
 }
 
 func isReferenceType(t ast.NoxyType) bool {
