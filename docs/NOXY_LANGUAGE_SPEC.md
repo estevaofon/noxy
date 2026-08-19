@@ -1712,6 +1712,6 @@ register, roll back, poison, or close the resource again.
     - **Reference Parameters**: A parameter declared with `ref` shares the caller's slot — the only sharing mechanism.
 
 ---
-*Version: 0.7.1*
+*Version: 0.7.2*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*
