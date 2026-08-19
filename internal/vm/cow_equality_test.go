@@ -115,3 +115,72 @@ func TestRefEqualityBySlotIdentity(t *testing.T) {
 		t.Fatal("refs para slots diferentes devem ser diferentes")
 	}
 }
+
+// TestRefEqualityIsSlotIdentityEndToEnd fecha o buraco que
+// TestRefEqualityBySlotIdentity (acima) nao pegava: aquele chama valuesEqual
+// direto, mas o compilador emitia OP_DEREF nos DOIS operandos de '=='/'!=',
+// entao a comparacao de identidade nunca era alcancada a partir de codigo
+// Noxy — dois refs para slots distintos de mesmo valor davam `true`.
+func TestRefEqualityIsSlotIdentityEndToEnd(t *testing.T) {
+	cases := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{"mesmo slot", "ra == ra2", true},
+		{"slots distintos, mesmo valor", "ra == rb", false},
+		{"slots distintos com !=", "ra != rb", true},
+		{"identidade ignora o valor apontado", "ra == rb", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := captureVMSource(t, `
+func main()
+    let a: int = 1
+    let b: int = 1
+    let ra: ref int = ref a
+    let rb: ref int = ref b
+    let ra2: ref int = ref a
+    test_report(`+tc.expr+`)
+end
+main()
+`)
+			if got.Type != value.VAL_BOOL || got.AsBool != tc.want {
+				t.Fatalf("%s: %s = %v, esperado %v", tc.name, tc.expr, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRefEqualityAutoDerefsAgainstNonRef guarda o outro lado da regra: um ref
+// comparado com algo que NAO e ref continua lendo o valor apontado (spec
+// §2.3). Sem isso, `no.proximo != null` e `contador == 10` quebrariam.
+func TestRefEqualityAutoDerefsAgainstNonRef(t *testing.T) {
+	cases := []struct {
+		name string
+		expr string
+		want bool
+	}{
+		{"ref contra valor igual", "ra == 1", true},
+		{"ref contra valor diferente", "ra == 2", false},
+		{"valor a esquerda", "1 == ra", true},
+		{"ref valido nao é null", "ra == null", false},
+		{"ref nulo é null", "nulo == null", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := captureVMSource(t, `
+func main()
+    let a: int = 1
+    let ra: ref int = ref a
+    let nulo: ref int = null
+    test_report(`+tc.expr+`)
+end
+main()
+`)
+			if got.Type != value.VAL_BOOL || got.AsBool != tc.want {
+				t.Fatalf("%s: %s = %v, esperado %v", tc.name, tc.expr, got, tc.want)
+			}
+		})
+	}
+}

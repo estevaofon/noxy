@@ -1,0 +1,748 @@
+// ============================================================
+// Testes unitarios de SEMANTICA da linguagem Noxy
+// ============================================================
+//
+// Diferente da maioria dos exemplos em noxy_examples/, este arquivo nao
+// existe para demonstrar features nem para provar que "roda sem erro".
+// Cada bloco abaixo afirma um comportamento OBSERVAVEL e falha (exit 1)
+// quando a semantica muda -- mesmo que o programa continue executando.
+//
+// Cobertura: nucleo da linguagem apenas (aritmetica, semantica de valor,
+// ref, igualdade estrutural, strings, closures, funcoes de primeira classe,
+// defer, genericos, colecoes, controle de fluxo). Nao cobre stdlib de I/O,
+// rede, SQLite nem concorrencia real -- esses tem exemplos proprios.
+//
+// Referencia: docs/NOXY_LANGUAGE_SPEC.md
+//
+// Uso: noxy noxy_examples/language_semantics_test.nx
+
+use sys select exit
+
+// ------------------------------------------------------------
+// Harness minimo
+// ------------------------------------------------------------
+
+let total: int = 0
+let failures: int = 0
+let grupo: string = ""
+
+func begin(nome: string)
+    grupo = nome
+end
+
+func check(condicao: bool, nome: string)
+    total = total + 1
+    if condicao then
+        return
+    end
+    failures = failures + 1
+    print("  [FAIL] " + grupo + " :: " + nome)
+end
+
+func check_int(obtido: int, esperado: int, nome: string)
+    check(obtido == esperado, nome + " (esperado " + to_str(esperado) + ", obtido " + to_str(obtido) + ")")
+end
+
+func check_str(obtido: string, esperado: string, nome: string)
+    check(obtido == esperado, nome + " (esperado '" + esperado + "', obtido '" + obtido + "')")
+end
+
+// ------------------------------------------------------------
+// Tipos de apoio
+// ------------------------------------------------------------
+
+struct Ponto
+    x: int,
+    y: int
+end
+
+struct Interno
+    valores: int[]
+end
+
+struct Externo
+    interno: Interno,
+    tag: string
+end
+
+struct Observador
+    alvo: ref int
+end
+
+struct Caixa<T>
+    valor: T
+end
+
+// ------------------------------------------------------------
+// 1. Aritmetica e operadores
+// ------------------------------------------------------------
+
+func test_operadores()
+    begin("operadores")
+
+    // Divisao inteira trunca em direcao a zero (nao arredonda, nao vira float).
+    check_int(7 / 2, 3, "7/2 trunca")
+    check_int(-7 / 2, -3, "-7/2 trunca em direcao a zero")
+
+    // Modulo mantem o sinal do dividendo (semantica de Go, nao de Python).
+    check_int(7 % 2, 1, "7%2")
+    check_int(-7 % 2, -1, "-7%2 mantem o sinal do dividendo")
+
+    // Divisao de floats nao trunca.
+    check(7.0 / 2.0 == 3.5, "7.0/2.0 preserva a fracao")
+
+    // Mistura int/float promove para float na aritmetica e na comparacao.
+    check(1 + 2.0 == 3.0, "int+float promove para float")
+    check(1 == 1.0, "int e float comparam por valor numerico")
+
+    // to_int trunca em direcao a zero, nao arredonda.
+    check_int(to_int(5.9), 5, "to_int(5.9) trunca")
+    check_int(to_int(-5.9), -5, "to_int(-5.9) trunca em direcao a zero")
+
+    // Precedencia.
+    check_int(2 + 3 * 4, 14, "* antes de +")
+    check_int((2 + 3) * 4, 20, "parenteses vencem")
+    check_int(10 - 2 - 3, 5, "- associa a esquerda")
+
+    // Bitwise.
+    check_int(6 & 3, 2, "and bitwise")
+    check_int(6 | 3, 7, "or bitwise")
+    check_int(6 ^ 3, 5, "xor bitwise")
+    check_int(1 << 3, 8, "shift left")
+    check_int(8 >> 2, 2, "shift right")
+    check_int(~0, -1, "not bitwise")
+    check_int(-5, 0 - 5, "menos unario")
+
+    // Booleanos e strings.
+    check(!(true && false), "and logico")
+    check(true || false, "or logico")
+    check("abc" == "abc", "== de string compara conteudo")
+    check("abc" != "abd", "!= de string")
+end
+
+// ------------------------------------------------------------
+// 2. Curto-circuito
+// ------------------------------------------------------------
+
+let trilha: string = ""
+
+func lado_verdadeiro() -> bool
+    trilha = trilha + "T"
+    return true
+end
+
+func lado_falso() -> bool
+    trilha = trilha + "F"
+    return false
+end
+
+func test_curto_circuito()
+    begin("curto-circuito")
+
+    trilha = ""
+    let r1: bool = lado_falso() && lado_verdadeiro()
+    check(!r1, "false && _ resulta false")
+    check_str(trilha, "F", "&& nao avalia o lado direito quando o esquerdo e false")
+
+    trilha = ""
+    let r2: bool = lado_verdadeiro() || lado_falso()
+    check(r2, "true || _ resulta true")
+    check_str(trilha, "T", "|| nao avalia o lado direito quando o esquerdo e true")
+
+    trilha = ""
+    let r3: bool = lado_verdadeiro() && lado_falso()
+    check(!r3, "true && false resulta false")
+    check_str(trilha, "TF", "&& avalia os dois lados quando o esquerdo e true")
+end
+
+// ------------------------------------------------------------
+// 3. Semantica de valor (copy-on-write)
+// ------------------------------------------------------------
+
+func muta_array(a: int[])
+    append(a, 99)
+    a[0] = -1
+end
+
+func muta_struct_aninhada(e: Externo)
+    e.interno.valores[0] = 99
+    e.tag = "mexido"
+end
+
+func test_semantica_de_valor()
+    begin("semantica de valor (CoW)")
+
+    // 1. Atribuicao copia.
+    let origem: int[] = [1, 2, 3]
+    let copia: int[] = origem
+    copia[0] = 100
+    check_int(origem[0], 1, "atribuir array nao compartilha")
+    check_int(copia[0], 100, "a copia e mutavel de forma independente")
+
+    // 2. Chamada copia (parametro sem ref).
+    let lista: int[] = [1, 2, 3]
+    muta_array(lista)
+    check_int(length(lista), 3, "callee nao consegue crescer o array do caller")
+    check_int(lista[0], 1, "callee nao consegue escrever no array do caller")
+
+    // 3. A independencia e PROFUNDA, nao rasa.
+    let valores: int[] = [1, 2]
+    let ext: Externo = Externo(Interno(valores), "original")
+    muta_struct_aninhada(ext)
+    check_int(ext.interno.valores[0], 1, "mutacao aninhada no callee nao vaza")
+    check_str(ext.tag, "original", "campo raso do callee nao vaza")
+    check_int(valores[0], 1, "o array usado no construtor tambem fica intacto")
+
+    // 4. Ler de um container produz valor independente.
+    let pontos: Ponto[] = [Ponto(5, 5)]
+    let lido: Ponto = pontos[0]
+    lido.x = 99
+    check_int(pontos[0].x, 5, "ler de array produz valor independente")
+
+    let mapa: map[string, int[]] = {"k": [1, 2]}
+    let interno: int[] = mapa["k"]
+    interno[0] = 42
+    check_int(mapa["k"][0], 1, "ler de map produz valor independente")
+
+    // 5. Guardar num container tambem copia.
+    let fonte: int[] = [7]
+    let caixa: Interno = Interno(fonte)
+    append(fonte, 8)
+    check_int(length(caixa.valores), 1, "construtor guarda copia independente")
+
+    let acumulado: int[][] = []
+    let item: int[] = [1]
+    append(acumulado, item)
+    item[0] = 500
+    check_int(acumulado[0][0], 1, "append guarda copia independente")
+
+    // 6. Copia de struct aninhada e profunda.
+    let a: Externo = Externo(Interno([1, 2]), "a")
+    let b: Externo = a
+    b.interno.valores[0] = 77
+    check_int(a.interno.valores[0], 1, "copia de struct e profunda")
+    check_int(b.interno.valores[0], 77, "a copia enxerga a propria mutacao")
+
+    // 7. Canais carregam valores, nao identidade.
+    let ch: any = make_chan(1)
+    let enviado: int[] = [1]
+    chan_send(ch, enviado)
+    append(enviado, 2)
+    let recebido: any = chan_recv(ch)
+    check_int(length(recebido), 1, "chan_send entrega copia independente")
+    check_int(length(enviado), 2, "o remetente mantem o proprio valor")
+end
+
+// ------------------------------------------------------------
+// 4. ref: o unico mecanismo de compartilhamento
+// ------------------------------------------------------------
+
+func cresce_por_ref(a: ref int[])
+    append(a, 99)
+end
+
+func incrementa(v: ref int)
+    *v = v + 1
+end
+
+func troca(a: ref int, b: ref int)
+    let va: int = a
+    let vb: int = b
+    *a = vb
+    *b = va
+end
+
+func test_ref()
+    begin("ref")
+
+    // Parametro ref compartilha o slot do caller.
+    let lista: int[] = [1, 2, 3]
+    cresce_por_ref(lista)
+    check_int(length(lista), 4, "parametro ref muta o valor do caller")
+
+    // Conversao contextual: assinatura exata aceita forma concisa e explicita.
+    let n: int = 1
+    incrementa(n)
+    incrementa(ref n)
+    check_int(n, 3, "ref aceita forma concisa e explicita")
+
+    // Auto-deref na leitura, '*' obrigatorio na escrita.
+    let x: int = 10
+    let r: ref int = ref x
+    check_int(r + 1, 11, "leitura de ref faz auto-deref")
+    *r = 20
+    check_int(x, 20, "'*r = v' escreve no slot original")
+
+    // '=' sem '*' faz REBIND do ponteiro, nao escreve no alvo antigo.
+    let y: int = 0
+    r = ref y
+    *r = 30
+    check_int(y, 30, "rebind passa a escrever no novo alvo")
+    check_int(x, 20, "rebind nao toca o alvo anterior")
+
+    // ref para elemento de array e para campo de struct.
+    let nums: int[] = [1, 2, 3]
+    let rel: ref int = ref nums[1]
+    *rel = 20
+    check_int(nums[1], 20, "ref para indice de array escreve no array")
+
+    let p: Ponto = Ponto(1, 2)
+    let rp: ref int = ref p.x
+    *rp = 9
+    check_int(p.x, 9, "ref para campo de struct escreve no campo")
+
+    // Campo ref numa struct: update vs rebind.
+    let temperatura: int = 20
+    let umidade: int = 50
+    let obs: Observador = Observador(ref temperatura)
+    check_int(obs.alvo, 20, "campo ref faz auto-deref na leitura")
+    *obs.alvo = 25
+    check_int(temperatura, 25, "'*obs.alvo = v' escreve na origem")
+    obs.alvo = ref umidade
+    *obs.alvo = 70
+    check_int(umidade, 70, "rebind de campo ref troca a origem")
+    check_int(temperatura, 25, "rebind de campo ref nao toca a origem antiga")
+
+    // swap so e correto porque '*' e '=' sao operacoes distintas.
+    let a: int = 100
+    let b: int = 200
+    troca(ref a, ref b)
+    check_int(a, 200, "swap por ref (a)")
+    check_int(b, 100, "swap por ref (b)")
+end
+
+// ------------------------------------------------------------
+// 5. Igualdade estrutural
+// ------------------------------------------------------------
+
+func test_igualdade()
+    begin("igualdade")
+
+    // Composites comparam por CONTEUDO, recursivamente.
+    check([1, 2, 3] == [1, 2, 3], "arrays iguais por conteudo")
+    check([1, 2, 3] != [1, 2, 4], "arrays diferentes por conteudo")
+    check(Ponto(1, 2) == Ponto(1, 2), "structs iguais por conteudo")
+    check(Ponto(1, 2) != Ponto(1, 3), "structs diferentes por conteudo")
+
+    let m1: map[string, int] = {"a": 1, "b": 2}
+    let m2: map[string, int] = {"b": 2, "a": 1}
+    check(m1 == m2, "maps iguais por conteudo, independente da ordem")
+
+    // Recursivo em profundidade.
+    let e1: Externo = Externo(Interno([1, 2]), "t")
+    let e2: Externo = Externo(Interno([1, 2]), "t")
+    let e3: Externo = Externo(Interno([1, 3]), "t")
+    check(e1 == e2, "igualdade desce em campos aninhados")
+    check(e1 != e3, "diferenca aninhada e detectada")
+
+    // Um ref DENTRO de um composite compara por identidade de slot,
+    // nao pelo valor apontado.
+    let x: int = 5
+    let y: int = 5
+    let mesmo_slot: Observador = Observador(ref x)
+    let outro_slot: Observador = Observador(ref y)
+    let tambem_x: Observador = Observador(ref x)
+    check(mesmo_slot == tambem_x, "campo ref igual quando aponta para o mesmo slot")
+    check(mesmo_slot != outro_slot, "campo ref difere entre slots distintos de mesmo valor")
+
+    // O mesmo vale para dois refs comparados diretamente: '==' entre dois
+    // 'ref T' pergunta "e o MESMO objeto?", nao "tem o mesmo valor?".
+    // Este e o unico ponto da linguagem onde um ref NAO sofre auto-deref.
+    let rx: ref int = ref x
+    let ry: ref int = ref y
+    let rx2: ref int = ref x
+    check(rx == rx2, "dois refs para o mesmo slot sao iguais")
+    check(rx != ry, "refs para slots distintos diferem, mesmo com valor igual")
+    check(addr(rx) != addr(ry), "addr() concorda: slots diferentes")
+
+    // Identidade nao segue o valor: mudar o conteudo nao aproxima nem
+    // afasta dois refs.
+    y = 7
+    check(rx != ry, "identidade nao muda quando os valores divergem")
+    y = 5
+    check(rx != ry, "identidade nao muda quando os valores voltam a coincidir")
+
+    // Ja o caso MISTO -- ref contra nao-ref -- continua lendo o valor
+    // apontado, como qualquer outro uso de ref numa expressao.
+    check(rx == 5, "ref contra valor faz auto-deref")
+    check(5 == rx, "auto-deref tambem com o ref a direita")
+    check(rx != 6, "auto-deref no caso negativo")
+
+    // E o teste de nulidade pergunta sobre o proprio ref.
+    let nulo: ref int = null
+    check(nulo == null, "ref nulo é null")
+    check(rx != null, "ref valido nao é null")
+end
+
+// ------------------------------------------------------------
+// 6. Strings e bytes
+// ------------------------------------------------------------
+
+func test_strings()
+    begin("strings")
+
+    // Indexacao e comprimento por CODE POINT, nao por byte.
+    check_int(length("café"), 4, "length conta code points, nao bytes")
+    check_str("café"[3], "é", "indexacao devolve o code point")
+    check_int(length("abc"), 3, "length em ascii")
+
+    // Concatenacao produz valor novo.
+    let s: string = "ab"
+    let t: string = s + "c"
+    check_str(s, "ab", "concatenacao nao muta a origem")
+    check_str(t, "abc", "concatenacao produz o valor esperado")
+
+    // Iteracao por caractere.
+    let acc: string = ""
+    for ch in "abc" do
+        acc = acc + ch + "-"
+    end
+    check_str(acc, "a-b-c-", "for-in string itera code points")
+
+    // F-string interpola expressoes, nao apenas variaveis.
+    let nome: string = "Noxy"
+    check_str(f"ola {nome} {1 + 2}", "ola Noxy 3", "f-string interpola expressao")
+
+    // bytes e o oposto: indexado por octeto.
+    let b: bytes = b"Hi"
+    check_int(length(b), 2, "length de bytes conta octetos")
+    check_str(hex_encode(b), "4869", "hex_encode")
+    check(hex_decode("4869") == b, "hex_decode inverte hex_encode")
+end
+
+// ------------------------------------------------------------
+// 7. Closures
+// ------------------------------------------------------------
+
+func faz_contador() -> func
+    let n: int = 0
+    return func() -> int
+        n = n + 1
+        return n
+    end
+end
+
+func faz_somador(base: int) -> func(int) -> int
+    return func(v: int) -> int
+        return base + v
+    end
+end
+
+func test_closures()
+    begin("closures")
+
+    // A closure captura o SLOT: chamadas sucessivas veem o estado atualizado.
+    let c: func = faz_contador()
+    check_int(to_int(c()), 1, "primeira chamada")
+    check_int(to_int(c()), 2, "estado capturado sobrevive entre chamadas")
+    check_int(to_int(c()), 3, "e continua avancando")
+
+    // Cada instancia tem o proprio ambiente.
+    let outro: func = faz_contador()
+    check_int(to_int(outro()), 1, "nova closure comeca do zero")
+    check_int(to_int(c()), 4, "sem interferencia entre instancias")
+
+    // Parametro capturado sobrevive ao fim do frame que o criou.
+    let mais10: func(int) -> int = faz_somador(10)
+    let mais20: func(int) -> int = faz_somador(20)
+    check_int(mais10(5), 15, "captura de parametro (base 10)")
+    check_int(mais20(5), 25, "captura de parametro (base 20)")
+end
+
+// ------------------------------------------------------------
+// 8. Funcoes de primeira classe
+// ------------------------------------------------------------
+
+func dobra(x: int) -> int
+    return x * 2
+end
+
+func soma_um(x: int) -> int
+    return x + 1
+end
+
+func aplica(f: func(int) -> int, v: int) -> int
+    return f(v)
+end
+
+func compoe(f: func(int) -> int, g: func(int) -> int) -> func(int) -> int
+    return func(x: int) -> int
+        return f(g(x))
+    end
+end
+
+func fatorial(n: int) -> int
+    if n <= 1 then
+        return 1
+    end
+    return n * fatorial(n - 1)
+end
+
+func test_funcoes()
+    begin("funcoes")
+
+    check_int(fatorial(5), 120, "recursao")
+    check_int(aplica(dobra, 5), 10, "funcao como argumento (tipo exato)")
+    check_int(compoe(dobra, soma_um)(3), 8, "composicao aplica g antes de f")
+
+    // Array de funcoes exatas (parenteses obrigatorios no tipo).
+    let fs: (func(int) -> int)[] = [dobra, soma_um]
+    check_int(fs[0](10), 20, "funcao vinda de array (indice 0)")
+    check_int(fs[1](10), 11, "funcao vinda de array (indice 1)")
+
+    // Widening para 'func' dinamico: o resultado vira 'any' em compile time.
+    let dinamica: func = dobra
+    let resultado: any = dinamica(4)
+    check_int(to_int(resultado), 8, "chamada por 'func' dinamico e validada em runtime")
+end
+
+// ------------------------------------------------------------
+// 9. defer
+// ------------------------------------------------------------
+
+let ordem: string = ""
+
+func marca(s: string)
+    ordem = ordem + s
+end
+
+func frame_com_defer()
+    marca("A")
+    defer marca("1")
+    defer marca("2")
+    marca("B")
+end
+
+func frame_captura_argumento()
+    let v: int = 1
+    defer marca(to_str(v))
+    v = 9
+end
+
+func frame_defer_em_loop()
+    let i: int = 0
+    while i < 3 do
+        defer marca(to_str(i))
+        i = i + 1
+    end
+    marca("|")
+end
+
+func test_defer()
+    begin("defer")
+
+    ordem = ""
+    frame_com_defer()
+    check_str(ordem, "AB21", "defer roda na saida do frame, em ordem LIFO")
+
+    ordem = ""
+    frame_captura_argumento()
+    check_str(ordem, "1", "argumentos sao avaliados no registro, nao na execucao")
+
+    ordem = ""
+    frame_defer_em_loop()
+    check_str(ordem, "|210", "defer em loop registra por iteracao e pertence ao frame")
+end
+
+// ------------------------------------------------------------
+// 10. Genericos (monomorfizacao)
+// ------------------------------------------------------------
+
+func primeiro<T>(arr: T[]) -> T
+    return arr[0]
+end
+
+func identidade<T>(x: T) -> T
+    return x
+end
+
+func troca_valor<T>(c: ref Caixa<T>, v: T)
+    c.valor = v
+end
+
+func aplica_todos<A, B>(arr: A[], fn: func(A) -> B) -> B[]
+    let saida: B[] = []
+    for item in arr do
+        append(saida, fn(item))
+    end
+    return saida
+end
+
+func test_genericos()
+    begin("genericos")
+
+    // Inferencia a partir do argumento.
+    let ints: int[] = [7, 8]
+    let strs: string[] = ["a", "b"]
+    check_int(primeiro(ints), 7, "T inferido como int")
+    check_str(primeiro(strs), "a", "T inferido como string")
+
+    // Struct generica e uma struct comum em todo o resto da linguagem.
+    let c: Caixa<int> = Caixa(3)
+    check_int(c.valor, 3, "construcao de struct generica")
+
+    // ... inclusive na semantica de valor.
+    let copia: Caixa<int> = c
+    copia.valor = 10
+    check_int(c.valor, 3, "copia de struct generica nao vaza")
+
+    // Aninhamento resolve de dentro para fora.
+    let dupla: Caixa<Caixa<int>> = Caixa(Caixa(9))
+    dupla.valor.valor = dupla.valor.valor + 1
+    check_int(dupla.valor.valor, 10, "Caixa<Caixa<int>> aninhada")
+
+    let outra: Caixa<Caixa<int>> = dupla
+    outra.valor.valor = 100
+    check_int(dupla.valor.valor, 10, "copia profunda tambem na generica aninhada")
+
+    // ref T num parametro generico continua compartilhando.
+    troca_valor(ref c, 42)
+    check_int(c.valor, 42, "parametro 'ref Caixa<T>' muta o original")
+
+    // Generico como valor: o tipo alvo da anotacao instancia o template.
+    let f: func(int) -> int = identidade
+    check_int(f(5), 5, "generico vira valor quando ha tipo alvo concreto")
+
+    // Unificacao de dois genericos na mesma chamada.
+    let dobrados: int[] = aplica_todos(ints, dobra)
+    check_int(length(dobrados), 2, "aplica_todos preserva o tamanho")
+    check_int(dobrados[0], 14, "A=int pelo array, B=int pela funcao")
+    check_int(dobrados[1], 16, "segundo elemento")
+end
+
+// ------------------------------------------------------------
+// 11. Colecoes
+// ------------------------------------------------------------
+
+func test_colecoes()
+    begin("colecoes")
+
+    let a: int[] = []
+    check_int(length(a), 0, "array dinamico comeca vazio")
+    append(a, 1)
+    append(a, 2)
+    append(a, 3)
+    check_int(length(a), 3, "append cresce")
+    check_int(pop(a), 3, "pop devolve o ultimo")
+    check_int(length(a), 2, "pop encurta")
+    check(contains(a, 2), "contains encontra o que ficou")
+    check(!contains(a, 3), "contains nao encontra o que saiu")
+
+    let z: int[3] = zeros(3)
+    check_int(length(z), 3, "zeros dimensiona")
+    check_int(z[0] + z[1] + z[2], 0, "zeros preenche com zero")
+
+    let m: map[string, int] = {"a": 1, "b": 2}
+    check_int(length(m), 2, "length de map")
+    check(has_key(m, "a"), "has_key positivo")
+    m["c"] = 3
+    check_int(m["c"], 3, "escrita cria a chave")
+    delete(m, "a")
+    check(!has_key(m, "a"), "delete remove a chave")
+    check_int(length(keys(m)), 2, "keys reflete o tamanho atual")
+
+    // Iteracao de map percorre chaves; a ordem NAO e especificada,
+    // entao a asercao e sobre o conjunto, nao sobre a sequencia.
+    let soma: int = 0
+    for k in m do
+        soma = soma + m[k]
+    end
+    check_int(soma, 5, "for-in map visita cada chave uma vez")
+end
+
+// ------------------------------------------------------------
+// 12. Controle de fluxo e escopo
+// ------------------------------------------------------------
+
+func retorna_cedo() -> int
+    let i: int = 0
+    while i < 10 do
+        if i == 1 then
+            return i
+        end
+        i = i + 1
+    end
+    return -1
+end
+
+func test_controle_de_fluxo()
+    begin("controle de fluxo")
+
+    // Cadeia elif: para no primeiro ramo verdadeiro.
+    let n: int = 2
+    let rotulo: string = ""
+    if n == 1 then
+        rotulo = "um"
+    elif n == 2 then
+        rotulo = "dois"
+    elif n == 2 then
+        rotulo = "dois-de-novo"
+    else
+        rotulo = "outro"
+    end
+    check_str(rotulo, "dois", "elif para no primeiro ramo verdadeiro")
+
+    // while + break.
+    let i: int = 0
+    let contados: int = 0
+    while true do
+        i = i + 1
+        if i > 3 then
+            break
+        end
+        contados = contados + 1
+    end
+    check_int(contados, 3, "break sai do while")
+
+    // for-in array itera valores.
+    let soma: int = 0
+    for v in [1, 2, 3, 4] do
+        soma = soma + v
+    end
+    check_int(soma, 10, "for-in array itera valores")
+
+    // return sai imediatamente da funcao.
+    check_int(retorna_cedo(), 1, "return interrompe o fluxo")
+
+    // Bloco interno pode sombrear um nome externo sem afetar o externo.
+    let x: int = 1
+    if true then
+        let x: int = 2
+        check_int(x, 2, "o bloco enxerga a propria declaracao")
+    end
+    check_int(x, 1, "o sombreamento termina com o bloco")
+end
+
+// ------------------------------------------------------------
+// Runner
+// ------------------------------------------------------------
+
+func main()
+    print("=== NOXY :: TESTES DE SEMANTICA DA LINGUAGEM ===")
+
+    test_operadores()
+    test_curto_circuito()
+    test_semantica_de_valor()
+    test_ref()
+    test_igualdade()
+    test_strings()
+    test_closures()
+    test_funcoes()
+    test_defer()
+    test_genericos()
+    test_colecoes()
+    test_controle_de_fluxo()
+
+    print("")
+    print("Asercoes: " + to_str(total))
+    print("Passaram: " + to_str(total - failures))
+    print("Falharam: " + to_str(failures))
+
+    if failures > 0 then
+        print("=== FALHOU ===")
+        exit(1)
+    end
+    print("=== OK ===")
+end
+
+main()

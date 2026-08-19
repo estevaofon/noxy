@@ -1040,12 +1040,22 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
 
+		// `==`/`!=` sao a UNICA excecao ao auto-deref de operandos (spec
+		// §2.3): dois refs precisam chegar inteiros ate OP_EQUAL para
+		// comparar IDENTIDADE DE SLOT (§2.2.7), e nao o valor apontado.
+		// O caso misto (`ref T` contra `T`, contra `null`) continua lendo o
+		// valor apontado, mas resolvido em runtime por OP_EQUAL, que enxerga
+		// os dois operandos de uma vez — aqui o tipo do lado direito ainda
+		// nao e conhecido quando o deref do esquerdo teria de ser emitido.
+		// Todos os demais operadores seguem dereferenciando neste ponto.
+		identityComparison := n.Operator == "==" || n.Operator == "!="
+
 		_, leftType, err := c.Compile(n.Left)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		if _, ok := leftType.(*ast.RefType); ok {
+		if _, ok := leftType.(*ast.RefType); ok && !identityComparison {
 			// Always deref ref types before comparison (including null comparison)
 			// This ensures 'ref Node == null' compares the pointed-to value, not the ref itself
 			c.emitByte(byte(chunk.OP_DEREF))
@@ -1059,7 +1069,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
-		if _, ok := rightType.(*ast.RefType); ok {
+		if _, ok := rightType.(*ast.RefType); ok && !identityComparison {
 			// Always deref ref types before comparison (including null comparison)
 			c.emitByte(byte(chunk.OP_DEREF))
 			if ref, ok := rightType.(*ast.RefType); ok {

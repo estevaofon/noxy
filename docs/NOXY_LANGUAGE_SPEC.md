@@ -112,7 +112,10 @@ Arrays, maps, and structs are composite **values**. Every binding without
    (variable, field, index, map entry); writes through any alias of the slot
    are visible to all aliases of that slot.
 7. **`==`/`!=` on composites is structural** (recursive by content). `ref`
-   values compare by slot identity and are not dereferenced.
+   values compare by slot identity and are not dereferenced — both as fields
+   nested inside a composite and as the two operands of a direct comparison.
+   A `ref` compared against a *non*-`ref` (a plain value, `null`) is the one
+   shape that still auto-dereferences; see §2.3.
 8. Closures capture *variables* (slots); captured-variable aliasing is
    unchanged and orthogonal to value semantics.
 
@@ -232,6 +235,31 @@ let y: int = r + 1   // Compiler auto-derefs 'r' -> 11
 print(r)             // Prints 10
 ```
 This applies to both Local Variables and Struct Fields.
+
+**The one exception: `==` and `!=` between two references.** Auto-dereference
+answers "what value is there?", which is the wrong question when *both* sides
+are references — there the question is about identity. So when both operands
+are statically `ref T`, the comparison is by **slot identity** (§2.2, rule 7)
+and neither side is dereferenced. Every other shape keeps auto-dereference,
+including a reference compared against a plain value or against `null`:
+
+```noxy
+let a: int = 1
+let b: int = 1
+let ra: ref int = ref a
+let rb: ref int = ref b
+let ra2: ref int = ref a
+
+ra == ra2   // true  — same slot
+ra == rb    // false — different slots, even though both hold 1
+ra == 1     // true  — mixed: auto-deref reads the pointed value
+ra == null  // false — mixed: the reference is valid
+
+node.next != null   // unchanged: the usual null test on a `ref` field
+```
+
+`addr(ref x)` remains available when you want that identity as a printable
+value rather than a comparison.
 
 #### 2. Writing (Update vs Rebind)
 The distinction between modifying the *value* and modifying the *pointer* is made explicit by syntax:

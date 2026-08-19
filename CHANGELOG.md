@@ -1,5 +1,56 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed (BREAKING) — `==`/`!=` entre dois `ref` compara identidade
+
+- **`ra == rb` com ambos os lados `ref T` agora compara identidade de slot**,
+  não o valor apontado — a semântica que a spec já descrevia em §2.2 regra 7
+  (*"`ref` values compare by slot identity and are not dereferenced"*) e que
+  a VM já implementava corretamente em `valuesEqual`
+  (`internal/vm/stack.go`), com teste unitário próprio
+  (`TestRefEqualityBySlotIdentity`). O bug estava um andar acima: o
+  compilador emitia `OP_DEREF` nos **dois** operandos de qualquer operador
+  binário, inclusive `==`/`!=`, então a comparação de identidade era
+  inalcançável a partir de código Noxy. Na prática, dois refs para variáveis
+  distintas que por acaso guardassem o mesmo valor davam `true`, e a
+  igualdade passava a seguir o conteúdo das variáveis ao longo do tempo.
+
+  ```noxy
+  let a: int = 1
+  let b: int = 1
+  let ra: ref int = ref a
+  let rb: ref int = ref b
+
+  ra == rb    // antes: true   agora: false  (slots distintos)
+  ```
+
+  O caso **misto** é deliberadamente preservado: um `ref` comparado contra um
+  não-`ref` continua fazendo auto-deref e lendo o valor apontado, agora
+  resolvido em runtime por `OP_EQUAL` (que enxerga os dois operandos de uma
+  vez, ao contrário do compilador, que ainda não conhece o tipo do lado
+  direito quando o deref do esquerdo precisaria ser emitido). Isso mantém
+  intactos `no.proximo != null`, `res.err != null` e `contador == 10` — os
+  169 exemplos de `noxy_examples/` passam sem alteração, incluindo listas
+  encadeadas, BST e grafos.
+
+  Migração: código que dependia de `ref == ref` como comparação de valor deve
+  dereferenciar explicitamente um dos lados (`*ra == *rb`) ou comparar contra
+  o valor (`ra == b`). Spec atualizada em §2.2 (regra 7) e §2.3, que agora
+  registra `==`/`!=` entre dois refs como a única exceção ao auto-deref.
+
+### Added
+
+- `noxy_examples/language_semantics_test.nx`: suíte de testes unitários de
+  **semântica** da linguagem (134 asserções em 12 grupos — aritmética,
+  curto-circuito, semântica de valor/CoW, `ref`, igualdade estrutural,
+  strings/bytes, closures, funções de primeira classe, `defer`, genéricos,
+  coleções, controle de fluxo). Diferente dos demais exemplos, que provam
+  apenas que o programa executa sem erro, cada asserção afirma um
+  comportamento observável e o arquivo sai com código 1 quando alguma falha,
+  reportando todas de uma vez. Entra automaticamente no
+  `run_all_tests_concurrent.nx`.
+
 ## [0.7.0] - 2026-08-18
 
 ### Added
