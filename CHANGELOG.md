@@ -37,7 +37,9 @@
   Migração: código que dependia de `ref == ref` como comparação de valor deve
   dereferenciar explicitamente um dos lados (`*ra == *rb`) ou comparar contra
   o valor (`ra == b`). Spec atualizada em §2.2 (regra 7) e §2.3, que agora
-  registra `==`/`!=` entre dois refs como a única exceção ao auto-deref.
+  registra `==`/`!=` entre dois refs como exceção ao auto-deref (ao lado da
+  segunda exceção, explicitada nesta mesma release — ver "Hint de deref na
+  atribuição" abaixo).
 
 ### Added
 
@@ -50,6 +52,47 @@
   comportamento observável e o arquivo sai com código 1 quando alguma falha,
   reportando todas de uma vez. Entra automaticamente no
   `run_all_tests_concurrent.nx`.
+
+- **Ordenação lexicográfica de strings**: `<`, `>`, `<=`, `>=` agora aceitam
+  duas strings, comparando byte a byte — dentro do invariante UTF-8, isso é
+  idêntico à ordem por code point, como em Python. Antes, `"abc" < "abd"`
+  compilava e estourava em **runtime** com `operands must be numbers`, embora
+  a spec listasse os operadores de comparação sem restringi-los a números.
+  Misturar string com número, ou ordenar `bytes`, continua erro de runtime —
+  agora com a mensagem `operands must be numbers or strings`; `bytes` seguem
+  deliberadamente fora da ordenação (a ponte explícita é `to_str`). `ref
+  string` participa pelo valor apontado (auto-deref de expressão, já emitido
+  pelo compilador). Spec atualizada em §8 (Comparison) e §12 (comparação
+  byte-exata). Testes: `internal/vm/string_ordering_test.go` e o grupo
+  "ordenacao de strings" da suíte de semântica.
+
+- `noxy_examples/language_semantics_test2.nx`: parte 2 da suíte de semântica
+  (129 asserções em 12 grupos — conversões numéricas, structs de resultado do
+  `convert`, `fmt`, as três formas de import, stdlib `strings` por code
+  point, ordenação de strings, `bytes` por octeto, arrays fixos e containers
+  aninhados, listas ligadas com `ref Node`/`GNode<T>`, `ref` avançado
+  (entrada de map, forwarding, escape de frame, closures compartilhando
+  slot, `defer` com `ref`), `when`/`case` e a fronteira `any`). Mesmo
+  contrato da parte 1: cada asserção afirma comportamento observável e o
+  arquivo sai com código 1 em falha. Entra automaticamente no
+  `run_all_tests_concurrent.nx`.
+
+### Changed
+
+- **Hint de deref na atribuição `x = r`**: atribuir um `ref T` a um alvo que
+  espera `T` (variável local, global ou capturada, índice de array, valor de
+  map, campo de struct) continua erro de compilação — atribuição não faz
+  auto-deref, agora explicitado na spec (§2.3, exceção 2, com linha nova na
+  tabela de Type-Based Assignment) — mas a mensagem passa a apontar o
+  conserto: `hint: use '*r' to read the referenced value`, espelhando o hint
+  já existente da direção inversa (`r = 50` → `use '*r = ...' to update the
+  referenced value`). O hint só aparece quando o deref de fato consertaria o
+  programa. A spec também corrige o exemplo `*r = ref z` de "Strict Type
+  Safety", que documentava um erro que a implementação nunca emitiu: no alvo
+  `*r =` o `*` já desfez a ambiguidade update/rebind, então um RHS `ref` é
+  lido como em qualquer expressão (`*r = s` equivale a `*r = *s`) —
+  comportamento agora fixado em teste na suíte de semântica. Testes:
+  `internal/compiler/assign_deref_hint_test.go`.
 
 ## [0.7.0] - 2026-08-18
 

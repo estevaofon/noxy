@@ -1,0 +1,566 @@
+// ============================================================
+// Testes unitarios de SEMANTICA da linguagem Noxy -- parte 2
+// ============================================================
+//
+// Continuacao de language_semantics_test.nx, com o mesmo contrato:
+// cada bloco afirma um comportamento OBSERVAVEL e falha (exit 1)
+// quando a semantica muda -- mesmo que o programa continue executando.
+//
+// Cobertura desta parte: conversoes e formatacao (to_*, fmt), as tres
+// formas de import, stdlib strings (unidade = code point), ordenacao
+// lexicografica de strings, bytes como octetos, structs de resultado do
+// modulo convert, arrays fixos e containers aninhados, structs
+// auto-referenciadas (listas ligadas), ref avancado (map entry,
+// forwarding, escape de frame, closures que compartilham slot, defer com
+// ref), when/case e a fronteira 'any'.
+//
+// Referencia: docs/NOXY_LANGUAGE_SPEC.md
+//
+// Uso: noxy noxy_examples/language_semantics_test2.nx
+
+use sys select exit
+
+// As tres formas de import sao, elas mesmas, semantica sob teste:
+// namespace, alias e selecao apontam para as MESMAS funcoes.
+use strings
+use strings as st
+use strings select to_upper, is_valid_utf8
+use convert select *
+
+// ------------------------------------------------------------
+// Harness minimo (identico ao da parte 1)
+// ------------------------------------------------------------
+
+let total: int = 0
+let failures: int = 0
+let grupo: string = ""
+
+func begin(nome: string)
+    grupo = nome
+end
+
+func check(condicao: bool, nome: string)
+    total = total + 1
+    if condicao then
+        return
+    end
+    failures = failures + 1
+    print("  [FAIL] " + grupo + " :: " + nome)
+end
+
+func check_int(obtido: int, esperado: int, nome: string)
+    check(obtido == esperado, nome + " (esperado " + to_str(esperado) + ", obtido " + to_str(obtido) + ")")
+end
+
+func check_str(obtido: string, esperado: string, nome: string)
+    check(obtido == esperado, nome + " (esperado '" + esperado + "', obtido '" + obtido + "')")
+end
+
+// ------------------------------------------------------------
+// Tipos de apoio
+// ------------------------------------------------------------
+
+struct Ponto
+    x: int,
+    y: int
+end
+
+struct Node
+    value: int,
+    next: ref Node
+end
+
+struct GNode<T>
+    value: T,
+    next: ref GNode<T>
+end
+
+struct Caixa<T>
+    valor: T
+end
+
+// ------------------------------------------------------------
+// 1. Conversoes numericas e floats
+// ------------------------------------------------------------
+
+func test_conversoes()
+    begin("conversoes")
+
+    // to_int/to_float aceitam strings quando a conversao e exata.
+    check_int(to_int("7"), 7, "to_int de string decimal")
+    check(to_float("5.5") == 5.5, "to_float de string com fracao")
+    check(to_float(5) == 5.0, "to_float de int")
+
+    // to_str de float usa formato fixo de 6 casas (igual a %f).
+    check_str(to_str(3.14), "3.140000", "to_str de float tem 6 casas")
+    check_str(to_str(1.0), "1.000000", "to_str de float inteiro mantem as casas")
+    check_str(to_str(42), "42", "to_str de int nao ganha casas")
+    check_str(to_str(true), "true", "to_str de bool")
+
+    // Floats seguem IEEE 754: fracoes decimais nao-representaveis
+    // acumulam erro; fracoes binarias exatas comparam exatas.
+    check(0.1 + 0.2 != 0.3, "0.1+0.2 difere de 0.3 (IEEE 754)")
+    check(0.5 + 0.25 == 0.75, "fracoes binarias exatas comparam exatas")
+
+    // Comparacao mista int/float promove, igual a aritmetica.
+    check(1 < 1.5, "int < float compara por valor numerico")
+    check(3 <= 3.0, "int <= float na igualdade numerica")
+    check(2.5 >= 2.5, "float >= float reflexivo")
+end
+
+// ------------------------------------------------------------
+// 2. Modulo convert: falha como dado, nao como erro
+// ------------------------------------------------------------
+
+func test_convert_result()
+    begin("convert result")
+
+    // A forma _result nunca levanta: sucesso e falha viram campos.
+    let ok_int: IntResult = to_int_result("42")
+    check(ok_int.ok, "to_int_result aceita inteiro decimal")
+    check_int(ok_int.value, 42, "value carrega o convertido")
+
+    // "5.5" e um float valido mas NAO um int: to_int_result recusa
+    // em vez de truncar silenciosamente.
+    let nao_int: IntResult = to_int_result("5.5")
+    check(!nao_int.ok, "to_int_result recusa string decimal fracionaria")
+    check(nao_int.error != "", "a falha vem descrita no campo error")
+
+    let ok_float: FloatResult = to_float_result("2.5")
+    check(ok_float.ok, "to_float_result aceita fracao")
+    check(ok_float.value == 2.5, "value carrega o float exato")
+
+    let nao_float: FloatResult = to_float_result("abc")
+    check(!nao_float.ok, "to_float_result recusa texto nao numerico")
+end
+
+// ------------------------------------------------------------
+// 3. fmt: formatacao estilo printf
+// ------------------------------------------------------------
+
+func test_fmt()
+    begin("fmt")
+
+    check_str(fmt("%d", 255), "255", "%d base 10")
+    check_str(fmt("%x", 255), "ff", "%x hex minusculo")
+    check_str(fmt("%X", 255), "FF", "%X hex maiusculo")
+    check_str(fmt("%b", 5), "101", "%b binario")
+    check_str(fmt("%f", 3.5), "3.500000", "%f usa 6 casas por padrao")
+    check_str(fmt("%.2f", 3.14159), "3.14", "%.Nf trunca a precisao pedida")
+    check_str(fmt("%e", 12345.678), "1.234568e+04", "%e notacao cientifica")
+    check_str(fmt("%t", true), "true", "%t bool")
+    check_str(fmt("%q", "hi"), "\"hi\"", "%q string entre aspas")
+    check_str(fmt("%s", "str"), "str", "%s string crua")
+    check_str(fmt("%v", [1, 2]), "[1, 2]", "%v representacao padrao de array")
+
+    // Varios verbos consomem os argumentos em ordem.
+    check_str(fmt("Value: %d, Hex: %x", 255, 255), "Value: 255, Hex: ff", "verbos em sequencia")
+end
+
+// ------------------------------------------------------------
+// 4. Formas de import: namespace, alias e selecao
+// ------------------------------------------------------------
+
+func test_import_forms()
+    begin("imports")
+
+    check_str(strings.to_lower("ABC"), "abc", "forma namespace: modulo.funcao")
+    check_str(st.reverse("abc"), "cba", "forma alias: 'use m as a'")
+    check_str(to_upper("abc"), "ABC", "forma seletiva importa direto no escopo")
+
+    // As tres formas resolvem para a MESMA funcao do modulo.
+    check_str(st.to_upper("ab"), to_upper("ab"), "alias e selecao coincidem")
+    check_str(strings.to_upper("ab"), to_upper("ab"), "namespace e selecao coincidem")
+end
+
+// ------------------------------------------------------------
+// 5. stdlib strings: a unidade e o code point
+// ------------------------------------------------------------
+
+func test_strings_stdlib()
+    begin("strings stdlib")
+
+    // substring: indices por rune, negativos contam do fim (estilo
+    // Python) e ambos os lados sao clampados a [0, len].
+    check_str(strings.substring("Hello", 1, 4), "ell", "substring basico")
+    check_str(strings.substring("Hello", 3, 100), "lo", "end e clampado ao tamanho")
+    check_str(strings.substring("Hello", -2, 5), "lo", "start negativo conta do fim")
+    check_str(strings.substring("Hello", 0, -1), "Hell", "end negativo conta do fim")
+    check_str(strings.substring("Hello", 3, 1), "", "start >= end resulta vazio")
+    check_str(strings.substring("aé🙂z", 1, 3), "é🙂", "indices por rune, nao por byte")
+
+    // Busca tambem responde em runes.
+    check_int(strings.index_of("banana", "na"), 2, "index_of devolve indice por rune")
+    check_int(strings.index_of("banana", "zz"), -1, "index_of sem match e -1")
+    check_int(strings.count("banana", "na"), 2, "count conta ocorrencias")
+    check_str(strings.char_at("café", 3), "é", "char_at devolve o code point")
+
+    // Transformacoes.
+    check_str(strings.repeat("ab", 3), "ababab", "repeat")
+    check_str(strings.pad_left("7", 3, "0"), "007", "pad_left preenche ate o total")
+    check_str(strings.trim("  oi  "), "oi", "trim remove espacos das pontas")
+    check_str(strings.replace("aaa", "a", "b"), "bbb", "replace troca todas")
+    check_str(strings.replace_first("aaa", "a", "b"), "baa", "replace_first troca so a primeira")
+    check_str(strings.reverse("abc"), "cba", "reverse")
+
+    // split devolve um struct de resultado, nao um array cru.
+    let sp: strings.SplitResult = strings.split("a,b,c", ",")
+    check_int(sp.count, 3, "split conta as partes")
+    check_str(sp.parts[0], "a", "primeira parte")
+    check_str(sp.parts[2], "c", "ultima parte")
+    check_str(strings.join_count(sp.parts, "-", sp.count), "a-b-c", "join_count inverte o split")
+
+    // Ponte caractere <-> codigo.
+    check_int(strings.char_code("A"), 65, "char_code")
+    check_str(strings.from_char_code(66), "B", "from_char_code")
+    let cs: int[] = strings.codes("hi")
+    check_int(cs[0], 104, "codes devolve os code points")
+    check_int(cs[1], 105, "codes segundo elemento")
+
+    // Predicados.
+    check(strings.starts_with("noxy", "no"), "starts_with")
+    check(strings.ends_with("noxy", "xy"), "ends_with")
+    check(strings.contains("noxy", "ox"), "contains de substring")
+    check(strings.is_digit("123"), "is_digit")
+    check(strings.is_alpha("abc"), "is_alpha")
+
+    // O builtin slice tambem opera em strings, por rune.
+    check_str(slice("hello", 1, 3), "el", "slice de string por rune")
+    check(slice([1, 2, 3, 4], 1, 3) == [2, 3], "slice de array devolve subarray")
+
+    // Escapes classicos valem um caractere cada.
+    check_int(length("a\nb"), 3, "\\n e um caractere")
+    check_int(length("a\tb"), 3, "\\t e um caractere")
+end
+
+// ------------------------------------------------------------
+// 5b. Ordenacao de strings: lexicografica, byte-exata
+// ------------------------------------------------------------
+
+func test_ordenacao_strings()
+    begin("ordenacao de strings")
+
+    // <, >, <=, >= ordenam strings lexicograficamente byte a byte --
+    // dentro do invariante UTF-8 isso e identico a ordem por code point.
+    check("abc" < "abd", "ordem lexicografica basica")
+    check("b" > "a", "> e o espelho de <")
+    check("a" <= "a", "<= e reflexivo")
+    check("abc" >= "abc", ">= e reflexivo")
+    check(!("a" > "b"), "caso negativo de >")
+
+    // Prefixo vem antes da palavra completa.
+    check("ab" < "b", "prefixo ordena antes")
+
+    // A ordem e byte-exata, nao 'alfabetica': maiusculas (0x5A) vem
+    // antes de minusculas (0x61), e acentos depois do ascii.
+    check("Z" < "a", "maiuscula antes de minuscula (byte order)")
+    check("e" < "é", "ascii antes de acentuado (code point order)")
+
+    // ref string ordena pelo valor apontado (auto-deref de expressao).
+    let s: string = "a"
+    let rs: ref string = ref s
+    check(rs < "b", "ref string participa da ordenacao pelo valor")
+end
+
+// ------------------------------------------------------------
+// 6. bytes: o espelho da string, indexado por octeto
+// ------------------------------------------------------------
+
+func test_bytes()
+    begin("bytes")
+
+    let b: bytes = b"Hi"
+
+    // Elemento de bytes e o proprio octeto, como int.
+    check_int(b[0], 72, "b[0] devolve o octeto como int")
+    check_int(b[1], 105, "b[1] segundo octeto")
+
+    // slice e concatenacao operam em octetos.
+    check_int(length(slice(b, 0, 1)), 1, "slice de bytes por octeto")
+    check_str(hex_encode(slice(b, 0, 1)), "48", "slice preserva o conteudo")
+    check_str(hex_encode(b"a" + b"b"), "6162", "+ concatena bytes")
+
+    // to_bytes/to_str sao a ponte explicita entre os dois tipos.
+    check(to_bytes("Hi") == b, "to_bytes de string ascii")
+    check_str(to_str(b), "Hi", "to_str de bytes validos")
+    check_str(to_str(to_bytes("café")), "café", "round-trip preserva unicode")
+
+    // O invariante UTF-8 e checado na fronteira, via is_valid_utf8.
+    check(is_valid_utf8(to_bytes("ok")), "bytes vindos de string sao UTF-8")
+    check(!is_valid_utf8(hex_decode("FF")), "0xFF sozinho nao e UTF-8")
+end
+
+// ------------------------------------------------------------
+// 7. Arrays fixos, containers aninhados e igualdade
+// ------------------------------------------------------------
+
+func test_containers()
+    begin("containers")
+
+    // Array dinamico declarado sem inicializador comeca vazio.
+    let vazia: int[]
+    check_int(length(vazia), 0, "declaracao sem inicializador comeca vazia")
+
+    // Array fixo participa da mesma semantica de valor...
+    let fx: int[3] = [1, 2, 3]
+    let cp: int[3] = fx
+    cp[0] = 9
+    check_int(fx[0], 1, "copia de array fixo nao vaza (CoW)")
+    check_int(cp[0], 9, "a copia e independente")
+
+    // ...e da mesma igualdade estrutural, inclusive contra dinamico.
+    let dyn: int[] = [1, 2, 3]
+    check(fx == dyn, "fixo e dinamico comparam por conteudo")
+
+    // for-in tambem itera arrays fixos.
+    let soma: int = 0
+    for v in fx do
+        soma = soma + v
+    end
+    check_int(soma, 6, "for-in sobre array fixo")
+
+    // Escrita atraves de indices encadeados alcanca o nivel interno.
+    let a2: int[][] = [[1, 2], [3, 4]]
+    a2[0][1] = 9
+    check_int(a2[0][1], 9, "escrita em array aninhado")
+    check_int(a2[1][0], 3, "o vizinho nao e afetado")
+
+    let m2: map[string, map[string, int]] = {"a": {"b": 1, "c": 2}}
+    m2["a"]["b"] = 5
+    check_int(m2["a"]["b"], 5, "escrita em map aninhado")
+    check_int(m2["a"]["c"], 2, "a chave vizinha nao e afetada")
+
+    // Chave de map nao precisa ser string.
+    let mi: map[int, string] = {1: "um", 2: "dois"}
+    check_str(mi[1] + mi[2], "umdois", "map com chave int")
+    let ks: int[] = keys(mi)
+    check_int(length(ks), 2, "keys de map[int] devolve int[]")
+    check(contains(ks, 1) && contains(ks, 2), "todas as chaves aparecem")
+
+    // Struct generica compara por conteudo como qualquer struct.
+    check(Caixa(1) == Caixa(1), "structs genericas iguais por conteudo")
+    check(Caixa(1) != Caixa(2), "structs genericas diferentes por conteudo")
+end
+
+// ------------------------------------------------------------
+// 8. Structs auto-referenciadas e null em contratos
+// ------------------------------------------------------------
+
+func test_listas_ligadas()
+    begin("listas ligadas")
+
+    // 'ref Node' dentro do proprio Node permite encadear valores;
+    // null e o terminador natural.
+    let n3: Node = Node(3, null)
+    let n2: Node = Node(2, ref n3)
+    let n1: Node = Node(1, ref n2)
+
+    // Encadeamento de acesso faz auto-deref em cada salto.
+    check_int(n1.next.value, 2, "n1.next.value atravessa o ref")
+    check_int(n1.next.next.value, 3, "dois saltos de ref")
+
+    // Percurso classico: rebind do cursor ate o null terminador.
+    let soma: int = 0
+    let cur: ref Node = ref n1
+    while cur != null do
+        soma = soma + cur.value
+        cur = cur.next
+    end
+    check_int(soma, 6, "percurso visita todos os nos e termina no null")
+
+    // A versao generica se comporta igual.
+    let g2: GNode<string> = GNode("b", null)
+    let g1: GNode<string> = GNode("a", ref g2)
+    check_str(g1.next.value, "b", "GNode<T> auto-referenciada")
+    check(g2.next == null, "terminador null no campo ref generico")
+
+    // null satisfaz contrato de struct: a variavel existe sem valor...
+    let p: Ponto = null
+    check(p == null, "variavel de struct aceita null")
+
+    // ...e volta ao normal ao receber uma instancia real.
+    p = Ponto(1, 2)
+    check(p != null, "instancia real nao e null")
+    check_int(p.x, 1, "campos acessiveis apos sair do null")
+end
+
+// ------------------------------------------------------------
+// 9. ref avancado
+// ------------------------------------------------------------
+
+let registro: int = 0
+
+func grava(v: ref int)
+    // Atribuir 'registro = v' direto e erro de compilacao (int vs ref int,
+    // com hint sugerindo '*v'): atribuicao nao faz auto-deref -- spec
+    // §2.3, excecao 2. O deref explicito e a forma canonica.
+    registro = *v
+end
+
+func frame_defer_ref()
+    let n: int = 1
+    defer grava(ref n)
+    n = 9
+end
+
+func cria_ref() -> ref int
+    let local: int = 42
+    return ref local
+end
+
+func par_de_closures() -> (func() -> int)[]
+    let n: int = 0
+    let incrementa: func() -> int = func() -> int
+        n = n + 1
+        return n
+    end
+    let le: func() -> int = func() -> int
+        return n
+    end
+    return [incrementa, le]
+end
+
+func test_ref_avancado()
+    begin("ref avancado")
+
+    // Entrada de map tambem e um slot referenciavel.
+    let m: map[string, int] = {"k": 1}
+    let r: ref int = ref m["k"]
+    *r = 5
+    check_int(m["k"], 5, "ref para entrada de map escreve no map")
+
+    // 'ref' sobre um ref FORWARDA a referencia existente (nao existe
+    // ref ref T): o resultado e o mesmo slot.
+    let x: int = 1
+    let rx: ref int = ref x
+    let fwd: ref int = ref rx
+    check(fwd == rx, "forwarding preserva a identidade do slot")
+    *fwd = 2
+    check_int(x, 2, "escrever via forward alcanca o original")
+
+    // '*' tambem funciona em posicao de leitura, como forma explicita.
+    check_int(*rx, 2, "'*r' le o valor apontado")
+
+    // No alvo '*r =' o RHS ref e lido (o '*' ja desfez a ambiguidade
+    // update/rebind): '*ra = ro' equivale a '*ra = *ro'.
+    let alvo: int = 1
+    let origem: int = 5
+    let ra: ref int = ref alvo
+    let ro: ref int = ref origem
+    *ra = ro
+    check_int(alvo, 5, "'*r = outro_ref' escreve o valor apontado pelo RHS")
+    check_int(origem, 5, "o RHS so e lido, nao alterado")
+
+    // ref para local sobrevive ao frame que o criou (promocao a heap).
+    let esc: ref int = cria_ref()
+    check_int(esc, 42, "ref devolvido le o valor da local promovida")
+    *esc = 99
+    check_int(esc, 99, "o slot promovido continua gravavel")
+
+    // Duas closures sobre a MESMA variavel compartilham o slot.
+    let fs: (func() -> int)[] = par_de_closures()
+    check_int(fs[0](), 1, "primeira mutacao via closure A")
+    check_int(fs[0](), 2, "segunda mutacao via closure A")
+    check_int(fs[1](), 2, "closure B enxerga o estado da closure A")
+
+    // defer com parametro ref RETEM a referencia: a chamada adiada
+    // le o valor final, nao o do registro do defer.
+    registro = 0
+    frame_defer_ref()
+    check_int(registro, 9, "defer com ref observa mutacoes posteriores")
+end
+
+// ------------------------------------------------------------
+// 10. when/case sobre canais
+// ------------------------------------------------------------
+
+func test_when()
+    begin("when/case")
+
+    // Canal com valor pronto: o case de recv vence e faz o bind.
+    let ch: any = make_chan(1)
+    chan_send(ch, 42)
+    let got: int = -1
+    when
+        case v = chan_recv(ch) then
+            got = to_int(v)
+        default
+            got = -2
+    end
+    check_int(got, 42, "case recv com bind entrega o valor")
+
+    // Canal vazio + default: o when nao bloqueia.
+    let vazio: any = make_chan(1)
+    let ramo: string = ""
+    when
+        case chan_recv(vazio) then
+            ramo = "recv"
+        default
+            ramo = "default"
+    end
+    check_str(ramo, "default", "default roda quando nenhum case esta pronto")
+
+    // case de send fica pronto quando o buffer tem espaco, e o valor
+    // realmente entra no canal.
+    let livre: any = make_chan(1)
+    let enviou: bool = false
+    when
+        case chan_send(livre, 7) then
+            enviou = true
+        default
+            enviou = false
+    end
+    check(enviou, "case send pronto com buffer livre")
+    check_int(to_int(chan_recv(livre)), 7, "o valor enviado pelo case chegou")
+end
+
+// ------------------------------------------------------------
+// 11. any: a fronteira dinamica
+// ------------------------------------------------------------
+
+func test_any()
+    begin("any")
+
+    // Uma variavel 'any' e a excecao a estabilidade de tipos: aceita
+    // valores de tipos diferentes ao longo da vida.
+    let a: any = 5
+    check_int(to_int(a) + 1, 6, "any carregando int")
+    a = "texto"
+    check_str(to_str(a), "texto", "o mesmo any carregando string")
+    a = [1, 2]
+    check_int(length(a), 2, "o mesmo any carregando array")
+end
+
+// ------------------------------------------------------------
+// Runner
+// ------------------------------------------------------------
+
+func main()
+    print("=== NOXY :: TESTES DE SEMANTICA DA LINGUAGEM (PARTE 2) ===")
+
+    test_conversoes()
+    test_convert_result()
+    test_fmt()
+    test_import_forms()
+    test_strings_stdlib()
+    test_ordenacao_strings()
+    test_bytes()
+    test_containers()
+    test_listas_ligadas()
+    test_ref_avancado()
+    test_when()
+    test_any()
+
+    print("")
+    print("Asercoes: " + to_str(total))
+    print("Passaram: " + to_str(total - failures))
+    print("Falharam: " + to_str(failures))
+
+    if failures > 0 then
+        print("=== FALHOU ===")
+        exit(1)
+    end
+    print("=== OK ===")
+end
+
+main()

@@ -236,7 +236,10 @@ print(r)             // Prints 10
 ```
 This applies to both Local Variables and Struct Fields.
 
-**The one exception: `==` and `!=` between two references.** Auto-dereference
+Auto-dereference has exactly **two exceptions**, described below: `==`/`!=`
+between two references, and the right-hand side of a plain assignment.
+
+**Exception 1: `==` and `!=` between two references.** Auto-dereference
 answers "what value is there?", which is the wrong question when *both* sides
 are references — there the question is about identity. So when both operands
 are statically `ref T`, the comparison is by **slot identity** (§2.2, rule 7)
@@ -261,6 +264,33 @@ node.next != null   // unchanged: the usual null test on a `ref` field
 `addr(ref x)` remains available when you want that identity as a printable
 value rather than a comparison.
 
+**Exception 2: the right-hand side of a plain assignment.** Assignment is
+where *update* and *rebind* are told apart by the static types of both sides
+(see the summary table below), so around `=` no reference conversion is
+implicit — in either direction. Assigning a `ref T` to a target that expects
+a plain `T` (a variable, an array/map entry, or a struct field) is a
+compile-time error with a hint, not an implicit read:
+
+```noxy
+let x: int = 10
+let r: ref int = ref x
+let n: int = 0
+
+n = r    // ERROR: type mismatch in assignment to 'n': expected int, got ref int
+         //   hint: use '*r' to read the referenced value
+n = *r   // OK: explicit dereference reads 10
+```
+
+The explicit-update form is different: in `*r = value` the `*` already names
+the target unambiguously, so a reference RHS keeps the ordinary expression
+rule and is read. With `s: ref int`, `*r = s` writes the value `s` points to
+(equivalent to `*r = *s`).
+
+Note that `let` initialization is *not* an assignment in this sense: a `let`
+creates a fresh slot, so there is nothing to rebind and no ambiguity —
+`let n: int = r` auto-dereferences, like any other expression position
+(including exact call arguments; see §4.2).
+
 #### 2. Writing (Update vs Rebind)
 The distinction between modifying the *value* and modifying the *pointer* is made explicit by syntax:
 
@@ -280,10 +310,17 @@ r = ref z    // REBIND: 'r' now points to 'z' (does not affect 'x')
 ```
 
 #### 3. Strict Type Safety
-The compiler enforces these rules to prevent ambiguity:
+The compiler enforces these rules to prevent ambiguity, and each rejection
+points at the intended fix:
 ```noxy
-r = 50       // ERROR: Cannot assign 'int' to 'ref int'. Did you mean '*r = 50'?
-*r = ref z   // ERROR: Cannot assign 'ref int' to 'int'.
+let n: int = 0
+r = 50       // ERROR: cannot assign int to ref int
+             //   hint: use '*r = ...' to update the referenced value
+n = r        // ERROR: type mismatch in assignment to 'n': expected int, got ref int
+             //   hint: use '*r' to read the referenced value
+n = *r       // OK: explicit dereference
+*r = ref z   // OK: '*' names the target unambiguously, so the reference RHS
+             // is read — writes z's value through r (same as '*r = z')
 ```
 
 #### 4. Reference Patterns
@@ -366,6 +403,7 @@ sensor.target = ref humidity  // Now watching humidity
 | `ref T` | `T` | `*r = val` | **UPDATE** – writes into memory |
 | `ref T` | `ref T` | `r = ref x`| **REBIND** – changes pointer |
 | `T` | `T` | `x = val` | Standard assignment |
+| `T` | `ref T` | `x = *r` | **READ** – explicit dereference required; plain `x = r` is a compile error (§2.3, exception 2) |
 
 #### Memory Safety (Captured Variables)
 Noxy ensures memory safety when using `ref`.
@@ -1014,6 +1052,14 @@ by `when`/`case` exactly like any other value.
 ### Comparison
 `>`, `<`, `>=`, `<=`, `==`, `!=`
 
+Ordering (`>`, `<`, `>=`, `<=`) is defined for **numbers** (with the usual
+int/float promotion) and for **strings**. String ordering is lexicographic
+and byte-exact — for valid UTF-8, which every Noxy string is by invariant,
+this is identical to code-point order, mirroring Python. Ordering any other
+operand pair, including `bytes`, is a runtime error (`operands must be
+numbers or strings`); bridge bytes through `to_str` first. Equality
+(`==`, `!=`) is structural for every type (§2.2, rule 7).
+
 ### Logical
 - `&&` (AND)
 - `||` (OR)
@@ -1274,7 +1320,9 @@ do carregamento de módulos e ainda não é validado (registrado como trabalho
 futuro no CHANGELOG).
 
 Noxy não aplica normalização Unicode (NFC/NFD). Comparação é byte-exata, como
-em Python.
+em Python — tanto a igualdade quanto a ordenação (`<`, `>`, `<=`, `>=`), que
+ordena strings lexicograficamente por byte; dentro do invariante UTF-8 isso
+é idêntico à ordem por code point.
 
 ### Network sockets
 
