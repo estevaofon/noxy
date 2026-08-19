@@ -965,7 +965,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_GREATER:
 			b := vm.pop()
 			a := vm.pop()
-			// Only supporting int/float comparison for now
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
 				vm.push(value.NewBool(a.AsInt > b.AsInt))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
@@ -974,8 +973,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				vm.push(value.NewBool(float64(a.AsInt) > b.AsFloat))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
 				vm.push(value.NewBool(a.AsFloat > float64(b.AsInt)))
+			} else if strA, strB, ok := stringOperands(a, b); ok {
+				// Ordenacao lexicografica byte a byte — para UTF-8 valido
+				// (invariante de toda string Noxy) coincide com a ordem por
+				// code point, e casa com a igualdade byte-exata da spec.
+				// bytes ficam de fora: a ponte explicita e to_str.
+				vm.push(value.NewBool(strA > strB))
 			} else {
-				return vm.runtimeError(c, ip, "operands must be numbers")
+				return vm.runtimeError(c, ip, "operands must be numbers or strings")
 			}
 		case chunk.OP_GREATER_INT:
 			b := vm.pop()
@@ -996,8 +1001,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				vm.push(value.NewBool(float64(a.AsInt) < b.AsFloat))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
 				vm.push(value.NewBool(a.AsFloat < float64(b.AsInt)))
+			} else if strA, strB, ok := stringOperands(a, b); ok {
+				// Mesma ordenacao lexicografica de OP_GREATER; `>=`/`<=`
+				// compilam como NOT(OP_LESS)/NOT(OP_GREATER) e herdam isto.
+				vm.push(value.NewBool(strA < strB))
 			} else {
-				return vm.runtimeError(c, ip, "operands must be numbers")
+				return vm.runtimeError(c, ip, "operands must be numbers or strings")
 			}
 		case chunk.OP_LESS_INT:
 			// Inline pop/pop/push
