@@ -615,11 +615,13 @@ func NewRuntimeTypeInfo(v *RuntimeTypeInfo) Value {
 	return Value{Type: VAL_OBJ, Obj: v}
 }
 
-// NewArray cria um array a partir dos elementos dados. A partir da Task 2
-// deste plano ele e DONO DURAVEL de cada elemento composto (Retain; no-op em
-// escalares e strings) — a mesma regra de OP_ARRAY no executor. Quem ja
-// reteve os elementos em nome do array usa NewArrayAdopting.
+// NewArray cria um array que e DONO DURAVEL de cada elemento composto
+// (Retain; no-op em escalares e strings) — a mesma regra de OP_ARRAY no
+// executor. Quem ja reteve os elementos em nome do array usa NewArrayAdopting.
 func NewArray(elements []Value) Value {
+	for _, element := range elements {
+		Retain(element)
+	}
 	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
 }
 
@@ -638,9 +640,12 @@ func NewMap() Value {
 	return Value{Type: VAL_OBJ, Obj: mapping}
 }
 
+// NewMapWithData cria um map que e DONO DURAVEL de cada valor composto
+// (Retain; no-op em escalares e strings) — a mesma regra de OP_MAP.
 func NewMapWithData(data map[string]Value) Value {
 	values := make(map[interface{}]Value, len(data))
 	for k, v := range data {
+		Retain(v)
 		values[k] = v
 	}
 	mapping := NewMap()

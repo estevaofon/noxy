@@ -140,25 +140,14 @@ func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err err
 		if runErr := vm.run(ownerFrameCount+1, &result); runErr != nil {
 			return value.NewNull(), runErr
 		}
-		// RC: o envelope ok (callResultOkEnvelope) guarda `result` no campo
-		// "value" via NewMapWithData, que — ao contrario de OP_MAP/OP_ARRAY —
-		// NAO retem os valores que recebe. Sem este retain, uma composta
-		// devolvida sem dono previo (Owners=0, caso comum de um retorno
-		// fresco) apareceria com Owners=1 apos o PRIMEIRO `let` no lado Noxy
-		// que capturar r.value; IsShared ficaria falso e uma mutacao nesse
-		// primeiro binding aconteceria in-place, vazando para qualquer outra
-		// leitura de r.value (mesmo objeto, guardado por referencia no mapa)
-		// — corrupcao comprovada por TestCallResultValueSemantics antes deste
-		// retain ("100|100|3" em vez de "1|100|3"). O retain aqui da ao
-		// envelope o mesmo dono-duravel que OP_MAP teria registrado se este
-		// valor tivesse sido escrito por bytecode Noxy comum.
-		value.Retain(result)
+		// RC: a posse de `result` pelo envelope ok e registrada pelo
+		// construtor (value.NewMapWithData retem em callResultOkEnvelope);
+		// reter aqui tambem deixaria r.value com 2 donos e IsShared para
+		// sempre. Ver TestCallResultOkValueHasExactlyOneOwner.
 		return result, nil
 	}
-	// native/construtor: sem frame novo; resultado no topo da pilha. Mesmo
-	// retain do ramo acima, mesma justificativa.
+	// native/construtor: sem frame novo; resultado no topo da pilha.
 	result = vm.peek(0)
-	value.Retain(result)
 	return result, nil
 }
 
@@ -212,36 +201,20 @@ func (vm *VM) hardUnwindTo(target int) {
 
 var errBoundaryPanic = fmt.Errorf("call_result: unwinding after Go panic")
 
-// retainingMap e retainingArray espelham OP_MAP/OP_ARRAY (executor.go,
-// "elemento e dono duravel"): o composto pai vira dono duravel de cada filho
-// composto que guarda. value.NewMapWithData/value.NewArray, ao contrario dos
-// opcodes, NAO retem o que recebem — sem estes funis a arvore de Failure
-// nasceria com Owners=0 nos filhos e o PRIMEIRO `let` do lado Noxy que
-// capturasse r.failure (ou uma entrada de causes) levaria o filho a Owners=1:
-// IsShared falso, mutacao aplicada in-place e o envelope reescrito por baixo
-// (corrupcao comprovada — ver TestCallResultFailureAliasDoesNotMutateEnvelope
-// e TestCallResultCauseAliasDoesNotMutateEnvelope). Com o retain do pai, o
-// mesmo `let` chega a Owners=2 e a mutacao clona, como em qualquer composto
-// escrito por bytecode Noxy comum. Strings e escalares dispensam o funil:
-// ownersOf so rastreia compostos, entao Retain neles e no-op.
-func retainingMap(data map[string]value.Value) value.Value {
-	for _, item := range data {
-		value.Retain(item)
-	}
-	return value.NewMapWithData(data)
-}
+// A arvore de Failure e construida com value.NewMapWithData/NewArray, que
+// retem cada filho composto (o pai e dono duravel — mesma regra de
+// OP_MAP/OP_ARRAY). Sem esse dono o primeiro `let f: any = r.failure` do
+// lado Noxy levaria o filho a Owners=1, IsShared falso, e a mutacao
+// reescreveria o envelope (TestCallResultFailureAliasDoesNotMutateEnvelope,
+// TestCallResultCauseAliasDoesNotMutateEnvelope). Strings e escalares sao
+// no-op em Retain (ownersOf so rastreia compostos).
 
-func retainingArray(elements []value.Value) value.Value {
-	for _, element := range elements {
-		value.Retain(element)
-	}
-	return value.NewArray(elements)
-}
-
-// callResultOkEnvelope NAO usa retainingMap de proposito: `result` ja foi
-// retido por invokeBoundaryCall (comentario "RC" la), e um segundo retain
-// aqui deixaria o valor eternamente IsShared — clonaria a cada mutacao. Os
-// outros dois campos sao escalares.
+// callResultOkEnvelope: NewMapWithData retem `result` (unico campo
+// composto) — e isso, e so isso, que da ao envelope a posse de r.value.
+// Sem esse dono, uma composta devolvida fresca (Owners=0) chegaria a
+// Owners=1 no primeiro `let` do lado Noxy, IsShared ficaria falso e a
+// mutacao nesse binding vazaria para r.value (TestCallResultValueSemantics
+// lia "100|100|3" em vez de "1|100|3").
 func callResultOkEnvelope(result value.Value) value.Value {
 	return value.NewMapWithData(map[string]value.Value{
 		"ok":      value.NewBool(true),
@@ -251,7 +224,7 @@ func callResultOkEnvelope(result value.Value) value.Value {
 }
 
 func callResultFailureEnvelope(err error) value.Value {
-	return retainingMap(map[string]value.Value{
+	return value.NewMapWithData(map[string]value.Value{
 		"ok":      value.NewBool(false),
 		"value":   value.NewNull(),
 		"failure": failureMap(err),
@@ -265,11 +238,11 @@ func callResultFailureEnvelope(err error) value.Value {
 // demais sob as causes dela (design §2, "Cleanup as first failure").
 func failureMap(err error) value.Value {
 	if panicErr, ok := err.(*boundaryPanicError); ok {
-		return retainingMap(map[string]value.Value{
+		return value.NewMapWithData(map[string]value.Value{
 			"kind":    value.NewString("panic"),
 			"message": value.NewString(panicErr.payload),
 			"stack":   value.NewString(panicErr.stack),
-			"causes":  retainingArray([]value.Value{}),
+			"causes":  value.NewArray([]value.Value{}),
 		})
 	}
 	if unwind, ok := err.(*UnwindError); ok {
@@ -299,11 +272,11 @@ func failureMapWithCauses(primary error, deferred []DeferredError) value.Value {
 	if primary != nil {
 		message = primary.Error()
 	}
-	return retainingMap(map[string]value.Value{
+	return value.NewMapWithData(map[string]value.Value{
 		"kind":    value.NewString("runtime"),
 		"message": value.NewString(message),
 		"stack":   value.NewString(deepestRuntimeStack(primary)),
-		"causes":  retainingArray(causes),
+		"causes":  value.NewArray(causes),
 	})
 }
 
