@@ -1192,7 +1192,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: 'ref' exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end
@@ -1259,7 +1260,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: 'ref' exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end
@@ -1320,8 +1322,17 @@ test_report(count(head_a) * 10 + count(head_b))`
 // 2 -> 1, o no passa a parecer unico, `second.valor = 99` muta no lugar em vez
 // de clonar (CoW) e a escrita vaza para head.proximo.
 //
-// Oraculo: o binario do merge-base responde 20 nos tres cenarios (o valor
-// original do no 20 nunca e alterado, porque toda mutacao passa por clone).
+// Oraculo original (merge-base): 20 nos tres cenarios — mas aquele binario
+// gravava um Node CRU em `proximo` (lacuna da #50), e `let u: ref Node =
+// head.proximo` recebia o Node cru: `u` virava COPIA (o box clonava) e a
+// escrita atraves de `u` nunca alcancava a lista. Desde a #50 o campo guarda
+// uma ref legitima para a celula do `let novo`, entao `u` e uma ref de
+// verdade: a escrita atraves dela (B, C) alcanca o no que head.proximo ve
+// (77) — exatamente o que o develop responde para uma ref legitima montada a
+// mao (`Node(0, ref n20)`) — enquanto `second` (copia por valor) segue
+// independente e clona ao escrever 99. A: o rebind nao toca o no 20. Oraculo
+// novo: 20/77/77. O que o teste continua guardando e a independencia da copia
+// por valor: se `second.valor = 99` vazasse para head, viria 99.
 func TestCapturedAndBorrowedRefSlotsNeverReleaseWhatTheyDoNotOwn(t *testing.T) {
 	machine := New()
 	reported := value.NewNull()
@@ -1339,7 +1350,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: 'ref' exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end
@@ -1404,9 +1416,10 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	// 20 / 20 / 20 — exatamente o que o binario do merge-base responde.
-	if reported.Type != value.VAL_INT || reported.AsInt != 202020 {
-		t.Fatalf("escrita vazou por dec a menos em slot/caixa emprestada: esperado 202020 (A=20 B=20 C=20), veio %#v", reported)
+	// 20 / 77 / 77 — ver o oraculo no comentario do teste (#50: `u` e ref
+	// legitima; `second` e copia independente).
+	if reported.Type != value.VAL_INT || reported.AsInt != 207777 {
+		t.Fatalf("escrita vazou por dec a menos em slot/caixa emprestada: esperado 207777 (A=20 B=77 C=77), veio %#v", reported)
 	}
 }
 
@@ -1435,7 +1448,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: 'ref' exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end
@@ -1548,7 +1562,11 @@ func TestBorrowedUpvalueBoxDoesNotRetainOnClose(t *testing.T) {
 //
 // Agora quem decide e o compilador: OP_GET_LOCAL_MUT_BORROW para local `ref` e
 // OP_MARK_UPVALUE_BORROW (emitido apos o OP_CLOSURE) para upvalue `ref`.
-// Oraculo dos dois cenarios, conferido no binario do merge-base: 20.
+// Oraculo original dos dois cenarios (merge-base): 20. Desde a #50 (campo
+// `proximo` guarda ref legitima, nao Node cru), `u` em (b)/(b2) e uma ref de
+// verdade e `u.valor = 77` alcanca o no que head.proximo ve — 77, como o
+// develop responde para `Node(0, ref n20)`; `second` (copia por valor) segue
+// independente. (a)/(a2) continuam 20. Oraculo novo: 20/20/77/77.
 func TestBorrowConditionIsStaticNotInferredFromOwnedList(t *testing.T) {
 	machine := New()
 	reported := value.NewNull()
@@ -1566,7 +1584,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: 'ref' exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end
@@ -1658,9 +1677,9 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	// 20 / 20 / 20 / 20 — os quatro cenarios respondem o oraculo do merge-base.
-	if reported.Type != value.VAL_INT || reported.AsInt != 20202020 {
-		t.Fatalf("condicao de emprestimo saiu errada (esperado 20202020 = e/e2/f/f2 todos 20), veio %#v", reported)
+	// 20 / 20 / 77 / 77 — ver o oraculo no comentario do teste (#50).
+	if reported.Type != value.VAL_INT || reported.AsInt != 20207777 {
+		t.Fatalf("condicao de emprestimo saiu errada (esperado 20207777 = e/e2 20, f/f2 77), veio %#v", reported)
 	}
 }
 
@@ -1713,7 +1732,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: 'ref' exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end

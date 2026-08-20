@@ -454,6 +454,8 @@ cd "$W" && (go run ./cmd/noxy noxy_examples/stack.nx; echo "exit=$?") > "$S/stac
 ```
 Esperado: 6× `--- PASS`, `ok`; `stack.nx: saida identica`. (Se um teste de `Owners` divergir: **não** ajustar o número — §4.2 prevê contagens iguais com a célula no lugar do campo; divergência é bug a investigar.)
 
+> **Registro da execução (2026-08-20):** (1) o comentário do `NEW` acima não pode ter crases dentro dos testes Go — o programa Noxy vive numa raw string com crases; no `rc_uniqueness_test.go` o comentário ficou `// variavel: 'ref' exige L-value; vai para a heap` (script `$S/fix_backticks.py`). (2) Dois testes divergiram **no valor reportado**, não em `Owners`: `TestCapturedAndBorrowedRefSlotsNeverReleaseWhatTheyDoNotOwn` (202020 → 207777) e `TestBorrowConditionIsStaticNotInferredFromOwnedList` (20202020 → 20207777). Investigado com o oráculo `$S/oracle_ref_write.nx` rodado no `develop` (refs legítimas, sem a lacuna): `77/77/20` — escrever através de `let u: ref Node = head.proximo` alcança o nó que `head.proximo` vê; a cópia por valor `second` fica independente. Os 20 antigos vinham do Node cru no slot (`u` virava cópia). Oráculos re-derivados com comentário nos dois testes (spec §4.2 atualizado). Efeito visível → bullet extra no CHANGELOG (Task 8).
+
 - [ ] **Step 8: Suíte dos dois pacotes**
 
 ```bash

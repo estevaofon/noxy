@@ -700,16 +700,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// 1. Compile Object — CoW: cadeia MUT uniciza cada nível do
 			// caminho (inclui OP_DEREF_MUT quando a base é ref)
-			leftType, baseWasRef, err := c.compileLValueBase(memberExp.Left)
+			// compileLValueBase ja devolve o tipo DESEMBRULHADO (emite
+			// OP_DEREF_MUT quando a base e ref), entao o campo resolve igual
+			// com base `ref` ou valor e a checagem abaixo vale para as duas
+			// (issue #50, Parte 1; spec 2026-08-20-ref-slot-invariant §3).
+			leftType, _, err := c.compileLValueBase(memberExp.Left)
 			if err != nil {
 				return nil, nil, err
-			}
-			// Compatibilidade pré-0.4: com base ref, o checker antigo nunca
-			// resolvia o tipo do campo (a asserção sobre RefType falhava em
-			// silêncio) e o assignment passava sem checagem. Replicado aqui
-			// para não rejeitar programas existentes (ex.: stack.nx).
-			if baseWasRef {
-				leftType = nil
 			}
 
 			// RESOLVE FIELD TYPE (antes de compilar o valor: §3 target-typing,
@@ -818,6 +815,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		for _, field := range n.FieldsList {
 			if primitive, ok := field.Type.(*ast.PrimitiveType); ok && primitive.Name == "any" {
 				structDefinition.JSONDynamicFields[field.Name] = true
+			}
+			// RefFields: schema de runtime do slot ref (spec
+			// 2026-08-20-ref-slot-invariant §6.1); nil quando o struct nao
+			// tem campo ref.
+			if _, isRef := field.Type.(*ast.RefType); isRef {
+				if structDefinition.RefFields == nil {
+					structDefinition.RefFields = make(map[string]bool)
+				}
+				structDefinition.RefFields[field.Name] = true
 			}
 		}
 		c.emitConstant(structObj)

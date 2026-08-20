@@ -12,8 +12,8 @@ import (
 // *_MUT que uniciza cada nível do caminho de mutação (CoW), gravando clones
 // de volta no slot pai. Devolve o tipo estático da expressão, já com refs
 // dereferenciados (emite OP_DEREF_MUT quando o tipo é ref), e um flag
-// indicando se o nível final era ref — o branch de member-assignment usa o
-// flag para replicar a leniência do checker pré-0.4 com bases ref.
+// indicando se o nível final era ref (informativo: desde a #50 o
+// member-assignment checa o campo do mesmo jeito com base ref ou valor).
 func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, error) {
 	switch n := expr.(type) {
 	case *ast.Identifier:

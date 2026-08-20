@@ -5,7 +5,8 @@ end
 
 func _append(node: ref Node, valor: int)
     if node.proximo == null then
-        node.proximo = Node(valor, null)
+        let novo: Node = Node(valor, null)   // variavel: `ref` exige L-value; vai para a heap
+        node.proximo = ref novo              // REBIND do campo do pai
     else
         _append(node.proximo, valor)
     end
