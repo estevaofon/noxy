@@ -186,3 +186,44 @@ test_report(r.parts[0] + "|" + p[0])
 		t.Fatalf("envelope de strings.split deve ficar intacto (CoW na copia): %q", text)
 	}
 }
+
+// Nao introduzimos clone desnecessario: r.parts tem dono unico (a instancia)
+// e muta in-place; s[0] e compartilhado com t (slice retem) e clona UMA vez
+// — a segunda escrita ja e in-place. Oraculo: "0|1|1|0".
+func TestNativeContainersDoNotCloneWithSingleOwner(t *testing.T) {
+	machine := vmWithCloneReset()
+	machine.DefineNative("clones_now", func(args []value.Value) value.Value {
+		return value.NewInt(CloneCountValue())
+	})
+	var reported value.Value
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	src := `
+use strings
+struct Pair
+    a: int
+    b: int
+end
+let r: strings.SplitResult = strings.split("a,b", ",")
+let t: Pair[] = [Pair(0, 0), Pair(1, 1)]
+let s: Pair[] = slice(t, 0, 2)
+test_reset_clones()
+r.parts[0] = "x"
+let c1: int = clones_now()
+s[0].a = 9
+let c2: int = clones_now()
+s[0].b = 8
+let c3: int = clones_now()
+test_report(to_str(c1) + "|" + to_str(c2) + "|" + to_str(c3) + "|" + to_str(t[0].a))
+`
+	if err := interpretVMSource(t, machine, src); err != nil {
+		t.Fatalf("programa falhou: %v", err)
+	}
+	if text, _ := reported.Obj.(string); text != "0|1|1|0" {
+		t.Fatalf("clones (parts in-place | 1 clone do Pair compartilhado | sem clone extra | original intacto): %q", text)
+	}
+}
