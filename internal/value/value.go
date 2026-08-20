@@ -160,6 +160,19 @@ func NewOpenUpvalue(location *Value, next *ObjUpvalue) *ObjUpvalue {
 	return &ObjUpvalue{location: location, next: next}
 }
 
+// NewClosedUpvalue cria uma caixa ja fechada sobre um valor que nunca morou
+// em slot de pilha — a "variavel anonima na heap" que json_loads usa para
+// preencher um slot `ref T` nulo (spec 2026-08-20-ref-slot-invariant, §5.2):
+// o analogo exato de `let novo: T = ...; slot = ref novo` depois que o frame
+// fecha. A caixa e possuidora (nao emprestada); o chamador retem o valor em
+// nome dela. PointsTo(slot de pilha) e sempre falso, entao retargetOwnedSlot
+// a ignora.
+func NewClosedUpvalue(v Value) *ObjUpvalue {
+	upvalue := &ObjUpvalue{closed: v}
+	upvalue.location = &upvalue.closed
+	return upvalue
+}
+
 // MarkBorrowed registra que a caixa empresta (não possui) o que guarda. É
 // idempotente: capturas repetidas do mesmo slot chegam à mesma conclusão.
 func (upvalue *ObjUpvalue) MarkBorrowed() {
@@ -364,7 +377,19 @@ type ObjStruct struct {
 	Name              string
 	Fields            []string
 	JSONDynamicFields map[string]bool
-	ConstructorType   *RuntimeTypeInfo
+	// RefFields marca os campos declarados `ref T`. E a fonte unica de
+	// runtime para a pergunta "este slot e ref?" (OP_REF_PROPERTY,
+	// OP_SET_PROPERTY — spec 2026-08-20-ref-slot-invariant §6.1): O(1) por
+	// nome e presente tambem nos structs que o builder JSON cria sem
+	// ConstructorType. Nil quando o struct nao tem campo ref (lookup em mapa
+	// nil e valido e barato).
+	RefFields       map[string]bool
+	ConstructorType *RuntimeTypeInfo
+}
+
+// FieldIsRef informa se o campo foi declarado `ref T` (nil-safe).
+func (os *ObjStruct) FieldIsRef(name string) bool {
+	return os != nil && os.RefFields[name]
 }
 
 func (os *ObjStruct) String() string {
