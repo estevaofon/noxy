@@ -447,10 +447,19 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if !ok {
 				return vm.runtimeError(c, ip, "undefined property '%s'", name)
 			}
-			if stored.Type == value.VAL_REF {
+			// O tipo estatico do campo ja e `ref T`: uma ref existente ou
+			// null e encaminhado como esta (spec §2.3 regra 2, §4.2) — igual
+			// a uma variavel `ref T`. Antes, null virava ref para o SLOT, o
+			// que tornava `n == null` falso para um campo nulo e deixava
+			// `*n = ...` gravar um T cru num slot tipado `ref T`.
+			if stored.Type == value.VAL_REF || stored.Type == value.VAL_NULL {
 				vm.push(stored)
 				continue
 			}
+			// Valor referente cru num slot `ref T` (hoje alcancavel por
+			// json_loads com payload compativel e por `campo = T` atraves de
+			// base ref) segue embrulhado numa ref para o slot, para continuar
+			// passavel adiante como antes.
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -482,12 +491,20 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
-				stored, _ = mapObj.Get(key)
+				var found bool
+				if stored, found = mapObj.Get(key); !found {
+					// Chave ausente le como null, igual a leitura plana
+					// `m[k]` (o zero de value.Value e VAL_BOOL, nao null).
+					stored = value.NewNull()
+				}
 			} else {
 				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
 			}
 
-			if stored.Type == value.VAL_REF {
+			// Elemento/valor de tipo estatico `ref T`: ref existente ou null e
+			// encaminhado como esta; valor referente cru segue embrulhado em
+			// ref para o slot (ver OP_CONTEXT_REF_PROPERTY acima).
+			if stored.Type == value.VAL_REF || stored.Type == value.VAL_NULL {
 				vm.push(stored)
 				continue
 			}

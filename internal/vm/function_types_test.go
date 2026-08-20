@@ -112,21 +112,51 @@ test_report(answer)`)
 	testExpectedObject(t, 42, got)
 }
 
-func TestReferenceFieldArgumentCanFillNullSlot(t *testing.T) {
+// Spec §2.3 regra 2 / §4.2: um campo `ref Node` nulo passado a parametro
+// `ref Node` e encaminhado como null (`node == null` dentro da funcao). Para
+// preencher o campo, a funcao recebe o PAI e liga `parent.next = ref novo`
+// — o padrao fill-null-slot (`*node == null` / `*node = Node(...)` sobre um
+// slot recebido contextualmente) deixou de existir.
+func TestReferenceFieldArgumentForwardsNullSlot(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Node
     value: int
     next: ref Node
 end
-func fill(node: ref Node) -> void
-    if *node == null then
-        *node = Node(42, null)
+func is_null(node: ref Node) -> bool
+    return node == null
+end
+func fill(parent: ref Node) -> void
+    if parent.next == null then
+        let novo: Node = Node(42, null)
+        parent.next = ref novo
     end
 end
 let head: Node = Node(1, null)
-fill(head.next)
-test_report(head.next.value)`)
+let was_null: bool = is_null(head.next)
+fill(head)
+if was_null then
+    test_report(head.next.value)
+else
+    test_report(0)
+end`)
 	testExpectedObject(t, 42, got)
+}
+
+func TestWritingThroughForwardedNullFieldIsRuntimeError(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+struct Node
+    value: int
+    next: ref Node
+end
+func fill(node: ref Node) -> void
+    *node = Node(42, null)
+end
+let head: Node = Node(1, null)
+fill(head.next)`)
+	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
+		t.Fatalf("error=%v", err)
+	}
 }
 
 func TestExplicitReferenceSurvivesBareFunctionCall(t *testing.T) {

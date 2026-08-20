@@ -2552,7 +2552,12 @@ test_report(42)`)
 	testExpectedObject(t, 42, got)
 }
 
-func TestContextualReferenceCallsCanFillNullIndexSlots(t *testing.T) {
+// Spec §2.3 regra 2 / §4.2: um elemento ou valor de tipo estatico `ref T`
+// que contem null e ENCAMINHADO como null — nao vira ref para o slot. Dentro
+// da funcao `target == null` e verdadeiro, igual a uma variavel `ref T` nula.
+// (Antes, o padrao fill-null-slot preenchia o slot `ref int` com um int cru
+// via `*target = 42`.)
+func TestContextualReferenceCallsForwardNullIndexSlots(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
@@ -2560,26 +2565,28 @@ func TestContextualReferenceCallsCanFillNullIndexSlots(t *testing.T) {
 		{
 			name: "array index",
 			source: `
-func fill(target: ref int) -> void
-    if *target == null then
-        *target = 42
-    end
+func eh_nulo(target: ref int) -> bool
+    return target == null
 end
 let stored: (ref int)[] = [null]
-fill(stored[0])
-test_report(stored[0])`,
+if eh_nulo(stored[0]) then
+    test_report(42)
+else
+    test_report(0)
+end`,
 		},
 		{
 			name: "map index",
 			source: `
-func fill(target: ref int) -> void
-    if *target == null then
-        *target = 42
-    end
+func eh_nulo(target: ref int) -> bool
+    return target == null
 end
 let stored: map[string, ref int] = {"answer": null}
-fill(stored["answer"])
-test_report(stored["answer"])`,
+if eh_nulo(stored["answer"]) then
+    test_report(42)
+else
+    test_report(0)
+end`,
 		},
 	}
 
@@ -2587,5 +2594,19 @@ test_report(stored["answer"])`,
 		t.Run(tt.name, func(t *testing.T) {
 			testExpectedObject(t, 42, runTypedFunctionProgram(t, tt.source))
 		})
+	}
+}
+
+// Escrever atraves do null encaminhado e o erro claro de ref nula — nao ha
+// slot por tras para preencher.
+func TestWritingThroughForwardedNullIndexSlotIsRuntimeError(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+func fill(target: ref int) -> void
+    *target = 42
+end
+let stored: (ref int)[] = [null]
+fill(stored[0])`)
+	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
+		t.Fatalf("error=%v", err)
 	}
 }
