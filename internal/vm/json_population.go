@@ -131,14 +131,22 @@ func prepareJSONArrayMutation(vm *VM, array *value.ObjArray, elementSchema *valu
 	if !ok {
 		return nil, false
 	}
+	oldElements := array.Elements
 	newElements := make([]value.Value, len(dataArray))
 	commits := make([]jsonCommit, 0, len(dataArray))
+	added := make([]value.Value, 0)
 	for i, item := range dataArray {
 		index := i
-		if i < len(array.Elements) {
-			newElements[i] = array.Elements[i]
-			commit, ok := prepareJSONMutation(vm, array.Elements[i], elementSchema, item, func(updated value.Value) {
+		if i < len(oldElements) {
+			previous := oldElements[i]
+			newElements[i] = previous
+			commit, ok := prepareJSONMutation(vm, previous, elementSchema, item, func(updated value.Value) {
+				// RC: a posicao troca de ocupante — retain-novo antes de
+				// release-velho (so roda quando o filho foi SUBSTITUIDO; a
+				// mutacao in-place de um filho composto nao passa por aqui).
+				value.Retain(updated)
 				newElements[index] = updated
+				value.Release(previous)
 			})
 			if !ok {
 				return nil, false
@@ -146,23 +154,29 @@ func prepareJSONArrayMutation(vm *VM, array *value.ObjArray, elementSchema *valu
 			commits = append(commits, commit)
 			continue
 		}
+		var created value.Value
 		if elementSchema == nil {
-			created, ok := dynamicJSONValue(item)
-			if !ok {
-				return nil, false
-			}
-			newElements[i] = created
-			continue
+			created, ok = dynamicJSONValue(item)
+		} else {
+			created, ok = buildTypedJSONValue(elementSchema, item)
 		}
-		created, ok := buildTypedJSONValue(elementSchema, item)
 		if !ok {
 			return nil, false
 		}
 		newElements[i] = created
+		added = append(added, created)
 	}
 	return func() {
 		for _, commit := range commits {
 			commit()
+		}
+		// RC: posicoes novas ganham o array como dono; posicoes descartadas
+		// (payload menor que o array) perdem.
+		for _, created := range added {
+			value.Retain(created)
+		}
+		for j := len(dataArray); j < len(oldElements); j++ {
+			value.Release(oldElements[j])
 		}
 		array.Elements = newElements
 	}, true
@@ -175,11 +189,16 @@ func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.Ru
 	}
 	newData := mapping.Snapshot()
 	commits := make([]jsonCommit, 0, len(dataMap))
+	added := make([]value.Value, 0)
 	for key, item := range dataMap {
 		mapKey := key
 		if current, exists := newData[mapKey]; exists {
+			previous := current
 			commit, ok := prepareJSONMutation(vm, current, valueSchema, item, func(updated value.Value) {
+				// RC: troca de ocupante — retain-novo antes de release-velho
+				value.Retain(updated)
 				newData[mapKey] = updated
+				value.Release(previous)
 			})
 			if !ok {
 				return nil, false
@@ -187,23 +206,24 @@ func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.Ru
 			commits = append(commits, commit)
 			continue
 		}
+		var created value.Value
 		if valueSchema == nil {
-			created, ok := dynamicJSONValue(item)
-			if !ok {
-				return nil, false
-			}
-			newData[mapKey] = created
-			continue
+			created, ok = dynamicJSONValue(item)
+		} else {
+			created, ok = buildTypedJSONValue(valueSchema, item)
 		}
-		created, ok := buildTypedJSONValue(valueSchema, item)
 		if !ok {
 			return nil, false
 		}
 		newData[mapKey] = created
+		added = append(added, created)
 	}
 	return func() {
 		for _, commit := range commits {
 			commit()
+		}
+		for _, created := range added {
+			value.Retain(created) // RC: chave nova — o map vira dono
 		}
 		mapping.Replace(newData)
 	}, true
@@ -235,8 +255,12 @@ func prepareJSONStructMutation(vm *VM, instance *value.ObjInstance, schema *valu
 			fieldSchema = &value.RuntimeTypeInfo{Kind: value.TYPE_ANY}
 		}
 		name := fieldName
+		previous := current
 		commit, ok := prepareJSONMutation(vm, current, fieldSchema, dataValue, func(updated value.Value) {
+			// RC: troca de ocupante do campo — retain-novo antes de release-velho
+			value.Retain(updated)
 			newFields[name] = updated
+			value.Release(previous)
 		})
 		if !ok {
 			return nil, false
@@ -307,7 +331,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			}
 			elements[i] = created
 		}
-		array := value.NewArray(elements)
+		array := retainingArray(elements) // RC: o array e dono duravel de cada elemento (espelha OP_ARRAY)
 		array.Obj.(*value.ObjArray).RuntimeType.Store(schema)
 		return array, true
 	case value.TYPE_MAP:
@@ -325,6 +349,9 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 				return value.Value{}, false
 			}
 			mapData[key] = created
+		}
+		for _, created := range mapData {
+			value.Retain(created) // RC: o map e dono duravel de cada valor (espelha OP_MAP)
 		}
 		mapObject.Replace(mapData)
 		return mapping, true
@@ -370,6 +397,9 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 				return value.Value{}, false
 			}
 			fields[name] = created
+		}
+		for _, created := range fields {
+			value.Retain(created) // RC: campo e dono duravel (espelha o construtor)
 		}
 		return instance, true
 	}
@@ -447,7 +477,7 @@ func dynamicJSONValue(data interface{}) (value.Value, bool) {
 			}
 			elements[i] = converted
 		}
-		return value.NewArray(elements), true
+		return retainingArray(elements), true // RC: o array e dono duravel de cada elemento
 	case map[string]interface{}:
 		mapping := value.NewMap()
 		mapObject := mapping.Obj.(*value.ObjMap)
@@ -458,6 +488,9 @@ func dynamicJSONValue(data interface{}) (value.Value, bool) {
 				return value.Value{}, false
 			}
 			dataMap[key] = converted
+		}
+		for _, converted := range dataMap {
+			value.Retain(converted) // RC: o map e dono duravel de cada valor
 		}
 		mapObject.Replace(dataMap)
 		return mapping, true
@@ -470,10 +503,20 @@ func jsonMapKeyCompatible(keyType *value.RuntimeTypeInfo) bool {
 	return keyType != nil && (keyType.Kind == value.TYPE_STRING || keyType.Kind == value.TYPE_ANY)
 }
 
+// jsonStoreThrough devolve o setter que escreve ATRAVES de uma ref pelo funil
+// unico de escrita via ref (storeReferenceValue): retain-novo/release-velho,
+// consciencia de caixa emprestada (refStorageBorrows) e reaponte da lista de
+// posse do frame (retargetOwnedSlot). O erro e descartado: referenceStorage
+// acabou de validar o alvo, e uma falha aqui so viria de invalidacao
+// concorrente, que a escrita crua tampouco detectaria.
+func jsonStoreThrough(vm *VM, target value.Value) jsonSetter {
+	return func(updated value.Value) { _ = vm.storeReferenceValue(target, updated) }
+}
+
 func jsonReferenceStorage(vm *VM, ref *value.ObjRef) (value.Value, jsonSetter, bool) {
 	stored, exists, store, err := vm.referenceStorage(ref)
 	if err != nil || !exists || store == nil {
 		return value.Value{}, nil, false
 	}
-	return stored, jsonSetter(store), true
+	return stored, jsonStoreThrough(vm, value.Value{Type: value.VAL_REF, Obj: ref}), true
 }

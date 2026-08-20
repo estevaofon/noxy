@@ -183,13 +183,13 @@ func goValToNoxy(i interface{}) value.Value {
 		for idx, el := range v {
 			arr[idx] = goValToNoxy(el)
 		}
-		return value.NewArray(arr)
+		return retainingArray(arr) // RC: o array e dono duravel de cada elemento
 	case map[string]interface{}:
 		m := make(map[string]value.Value)
 		for k, val := range v {
 			m[k] = goValToNoxy(val)
 		}
-		return value.NewMapWithData(m)
+		return retainingMap(m) // RC: o map e dono duravel de cada valor (NewMapWithData nao retem)
 	}
 	return value.NewString(fmt.Sprintf("%v", i))
 }
@@ -201,7 +201,7 @@ func populateTarget(vm *VM, target value.Value, data interface{}) bool {
 		if !ok || ref == nil {
 			return false
 		}
-		return populateRef(vm, ref, data)
+		return populateRef(vm, target, ref, data)
 	} else if target.Type == value.VAL_OBJ {
 		// Populate Object In-Place
 		return populateObj(vm, target, data)
@@ -219,21 +219,24 @@ func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
 	return true
 }
 
-// Helper: Populate a Reference with Go Data (Deeply)
-func populateRef(vm *VM, ref *value.ObjRef, data interface{}) bool {
+// populateRef popula o alvo atraves da ref. Toda substituicao do valor
+// apontado passa por jsonStoreThrough (storeReferenceValue), nunca pelo
+// store cru de referenceStorage — spec 2026-08-20-ref-slot-invariant §5.3.
+func populateRef(vm *VM, target value.Value, ref *value.ObjRef, data interface{}) bool {
 	currentVal, exists, store, err := vm.referenceStorage(ref)
 	if err != nil || !exists || store == nil {
 		return false
 	}
+	set := jsonStoreThrough(vm, target)
 	if ref.JSONDynamic.Load() {
 		replacement, ok := dynamicJSONValue(data)
 		if !ok {
 			return false
 		}
-		store(replacement)
+		set(replacement)
 		return true
 	}
-	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType.Load(), data, jsonSetter(store))
+	commit, ok := prepareJSONMutation(vm, currentVal, ref.TargetType.Load(), data, set)
 	if !ok {
 		return false
 	}
