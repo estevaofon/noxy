@@ -221,7 +221,8 @@ end`)
 
 func TestReferenceSlotValueAssignmentsSuggestDereference(t *testing.T) {
 	tests := []struct {
-		name, input, hint string
+		name, input string
+		hints       []string
 	}{
 		{
 			name: "local reference parameter",
@@ -229,7 +230,7 @@ func TestReferenceSlotValueAssignmentsSuggestDereference(t *testing.T) {
 func increment(value: ref int) -> void
     value = value + 1
 end`,
-			hint: "use '*value = ...'",
+			hints: []string{"use '*value = ...'"},
 		},
 		{
 			name: "global",
@@ -237,7 +238,7 @@ end`,
 let number: int = 0
 let value: ref int = ref number
 value = 1`,
-			hint: "use '*value = ...'",
+			hints: []string{"use '*value = ...'"},
 		},
 		{
 			name: "captured reference parameter",
@@ -247,7 +248,7 @@ func outer(value: ref int) -> void
         value = value + 1
     end
 end`,
-			hint: "use '*value = ...'",
+			hints: []string{"use '*value = ...'"},
 		},
 		{
 			name: "field",
@@ -258,7 +259,18 @@ end
 let number: int = 0
 let holder: Holder = Holder(ref number)
 holder.field = 1`,
-			hint: "use '*holder.field = ...'",
+			hints: []string{"to point the field at a new value", "use 'holder.field = ref novo'", "use '*holder.field = ...'"},
+		},
+		{
+			name: "field through ref base",
+			input: `
+struct Holder
+    field: ref int
+end
+func f(holder: ref Holder)
+    holder.field = 1
+end`,
+			hints: []string{"to point the field at a new value", "use 'holder.field = ref novo'", "use '*holder.field = ...'"},
 		},
 		{
 			name: "array element",
@@ -266,7 +278,7 @@ holder.field = 1`,
 let number: int = 0
 let items: (ref int)[] = [ref number]
 items[0] = 1`,
-			hint: "use '*items[0] = ...'",
+			hints: []string{"to point the element at a new value", "use 'items[0] = ref novo'", "use '*items[0] = ...'"},
 		},
 		{
 			name: "map value",
@@ -274,7 +286,7 @@ items[0] = 1`,
 let number: int = 0
 let items: map[string, ref int] = {"item": ref number}
 items["item"] = 1`,
-			hint: "use '*items[\"item\"] = ...'",
+			hints: []string{"to point the entry at a new value", "use 'items[\"item\"] = ref novo'", "use '*items[\"item\"] = ...'"},
 		},
 	}
 
@@ -284,8 +296,13 @@ items["item"] = 1`,
 			if err == nil {
 				t.Fatal("expected reference assignment error")
 			}
-			if !strings.Contains(err.Error(), "cannot assign int to ref int") || !strings.Contains(err.Error(), tt.hint) {
-				t.Fatalf("error=%q, want reference assignment diagnostic with %q", err, tt.hint)
+			if !strings.Contains(err.Error(), "cannot assign int to ref int") {
+				t.Fatalf("error=%q, want reference assignment diagnostic", err)
+			}
+			for _, hint := range tt.hints {
+				if !strings.Contains(err.Error(), hint) {
+					t.Fatalf("error=%q, want hint %q", err, hint)
+				}
 			}
 		})
 	}

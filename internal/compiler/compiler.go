@@ -663,7 +663,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if refType, isRef := arrType.ElementType.(*ast.RefType); isRef &&
 					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
 					c.areTypesCompatible(refType.ElementType, valType) {
-					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), arrType.ElementType, valType)
+					return nil, nil, referenceSlotAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), "element", arrType.ElementType, valType)
 				}
 				if !c.areTypesCompatible(arrType.ElementType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s%s", c.currentLine, arrType.ElementType.String(), valType.String(), c.derefReadHint(arrType.ElementType, valType, n.Value))
@@ -676,7 +676,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if refType, isRef := mapType.ValueType.(*ast.RefType); isRef &&
 					!(isReferenceType(valType) || valType == nil || isNullType(valType)) &&
 					c.areTypesCompatible(refType.ElementType, valType) {
-					return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), mapType.ValueType, valType)
+					return nil, nil, referenceSlotAssignmentTypeError(c.currentLine, assignmentTargetName(indexExp), "entry", mapType.ValueType, valType)
 				}
 				if !c.areTypesCompatible(mapType.ValueType, valType) {
 					return nil, nil, fmt.Errorf("[line %d] type mismatch in map value: expected %s, got %s%s", c.currentLine, mapType.ValueType.String(), valType.String(), c.derefReadHint(mapType.ValueType, valType, n.Value))
@@ -752,7 +752,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 						}
 					} else if c.areTypesCompatible(refType.ElementType, valType) {
-						return nil, nil, referenceAssignmentTypeError(c.currentLine, assignmentTargetName(memberExp), fieldType, valType)
+						return nil, nil, referenceSlotAssignmentTypeError(c.currentLine, assignmentTargetName(memberExp), "field", fieldType, valType)
 					} else {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in rebind: expected %s, got %s", c.currentLine, fieldType.String(), valType.String())
 					}
@@ -2758,6 +2758,20 @@ func referenceAssignmentTypeError(line int, name string, expected, actual ast.No
 	return fmt.Errorf(
 		"[line %d] cannot assign %s to %s\n  hint: use '*%s = ...' to update the referenced value",
 		line, noxyTypeName(actual), noxyTypeName(expected), name,
+	)
+}
+
+// referenceSlotAssignmentTypeError e a variante para alvos que sao SLOTS
+// (campo de struct = "field", elemento de array = "element", valor de map =
+// "entry"). O hint cobre os dois caminhos legitimos da tabela de §2.3: apontar
+// o slot para um valor novo ('x = ref novo' — uma variavel, porque `ref`
+// exige L-value e o compilador a promove para a heap) e sobrescrever o
+// referente ('*x = ...'). Variavel `ref T` segue com
+// referenceAssignmentTypeError (spec §2.3 documenta aquele hint).
+func referenceSlotAssignmentTypeError(line int, name, slotKind string, expected, actual ast.NoxyType) error {
+	return fmt.Errorf(
+		"[line %d] cannot assign %s to %s\n  hint: to point the %s at a new value, bind it to a variable first and use '%s = ref novo'; to overwrite the referenced value use '*%s = ...'",
+		line, noxyTypeName(actual), noxyTypeName(expected), slotKind, name, name,
 	)
 }
 
