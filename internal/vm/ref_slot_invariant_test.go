@@ -151,3 +151,57 @@ soma(a.valor)
 let b: Node = a
 test_report([b.valor == 11])`, []bool{true})
 }
+
+// Rota 5 (nao listada na issue): OP_SET_PROPERTY/OP_SET_INDEX nao validavam
+// nada em base `any` e gravavam T cru em slot `ref T`. Agora e o gemeo
+// dinamico do erro de compilacao; ref/null seguem aceitos.
+func TestAnyBaseWriteOfRawValueIntoRefFieldIsRuntimeError(t *testing.T) {
+	err := runTypedFunctionProgramError(t, refSlotPrelude+`
+let a: any = Node(1, null)
+a.proximo = Node(9, null)`)
+	if err == nil || !strings.Contains(err.Error(), "cannot assign Node to ref Node") {
+		t.Fatalf("esperava 'cannot assign Node to ref Node' em runtime, veio %v", err)
+	}
+}
+
+func TestAnyBaseWriteOfRefOrNullIntoRefFieldIsAllowed(t *testing.T) {
+	requireBoolResults(t, refSlotPrelude+`
+let b: Node = Node(2, null)
+let a: any = Node(1, null)
+a.proximo = ref b
+let ligado: bool = !eh_nulo(a.proximo)
+a.proximo = null
+test_report([ligado, eh_nulo(a.proximo)])`, []bool{true, true})
+}
+
+func TestAnyBaseWriteOfRawValueIntoRefElementIsRuntimeError(t *testing.T) {
+	cases := map[string]string{
+		"array": `
+let arr: (ref int)[] = [null]
+let d: any = arr
+d[0] = 5`,
+		"map": `
+let m: map[string, ref int] = {}
+let d: any = m
+d["k"] = 5`,
+	}
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := runTypedFunctionProgramError(t, src)
+			if err == nil || !strings.Contains(err.Error(), "cannot assign int to ref int") {
+				t.Fatalf("esperava 'cannot assign int to ref int' em runtime, veio %v", err)
+			}
+		})
+	}
+}
+
+// Campo comum via `any` segue fronteira dinamica sem checagem (inalterado).
+func TestAnyBasePlainFieldWriteIsStillUnchecked(t *testing.T) {
+	got := runTypedFunctionProgram(t, refSlotPrelude+`
+let a: any = Node(1, null)
+a.valor = "texto"
+test_report(type(a.valor))`)
+	if got.Type != value.VAL_OBJ || got.Obj.(string) != "string" {
+		t.Fatalf("campo comum via any continua sem checagem; veio %v", got)
+	}
+}

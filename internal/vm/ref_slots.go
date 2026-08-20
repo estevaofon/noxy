@@ -53,3 +53,24 @@ func mapValueIsRefSlot(mapping *value.ObjMap) bool {
 	tag := mapping.RuntimeType.Load()
 	return tag != nil && tag.Kind == value.TYPE_MAP && tag.Value != nil && tag.Value.Kind == value.TYPE_REF
 }
+
+// structRefFieldTypeName devolve o tipo declarado do campo (`ref Node`) a
+// partir de ConstructorType.Params — so para mensagens de erro (caminho
+// frio); sem ConstructorType valido cai em "reference field 'nome'".
+func structRefFieldTypeName(definition *value.ObjStruct, name string) string {
+	if schema, ok := validStructConstructorType(definition); ok {
+		for i, field := range definition.Fields {
+			if field == name && i < len(schema.Params) && schema.Params[i] != nil {
+				return schema.Params[i].String()
+			}
+		}
+	}
+	return fmt.Sprintf("reference field '%s'", name)
+}
+
+// refSlotWriteError e o gemeo dinamico do erro de compilacao
+// "cannot assign T to ref T" (spec §2.3), usado quando a escrita chega por
+// fronteira dinamica (base `any`) — spec §6.3.
+func refSlotWriteError(expected string, val value.Value) string {
+	return fmt.Sprintf("cannot assign %s to %s", runtimeTypeName(val), expected)
+}

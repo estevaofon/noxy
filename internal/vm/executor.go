@@ -1444,6 +1444,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
+					// Guard do slot ref (spec §6.3): elemento `ref T` (tag
+					// RuntimeType) so aceita ref/null; via base tipada o
+					// compilador ja rejeitou. O teste de val.Type vem antes
+					// para o Load() atomico so rodar em escritas nao-ref.
+					if val.Type != value.VAL_REF && val.Type != value.VAL_NULL && arrayElementIsRefSlot(arr) {
+						return vm.runtimeError(c, ip, "%s", refSlotWriteError(arr.RuntimeType.Load().Element.String(), val))
+					}
 					// RC: retain-antes-de-release (elemento e dono duravel)
 					old := arr.Elements[idx]
 					value.Retain(val)
@@ -1463,6 +1470,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 						}
 					} else {
 						return vm.runtimeError(c, ip, "map key must be int or string")
+					}
+					// Guard do slot ref (spec §6.3): valor `ref T` (tag
+					// RuntimeType) so aceita ref/null.
+					if val.Type != value.VAL_REF && val.Type != value.VAL_NULL && mapValueIsRefSlot(mapObj) {
+						return vm.runtimeError(c, ip, "%s", refSlotWriteError(mapObj.RuntimeType.Load().Value.String(), val))
 					}
 					// RC: so libera o velho se a chave ja existia (dec a
 					// menos e proibido); retain-antes-de-release quando existe.
@@ -1543,6 +1555,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			instance, ok := instanceVal.Obj.(*value.ObjInstance)
 			if !ok {
 				return vm.runtimeError(c, ip, "only instances have properties")
+			}
+
+			// Guard do slot ref (spec 2026-08-20-ref-slot-invariant §6.3):
+			// via base tipada o compilador ja rejeitou; aqui so dispara em
+			// fronteira dinamica (`any`). Lookup em mapa nil e gratuito.
+			if instance.Struct.FieldIsRef(name) && val.Type != value.VAL_REF && val.Type != value.VAL_NULL {
+				return vm.runtimeError(c, ip, "%s", refSlotWriteError(structRefFieldTypeName(instance.Struct, name), val))
 			}
 
 			// RC: retain-antes-de-release (campo e dono duravel); Release
