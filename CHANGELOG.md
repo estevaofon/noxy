@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Changed (BREAKING) — campo/índice `ref T` nulo passado a parâmetro `ref T` encaminha `null`
+
+- Um argumento cujo tipo estático já é `ref T` — campo de struct, elemento
+  de `(ref T)[]`, valor de `map[K, ref T]` — é **encaminhado como está**,
+  inclusive quando contém `null`, exatamente como uma variável `ref T` já
+  era (spec §2.3 regra 2 e §4.2: a conversão contextual existe para
+  expressões de tipo `T`, não `ref T`). Antes, `OP_CONTEXT_REF_PROPERTY` e
+  `OP_CONTEXT_REF_INDEX` fabricavam uma ref para o *slot* quando ele
+  continha `null`: dentro da função `n == null` era `false` para um campo
+  nulo (uma ref válida para um slot que contém null), enquanto o mesmo
+  `a.proximo` lido em `let`/atribuição dava `null`; e um `_append` que
+  recursa por `_append(node.proximo, v)` morria com "contextual property
+  reference base must be an instance" em vez de uma mensagem sobre ref
+  nula. Chave ausente em `map[K, ref T]` encaminha `null`, igual à leitura
+  plana `m[k]`.
+
+- **O padrão fill-null-slot deixa de existir.** `*node == null` /
+  `*node = Node(v, null)` sobre um slot recebido contextualmente preenchia
+  o campo `ref Node` com um `Node` *cru* (`type(no.proximo)` virava
+  `"Node"`, e um `*viz = ...` posterior através dele falhava com "expected
+  reference value, got object"). Agora o `null` chega como ref nula e
+  `*node = ...` é o erro claro `cannot update null reference`. Migração: a
+  função recebe o **pai** e liga pelo campo —
+  `if node.proximo == null then let novo: Node = Node(v, null)`
+  `node.proximo = ref novo` (o nó novo é uma variável porque `ref` exige
+  L-value; o compilador o promove para a heap). No repositório isso
+  alcançou `noxy_examples/linked_list.nx` (migrado) e os testes
+  `TestReferenceFieldArgumentCanFillNullSlot` /
+  `TestContextualReferenceCallsCanFillNullIndexSlots` (reescritos para a
+  semântica nova). Travessias (`cur != null`, `no.proximo != null`) e o
+  `_append` que já ligava pelo campo (`stack.nx`) não mudam.
+
+- Inalterado, e registrado como pendência: um valor referente **cru** num
+  slot `ref T` — alcançável por `json_loads` com payload compatível e por
+  `campo = T` através de uma base `ref`, que o compilador hoje não rejeita
+  (via base valor é erro "cannot assign T to ref T") — segue sendo
+  embrulhado numa ref para o slot ao ser passado adiante, como antes.
+
+- Testes: `internal/vm/ref_null_forwarding_test.go` (campo, campo via base
+  `ref`, índice, chave ausente de map, guarda do caso não-nulo). Spec §4.2
+  ganha o parágrafo sobre encaminhamento de `ref T` (inclusive `null`) com o
+  `append_node` idiomático.
+
 ### Docs
 
 - README ganha badge de versão no topo (`noxy | 0.9.0`, shields.io estático,

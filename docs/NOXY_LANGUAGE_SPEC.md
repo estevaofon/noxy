@@ -542,6 +542,26 @@ This contextual conversion is limited to exact script signatures and public
 native contracts known by the compiler. It never applies at a dynamic
 boundary.
 
+An argument whose static type is already `ref T` — a `ref` variable, a struct
+field, an array element, or a map value declared `ref T` — needs no
+conversion: the stored reference is forwarded as is, **including `null`**,
+exactly as a `ref` variable is (§2.3, rule 2). No reference to the containing
+slot is created, so inside the callee `param == null` is true precisely when
+the stored reference was null, and writing through such a parameter is the
+ordinary null-reference error. To fill an empty `ref` field, the callee
+receives the *owner* and rebinds the field:
+
+```noxy
+func append_node(node: ref Node, valor: int)
+    if node.proximo == null then
+        let novo: Node = Node(valor, null)   // a variable: `ref` needs an L-value
+        node.proximo = ref novo              // REBIND of the owner's field
+    else
+        append_node(node.proximo, valor)     // forwards the stored reference
+    end
+end
+```
+
 Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
 
 ```noxy
