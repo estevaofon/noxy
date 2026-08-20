@@ -957,6 +957,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "zeros size must be integer")
 			}
 			count := int(countVal.AsInt)
+			if count < 0 {
+				// Sem o guard, make() panica no lado Go (makeslice: len out
+				// of range) e o panic atravessa a VM — fora do alcance de
+				// call_result e sem linha do script.
+				return vm.runtimeError(c, ip, "zeros size must be non-negative, got %d", count)
+			}
 			elements := make([]value.Value, count)
 			for i := 0; i < count; i++ {
 				elements[i] = value.NewInt(0)

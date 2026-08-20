@@ -28,6 +28,11 @@ func main() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
 			debug.PrintStack()
+			// Um panic que chegou ate aqui e falha, nunca sucesso: sem este
+			// exit, scripts/CI viam codigo 0 de um programa que explodiu no
+			// meio. Este defer e o primeiro registrado em main, logo roda por
+			// ultimo — os demais defers ja executaram quando o Exit dispara.
+			os.Exit(1)
 		}
 	}()
 

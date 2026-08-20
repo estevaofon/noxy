@@ -33,6 +33,12 @@
   do template: ele vazava para a primeira chamada genérica aninhada nos
   argumentos, aceitando programa que deveria ser erro de inferência
   (pré-existente no caminho do `let`; o guard endurece `let` e `return`).
+- `zeros(n)` com tamanho negativo panicava no lado Go (`makeslice: len out
+  of range`), imprimia stack trace do interpretador e o processo saía com
+  código 0. Agora é erro de runtime do noxy ("zeros size must be
+  non-negative"), com linha do script e capturável por `call_result` — e um
+  panic que ainda alcance o recover do topo passa a terminar o processo com
+  código 1, nunca mais como sucesso.
 
 ### Docs
 
