@@ -92,6 +92,18 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
 | `void` | Absence of value (function return only) | - |
 | `bytes` | Raw byte sequence | `b"Data"`, `hex_decode("FF")` |
 
+An `int` literal must fit in the signed 64-bit range
+`-9223372036854775808 … 9223372036854775807`. A literal outside that range —
+decimal, hexadecimal (`0x…`) or binary (`0b…`) — is a compile-time error,
+never a silently saturated value. Unary minus applied directly to an integer
+literal is part of the literal, so the minimum of the type is writable as
+`-9223372036854775808`:
+
+```noxy
+let min: int = -9223372036854775808 // ok — exact
+let bad: int = 9223372036854775808  // ERROR: integer literal out of int64 range
+```
+
 ### 2.2 Composite Types
 
 #### Value Semantics (Copy-on-Write)
