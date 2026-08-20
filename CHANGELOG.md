@@ -20,19 +20,52 @@
 
 - **O padrão fill-null-slot deixa de existir.** `*node == null` /
   `*node = Node(v, null)` sobre um slot recebido contextualmente preenchia
-  o campo `ref Node` com um `Node` *cru* (`type(no.proximo)` virava
-  `"Node"`, e um `*viz = ...` posterior através dele falhava com "expected
-  reference value, got object"). Agora o `null` chega como ref nula e
-  `*node = ...` é o erro claro `cannot update null reference`. Migração: a
-  função recebe o **pai** e liga pelo campo —
+  o campo `ref Node` com um `Node` *cru* (um `let viz: ref Node = no.proximo`
+  seguido de `*viz = ...` falhava com "expected reference value, got
+  object"). Agora o `null` chega como ref nula e `*node = ...` é o erro
+  claro `cannot update null reference`. Migração: a função recebe o **pai**
+  e liga pelo campo —
   `if node.proximo == null then let novo: Node = Node(v, null)`
   `node.proximo = ref novo` (o nó novo é uma variável porque `ref` exige
-  L-value; o compilador o promove para a heap). No repositório isso
-  alcançou `noxy_examples/linked_list.nx` (migrado) e os testes
+  L-value; o compilador o promove para a heap). Para elemento de
+  `(ref T)[]` e valor de `map[K, ref T]` a regra é a mesma: quem preenche é
+  o dono (`lista[0] = ref novo`, `m["k"] = ref novo`); `*param = ...` sobre
+  o `null` encaminhado é `cannot update null reference` tanto para elemento
+  nulo quanto para chave ausente. No repositório isso alcançou
+  `noxy_examples/linked_list.nx` (migrado) e os testes
   `TestReferenceFieldArgumentCanFillNullSlot` /
   `TestContextualReferenceCallsCanFillNullIndexSlots` (reescritos para a
-  semântica nova). Travessias (`cur != null`, `no.proximo != null`) e o
-  `_append` que já ligava pelo campo (`stack.nx`) não mudam.
+  semântica nova). Travessias (`cur != null`, `no.proximo != null`) não
+  mudam; `bst.nx` trocou `*node == null` por `node == null` (a pergunta
+  certa para um parâmetro `ref` que recebe um campo `ref`; `binary_tree.nx`
+  usa campos `Node` por valor, onde o parâmetro é uma ref para o slot e
+  `*node != null` segue sendo a pergunta certa). O `_append` de
+  `stack.nx`, que grava `Node` cru via base `ref` (lacuna da #50), segue
+  funcionando pelo shim descrito abaixo.
+
+- **Vale para toda posição que recebe a referência contextualmente**, não
+  só argumento de função script: `ref a.campo` explícito, argumento de
+  construtor para campo `ref` (`Node(2, a.proximo)`), `return ref n.campo`,
+  `append(lista, a.campo)` em `(ref T)[]` e o alvo de `json_loads`. Em todas,
+  um `ref T` armazenado como `null` chega como `null` — antes chegava como
+  ref para o slot de origem (em `Node(2, a.proximo)`, por exemplo, o nó novo
+  ficava *apontando para o slot* `a.proximo`, um alias acidental).
+
+- **`json_loads` com alvo `ref T` nulo vindo de campo/índice** (ex.:
+  `json_loads(s, h.child)` com `child: ref any` nulo) passa a devolver
+  `false` sem preencher nada — o alvo chega como `null` e não há slot por
+  trás; `OP_MARK_REF_JSON_DYNAMIC` deixa o `null` passar (antes, sem o
+  passthrough, seria erro de runtime). Antes do encaminhamento o slot era
+  preenchido com o payload cru. Para preencher, passe o **dono**
+  (`json_loads(s, h)` com schema do struct) ou pré-aponte o slot; a decisão
+  definitiva sobre slot `ref T` nulo em `json_loads` fica na #50 (Parte 3).
+
+- **Atenção na migração dentro de laços com `break`** (issue #52,
+  pré-existente): `break` não fecha os upvalues dos locais do corpo do laço,
+  então `let novo: Node = ...; campo = ref novo` seguido de `break` deixa a
+  ref apontando para um slot de pilha reaproveitado. Até a #52, prefira a
+  forma recursiva do `_append`, ou deixe o laço terminar pela condição em
+  vez de `break` quando houver `ref` a um local do corpo.
 
 - Inalterado, e registrado como pendência (issue #50): um valor referente
   **cru** num slot `ref T` — alcançável por `json_loads` com payload

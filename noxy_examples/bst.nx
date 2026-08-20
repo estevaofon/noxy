@@ -28,7 +28,7 @@ end
 
 // Busca um valor na árvore
 func search(node: ref TreeNode, valor: int) -> bool
-    if *node == null then
+    if node == null then
         return false
     end
     if node.valor == valor then
@@ -43,7 +43,7 @@ end
 
 // Travessia In-Order (esquerda, raiz, direita) - imprime em ordem crescente
 func inorder(node: ref TreeNode)
-    if *node == null then
+    if node == null then
         return
     end
     inorder(node.esquerda)
@@ -53,7 +53,7 @@ end
 
 // Encontra o valor mínimo da árvore
 func find_min(node: ref TreeNode) -> int
-    if *node == null then
+    if node == null then
         return -1
     end
     let current: ref TreeNode = node
@@ -65,7 +65,7 @@ end
 
 // Encontra o valor máximo da árvore
 func find_max(node: ref TreeNode) -> int
-    if *node == null then
+    if node == null then
         return -1
     end
     let current: ref TreeNode = node
@@ -77,7 +77,7 @@ end
 
 // Conta o número de nós na árvore
 func count_nodes(node: ref TreeNode) -> int
-    if *node == null then
+    if node == null then
         return 0
     end
     return 1 + count_nodes(node.esquerda) + count_nodes(node.direita)
@@ -85,7 +85,7 @@ end
 
 // Calcula a altura da árvore
 func height(node: ref TreeNode) -> int
-    if *node == null then
+    if node == null then
         return 0
     end
     let left_height: int = height(node.esquerda)
