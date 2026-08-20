@@ -1,6 +1,6 @@
 # Invariante do slot `ref T` — checagem de campo com base `ref`, `json_loads` e fim do shim (issue #50)
 
-**Data:** 2026-08-20 · **Branch:** `fix/ref-slot-invariant` (a partir do `develop` local, que já contém a #51 em `4ef1777`) · **Status:** design aprovado, implementação pendente
+**Data:** 2026-08-20 · **Branch:** `fix/ref-slot-invariant` (a partir do `develop` local, que já contém a #51 em `4ef1777`) · **Status:** design aprovado pelo usuário; revisão independente (timebox 20 min) = "aprovar com ajustes", ajustes incorporados (§3 superfície extra, §4.2 deslocamento de posse, §5.3 escrita através de ref armazenada, §6.1 fonte única `RefFields`, §6.2 `OP_REF_INDEX`, §6.3 custo, §9 `REF_PTR`); implementação pendente
 **Issue:** [#50](https://github.com/estevaofon/noxy/issues/50) (3 partes + 2 emendas) · **Release:** v0.10.0 (BREAKING, precedente PR #46 / v0.9.0 e PR #51 / v0.9.1)
 **Relação:** fecha a pendência deixada pelo branch `fix/ref-null-forwarding` (PR #51): o *shim* dos opcodes contextuais em `internal/vm/executor.go` e o entry "Inalterado, e registrado como pendência (issue #50)" do CHANGELOG 0.9.1.
 
@@ -73,6 +73,8 @@ O segundo retorno de `compileLValueBase` (`baseWasRef`) deixa de ter consumidor 
 
 Base `any` (`a.campo = ...` com `a: any`) continua sem checagem estática — é fronteira dinâmica (§2.0); a rota 5 é fechada em runtime (§6.3).
 
+**Superfície extra habilitada (registrar no CHANGELOG):** com `fieldType` resolvido, o mesmo statement via base `ref` passa também por `rewriteIfGenericValue(n.Value, fieldType)` (target-typing §3, posição 4 — `node.transform = identity` com campo de tipo função genérica passa a inferir pelo campo, como na base valor) e por `emitRuntimeValueType(fieldType)` → `OP_MARK_RUNTIME_VALUE_TYPE` para campos compostos (array/map/chan), que pode falhar em runtime com `runtime value metadata conflicts with static context` quando um composto já etiquetado com outro tipo é atribuído — idêntico ao que a base valor já faz hoje, mas é erro novo para programas via `ref` que hoje rodam sem validação.
+
 ## 4. Parte 2 — hint e migração
 
 ### 4.1 Hint
@@ -113,7 +115,9 @@ func _append(node: ref Node, valor: int)
 end
 ```
 
-Alcance no repositório: `noxy_examples/stack.nx:6-12` e os 6 testes de `internal/vm/rc_uniqueness_test.go` que usam esse `_append` como veículo (`TestRefLocalBindingIsBorrowNotOwner`, `TestRefGlobalAndCapturedRefLocalAreBorrows`, `TestCapturedAndBorrowedRefSlotsNeverReleaseWhatTheyDoNotOwn`, `TestBorrowedUpvalueRebindKeepsOwnersOfSharedNode`, `TestBorrowConditionIsStaticNotInferredFromOwnedList`, `TestRefWriteToUniquelyOwnedNodeMutatesInPlace`). Só o `_append` muda; as asserções de RC/posse ficam **inalteradas** — se alguma mudar de resultado com a forma nova, isso é um achado a investigar, não a acomodar. A saída de `stack.nx` tem de ser byte-a-byte a mesma do baseline.
+Alcance no repositório: `noxy_examples/stack.nx:6-12` e os 6 testes de `internal/vm/rc_uniqueness_test.go` que usam esse `_append` como veículo (`TestRefLocalBindingIsBorrowNotOwner`, `TestRefGlobalAndCapturedRefLocalAreBorrows`, `TestCapturedAndBorrowedRefSlotsNeverReleaseWhatTheyDoNotOwn`, `TestBorrowedUpvalueRebindKeepsOwnersOfSharedNode`, `TestBorrowConditionIsStaticNotInferredFromOwnedList`, `TestRefWriteToUniquelyOwnedNodeMutatesInPlace`). Só o `_append` muda. A saída de `stack.nx` tem de ser byte-a-byte a mesma do baseline.
+
+**Deslocamento de posse (previsível, registrar no CHANGELOG):** na forma velha o **campo** `proximo` era o dono durável do nó (`OP_SET_PROPERTY` retém, `executor.go` ~1511); na forma nova o dono é a **célula fechada** do `let novo` (`closeUpvalue`, `stack.go` ~271-291) e o campo guarda um `VAL_REF` (retain/release no-op em `ownersOf`). Consequências: (i) `campo = null` / rebind do campo **não solta mais o nó** — quem o mantém vivo é a célula, que o GC do Go recolhe quando nada mais a alcança; (ii) as contagens de `Owners` sondadas pelos testes **não mudam** — o nó continua com exatamente 1 dono, só que a célula em vez do campo (`TestBorrowedUpvalueRebindKeepsOwnersOfSharedNode` espera 2 = célula + `let second`; `TestRefWriteToUniquelyOwnedNodeMutatesInPlace` espera p1..p4 = 1,2,1,1 — derivação em §8). As asserções dos 6 testes ficam **inalteradas**; se alguma contagem divergir, é um achado a investigar (provável bug no caminho novo), não a acomodar.
 
 ## 5. Parte 3 — `json_loads` com slot `ref T`
 
@@ -159,7 +163,7 @@ Mudanças em `internal/vm/json_population.go` e `builtins_json.go`:
 - **Builders** (`buildTypedJSONValue`, `dynamicJSONValue`, `goValToNoxy`): ao colocar um filho num array/map/struct recém-construído, `Retain(filho)`. Strings/escalares são no-op em `ownersOf`, então o retain incondicional é barato e correto.
 - **Setters de substituição** nas mutações preparadas (`prepareJSONArrayMutation`, `prepareJSONMapMutation`, `prepareJSONStructMutation`): quando o commit troca o ocupante de uma posição existente (`newElements[i] = updated`, `newData[k] = updated`, `newFields[name] = updated`), `Retain(updated)` e `Release(antigo)` — na ordem retain-antes-de-release. Quando a mutação é in-place (commit do filho não chama `set`), nada a contar.
 - **Posições novas** (array cresce, chave nova no map): `Retain(criado)`. **Posições descartadas** (array encolhe: `len(dataArray) < len(array.Elements)`): `Release(antigo)` no commit.
-- **Top-level** (`populateRef`: `store` vindo de `referenceStorage`, usado pelo caminho `JSONDynamic` e por `prepareJSONMutation` quando o alvo é escalar/`any`/substituído inteiro): trocar o `store` cru por um setter que passa por `vm.storeReferenceValue(refValue, v)` — retain/release + `refStorageBorrows` + `retargetOwnedSlot`, como qualquer escrita via ref.
+- **Escrita através de uma ref** — nos **dois** lugares que hoje usam o `store` cru de `referenceStorage`: (i) **top-level** (`populateRef`, caminho `JSONDynamic` e `prepareJSONMutation` quando o alvo é escalar/`any`/substituído inteiro) e (ii) **slot `ref T` já apontando** (`prepareJSONMutation` `TYPE_REF` com `current.Type == VAL_REF` → `jsonReferenceStorage`, `json_population.go` ~32-41 e ~440-447). Ambos passam a usar um setter que chama `vm.storeReferenceValue(Value{VAL_REF, ref}, v)` — retain-novo/release-velho + `refStorageBorrows` + `retargetOwnedSlot`, como qualquer escrita via ref. Sem (ii), um slot `ref Pair` apontando para uma variável que contém `null` receberia um struct construído sem `Retain` e sem reapontar a entrada `frame.Owned` (achado do revisor independente). `jsonReferenceStorage` devolve esse setter; o `store` cru não é mais exposto ao módulo JSON.
 - A célula de §5.2 nasce com `Retain(valor)` (a célula é o dono). A ref gravada no slot é `VAL_REF` — `ownersOf` não a rastreia, então `Retain`/`Release` sobre ela são no-op (slot `ref T` não possui, §4.2).
 
 Teste de regressão (vm): o programa de §2 item 5 tem de imprimir `1`; versões para map (`map[string, Pair]`), struct aninhado, `json_parse` (`let d: any = json_parse(...)`, `let e: any = d`, mutar `e`, `d` intacto) e alvo `any` via `JSONDynamic`.
@@ -170,7 +174,7 @@ Teste de regressão (vm): o programa de §2 item 5 tem de imprimir `1`; versões
 
 ### 6.1 Schema de runtime de "slot declarado `ref T`"
 
-- **Struct:** novo campo `ObjStruct.RefFields map[string]bool`, ao lado de `JSONDynamicFields`, preenchido (i) no compilador, no case `*ast.StructStatement` (`compiler.go` ~815-825), para todo campo cujo tipo é `*ast.RefType`; (ii) em `buildTypedJSONValue` `TYPE_STRUCT` a partir de `schema.Fields[name].Kind == TYPE_REF`. `value.NewStruct` não muda de assinatura; lookup em mapa `nil` é válido em Go (devolve `false`) — sem custo para structs sem campo `ref`.
+- **Struct:** novo campo `ObjStruct.RefFields map[string]bool`, ao lado de `JSONDynamicFields`, preenchido (i) no compilador, no case `*ast.StructStatement` (`compiler.go` ~815-825), para todo campo cujo tipo é `*ast.RefType`; (ii) em `buildTypedJSONValue` `TYPE_STRUCT` a partir de `schema.Fields[name].Kind == TYPE_REF`. `value.NewStruct` não muda de assinatura; lookup em mapa `nil` é válido em Go (devolve `false`, sem hash) — sem custo para structs sem campo `ref`. A informação já existe em `ConstructorType.ParamIsRef[i]` (alinhado a `Fields[i]`), mas structs criados pelo builder JSON nascem **sem** `ConstructorType`, e a pergunta "este campo é `ref`?" por nome precisa ser O(1) no caminho quente; por isso `RefFields` é a **única fonte de runtime para a pergunta do slot** (acessada por um helper `func (s *ObjStruct) FieldIsRef(name string) bool`), e `ConstructorType` segue servindo só à validação do construtor. Um teste Go garante a consistência: para todo struct criado pelo compilador, `RefFields[Fields[i]] == ConstructorType.ParamIsRef[i]`.
 - **Array/map:** a tag `ObjArray.RuntimeType` / `ObjMap.RuntimeType` (`atomic.Pointer`, já existente) quando presente com `Element`/`Value` de `Kind == TYPE_REF`. Sem tag → sem informação → comportamento dinâmico atual.
 
 Helper único: `func refSlotDeclared(container value.Value, name string / index) bool` (duas variantes, propriedade e índice).
@@ -179,6 +183,7 @@ Helper único: `func refSlotDeclared(container value.Value, name string / index)
 
 - `OP_CONTEXT_REF_PROPERTY` / `OP_CONTEXT_REF_INDEX`: `VAL_REF`/`VAL_NULL` → encaminha (inalterado); **qualquer outra coisa → erro de runtime** `reference slot '<campo>' holds a non-reference value` (propriedade) / `reference slot at index <i> holds a non-reference value` (array) / `reference slot for key <k> holds a non-reference value` (map). O bloco do shim e seus comentários saem; o comentário passa a citar o invariante e esta spec.
 - `OP_REF_PROPERTY` / `OP_REF_INDEX` (base `any` ou struct desconhecido pelo compilador): antes de fabricar `REF_PROPERTY`/`REF_INDEX`, consultar §6.1. Slot declarado `ref T` → **mesmo comportamento do opcode contextual** (encaminha ref/null; cru → mesmo erro). Slot comum → ref para o slot, como hoje. Efeito: `preenche(a.proximo)` com `a: any` e campo nulo dá `cannot update null reference` em `*n = ...` — idêntico à base tipada; `ref a.proximo` e `json_loads(s, a.proximo)` idem.
+  - Detalhe de `OP_REF_INDEX` (hoje ele **não** auto-deref nem valida o container, ao contrário de `OP_REF_PROPERTY`): a consulta ao schema só acontece quando o container, **depois de resolver um eventual `VAL_REF`** (mesmo `resolveReferenceValue` que `OP_REF_PROPERTY` usa), é `*ObjArray`/`*ObjMap` com tag `RuntimeType` cujo `Element`/`Value` é `TYPE_REF`. Nesse caso o opcode espelha `OP_CONTEXT_REF_INDEX` por inteiro: índice fora da faixa → erro; **chave ausente em map → `null`** (igual à leitura plana `m[k]`); ref/null armazenado → encaminha; cru → erro de §6.2. Em qualquer outro caso (sem tag, elemento não-`ref`, container não-coleção) o comportamento atual é mantido sem nova validação.
 
 ### 6.3 Escrita em slots (rota 5)
 
@@ -186,7 +191,7 @@ Helper único: `func refSlotDeclared(container value.Value, name string / index)
 - `OP_SET_INDEX`: para array/map com tag `RuntimeType` cujo elemento/valor é `TYPE_REF`, mesma regra. Custo: um `Load()` atômico + comparação de `Kind`.
 - `OP_SET_PROPERTY_DEREF` / `OP_STORE_REF` / `OP_STORE_VIA_REF` não mudam: escrevem **através** de uma ref que, após §6.2, nunca aponta para um slot `ref T`.
 
-Via base tipada o compilador já rejeita antes, então esses guards só disparam em fronteira dinâmica — defesa em profundidade, não caminho quente.
+Via base tipada o compilador já rejeita antes, então esses guards só **disparam** em fronteira dinâmica — defesa em profundidade. O **custo**, porém, é pago em toda escrita: o lookup em `RefFields` (mapa nil → retorno imediato para a maioria dos structs) em todo `OP_SET_PROPERTY` e o `Load()` atômico da tag em todo `OP_SET_INDEX` tipado ou não (um `MOV` em x86; ~1 ns). Aceito. Se o benchmark de escrita em array (`benchmarks/`) mostrar regressão mensurável, a alternativa sem custo é o compilador emitir a variante com guard só quando **não** conhece o tipo da base (`any`), deixando o opcode tipado intocado.
 
 ### 6.4 Outros produtores
 
@@ -221,7 +226,7 @@ Via base tipada o compilador já rejeita antes, então esses guards só disparam
 
 - **BREAKING real:** programas que gravavam `T` cru em campo `ref T` via base `ref` param de compilar com mensagem clara e hint de migração. Decisão do usuário: aceito, como nos precedentes #46/#51; versão 0.10.0.
 - **Guard de runtime em `OP_SET_PROPERTY`/`OP_SET_INDEX`:** custo de um lookup em mapa nil / load atômico por escrita; aceito (aprovado) porque sem ele o invariante não fecha pela rota 5. Se benchmarks mostrarem regressão mensurável, alternativa é gatear em `len(RefFields) > 0` / flag booleana no `ObjStruct`.
-- **Opção (a) do `json_loads`** em vez de (b): mais útil; a célula é exatamente o estado que `let novo` + `ref novo` produz, então não há terceira forma de ref no runtime.
+- **Opção (a) do `json_loads`** em vez de (b): mais útil; a célula é exatamente o estado que `let novo` + `ref novo` produz depois que o frame fecha (`REF_UPVALUE` sobre caixa fechada), então não se introduz um novo tipo de `ObjRef`. As formas existentes são `REF_GLOBAL`, `REF_UPVALUE`, `REF_PTR`, `REF_PROPERTY` e `REF_INDEX`; `REF_PTR` (ponteiro cru para slot de pilha, "unsafe if escapes", varrido por `retargetOwnedSlot`) seria a alternativa errada para um valor que nunca morou na pilha.
 - **RC dos builders JSON no mesmo PR:** aprovado pelo usuário; toca `json_parse` (`goValToNoxy`) além de `json_loads` porque é a mesma família de builders e o mesmo bug.
 - **Git:** branch nasce do `develop` local (com a #51); PR aguarda a #51 no GitHub. Não fazer push do `develop`.
 - **Não tocado:** #52; hint de variável; arrays/maps sem tag via `any`.
