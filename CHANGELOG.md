@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.9.0] - 2026-08-20
+
+### Changed (BREAKING) — redeclarar `let` no mesmo escopo é erro de compilação
+
+- Um segundo `let` com o mesmo nome no mesmo escopo criava silenciosamente um
+  binding novo — inclusive com outro tipo, furando a regra da §2.0 ("o tipo é
+  definido na declaração e não pode mudar"). Agora é erro de compilação no
+  molde do Go, apontando a declaração anterior (`variable 'x' redeclared in
+  this scope (previous declaration at line N)`) e com hint sugerindo a
+  atribuição. Reatribuição (`x = valor`) segue como o caminho para atualizar
+  o valor; shadowing em escopo interno (bloco, corpo sobre parâmetro,
+  variável de `for`) continua permitido. O REPL segue a mesma regra: a
+  sessão se comporta como um arquivo digitado linha a linha, então re-`let`
+  de um nome de linha anterior é rejeitado (`previously declared in this
+  session`) — e uma linha rejeitada não queima o nome.
+
+### Docs
+
+- Spec §3 documenta redeclaração × reatribuição e shadowing em escopos
+  internos; a seção do `for ... in` documenta que a variável de loop é
+  escopada ao loop e re-vinculada da coleção a cada iteração (atribuir a ela
+  no corpo não afeta a sequência).
+
 ## [0.8.0] - 2026-08-19
 
 ### Added — `type`, target typing em `return` (issue #44)
