@@ -450,6 +450,39 @@ let name: type = value
 
 Variables can be reassigned, but the new value **MUST** be of the same type as declared.
 
+### Redeclaration vs. reassignment
+
+`let` introduces a new binding; `=` updates an existing one. Declaring a
+name that already exists **in the same scope** is a compile-time error —
+assignment is the only way to change a variable's value, and no sequence
+of statements can change its type:
+
+```noxy
+let x: int = 1
+let x: int = 2       // ERROR: variable 'x' redeclared in this scope
+let x: string = "s"  // ERROR: same rule — redeclaration can never change the type
+x = 2                // ✓ OK — assignment updates the value
+```
+
+The REPL applies the same rule: a session behaves like a single file typed
+line by line, so re-declaring a name from an earlier line is rejected —
+assign to it instead. A rejected line does not claim its name: after an
+error you may still `let` that name.
+
+### Shadowing in inner scopes
+
+A `let` in an **inner** scope (a block body, or a function body shadowing a
+parameter) creates a distinct variable that hides the outer one until the
+block ends. The outer variable is untouched:
+
+```noxy
+let x: int = 99
+if x > 0 then
+    let x: string = "inner"  // ✓ OK: new variable, dies at 'end'
+end
+print(x)                     // 99
+```
+
 ---
 
 ## 4. Functions
@@ -995,6 +1028,19 @@ end
 for char in "hello" do
     print(char)
 end
+```
+
+The loop variable is **scoped to the loop**: it is created by the `for`,
+may shadow an outer variable of the same name (left untouched), and no
+longer exists after `end`. It is also **rebound from the collection on
+every iteration** — assigning to it inside the body is allowed but never
+affects the sequence:
+
+```noxy
+for i in [1, 2, 3] do
+    i = 5        // allowed; next iteration rebinds i from the collection
+end
+print(i)         // ERROR: 'i' is not defined here
 ```
 
 ### Defer and deterministic cleanup

@@ -10,8 +10,11 @@ import (
 )
 
 type Local struct {
-	Name       string
-	Depth      int
+	Name  string
+	Depth int
+	// Line e a linha da declaracao — so e lida pelo erro de redeclaracao,
+	// que aponta a primeira ocorrencia do nome no escopo.
+	Line       int
 	Type       ast.NoxyType
 	IsCaptured bool
 	IsParam    bool
@@ -95,6 +98,16 @@ type Compiler struct {
 	// TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule) so pode
 	// afetar o escopo daquele corpo, nunca vazar para o compilador pai.
 	namespaceImports map[string]string
+	// sessionLets e a memoria de sessao do REPL (nil fora dele): nomes de
+	// `let` global de linhas ANTERIORES. O predeclare so CHECA contra ele;
+	// quem registra e o loop do REPL apos a linha compilar com sucesso —
+	// linha rejeitada nao queima o nome. O scratch do pass 1
+	// (newPass1Compiler) nao recebe o campo: fica nil, sem check nem
+	// registro duplicado no two-pass.
+	sessionLets map[string]int
+	// programLets acumula os `let` top-level da compilacao corrente
+	// (preenchido pelo predeclare) para o REPL ler via ProgramLets.
+	programLets map[string]int
 }
 
 type callEmission struct {
@@ -183,6 +196,18 @@ func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 	return c.globals
 }
 
+// SetSessionLets arma a checagem de redeclaracao entre linhas de uma sessao
+// interativa (REPL). Fora do REPL ninguem chama e o campo fica nil.
+func (c *Compiler) SetSessionLets(m map[string]int) {
+	c.sessionLets = m
+}
+
+// ProgramLets devolve os `let` top-level vistos pela ultima compilacao —
+// o REPL faz o merge para a sessao somente apos sucesso.
+func (c *Compiler) ProgramLets() map[string]int {
+	return c.programLets
+}
+
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
@@ -239,6 +264,21 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 	case *ast.LetStmt:
 		c.setLine(n.Token.Line)
+		// Redeclaracao no mesmo escopo e erro (spec §3): `let` cria vinculo
+		// novo, e um segundo `let` do mesmo nome no mesmo depth poderia ate
+		// trocar o tipo por baixo da §2.0. Escopos internos (depth maior)
+		// continuam livres para sombrear — a pilha de locals e ordenada por
+		// depth, entao a varredura para na primeira mudanca de profundidade.
+		// Globais tem o proprio check em predeclareGlobalBindings.
+		if c.scopeDepth > 0 {
+			for i := len(c.locals) - 1; i >= 0 && c.locals[i].Depth == c.scopeDepth; i-- {
+				if c.locals[i].Name == n.Name.Value {
+					return nil, nil, fmt.Errorf(
+						"[line %d] variable '%s' redeclared in this scope (previous declaration at line %d); hint: to update the value, use '%s = ...' without 'let'",
+						n.Token.Line, n.Name.Value, c.locals[i].Line, n.Name.Value)
+				}
+			}
+		}
 		// §4, terceira familia de hooks: a anotacao pode nomear instancias de
 		// struct generico (`Caixa<int>`, `Caixa<int>[]`, `ref Node<int>`). A
 		// resolucao vem ANTES de tudo — antes do hint, do emitDefaultInit e da
@@ -2594,14 +2634,14 @@ func (c *Compiler) endScope() {
 // addLocal declara um vinculo local que NAO retem o que guarda (Owns=false — o
 // default seguro). Vinculos que retem devem usar addOwnedLocal.
 func (c *Compiler) addLocal(name string, t ast.NoxyType) {
-	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t})
+	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Line: c.currentLine, Type: t})
 }
 
 // addOwnedLocal declara um vinculo local cujo slot RETEM o composto que guarda
 // — usar somente onde o inc correspondente e de fato emitido (OP_OWN_LOCAL) ou
 // feito pelo runtime (retain de parametro sem `ref`).
 func (c *Compiler) addOwnedLocal(name string, t ast.NoxyType) {
-	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Type: t, Owns: true})
+	c.locals = append(c.locals, Local{Name: name, Depth: c.scopeDepth, Line: c.currentLine, Type: t, Owns: true})
 }
 
 // localOwns responde a pergunta que os funis de escrita fazem: este slot retem

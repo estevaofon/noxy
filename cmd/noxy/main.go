@@ -167,6 +167,9 @@ func startREPL(showDisasm bool) {
 	replGlobals := make(map[string]ast.NoxyType)
 	replStructs := make(map[string]*ast.StructStatement)
 	replGenerics := compiler.NewGenericRegistry()
+	// replLets: `let` globais de linhas anteriores — a sessao segue a mesma
+	// regra de redeclaracao de um arquivo (spec §3), linha a linha.
+	replLets := make(map[string]int)
 
 	var inputBuffer string
 
@@ -256,6 +259,7 @@ func startREPL(showDisasm bool) {
 		// 3. Compile
 		c := compiler.NewWithState(replGlobals, replStructs, "REPL")
 		c.SetGenericState(replGenerics)
+		c.SetSessionLets(replLets)
 		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Printf("Compiler error: %s\n", err)
@@ -265,6 +269,11 @@ func startREPL(showDisasm bool) {
 
 		// Update globals
 		replGlobals = c.GetGlobals()
+		// Sessao lembra os let desta linha — SO apos compilar com sucesso,
+		// para uma linha rejeitada nao queimar o nome.
+		for name, line := range c.ProgramLets() {
+			replLets[name] = line
+		}
 
 		// 4. Disassembly (optional)
 		if showDisasm {

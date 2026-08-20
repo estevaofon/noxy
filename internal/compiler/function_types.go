@@ -244,6 +244,7 @@ func commonInferredType(left, right ast.NoxyType) ast.NoxyType {
 
 func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 	seen := make(map[string]struct{})
+	letSeen := make(map[string]int)
 	for _, statement := range statements {
 		switch declaration := statement.(type) {
 		case *ast.UseStmt:
@@ -276,6 +277,28 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 			}
 			c.globals[declaration.Name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
 		case *ast.LetStmt:
+			// Mesma regra do check local do LetStmt (compiler.go): dois `let`
+			// do mesmo nome no MESMO escopo global e redeclaracao — dentro de
+			// um Program via letSeen, entre linhas do REPL via sessionLets
+			// (spec §3: a sessao se comporta como um arquivo digitado linha a
+			// linha). letSeen e por chamada; sessionLets e so leitura aqui.
+			if prevLine, duplicate := letSeen[declaration.Name.Value]; duplicate {
+				return fmt.Errorf(
+					"[line %d] variable '%s' redeclared in this scope (previous declaration at line %d); hint: to update the value, use '%s = ...' without 'let'",
+					declaration.Token.Line, declaration.Name.Value, prevLine, declaration.Name.Value)
+			}
+			if c.sessionLets != nil {
+				if _, duplicate := c.sessionLets[declaration.Name.Value]; duplicate {
+					return fmt.Errorf(
+						"[line %d] variable '%s' redeclared in this scope (previously declared in this session); hint: to update the value, use '%s = ...' without 'let'",
+						declaration.Token.Line, declaration.Name.Value, declaration.Name.Value)
+				}
+			}
+			letSeen[declaration.Name.Value] = declaration.Token.Line
+			if c.programLets == nil {
+				c.programLets = make(map[string]int)
+			}
+			c.programLets[declaration.Name.Value] = declaration.Token.Line
 			resolved, err := c.resolveAnnotation(declaration.Type, declaration.Token.Line)
 			if err != nil {
 				return err
