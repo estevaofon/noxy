@@ -533,12 +533,20 @@ end`)
 }
 
 func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
-	t.Run("fill null slot with referent value", func(t *testing.T) {
+	// Issue #50 Parte 3 (opcao a): slot `ref T` nulo recebe uma CELULA heap
+	// nova com o referente + ref para ela — o analogo de `let novo = T;
+	// slot = ref novo`. A sonda `type(ref viz)` distingue ref ("ref") de
+	// valor cru (erro do marcador); `type(slot)` nao serve (auto-deref).
+	t.Run("null ref slot gets a fresh referent cell", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
+func le(r: ref int) -> int
+    return r
+end
 let target: (ref int)[] = [null]
 let ok: bool = json_loads("[42]", target)
-if ok then
-    test_report(target[0])
+let viz: ref int = target[0]
+if ok && type(ref viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
+    test_report(42)
 else
     test_report(999)
 end`)

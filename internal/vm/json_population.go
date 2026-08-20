@@ -41,8 +41,17 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 			}
 			return prepareJSONMutation(vm, stored, schema.Element, data, store)
 		}
-		// Null and legacy-filled ref slots retain their declared referent type.
-		return prepareJSONMutation(vm, current, schema.Element, data, set)
+		// Slot `ref T` nulo com payload nao-nulo: celula heap nova + ref
+		// (spec 2026-08-20-ref-slot-invariant §5). Valor cru no slot e estado
+		// impossivel depois da #50 — recusa em vez de sobrescrever.
+		if current.Type != value.VAL_NULL || set == nil {
+			return nil, false
+		}
+		cell, ok := buildReferentCell(schema.Element, data)
+		if !ok {
+			return nil, false
+		}
+		return func() { set(cell) }, true
 	}
 	if schema != nil && schema.Kind == value.TYPE_STRUCT && data == nil {
 		if set == nil {
@@ -284,7 +293,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 		if data == nil {
 			return value.NewNull(), true
 		}
-		return buildTypedJSONValue(schema.Element, data)
+		return buildReferentCell(schema.Element, data)
 	case value.TYPE_ARRAY:
 		items, ok := data.([]interface{})
 		if !ok {
@@ -365,6 +374,20 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 		return instance, true
 	}
 	return value.Value{}, false
+}
+
+// buildReferentCell constroi o T pelo schema do referente e devolve uma ref
+// para uma CELULA heap nova que o possui — o analogo exato de
+// `let novo: T = ...; slot = ref novo` depois que o frame fecha (caixa
+// REF_UPVALUE fechada, Owners do valor = 1, como closeUpvalue deixa).
+func buildReferentCell(referent *value.RuntimeTypeInfo, data interface{}) (value.Value, bool) {
+	built, ok := buildTypedJSONValue(referent, data)
+	if !ok {
+		return value.Value{}, false
+	}
+	value.Retain(built) // RC: a celula e o dono duravel do referente
+	cell := value.NewClosedUpvalue(built)
+	return value.Value{Type: value.VAL_REF, Obj: &value.ObjRef{RefType: value.REF_UPVALUE, Upvalue: cell}}, true
 }
 
 func exactJSONInt(data interface{}) (int64, bool) {
