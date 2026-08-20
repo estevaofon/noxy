@@ -34,11 +34,13 @@
   semântica nova). Travessias (`cur != null`, `no.proximo != null`) e o
   `_append` que já ligava pelo campo (`stack.nx`) não mudam.
 
-- Inalterado, e registrado como pendência: um valor referente **cru** num
-  slot `ref T` — alcançável por `json_loads` com payload compatível e por
-  `campo = T` através de uma base `ref`, que o compilador hoje não rejeita
-  (via base valor é erro "cannot assign T to ref T") — segue sendo
-  embrulhado numa ref para o slot ao ser passado adiante, como antes.
+- Inalterado, e registrado como pendência (issue #50): um valor referente
+  **cru** num slot `ref T` — alcançável por `json_loads` com payload
+  compatível e por `campo = T` através de uma base `ref`, que o compilador
+  hoje não rejeita (via base valor é erro "cannot assign T to ref T") —
+  segue sendo embrulhado numa ref para o slot ao ser passado adiante, como
+  antes. A #50 fecha a checagem de campo com base `ref`, decide o
+  `json_loads` e remove esse shim.
 
 - Testes: `internal/vm/ref_null_forwarding_test.go` (campo, campo via base
   `ref`, índice, chave ausente de map, guarda do caso não-nulo). Spec §4.2

@@ -459,7 +459,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Valor referente cru num slot `ref T` (hoje alcancavel por
 			// json_loads com payload compativel e por `campo = T` atraves de
 			// base ref) segue embrulhado numa ref para o slot, para continuar
-			// passavel adiante como antes.
+			// passavel adiante como antes. Shim temporario: sai quando a
+			// issue #50 fechar o invariante "slot ref T contem ref ou null".
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
