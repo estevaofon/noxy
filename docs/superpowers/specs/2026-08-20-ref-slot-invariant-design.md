@@ -156,7 +156,7 @@ func NewClosedUpvalue(v Value) *ObjUpvalue
 
 ### 5.3 RC dos builders JSON (under-count pré-existente)
 
-Modelo a espelhar (já é o do bytecode): **todo contêiner que guarda um composto conta como um dono** — `OP_ARRAY`/`OP_MAP` retêm cada elemento/valor, o construtor de struct retém cada campo, `OP_SET_INDEX`/`OP_SET_PROPERTY` fazem retain-novo/release-velho, `storeReferenceValue` idem com consciência de empréstimo. Precedente em Go: `retainingArray`/`retainingMap` de `internal/vm/builtins_call_result.go` (reutilizados como estão — mesmo pacote; a mudança de arquivo foi dispensada na implementação para manter o diff focado).
+Modelo a espelhar (já é o do bytecode): **todo contêiner que guarda um composto conta como um dono** — `OP_ARRAY`/`OP_MAP` retêm cada elemento/valor, o construtor de struct retém cada campo, `OP_SET_INDEX`/`OP_SET_PROPERTY` fazem retain-novo/release-velho, `storeReferenceValue` idem com consciência de empréstimo. Precedente em Go: `retainingArray`/`retainingMap` de `internal/vm/builtins_call_result.go` (reutilizados como estão — mesmo pacote; a mudança de arquivo foi dispensada na implementação para manter o diff focado). *(Nota posterior: na v0.10.1 — issue #55, fase A da #54 — esses helpers foram substituídos pelos próprios construtores `value.NewArray`/`value.NewMapWithData`, que passaram a reter os filhos compostos por padrão; ver `docs/superpowers/specs/2026-08-20-container-owners-design.md`.)*
 
 Mudanças em `internal/vm/json_population.go` e `builtins_json.go`:
 

@@ -201,14 +201,6 @@ func (vm *VM) hardUnwindTo(target int) {
 
 var errBoundaryPanic = fmt.Errorf("call_result: unwinding after Go panic")
 
-// A arvore de Failure e construida com value.NewMapWithData/NewArray, que
-// retem cada filho composto (o pai e dono duravel — mesma regra de
-// OP_MAP/OP_ARRAY). Sem esse dono o primeiro `let f: any = r.failure` do
-// lado Noxy levaria o filho a Owners=1, IsShared falso, e a mutacao
-// reescreveria o envelope (TestCallResultFailureAliasDoesNotMutateEnvelope,
-// TestCallResultCauseAliasDoesNotMutateEnvelope). Strings e escalares sao
-// no-op em Retain (ownersOf so rastreia compostos).
-
 // callResultOkEnvelope: NewMapWithData retem `result` (unico campo
 // composto) — e isso, e so isso, que da ao envelope a posse de r.value.
 // Sem esse dono, uma composta devolvida fresca (Owners=0) chegaria a
@@ -223,6 +215,14 @@ func callResultOkEnvelope(result value.Value) value.Value {
 	})
 }
 
+// callResultFailureEnvelope: a arvore de Failure (este envelope, failureMap
+// e as causes) e construida com value.NewMapWithData/NewArray, que retem
+// cada filho composto (o pai e dono duravel — mesma regra de OP_MAP/
+// OP_ARRAY). Sem esse dono o primeiro `let f: any = r.failure` do lado Noxy
+// levaria o filho a Owners=1, IsShared falso, e a mutacao reescreveria o
+// envelope (TestCallResultFailureAliasDoesNotMutateEnvelope,
+// TestCallResultCauseAliasDoesNotMutateEnvelope). Strings e escalares sao
+// no-op em Retain (ownersOf so rastreia compostos).
 func callResultFailureEnvelope(err error) value.Value {
 	return value.NewMapWithData(map[string]value.Value{
 		"ok":      value.NewBool(false),
