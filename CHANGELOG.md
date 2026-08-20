@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.3] - 2026-08-19
+## [0.8.0] - 2026-08-19
 
 ### Added — `type`, target typing em `return` (issue #44)
 
