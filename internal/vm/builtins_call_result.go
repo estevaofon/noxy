@@ -345,12 +345,16 @@ func deferredFailureMap(deferred *DeferredError, siblings []DeferredError) value
 			value.Retain(sibling) // filho novo: o array vira dono duravel
 			causes = append(causes, sibling)
 		}
+		// RC: move — os herdados transferem o retain do array antigo, os
+		// irmaos novos foram retidos no laco acima; NewArrayAdopting nao
+		// retem de novo (um dono a mais que ninguem solta deixaria o
+		// composto IsShared para sempre).
 		// RC: ObjMap.Set NAO solta o valor sobrescrito (bindingStore.set so
 		// escreve) — quem faz retain-novo/release-velho no map-set do Noxy e
 		// o funil de OP_SET_INDEX no executor. Aqui a troca e a mao e segue a
 		// mesma ordem: o array novo ganha `mapping` como dono ANTES do antigo
 		// perder o dele (nunca soltar primeiro; um dec a mais nao tem volta).
-		replacement := value.NewArray(causes)
+		replacement := value.NewArrayAdopting(causes)
 		value.Retain(replacement)
 		mapping.Set("causes", replacement)
 		if hadPrevious {

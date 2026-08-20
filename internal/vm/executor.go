@@ -1299,7 +1299,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				// RC: elemento pode continuar referenciado pela origem
 				value.Retain(elements[i]) // elemento e dono duravel
 			}
-			vm.push(value.NewArray(elements))
+			// RC: move — os elementos ja foram retidos acima em nome do array.
+			vm.push(value.NewArrayAdopting(elements))
 
 		case chunk.OP_MAP:
 			count := int(c.Code[ip])<<8 | int(c.Code[ip+1])
