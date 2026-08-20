@@ -1,6 +1,6 @@
-# Noxy VM 🚀
-
 [![noxy 0.9.0](https://img.shields.io/badge/noxy-0.9.0-blue)](CHANGELOG.md)
+
+# Noxy VM 🚀
 
 A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://noxylang.com/)
 
