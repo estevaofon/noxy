@@ -27,6 +27,27 @@ jobs:
       - run: go test -race ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=180s
       - run: go test ./internal/... -count=1
 
+  examples:
+    name: Noxy examples (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      # run_all_tests_concurrent.nx runs every noxy_examples/*.nx (minus the
+      # interactive/server demos in its exclusion list) through argv[0] — the
+      # interpreter `go run` just built — with 8 workers, and exits 1 if any
+      # example fails. It lists the directory via `ls`/`dir` by OS, so it must
+      # run from the repository root.
+      - run: go run ./cmd/noxy noxy_examples/run_all_tests_concurrent.nx
+
   cross-build:
     name: Production cross-build (${{ matrix.goos }}/${{ matrix.goarch }})
     strategy:
