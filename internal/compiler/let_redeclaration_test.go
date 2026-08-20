@@ -11,6 +11,8 @@ package compiler
 import (
 	"strings"
 	"testing"
+
+	"noxy-vm/internal/ast"
 )
 
 const redeclaredText = "redeclared in this scope"
@@ -76,4 +78,82 @@ func TestLetShadowingParamAllowed(t *testing.T) {
     let x: string = "corpo sombreia parametro"
     print(x)
 end`)
+}
+
+func TestGlobalLetRedeclarationFails(t *testing.T) {
+	requireRedeclarationError(t, `let x: int = 1
+let x: string = "virei string"`, "previous declaration at line 1")
+}
+
+func TestGlobalLetAfterTopLevelForAllowed(t *testing.T) {
+	// O padrao do crivo.nx: a variavel do for e escopada ao loop, entao o
+	// let seguinte e declaracao nova, nao redeclaracao.
+	requireCompiles(t, `for i in [1, 2, 3] do
+    print(i)
+end
+let i: int = 2
+print(i)`)
+}
+
+func TestReplSessionReLetFails(t *testing.T) {
+	// REPL sem excecao (decisao 2026-08-20): a sessao se comporta como um
+	// arquivo digitado linha a linha. O compilador CHECA contra sessionLets;
+	// quem registra e o loop do REPL, apos a linha compilar com sucesso.
+	structs := make(map[string]*ast.StructStatement)
+	session := make(map[string]int)
+
+	c1 := NewWithState(make(map[string]ast.NoxyType), structs, "REPL")
+	c1.SetSessionLets(session)
+	if _, _, err := c1.Compile(parse(`let x: int = 1`)); err != nil {
+		t.Fatalf("primeira linha do REPL falhou: %v", err)
+	}
+	for name, line := range c1.ProgramLets() {
+		session[name] = line
+	}
+
+	c2 := NewWithState(c1.GetGlobals(), structs, "REPL")
+	c2.SetSessionLets(session)
+	_, _, err := c2.Compile(parse(`let x: string = "re-let de sessao"`))
+	if err == nil {
+		t.Fatal("re-let entre linhas da sessao deveria falhar")
+	}
+	if !strings.Contains(err.Error(), "previously declared in this session") {
+		t.Fatalf("erro deveria citar a sessao: %v", err)
+	}
+}
+
+func TestReplFailedLineDoesNotBurnTheName(t *testing.T) {
+	// Uma linha rejeitada nao registra o nome: ProgramLets so e lido pelo
+	// REPL quando a compilacao inteira da linha teve sucesso, entao aqui o
+	// contrato e que a linha seguinte com o MESMO nome compila.
+	structs := make(map[string]*ast.StructStatement)
+	session := make(map[string]int)
+
+	c1 := NewWithState(make(map[string]ast.NoxyType), structs, "REPL")
+	c1.SetSessionLets(session)
+	if _, _, err := c1.Compile(parse(`let x: int = "tipo errado"`)); err == nil {
+		t.Fatal("linha com type mismatch deveria falhar")
+	}
+	// REPL nao faz merge apos erro — session continua vazio.
+
+	c2 := NewWithState(make(map[string]ast.NoxyType), structs, "REPL")
+	c2.SetSessionLets(session)
+	if _, _, err := c2.Compile(parse(`let x: int = 1`)); err != nil {
+		t.Fatalf("nome de linha rejeitada nao deveria estar queimado: %v", err)
+	}
+}
+
+func TestSharedGlobalsWithoutSessionAllowed(t *testing.T) {
+	// Fora do REPL ninguem arma SetSessionLets: duas compilacoes que por
+	// acaso compartilhem o mapa de globals (fronteiras de modulo) nao se
+	// enxergam — o check global e por Program.
+	structs := make(map[string]*ast.StructStatement)
+	c1 := NewWithState(make(map[string]ast.NoxyType), structs, "a.nx")
+	if _, _, err := c1.Compile(parse(`let x: int = 1`)); err != nil {
+		t.Fatalf("primeira compilacao falhou: %v", err)
+	}
+	c2 := NewWithState(c1.GetGlobals(), structs, "b.nx")
+	if _, _, err := c2.Compile(parse(`let x: string = "outro programa"`)); err != nil {
+		t.Fatalf("sem sessao armada nao ha memoria entre Programs: %v", err)
+	}
 }

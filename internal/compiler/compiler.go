@@ -98,6 +98,16 @@ type Compiler struct {
 	// TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule) so pode
 	// afetar o escopo daquele corpo, nunca vazar para o compilador pai.
 	namespaceImports map[string]string
+	// sessionLets e a memoria de sessao do REPL (nil fora dele): nomes de
+	// `let` global de linhas ANTERIORES. O predeclare so CHECA contra ele;
+	// quem registra e o loop do REPL apos a linha compilar com sucesso —
+	// linha rejeitada nao queima o nome. O scratch do pass 1
+	// (newPass1Compiler) nao recebe o campo: fica nil, sem check nem
+	// registro duplicado no two-pass.
+	sessionLets map[string]int
+	// programLets acumula os `let` top-level da compilacao corrente
+	// (preenchido pelo predeclare) para o REPL ler via ProgramLets.
+	programLets map[string]int
 }
 
 type callEmission struct {
@@ -184,6 +194,18 @@ func NewChild(parent *Compiler) *Compiler {
 
 func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 	return c.globals
+}
+
+// SetSessionLets arma a checagem de redeclaracao entre linhas de uma sessao
+// interativa (REPL). Fora do REPL ninguem chama e o campo fica nil.
+func (c *Compiler) SetSessionLets(m map[string]int) {
+	c.sessionLets = m
+}
+
+// ProgramLets devolve os `let` top-level vistos pela ultima compilacao —
+// o REPL faz o merge para a sessao somente apos sucesso.
+func (c *Compiler) ProgramLets() map[string]int {
+	return c.programLets
 }
 
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
