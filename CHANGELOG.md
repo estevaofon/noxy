@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Docs
+
+- README ganha badge de versão no topo (`noxy | 0.9.0`, shields.io estático,
+  linkando para este CHANGELOG). Estático de propósito: as tags git (v1.x) e
+  a release do GitHub (v0.1.0) não acompanham `internal/version/version.go`,
+  então um badge dinâmico mostraria o número errado — bumpar o badge junto
+  com `version.go` a cada release.
+
 ## [0.9.0] - 2026-08-20
 
 ### Changed (BREAKING) — redeclarar `let` no mesmo escopo é erro de compilação
