@@ -1034,3 +1034,25 @@ Expected: vazio.
 - **Cobertura do spec:** §1 construtores → Tasks 1-2; §2 três moves → Task 1 (+ o quarto move implícito, `invokeBoundaryCall`, → Task 2 — não listado na issue, descoberto na leitura: sem ele `r.value` ficaria com 2 donos); §3 remover paliativos → Task 3; §4 `NewInstanceWith` → Task 4; reproduções → Tasks 2 e 4; critérios de aceite: `Owners` unitários (T1/T2), sem double-retain (T2 sondas + `TestCallResultCauseAlias*`), cópia não vaza (T2/T4), `CloneCountValue` (T5), grep (T3/T7), suíte/vet/runner/diff (T7), CHANGELOG+AGENTS (T6), comentários #53/#54 (T8).
 - **Fora de escopo respeitado:** nenhum opcode novo, `ObjMap.Set/Replace` intactos, laços de retain do `json_population.go` intactos, `NewMap()`/`NewInstance()` intactos, builders só-escalares não migrados.
 - **Consistência de nomes:** `NewArrayAdopting(elements []Value)`, `NewInstanceWith(def *ObjStruct, fields map[string]Value)`, `vmWithOwnersProbe`, `probe_owners`, `clones_now`, `test_reset_clones` — iguais em todas as tasks.
+
+---
+
+## Registro da execução (2026-08-20)
+
+**Branch:** `fix/container-owners` (worktree `.claude/worktrees/fix+container-owners`, base `1680266` = `origin/develop` = `origin/main`). **Commits:** `ecb835b` plano+spec → `6d915e8` Task 1 → `58f2cad` Tasks 2+3 (commit único, sem janela de double-retain) → `a1c5e20` Task 4 → `7269cc6` Task 5 → `7ee4d4e` Task 6 (v0.10.1) → `cc0366f` ajustes da revisão → (este) registro.
+
+**Desvios do planejado (todos para melhor):**
+- Tasks 2 e 3 foram fundidas num commit, como a nota do plano recomendava.
+- Task 6 tocou também `README.md` (badge e banner do REPL), espelhando o bump anterior (`c55c39d`).
+- Revisão de código (Task 7 passo 6, subagente independente, 9,5 min): **sem Critical**; Important (1) asserção de `Owners == 1` dos herdados e do irmão em `TestFailureMapMergesInnerCausesWithSiblingsOnPromotion` — única lacuna do critério "Owners dos herdados inalterado" (feito em `cc0366f`); Important (2) evidência do runner/diff (abaixo); Minor: comentário obsoleto em `builtins_call_result_test.go:461-469` (reescrito), bloco de comentário órfão em `builtins_call_result.go` (virou doc de `callResultFailureEnvelope`), nota na spec da #50 §5.3 sobre `retainingArray/Map` (adicionada). O revisor varreu os ~40 call sites dos construtores e todos os `value.Retain(` não-teste e confirmou: nenhum double-retain, nenhuma escrita crua de composto remanescente, `invokeBoundaryCall` exatamente compensado, release symmetry preservada (`pop`/`delete`/`OP_SET_*`).
+
+**TDD — falhas observadas antes de cada mudança (valores previstos no plano):** Task 1 `undefined: NewArrayAdopting/NewInstanceWith`; Task 2 `Owners=0, esperado 1` (value e plugin), `copyValue` pré-condição `Owners=0`, slice `"9|9"`, task_await `"99|99|hacked|hacked"`; Task 4 sqlite `"ZZZ|ZZZ|999|999"`, io/strings `"ZZZ|ZZZ"`; Task 5 passou de primeira com `"0|1|1|0"`. Guardas `TestArrayLiteralElementHasExactlyOneOwner` e `TestCallResultOkValueHasExactlyOneOwner` passam antes e depois (protegem contra double-retain futuro).
+
+**Verificação (Task 7):**
+- `go vet ./...` limpo; gofmt dos arquivos tocados limpo (checado com CRLF normalizado — `gofmt -l` lista todo o checkout Windows, é ruído).
+- `go test ./...` completo, sem `| tail`: 9 pacotes `ok` (`internal/vm` 56 s).
+- `grep -rn "retainingArray\|retainingMap" internal` vazio.
+- Runner `noxy_examples/run_all_tests_concurrent.nx` no worktree: **171/171** (17 s).
+- Diff de saída dos exemplos (script `capture_examples.py`: `go run ./cmd/noxy` por exemplo, exclusões do runner, 171 exemplos em cada árvore, 0 com exit ≠ 0 nas duas): **24 arquivos diferem, todos por não-determinismo ou ambiente** — caminho do binário `go run`/cwd (`cli_example`, `test_basic_import`, `test_sys`), tempos (`fibonacci`, `quicksort_in_place`, `stress_test_json`, `time_demo`), ordem de map (`json_map_test`, `json_test`, `multiline_test`, `test_for_loop`, `json_analogy_test`), rand/uuid/salt (`password_generator`, `rand_demo`, `uuid_demo`, `test_crypto_aes`, `test_crypto_debug` — este já imprime FAIL com exit 0 nas duas árvores, #53 item 4), endereços (`test_addr_struct`, `test_addr_trust`), porta efêmera (`test_http_server`). Dois exigiram verificação: `read_passwords.nx` ("Found 2 passwords" → "Error executing query") é porque `passwords.db` (gitignored) só existe no checkout principal — copiado para o worktree, a saída ficou **idêntica** (o exemplo lê `res.rows[i].values[j]` do envelope novo); `dynamodb_*`/`test_dynamodb_plugin` ("Plugin Load Error: command not found: noxy-plugin-dynamodb") é o binário do plugin presente só no ambiente do checkout principal — e no baseline esses exemplos já terminam em erro 400 da AWS. Nenhuma diferença de valor atribuível à mudança.
+
+**Pendências (Task 8, ações externas — aguardam confirmação do usuário):** push da branch, PR (`fix/container-owners - …`, base `develop`, label `not available to review`, corpo no template Summary/Components/Test Plan), comentários em #53 (itens 1b/1c/1d fechados) e #54 (fase A feita).
