@@ -183,13 +183,13 @@ func goValToNoxy(i interface{}) value.Value {
 		for idx, el := range v {
 			arr[idx] = goValToNoxy(el)
 		}
-		return retainingArray(arr) // RC: o array e dono duravel de cada elemento
+		return value.NewArray(arr) // RC: o array e dono duravel de cada elemento (construtor retem)
 	case map[string]interface{}:
 		m := make(map[string]value.Value)
 		for k, val := range v {
 			m[k] = goValToNoxy(val)
 		}
-		return retainingMap(m) // RC: o map e dono duravel de cada valor (NewMapWithData nao retem)
+		return value.NewMapWithData(m) // RC: o map e dono duravel de cada valor (construtor retem)
 	}
 	return value.NewString(fmt.Sprintf("%v", i))
 }

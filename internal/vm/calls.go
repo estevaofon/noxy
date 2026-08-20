@@ -177,7 +177,8 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		for _, el := range newElems {
 			value.Retain(el) // RC: filho ganha dono duravel no clone
 		}
-		copied := value.NewArray(newElems)
+		// RC: move — filhos retidos acima em nome do clone.
+		copied := value.NewArrayAdopting(newElems)
 		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjMap:

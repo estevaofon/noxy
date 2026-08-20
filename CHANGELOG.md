@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.10.1] - 2026-08-20
+
+### Fixed — contêineres criados por natives/plugins são donos dos filhos (issue #55)
+
+- **`slice`, `sqlite.query` (`columns`, `rows[i].values`), `task_await` (`value`,
+  `error`), `io.read_lines` (`data`), `strings.split` (`parts`) e plugins
+  (`InterfaceToValue`) devolviam contêineres que não eram donos dos filhos
+  compostos**: a cópia por valor (`let s: Pair[] = slice(t, 0, 2); s[0].a = 9`)
+  mutava o original (`t[0].a` lia 9). Regra do runtime — *todo contêiner é dono
+  durável de cada filho composto* — já valia no bytecode (`OP_ARRAY`/`OP_MAP`/
+  construtor de struct) e passa a valer nos natives: `value.NewArray`/
+  `NewMapWithData` retêm cada filho composto, `NewInstanceWith` constrói
+  instâncias retendo os campos. Os sites que já entregavam filhos retidos
+  (`OP_ARRAY`, clone CoW, merge de `causes` do `call_result`) usam
+  `NewArrayAdopting`; o retain manual do envelope `ok` do `call_result` saiu
+  (o construtor registra a posse). Efeito visível: código que dependia do
+  aliasing acidental passa a ver a cópia independente (e um clone CoW na
+  primeira escrita ao filho ainda compartilhado). Sem mudança de API Noxy.
+- Fase A da #54; itens 1b/1c/1d da #53.
+
 ## [0.10.0] - 2026-08-20
 
 ### Changed (BREAKING) — invariante do slot `ref T`: checagem de campo vale através de base `ref`, `json_loads` cria célula, fim do shim (issue #50)

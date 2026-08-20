@@ -331,7 +331,7 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			}
 			elements[i] = created
 		}
-		array := retainingArray(elements) // RC: o array e dono duravel de cada elemento (espelha OP_ARRAY)
+		array := value.NewArray(elements) // RC: o array e dono duravel de cada elemento (construtor retem; espelha OP_ARRAY)
 		array.Obj.(*value.ObjArray).RuntimeType.Store(schema)
 		return array, true
 	case value.TYPE_MAP:
@@ -477,7 +477,7 @@ func dynamicJSONValue(data interface{}) (value.Value, bool) {
 			}
 			elements[i] = converted
 		}
-		return retainingArray(elements), true // RC: o array e dono duravel de cada elemento
+		return value.NewArray(elements), true // RC: o array e dono duravel de cada elemento (construtor retem)
 	case map[string]interface{}:
 		mapping := value.NewMap()
 		mapObject := mapping.Obj.(*value.ObjMap)

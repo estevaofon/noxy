@@ -337,18 +337,21 @@ func (vm *VM) defineSQLiteBuiltins() {
 				}
 				values[index] = converted
 			}
-			row := value.NewInstance(rowTemplate.Struct).Obj.(*value.ObjInstance)
-			row.Fields["values"] = value.NewArray(values)
-			rowValues = append(rowValues, value.Value{Type: value.VAL_OBJ, Obj: row})
+			// RC: NewInstanceWith retem values — a Row e dona duravel do array.
+			row := value.NewInstanceWith(rowTemplate.Struct, map[string]value.Value{
+				"values": value.NewArray(values),
+			})
+			rowValues = append(rowValues, row)
 		}
 
-		result := value.NewInstance(resultTemplate.Struct).Obj.(*value.ObjInstance)
-		result.Fields["columns"] = value.NewArray(columnValues)
-		result.Fields["rows"] = value.NewArray(rowValues)
-		result.Fields["row_count"] = value.NewInt(int64(len(rowValues)))
-		result.Fields["ok"] = value.NewBool(true)
-		result.Fields["error"] = value.NewString("")
-		return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
+		// RC: NewInstanceWith retem columns e rows (compostos); os escalares sao no-op.
+		return value.NewInstanceWith(resultTemplate.Struct, map[string]value.Value{
+			"columns":   value.NewArray(columnValues),
+			"rows":      value.NewArray(rowValues),
+			"row_count": value.NewInt(int64(len(rowValues))),
+			"ok":        value.NewBool(true),
+			"error":     value.NewString(""),
+		}), nil
 	})
 }
 
@@ -435,13 +438,14 @@ func sqliteExecError(definition *value.ObjStruct, errorText string) value.Value 
 }
 
 func sqliteQueryError(definition *value.ObjStruct, errorText string) value.Value {
-	instance := value.NewInstance(definition).Obj.(*value.ObjInstance)
-	instance.Fields["columns"] = value.NewArray(nil)
-	instance.Fields["rows"] = value.NewArray(nil)
-	instance.Fields["row_count"] = value.NewInt(0)
-	instance.Fields["ok"] = value.NewBool(false)
-	instance.Fields["error"] = value.NewString(errorText)
-	return value.Value{Type: value.VAL_OBJ, Obj: instance}
+	// RC: NewInstanceWith retem os arrays vazios (campos compostos).
+	return value.NewInstanceWith(definition, map[string]value.Value{
+		"columns":   value.NewArray(nil),
+		"rows":      value.NewArray(nil),
+		"row_count": value.NewInt(0),
+		"ok":        value.NewBool(false),
+		"error":     value.NewString(errorText),
+	})
 }
 
 // sqliteValue converts a scanned column that carries no text payload. TEXT and

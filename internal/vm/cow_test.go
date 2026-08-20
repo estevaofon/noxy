@@ -20,11 +20,7 @@ func shareByOwners(v value.Value) {
 func TestShareByOwnersAndUnicize(t *testing.T) {
 	machine := New()
 	inner := value.NewArray([]value.Value{value.NewInt(1)})
-	outer := value.NewArray([]value.Value{inner})
-	// inner é elemento durável de outer — o OP_ARRAY real teria retido
-	// (Task 5); aqui o array foi montado fora do bytecode, então contamos à
-	// mão para que o clone raso de outer o leve de 1 para 2 donos.
-	value.Retain(inner)
+	outer := value.NewArray([]value.Value{inner}) // NewArray retém: inner tem outer como dono (1)
 
 	if value.IsShared(outer) {
 		t.Fatal("array novo não deve nascer Shared")

@@ -106,6 +106,13 @@ case chunk.OP_NEW_OPCODE:
 2. Registre em `defineNatives()`
 3. Valide argumentos
 4. Documente na spec
+5. **Contêineres devolvidos são donos dos filhos**: construa com `value.NewArray`,
+   `value.NewMapWithData` ou `value.NewInstanceWith(def, fields)` — eles retêm cada
+   filho composto (array/map/instância; no-op em escalares/strings). Nunca escreva
+   um composto em `inst.Fields[...]`/`ObjMap.Set` cru sem `value.Retain`. Só use
+   `value.NewArrayAdopting` para elementos que **você** já reteve em nome do array,
+   com comentário `// RC: move` (sites atuais: `OP_ARRAY`, `copyValue`, merge de
+   `causes` do `call_result`).
 
 ```go
 func (vm *VM) builtinNewFunc(args []value.Value) (value.Value, error) {

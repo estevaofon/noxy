@@ -226,16 +226,15 @@ func (vm *VM) defineStringBuiltins() {
 
 		parts := strings.Split(s, sep)
 
-		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["count"] = value.NewInt(int64(len(parts)))
-
 		partValues := make([]value.Value, len(parts))
 		for i, p := range parts {
 			partValues[i] = value.NewString(p)
 		}
-		inst.Fields["parts"] = value.NewArray(partValues)
-
-		return value.Value{Type: value.VAL_OBJ, Obj: inst}, nil
+		// RC: NewInstanceWith retem parts — SplitResult e dono duravel do array.
+		return value.NewInstanceWith(structDef, map[string]value.Value{
+			"count": value.NewInt(int64(len(parts))),
+			"parts": value.NewArray(partValues),
+		}), nil
 	})
 	vm.DefineContextualNative("strings_join_count", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if len(args) < 3 {

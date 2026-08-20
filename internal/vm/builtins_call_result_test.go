@@ -242,6 +242,18 @@ func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
 	if got := causeMessage(array.Elements[1]); got != "outer sibling failure" {
 		t.Fatalf("second cause should be the outer sibling, got %q", got)
 	}
+
+	// RC (#55): o array de causes e montado por NewArrayAdopting — o herdado
+	// TRANSFERE o retain do array antigo e o irmao novo recebe um retain
+	// manual; cada um termina com exatamente UM dono (o array novo). Um
+	// NewArray aqui retaria de novo e deixaria os herdados com 2 donos
+	// (IsShared para sempre, clone a cada mutacao).
+	if got := value.OwnersCount(array.Elements[0]); got != 1 {
+		t.Fatalf("inherited cause must keep exactly one owner (the new causes array), got %d", got)
+	}
+	if got := value.OwnersCount(array.Elements[1]); got != 1 {
+		t.Fatalf("promoted sibling must have exactly one owner (the new causes array), got %d", got)
+	}
 }
 
 // TestCallResultAggregatesDeferFailures cobre a agregacao ponta-a-ponta: o
@@ -448,13 +460,15 @@ test_report(to_str(original[0]) + "|" + to_str(copia[0]) + "|" + to_str(length(o
 
 // TestCallResultFailureAliasDoesNotMutateEnvelope espelha
 // TestCallResultValueSemantics no ramo de FALHA: a arvore de Failure e
-// construida por Go (NewMapWithData/NewArray), que — ao contrario de
-// OP_MAP/OP_ARRAY — nao retem os filhos compostos. Sem o retain do pai, o
-// mapa `failure` chegava ao Noxy com Owners=0; o primeiro `let f: any =
-// r.failure` o levava a Owners=1, IsShared ficava falso e `f["message"] =
-// ...` mutava IN-PLACE o mesmo objeto guardado no envelope — r.failure.message
-// passava a ler "hacked". Com o envelope como dono duravel, o `let` chega a
-// Owners=2 e a mutacao clona (CoW), deixando o envelope intacto.
+// construida por Go (NewMapWithData/NewArray). Desde a v0.10.1 (#55) esses
+// construtores retem os filhos compostos, como OP_MAP/OP_ARRAY; antes o
+// retain do pai era feito a mao (retainingMap/retainingArray). Sem o retain
+// do pai, o mapa `failure` chegava ao Noxy com Owners=0; o primeiro
+// `let f: any = r.failure` o levava a Owners=1, IsShared ficava falso e
+// `f["message"] = ...` mutava IN-PLACE o mesmo objeto guardado no envelope —
+// r.failure.message passava a ler "hacked". Com o envelope como dono
+// duravel, o `let` chega a Owners=2 e a mutacao clona (CoW), deixando o
+// envelope intacto.
 func TestCallResultFailureAliasDoesNotMutateEnvelope(t *testing.T) {
 	source := `
 func quebra(texto: string) -> int

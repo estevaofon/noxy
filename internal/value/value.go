@@ -615,7 +615,22 @@ func NewRuntimeTypeInfo(v *RuntimeTypeInfo) Value {
 	return Value{Type: VAL_OBJ, Obj: v}
 }
 
+// NewArray cria um array que e DONO DURAVEL de cada elemento composto
+// (Retain; no-op em escalares e strings) — a mesma regra de OP_ARRAY no
+// executor. Quem ja reteve os elementos em nome do array usa NewArrayAdopting.
 func NewArray(elements []Value) Value {
+	for _, element := range elements {
+		Retain(element)
+	}
+	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
+}
+
+// NewArrayAdopting cria um array ADOTANDO elementos que o chamador JA reteve
+// em nome do array (move): nao retem de novo. Uso restrito aos sites que
+// transferem posse — OP_ARRAY (executor.go), copyValue (calls.go) e o merge
+// de causes do call_result (builtins_call_result.go); qualquer outro uso
+// precisa de comentario `// RC: move` explicando quem reteve.
+func NewArrayAdopting(elements []Value) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
 }
 
@@ -625,9 +640,12 @@ func NewMap() Value {
 	return Value{Type: VAL_OBJ, Obj: mapping}
 }
 
+// NewMapWithData cria um map que e DONO DURAVEL de cada valor composto
+// (Retain; no-op em escalares e strings) — a mesma regra de OP_MAP.
 func NewMapWithData(data map[string]Value) Value {
 	values := make(map[interface{}]Value, len(data))
 	for k, v := range data {
+		Retain(v)
 		values[k] = v
 	}
 	mapping := NewMap()
@@ -639,8 +657,25 @@ func NewStruct(name string, fields []string) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjStruct{Name: name, Fields: fields}}
 }
 
+// NewInstance cria uma instancia vazia; quem escreve compostos em Fields
+// depois precisa reter a mao (como calls.go:callPreparedValue faz) ou usar
+// NewInstanceWith.
 func NewInstance(def *ObjStruct) Value {
 	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
+}
+
+// NewInstanceWith cria uma instancia ja com os campos dados, retendo cada
+// valor composto — a mesma regra do construtor de struct em bytecode
+// (calls.go:callPreparedValue, "campo e dono duravel"). Escalares e strings
+// sao no-op em Retain. O map recebido passa a pertencer a instancia.
+func NewInstanceWith(def *ObjStruct, fields map[string]Value) Value {
+	if fields == nil {
+		fields = make(map[string]Value)
+	}
+	for _, field := range fields {
+		Retain(field)
+	}
+	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: fields}}
 }
 
 func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, environment *GlobalEnvironment) Value {
