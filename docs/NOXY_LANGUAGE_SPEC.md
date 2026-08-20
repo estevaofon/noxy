@@ -1578,6 +1578,34 @@ strings.substring("Hello", -3, -1)  // "ll"   (-3 → 2, -1 → 4)
 strings.substring("aé🙂z", 1, 3)   // "é🙂"  (rune-based, not byte-based)
 ```
 
+#### Code points: `char_code`, `from_char_code`, `codes`
+
+`char_code(s) -> int` returns the Unicode code point of a single-character
+string (the `ord` of other languages); a string whose rune count is not
+exactly 1 is a runtime error. `from_char_code(code) -> string` is its
+inverse (`chr`). `codes(s) -> int[]` decodes the whole string once and
+returns every code point — prefer it when scanning a string character by
+character: `char_at` rebuilds the rune slice on each call, so a `char_at`
+loop is quadratic in the string's length.
+
+```noxy
+use strings select *
+
+char_code("A")            // 65
+char_code("é")            // 233
+from_char_code(233)       // "é"
+codes("já")               // [106, 225]
+
+// range comparison — no digit-table tricks needed
+func is_ascii_digit(ch: string) -> bool
+    let code: int = char_code(ch)
+    return code >= 48 && code <= 57
+end
+```
+
+There is no `\u` escape in string literals; build a character from its code
+point with `from_char_code(code)`.
+
 ### Indexação de strings
 
 Uma `string` é indexada por **caractere** (code point Unicode), não por byte.
