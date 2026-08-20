@@ -343,6 +343,15 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			if schema.Fields[name] != nil && schema.Fields[name].Kind == value.TYPE_ANY {
 				definition.JSONDynamicFields[name] = true
 			}
+			// RefFields: schema de runtime do slot ref (spec
+			// 2026-08-20-ref-slot-invariant §6.1), como o compilador faz para
+			// os structs declarados.
+			if schema.Fields[name] != nil && schema.Fields[name].Kind == value.TYPE_REF {
+				if definition.RefFields == nil {
+					definition.RefFields = make(map[string]bool)
+				}
+				definition.RefFields[name] = true
+			}
 			item, exists := items[name]
 			if !exists {
 				return value.Value{}, false

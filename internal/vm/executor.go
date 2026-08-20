@@ -399,15 +399,26 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "Property reference base must be an object")
 			}
 
+			// Base que o compilador nao conhecia (`any`, struct de outro
+			// modulo): se o campo e declarado `ref T`, comporta como
+			// OP_CONTEXT_REF_PROPERTY — encaminha a ref/null armazenada em vez
+			// de fabricar uma ref para o slot (que deixaria `*n = T` gravar
+			// cru). Spec 2026-08-20-ref-slot-invariant §6.2.
+			if instance, ok := container.Obj.(*value.ObjInstance); ok && instance != nil && instance.Struct.FieldIsRef(name) {
+				stored, exists := instance.Fields[name]
+				if !exists {
+					return vm.runtimeError(c, ip, "undefined property '%s'", name)
+				}
+				forwarded, err := forwardRefSlot(stored, "'"+name+"'")
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				vm.push(forwarded)
+				continue
+			}
+
 			// Push a reference wrapping the container and property name,
 			// so a later dereference or assignment can resolve this field.
-			/*(
-			  if inst, ok := container.Obj.(*value.ObjInstance); ok {
-			       if idVal, hasId := inst.Fields["id"]; hasId {
-			           fmt.Printf("VM REF_PROPERTY: %s on Node[%v]\n", name, idVal)
-			       }
-			  }
-			*/
 
 			vm.push(value.Value{
 				Type: value.VAL_REF,
@@ -422,6 +433,56 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Pop Index, then Container
 			idx := vm.pop()
 			container := vm.pop()
+
+			// Base que o compilador nao conhecia (`any`): resolve um
+			// eventual ref (como OP_REF_PROPERTY) e, se o array/map esta
+			// etiquetado com elemento/valor `ref T`, espelha
+			// OP_CONTEXT_REF_INDEX por inteiro (encaminha ref/null; chave
+			// ausente le null; valor cru e erro). Spec §6.2.
+			if container.Type == value.VAL_REF {
+				resolved, err := vm.resolveReferenceValue(container)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				container = resolved
+			}
+			if container.Type == value.VAL_OBJ {
+				switch collection := container.Obj.(type) {
+				case *value.ObjArray:
+					if arrayElementIsRefSlot(collection) {
+						if idx.Type != value.VAL_INT {
+							return vm.runtimeError(c, ip, "array index must be integer")
+						}
+						arrayIndex := int(idx.AsInt)
+						if arrayIndex < 0 || arrayIndex >= len(collection.Elements) {
+							return vm.runtimeError(c, ip, "array index out of bounds")
+						}
+						forwarded, err := forwardRefSlot(collection.Elements[arrayIndex], describeRefSlotIndex(idx))
+						if err != nil {
+							return vm.runtimeError(c, ip, "%s", err)
+						}
+						vm.push(forwarded)
+						continue
+					}
+				case *value.ObjMap:
+					if mapValueIsRefSlot(collection) {
+						key, err := referenceMapKey(idx)
+						if err != nil {
+							return vm.runtimeError(c, ip, "%s", err)
+						}
+						stored, found := collection.Get(key)
+						if !found {
+							stored = value.NewNull()
+						}
+						forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx))
+						if err != nil {
+							return vm.runtimeError(c, ip, "%s", err)
+						}
+						vm.push(forwarded)
+						continue
+					}
+				}
+			}
 
 			vm.push(value.Value{
 				Type: value.VAL_REF,
@@ -447,28 +508,15 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if !ok {
 				return vm.runtimeError(c, ip, "undefined property '%s'", name)
 			}
-			// O tipo estatico do campo ja e `ref T`: uma ref existente ou
-			// null e encaminhado como esta (spec §2.3 regra 2, §4.2) — igual
-			// a uma variavel `ref T`. Antes, null virava ref para o SLOT, o
-			// que tornava `n == null` falso para um campo nulo e deixava
-			// `*n = ...` gravar um T cru num slot tipado `ref T`.
-			if stored.Type == value.VAL_REF || stored.Type == value.VAL_NULL {
-				vm.push(stored)
-				continue
+			// Invariante do slot ref (spec 2026-08-20-ref-slot-invariant):
+			// ref ou null e encaminhado como esta (spec §2.3 regra 2, §4.2) —
+			// igual a uma variavel `ref T`; valor cru e estado impossivel e
+			// erro explicito (o shim da #51 que o embrulhava saiu na #50).
+			forwarded, err := forwardRefSlot(stored, "'"+name+"'")
+			if err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
-			// Valor referente cru num slot `ref T` (hoje alcancavel por
-			// json_loads com payload compativel e por `campo = T` atraves de
-			// base ref) segue embrulhado numa ref para o slot, para continuar
-			// passavel adiante como antes. Shim temporario: sai quando a
-			// issue #50 fechar o invariante "slot ref T contem ref ou null".
-			vm.push(value.Value{
-				Type: value.VAL_REF,
-				Obj: &value.ObjRef{
-					RefType:   value.REF_PROPERTY,
-					Container: container,
-					Name:      name,
-				},
-			})
+			vm.push(forwarded)
 
 		case chunk.OP_CONTEXT_REF_INDEX:
 			idx := vm.pop()
@@ -502,21 +550,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "contextual index reference base must be an array or map")
 			}
 
-			// Elemento/valor de tipo estatico `ref T`: ref existente ou null e
-			// encaminhado como esta; valor referente cru segue embrulhado em
-			// ref para o slot (ver OP_CONTEXT_REF_PROPERTY acima).
-			if stored.Type == value.VAL_REF || stored.Type == value.VAL_NULL {
-				vm.push(stored)
-				continue
+			// Mesmo invariante do OP_CONTEXT_REF_PROPERTY: ref/null
+			// encaminha, valor cru e erro explicito.
+			forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx))
+			if err != nil {
+				return vm.runtimeError(c, ip, "%s", err)
 			}
-			vm.push(value.Value{
-				Type: value.VAL_REF,
-				Obj: &value.ObjRef{
-					RefType:   value.REF_INDEX,
-					Container: container,
-					Index:     idx,
-				},
-			})
+			vm.push(forwarded)
 
 		case chunk.OP_MARK_REF_JSON_DYNAMIC:
 			refValue := vm.peek(0)
