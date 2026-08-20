@@ -1441,6 +1441,7 @@ sem converter. Não existe `is_float`.
   - `%v`: Any value (Default representation)
   - `%t`: Boolean
   - `%q`: Quoted string/bytes
+  - `%T`: Runtime type name of the value (same table as `type(v)` below)
 
 ```noxy
 let msg: string = fmt("Value: %d, Hex: %x", 255, 255)
@@ -1451,6 +1452,39 @@ let data: bytes = b"Hello"
 let hex: string = hex_encode(data)  // "48656c6c6f"
 let back: bytes = hex_decode(hex)   // b"Hello"
 ```
+
+### Type inspection
+
+`type(v: any) -> string` returns the runtime type name of a value. Its main
+use is inspecting `any` values at dynamic boundaries (`call_result` and
+`task_await` envelopes, JSON, channel payloads). The names:
+
+| Value | `type(v)` |
+|-------|-----------|
+| `int`, `float`, `bool`, `string`, `bytes` | `"int"`, `"float"`, `"bool"`, `"string"`, `"bytes"` |
+| `null` | `"null"` |
+| array | `"array"` |
+| map | `"map"` |
+| struct instance | the nominal name — `"Pessoa"`, `"Caixa<int>"` (no module qualifier) |
+| function, closure, or native | `"function"` |
+| `ref` | `"ref"` |
+| task handle | `"task"` |
+| channel / waitgroup | `"channel"` / `"waitgroup"` |
+
+```noxy
+struct Caixa<T>
+    valor: T
+end
+
+print(type(1))          // int
+print(type(Caixa(1)))   // Caixa<int>
+print(type(null))       // null
+```
+
+`type` reports the runtime representation, not the static annotation: a
+`call_result` envelope reports `"map"` (its physical shape at the dynamic
+boundary), and any value bound to `any` reports what it actually is. The
+`%T` verb of `fmt` uses the same table.
 
 ### Concurrency and Supervised Tasks
 
