@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.7.3] - 2026-08-19
+
+### Added — `type`, target typing em `return` (issue #44)
+
+- Novo nativo global `type(v: any) -> string` devolve o nome do tipo em
+  runtime (`"int"`, `"map"`, `"Caixa<int>"`, `"ref"`, ...). Uso principal:
+  inspecionar `any` nas fronteiras dinâmicas (envelopes de
+  `call_result`/`task_await`, JSON, payloads de canal). A tabela de nomes é
+  única e compartilhada com o verbo `%T` do `fmt` — e com isso o `%T` mudou
+  em dois pontos: instância de struct genérico imprime o nome de exibição
+  (`Caixa<int>`; antes vazava a identidade interna `main::Caixa<int>`,
+  inclusive nos argumentos aninhados) e ref/channel/waitgroup deixam de
+  imprimir `"unknown"`.
+- Target typing em posição de `return`: a anotação de retorno da função
+  envolvente ancora o `T` que só aparece no retorno do template chamado
+  (`return vazia()` numa função `-> int[]`), simétrico à âncora do `let`
+  anotado. Argumentos continuam sendo a âncora primária; construtor de
+  struct genérico também é coberto (`return Stack([])` com `-> Stack<int>`).
+
+### Fixed (BREAKING) — literal int fora da faixa é erro de compilação
+
+- Literal inteiro fora da faixa de int64 (decimal, hex ou binário) era
+  saturado silenciosamente para o máximo — `9223372036854775808` compilava
+  valendo `...807` — e agora é `SyntaxError` com posição. O menos unário
+  diretamente sobre um literal funde o sinal no literal, então o mínimo do
+  tipo (`-9223372036854775808`) passou a ser escrevível e exato (antes
+  valia `-...807`, um off-by-one silencioso). O tamanho em anotação de
+  array (`int[N]`) passa pela mesma validação (antes um `N` estourado
+  virava silenciosamente array sem tamanho).
+- O hint de target typing não é mais armado quando um local sombreia o nome
+  do template: ele vazava para a primeira chamada genérica aninhada nos
+  argumentos, aceitando programa que deveria ser erro de inferência
+  (pré-existente no caminho do `let`; o guard endurece `let` e `return`).
+
+### Docs
+
+- Spec: `strings.char_code`/`from_char_code`/`codes` documentados — o
+  `ord`/`chr` pedido na issue #44 já existia, a lacuna era de documentação.
+  Regra de faixa de literais inteiros em §2.1, âncora de `return` em §6.2,
+  tabela de nomes de `type()`/`%T` em §10, e correção da afirmação falsa de
+  que não havia escape `\u` (o lexer implementa `\u{...}` e `\uXXXX`).
+
 ## [0.7.2] - 2026-08-19
 
 ### Added — `call_result`: fronteira síncrona de erro
