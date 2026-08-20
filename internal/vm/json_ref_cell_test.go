@@ -69,6 +69,53 @@ end`)
 	testExpectedObject(t, 1, got)
 }
 
+// Valor de map `ref T`: slot nulo e chave nova recebem celula + ref; slot
+// apontando escreve atraves.
+func TestJSONLoadsMapRefValueSlots(t *testing.T) {
+	t.Run("null value gets a cell", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+struct Pair
+    a: int
+    b: int
+end
+let m: map[string, ref Pair] = {"k": null}
+let ok: bool = json_loads("{\"k\":{\"a\":1,\"b\":2}}", m)
+let viz: ref Pair = m["k"]
+if ok && type(ref viz) == "ref" && viz.a * 10 + viz.b == 12 then
+    test_report(12)
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 12, got)
+	})
+
+	t.Run("new key gets a cell", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let m: map[string, ref int] = {}
+let ok: bool = json_loads("{\"k\": 7}", m)
+let viz: ref int = m["k"]
+if ok && type(ref viz) == "ref" && *viz == 7 then
+    test_report(7)
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 7, got)
+	})
+
+	t.Run("pointing value writes through", func(t *testing.T) {
+		got := runTypedFunctionProgram(t, `
+let backing: int = 1
+let m: map[string, ref int] = {"k": ref backing}
+let ok: bool = json_loads("{\"k\": 9}", m)
+if ok && backing == 9 then
+    test_report(9)
+else
+    test_report(999)
+end`)
+		testExpectedObject(t, 9, got)
+	})
+}
+
 // A celula e possuidora (Owners=1): mutar uma copia por valor do referente
 // nao altera o que o slot aponta (o `let` da copia leva Owners a 2 e clona).
 func TestJSONLoadsCellOwnsItsReferent(t *testing.T) {

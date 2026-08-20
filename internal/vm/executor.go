@@ -457,7 +457,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 						if arrayIndex < 0 || arrayIndex >= len(collection.Elements) {
 							return vm.runtimeError(c, ip, "array index out of bounds")
 						}
-						forwarded, err := forwardRefSlot(collection.Elements[arrayIndex], describeRefSlotIndex(idx))
+						forwarded, err := forwardRefSlot(collection.Elements[arrayIndex], describeRefSlotIndex(idx, false))
 						if err != nil {
 							return vm.runtimeError(c, ip, "%s", err)
 						}
@@ -474,7 +474,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 						if !found {
 							stored = value.NewNull()
 						}
-						forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx))
+						forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx, true))
 						if err != nil {
 							return vm.runtimeError(c, ip, "%s", err)
 						}
@@ -526,6 +526,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 			var stored value.Value
+			slotIsMap := false
 			if array, ok := container.Obj.(*value.ObjArray); ok && array != nil {
 				if idx.Type != value.VAL_INT {
 					return vm.runtimeError(c, ip, "array index must be integer")
@@ -536,6 +537,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				}
 				stored = array.Elements[arrayIndex]
 			} else if mapObj, ok := container.Obj.(*value.ObjMap); ok && mapObj != nil {
+				slotIsMap = true
 				key, err := referenceMapKey(idx)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
@@ -552,7 +554,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			// Mesmo invariante do OP_CONTEXT_REF_PROPERTY: ref/null
 			// encaminha, valor cru e erro explicito.
-			forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx))
+			forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx, slotIsMap))
 			if err != nil {
 				return vm.runtimeError(c, ip, "%s", err)
 			}

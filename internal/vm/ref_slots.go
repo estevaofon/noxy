@@ -25,14 +25,15 @@ func forwardRefSlot(stored value.Value, slot string) (value.Value, error) {
 }
 
 // describeRefSlotIndex nomeia o slot de um indice nas mensagens de erro:
-// `at index 3` para array, `for key "k"` para map com chave string.
-func describeRefSlotIndex(index value.Value) string {
-	if index.Type == value.VAL_OBJ {
-		if key, ok := index.Obj.(string); ok {
-			return fmt.Sprintf("for key %q", key)
-		}
+// `at index 3` para array; `for key "k"` / `for key 3` para map.
+func describeRefSlotIndex(index value.Value, isMap bool) string {
+	if !isMap {
+		return fmt.Sprintf("at index %s", index.String())
 	}
-	return fmt.Sprintf("at index %s", index.String())
+	if key, ok := index.Obj.(string); ok && index.Type == value.VAL_OBJ {
+		return fmt.Sprintf("for key %q", key)
+	}
+	return fmt.Sprintf("for key %s", index.String())
 }
 
 // arrayElementIsRefSlot: o array passou por um contexto tipado que o etiquetou
