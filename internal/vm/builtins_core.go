@@ -192,6 +192,15 @@ func (vm *VM) defineCoreBuiltins() {
 	// Verb: [a-zA-Z%]
 	fmtVerbRe := regexp.MustCompile(`%([-+ #0]*)(?:(\d+|\*)?)(?:\.(\d+|\*))?([a-zA-Z%])`)
 
+	// Inspecao de tipo em runtime (issue #44): devolve o nome da tabela de
+	// runtimeTypeName — a mesma que o verbo %T do fmt usa.
+	vm.DefineContextualNative("type", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("type: expects exactly 1 argument, got %d", len(args))
+		}
+		return value.NewString(runtimeTypeName(args[0])), nil
+	})
+
 	vm.DefineNative("fmt", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
@@ -275,42 +284,7 @@ func (vm *VM) defineCoreBuiltins() {
 				if verb == 'T' {
 					// Replace %T with %s and supply type name string
 					newFormatBuilder.WriteString("%s")
-
-					typeName := "unknown"
-					switch val.Type {
-					case value.VAL_INT:
-						typeName = "int"
-					case value.VAL_FLOAT:
-						typeName = "float"
-					case value.VAL_BOOL:
-						typeName = "bool"
-					case value.VAL_NULL:
-						typeName = "null"
-					case value.VAL_BYTES:
-						typeName = "bytes"
-					case value.VAL_FUNCTION:
-						typeName = "function"
-					case value.VAL_NATIVE:
-						typeName = "function"
-					case value.VAL_TASK:
-						typeName = "task"
-					case value.VAL_OBJ:
-						// Determine specific object type
-						if _, ok := val.Obj.(*value.ObjArray); ok {
-							typeName = "array"
-						} else if _, ok := val.Obj.(*value.ObjMap); ok {
-							typeName = "map"
-						} else if inst, ok := val.Obj.(*value.ObjInstance); ok {
-							typeName = inst.Struct.Name
-						} else if _, ok := val.Obj.(*value.ObjStruct); ok {
-							typeName = "struct" // Class definition
-						} else if _, ok := val.Obj.(string); ok {
-							typeName = "string"
-						} else {
-							typeName = fmt.Sprintf("%T", val.Obj)
-						}
-					}
-					newArgs = append(newArgs, typeName)
+					newArgs = append(newArgs, runtimeTypeName(val))
 				} else {
 					// Keep original verb sequence (including flags/width/prec)
 					newFormatBuilder.WriteString(formatStr[start:end])

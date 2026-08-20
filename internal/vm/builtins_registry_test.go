@@ -44,7 +44,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"time_month_name", "time_now", "time_now_datetime", "time_now_ms",
 		"time_parse", "time_parse_date", "time_sleep", "time_to_timestamp",
 		"time_weekday_name", "to_bytes", "to_float", "to_int", "to_str",
-		"wg_add", "wg_done", "wg_wait",
+		"type", "wg_add", "wg_done", "wg_wait",
 	}
 
 	globals := machine.shared.Root.LocalSnapshot()

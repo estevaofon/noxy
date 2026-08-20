@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
@@ -596,7 +597,12 @@ func (p *Parser) parseType() ast.NoxyType {
 		if !p.peekTokenIs(token.RBRACKET) {
 			p.nextToken()                     // Eat the size token
 			if p.curToken.Type == token.INT { // Verify token type name
-				fmt.Sscanf(p.curToken.Literal, "%d", &size)
+				// Mesma validacao de faixa dos literais de expressao: antes
+				// (Sscanf com erro descartado) um N que estourasse virava
+				// silenciosamente um array sem tamanho.
+				if lit, ok := p.newIntegerLiteral(p.curToken).(*ast.IntegerLiteral); ok {
+					size = int(lit.Value)
+				}
 			}
 		}
 
@@ -898,9 +904,24 @@ func (p *Parser) parseIdentifier() ast.Expression {
 }
 
 func (p *Parser) parseIntegerLiteral() ast.Expression {
-	lit := &ast.IntegerLiteral{Token: p.curToken}
+	return p.newIntegerLiteral(p.curToken)
+}
 
-	value, _ := strconv.ParseInt(p.curToken.Literal, 0, 64)
+// newIntegerLiteral converte o texto do token em int64. ParseInt devolve o
+// valor SATURADO junto com ErrRange, entao descartar o erro faria literais
+// fora da faixa compilarem silenciosamente com outro valor.
+func (p *Parser) newIntegerLiteral(tok token.Token) ast.Expression {
+	lit := &ast.IntegerLiteral{Token: tok}
+	value, err := strconv.ParseInt(tok.Literal, 0, 64)
+	if err != nil {
+		reason := "invalid integer literal"
+		if errors.Is(err, strconv.ErrRange) {
+			reason = "integer literal out of int64 range"
+		}
+		p.errors = append(p.errors, fmt.Sprintf(
+			"[%d:%d] SyntaxError: %s: %s", tok.Line, tok.Column, reason, tok.Literal))
+		return lit
+	}
 	lit.Value = value
 	return lit
 }
@@ -1042,6 +1063,19 @@ func (p *Parser) parseFString() ast.Expression {
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {
+	// Menos unario diretamente sobre um literal inteiro funde o sinal no
+	// literal: a faixa de int64 e assimetrica, entao o minimo
+	// (-9223372036854775808) so e representavel com o sinal incorporado —
+	// negar o literal positivo estouraria antes de o menos ser aplicado.
+	if p.curToken.Type == token.MINUS && p.peekToken.Type == token.INT {
+		minus := p.curToken
+		p.nextToken()
+		tok := p.curToken
+		tok.Literal = "-" + tok.Literal
+		tok.Line = minus.Line
+		tok.Column = minus.Column
+		return p.newIntegerLiteral(tok)
+	}
 	expression := &ast.PrefixExpression{
 		Token:    p.curToken,
 		Operator: p.curToken.Literal,

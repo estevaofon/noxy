@@ -92,6 +92,18 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
 | `void` | Absence of value (function return only) | - |
 | `bytes` | Raw byte sequence | `b"Data"`, `hex_decode("FF")` |
 
+An `int` literal must fit in the signed 64-bit range
+`-9223372036854775808 … 9223372036854775807`. A literal outside that range —
+decimal, hexadecimal (`0x…`) or binary (`0b…`) — is a compile-time error,
+never a silently saturated value. Unary minus applied directly to an integer
+literal is part of the literal, so the minimum of the type is writable as
+`-9223372036854775808`:
+
+```noxy
+let min: int = -9223372036854775808 // ok — exact
+let bad: int = 9223372036854775808  // ERROR: integer literal out of int64 range
+```
+
 ### 2.2 Composite Types
 
 #### Value Semantics (Copy-on-Write)
@@ -687,7 +699,30 @@ print(peek(ints)) // 20
 
 This works because every `let` in Noxy already requires a type annotation —
 the language already forces the caller to write the information inference
-needs. `Stack<int>` and `Stack<string>` are distinct nominal struct types;
+needs.
+
+The declared return type of the enclosing function is the same kind of
+anchor: a generic call in `return` position unifies its return type against
+the annotation, exactly as an annotated `let` does. Arguments remain the
+primary anchor; the annotation only resolves what the arguments leave open:
+
+```noxy
+func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+
+func prepara() -> int[]
+    return vazia() // T = int, from the enclosing function's return type
+end
+
+func nova() -> Stack<int>
+    return Stack([]) // the constructor argument ([]) is empty; the
+                      // return annotation supplies T = int
+end
+```
+
+`Stack<int>` and `Stack<string>` are distinct nominal struct types;
 using one where the other is expected is a compile-time type error, the same
 as any other struct mismatch.
 
@@ -1406,6 +1441,7 @@ sem converter. Não existe `is_float`.
   - `%v`: Any value (Default representation)
   - `%t`: Boolean
   - `%q`: Quoted string/bytes
+  - `%T`: Runtime type name of the value (same table as `type(v)` below)
 
 ```noxy
 let msg: string = fmt("Value: %d, Hex: %x", 255, 255)
@@ -1416,6 +1452,40 @@ let data: bytes = b"Hello"
 let hex: string = hex_encode(data)  // "48656c6c6f"
 let back: bytes = hex_decode(hex)   // b"Hello"
 ```
+
+### Type inspection
+
+`type(v: any) -> string` returns the runtime type name of a value. Its main
+use is inspecting `any` values at dynamic boundaries (`call_result` and
+`task_await` envelopes, JSON, channel payloads). The names:
+
+| Value | `type(v)` |
+|-------|-----------|
+| `int`, `float`, `bool`, `string`, `bytes` | `"int"`, `"float"`, `"bool"`, `"string"`, `"bytes"` |
+| `null` | `"null"` |
+| array | `"array"` |
+| map | `"map"` |
+| struct instance | the nominal name — `"Pessoa"`, `"Caixa<int>"` (no module qualifier) |
+| struct definition (the constructor as a value) | `"struct"` |
+| function, closure, or native | `"function"` |
+| `ref` | `"ref"` |
+| task handle | `"task"` |
+| channel / waitgroup | `"channel"` / `"waitgroup"` |
+
+```noxy
+struct Caixa<T>
+    valor: T
+end
+
+print(type(1))          // int
+print(type(Caixa(1)))   // Caixa<int>
+print(type(null))       // null
+```
+
+`type` reports the runtime representation, not the static annotation: a
+`call_result` envelope reports `"map"` (its physical shape at the dynamic
+boundary), and any value bound to `any` reports what it actually is. The
+`%T` verb of `fmt` uses the same table.
 
 ### Concurrency and Supervised Tasks
 
@@ -1508,6 +1578,35 @@ strings.substring("Hello", 0, -1)   // "Hell" (-1 → index 4)
 strings.substring("Hello", -3, -1)  // "ll"   (-3 → 2, -1 → 4)
 strings.substring("aé🙂z", 1, 3)   // "é🙂"  (rune-based, not byte-based)
 ```
+
+#### Code points: `char_code`, `from_char_code`, `codes`
+
+`char_code(s) -> int` returns the Unicode code point of a single-character
+string (the `ord` of other languages); a string whose rune count is not
+exactly 1 is a runtime error. `from_char_code(code) -> string` is its
+inverse (`chr`). `codes(s) -> int[]` decodes the whole string once and
+returns every code point — prefer it when scanning a string character by
+character: `char_at` rebuilds the rune slice on each call, so a `char_at`
+loop is quadratic in the string's length.
+
+```noxy
+use strings select *
+
+char_code("A")            // 65
+char_code("é")            // 233
+from_char_code(233)       // "é"
+codes("já")               // [106, 225]
+
+// range comparison — no digit-table tricks needed
+func is_ascii_digit(ch: string) -> bool
+    let code: int = char_code(ch)
+    return code >= 48 && code <= 57
+end
+```
+
+String literals also accept `\u{...}` and `\uXXXX` escapes for writing a
+character by its code point; `from_char_code(code)` is the runtime
+equivalent for a code point computed at runtime.
 
 ### Indexação de strings
 

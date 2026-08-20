@@ -110,6 +110,94 @@ func TestBindTypeParamConflictIsStructured(t *testing.T) {
 	}
 }
 
+// Issue #44 (1): a anotacao de retorno da funcao envolvente e ancora de
+// target-typing para chamada generica em posicao de `return` — simetrica a
+// ancora do `let` anotado (§6.2). Cobre T que so aparece no retorno do
+// template, tanto funcao quanto construtor de struct generico.
+func TestReturnPositionAnchorsGenericCall(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "funcao com T so no retorno",
+			src: `func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func faz() -> int[]
+    return vazia()
+end`,
+		},
+		{
+			name: "construtor generico sem ancora nos argumentos",
+			src: `struct Pilha<T>
+    itens: T[]
+end
+func nova() -> Pilha<int>
+    return Pilha([])
+end`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, _, err := New().Compile(parse(tt.src)); err != nil {
+				t.Fatalf("retorno anotado deveria ancorar o tipo, veio %v", err)
+			}
+		})
+	}
+}
+
+// O hint so pode ser armado quando o call site realmente e o template: um
+// local que sombreia o nome do template compila pelo caminho normal, e um
+// hint armado vazaria para a PRIMEIRA chamada generica aninhada nos
+// argumentos (ancorando o T de 'outro' pela anotacao de um site que nao e
+// dele — target typing em posicao de argumento, que nao existe). Mesma regra
+// de sombreamento da interceptacao de call site (isShadowedByLocal).
+func TestShadowedTemplateNameDoesNotArmHint(t *testing.T) {
+	for _, tt := range []struct{ name, body string }{
+		{"let anotado", "let y: int[] = tpl(outro())\n    return y"},
+		{"posicao de return", "return tpl(outro())"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `func tpl<T>(xs: T[]) -> T[]
+    return xs
+end
+func outro<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func usa() -> int[]
+    let tpl: func(int[]) -> int[] = func(xs: int[]) -> int[]
+        return xs
+    end
+    ` + tt.body + `
+end`
+			_, _, err := New().Compile(parse(src))
+			if err == nil || !strings.Contains(err.Error(), "não foi possível inferir") {
+				t.Fatalf("outro() aninhado sem ancora propria deveria falhar, veio %v", err)
+			}
+		})
+	}
+}
+
+// Issue #44 (1), caso de erro: quando a anotacao de retorno NAO casa com o
+// retorno do template, a falha e a mesma do caminho do `let` ("retorno de
+// 'f': ..."), nao a generica "não foi possível inferir T".
+func TestReturnPositionHintMismatchIsError(t *testing.T) {
+	src := `func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func faz() -> int
+    return vazia()
+end`
+	_, _, err := New().Compile(parse(src))
+	if err == nil || !strings.Contains(err.Error(), "retorno de 'vazia'") {
+		t.Fatalf("mismatch de retorno deveria unificar e falhar com atribuicao, veio %v", err)
+	}
+}
+
 // I5 (2b): erro vindo da passada BIDIRECIONAL carrega a atribuicao por
 // argumento — antes o unico contexto era o indice do argumento-template, sem
 // nenhum caminho para a mensagem "(argumento N) e (argumento M)" do §9.

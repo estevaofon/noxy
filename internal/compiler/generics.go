@@ -716,6 +716,14 @@ func (c *Compiler) setGenericReturnHint(target ast.NoxyType, valueExpr ast.Expre
 	if !isFunctionTemplate && !isStructTemplate {
 		return
 	}
+	// Mesma regra de sombreamento da interceptacao de call site: um local ou
+	// upvalue com o nome do template vence, a chamada compila pelo caminho
+	// normal e NAO consome o hint — que entao vazaria para a primeira chamada
+	// generica aninhada nos argumentos, ancorando o T dela por uma anotacao
+	// que nao e do site dela.
+	if c.isShadowedByLocal(callee.Value) {
+		return
+	}
 	c.genericReturnHint = target
 }
 

@@ -21,7 +21,7 @@ var readonlyNatives = map[string]bool{
 	"to_int":      true,
 	"to_float":    true,
 	"fmt":         true,
-	"typeof":      true,
+	"type":        true, // só lê o valor e devolve string nova
 	"chan_recv":   true, // recebe o canal; o payload foi retido no send
 	"test_report": true, // harness de teste: apenas observa
 	"has_key":     true, // só consulta o mapa; devolve bool novo
