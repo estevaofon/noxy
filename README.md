@@ -1,4 +1,4 @@
-[![noxy 0.9.1](https://img.shields.io/badge/noxy-0.9.1-blue)](CHANGELOG.md)
+[![noxy 0.10.0](https://img.shields.io/badge/noxy-0.10.0-blue)](CHANGELOG.md)
 
 # Noxy VM 🚀
 
@@ -76,7 +76,7 @@ go run ./cmd/noxy/main.go program.nx
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.9.1
+Noxy REPL v0.10.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5

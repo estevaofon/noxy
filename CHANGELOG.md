@@ -1,5 +1,92 @@
 # Changelog
 
+## [0.10.0] - 2026-08-20
+
+### Changed (BREAKING) — invariante do slot `ref T`: checagem de campo vale através de base `ref`, `json_loads` cria célula, fim do shim (issue #50)
+
+- **Atribuição a campo com base `ref` é checada como com base valor.**
+  `node.valor = "texto"` com `node: ref Node` era aceito pelo compilador — a
+  checagem de campo inteira era pulada quando a base do L-value era `ref`
+  (herança pré-0.4) — e gravava `string` num campo `int`;
+  `node.proximo = Node(9, null)` gravava um `Node` *cru* num campo `ref Node`.
+  Agora são os mesmos erros da base valor:
+  `type mismatch in field assignment: expected int, got string` e
+  `cannot assign Node to ref Node`. Com isso também passam a valer via `ref`
+  o target typing do campo (§3, `node.f = identity`) e a validação de runtime
+  de campos compostos (`OP_MARK_RUNTIME_VALUE_TYPE`), como já valia via valor —
+  superfície nova de erro para programas que só rodavam via `ref`.
+- **Hint novo para campo/elemento/entrada `ref T`:**
+  `hint: to point the field at a new value, bind it to a variable first and use 'x.proximo = ref novo'; to overwrite the referenced value use '*x.proximo = ...'`
+  (variável `ref T` mantém `use '*r = ...'`).
+- **Migração** (alcançou `noxy_examples/stack.nx` e 6 testes de
+  `internal/vm/rc_uniqueness_test.go`; `linked_list.nx` já estava assim desde
+  a 0.9.1):
+
+  ```noxy
+  func _append(node: ref Node, valor: int)
+      if node.proximo == null then
+          let novo: Node = Node(valor, null)   // variável: `ref` exige L-value; vai para a heap
+          node.proximo = ref novo              // REBIND do campo do pai
+      else
+          _append(node.proximo, valor)
+      end
+  end
+  ```
+
+  Posse: antes o campo era o dono durável do nó; agora o dono é a célula heap
+  do `let novo` e o campo guarda a ref — `campo = null` não solta mais o nó (o
+  GC recolhe a célula quando nada mais a alcança); as contagens de `Owners`
+  observáveis não mudam (1 dono nos dois casos). **Efeito visível:** depois da
+  migração, `let u: ref Node = no.proximo; u.valor = X` altera o nó da lista
+  (semântica de referência, a mesma de `Node(0, ref n)`); com o `Node` cru no
+  slot, `u` virava uma cópia e a escrita se perdia — dois testes RC tiveram o
+  oráculo re-derivado por isso (20 → 77). Dentro de laços com `break`, lembrar
+  da issue #52: prefira a forma recursiva.
+- **`json_loads` com slot `ref T` nulo cria uma célula heap + ref** (opção (a)
+  da #50). Payload não-nulo para um elemento/campo/valor `ref T` que está
+  `null` (ou é novo) constrói o `T` pelo schema do referente, cria uma célula
+  nova que o possui e grava no slot uma ref para ela — o análogo de
+  `let novo = T; slot = ref novo`. Depois, `let viz: ref T = slot; type(ref viz)`
+  é `"ref"`, `*viz` lê o valor e `slot` passa a parâmetro `ref T` pelo
+  encaminhamento normal. Antes, o `T` cru ia direto para o slot
+  ("legacy-filled"). Slot já apontando: escreve através (inalterado); payload
+  `null`: limpa (inalterado). **Alvo direto** `json_loads(s, h.child)` com
+  `child` nulo continua `false` — o null é encaminhado, não há slot por trás
+  (0.9.1): passe o dono (`json_loads(s, h)`).
+- **Shim removido.** `OP_CONTEXT_REF_PROPERTY`/`OP_CONTEXT_REF_INDEX` não
+  embrulham mais valor cru numa ref para o slot:
+  `reference slot 'proximo' holds a non-reference value` (ou `at index N` /
+  `for key "k"`) é erro de runtime explícito — estado que nenhum programa Noxy
+  produz mais.
+- **Base `any` se comporta como base tipada para slots `ref T`.**
+  `ref a.proximo`, `f(a.proximo)` e `json_loads(s, a.proximo)` com `a: any`
+  encaminham a ref/null armazenada (antes fabricavam ref para o slot e
+  `*n = Node(...)` gravava cru); `a.proximo = Node(9, null)` via `any` é erro
+  de runtime `cannot assign Node to ref Node` (o gêmeo dinâmico do erro de
+  compilação), e o mesmo vale para elemento/valor `ref T` de array/map
+  etiquetado (`d[0] = 5` → `cannot assign int to ref int`). Campo comum via
+  `any` (`a.valor = "texto"`) segue sendo fronteira dinâmica sem checagem.
+
+### Fixed — contagem de donos (RC) dos valores construídos por `json_loads`/`json_parse`
+
+- Compostos criados pelos builders JSON entravam em arrays/maps/structs **sem
+  `Retain`**, e substituições não soltavam o ocupante anterior:
+  `let t: Pair[] = []; json_loads("[{\"a\":1,\"b\":2}]", t); let p: Pair = t[0]; p.a = 99`
+  mutava `t[0]` no lugar (IsShared falso com 2 donos reais). Agora os builders
+  espelham `OP_ARRAY`/`OP_MAP`/construtor (todo contêiner que guarda um
+  composto é um dono), as substituições fazem retain-novo/release-velho,
+  posições descartadas são soltas, e toda escrita *através* de uma ref (alvo
+  top-level e slot `ref T` já apontando) passa por `storeReferenceValue`.
+  `json_parse` idem.
+
+### Docs
+
+- Spec §2.3 (checagem de campo através de base `ref` + hint), §4.2 (valor cru
+  em slot `ref T` é erro explícito; base `any`), §5 (campo `ref` se preenche
+  por rebind), §12 (subseção JSON: contrato de `json_loads` para slot `ref T`);
+  `docs/JSON_SUPPORT.md` ("Reference slots"); design em
+  `docs/superpowers/specs/2026-08-20-ref-slot-invariant-design.md`.
+
 ## [0.9.1] - 2026-08-20
 
 ### Changed (BREAKING) — campo/índice `ref T` nulo passado a parâmetro `ref T` encaminha `null`

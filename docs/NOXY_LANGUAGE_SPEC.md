@@ -430,6 +430,18 @@ sensor.target = ref humidity  // Now watching humidity
 | `T` | `T` | `x = val` | Standard assignment |
 | `T` | `ref T` | `x = *r` | **READ** – explicit dereference required; plain `x = r` is a compile error (§2.3, exception 2) |
 
+The field rules apply identically when the assignment **base** is itself a
+reference: with `node: ref Node`, `node.valor = "texto"` is `type mismatch in
+field assignment: expected int, got string`, and `node.proximo = Node(9, null)`
+is `cannot assign Node to ref Node` — the compiler resolves the field through
+the dereferenced base and checks it exactly as it checks `a.valor` /
+`a.proximo` with `a: Node`. For a `ref T` field, array element, or map value
+the error names the two legitimate paths:
+
+```
+hint: to point the field at a new value, bind it to a variable first and use 'x.proximo = ref novo'; to overwrite the referenced value use '*x.proximo = ...'
+```
+
 #### Memory Safety (Captured Variables)
 Noxy ensures memory safety when using `ref`.
 - If you create a `ref` to a **local variable**, that variable is automatically **Captured** (moved to the Heap) by the compiler.
@@ -568,6 +580,15 @@ func append_node(node: ref Node, valor: int)
 end
 ```
 
+A slot declared `ref T` always holds a reference or `null`, and the runtime
+never wraps anything else: should a slot hold a raw `T` (which no Noxy program
+can produce), forwarding it is the explicit error `reference slot 'field'
+holds a non-reference value`. Through a base typed `any` the same forwarding
+applies — `ref a.proximo`, `f(a.proximo)`, `json_loads(s, a.proximo)` with
+`a: any` forward the stored reference or `null` exactly as the typed base does
+— and writing a raw `T` into a `ref T` field, element, or map value through
+`any` is the runtime error `cannot assign T to ref T`.
+
 Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
 
 ```noxy
@@ -673,6 +694,10 @@ struct Node
     next: ref Node
 end
 ```
+
+A `ref` field is filled by rebinding it to a variable (`let novo: Node = ...;
+node.next = ref novo`) or cleared with `null`; assigning a raw `Node` to it is
+a compile error whether `node` is a `Node` or a `ref Node` (§2.3, §4.2).
 
 A struct may also reference itself through an **array field without `ref`**:
 value semantics without `ref` cannot form a cycle, so no `ref` is needed to
@@ -1624,6 +1649,21 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
 | `errors` | Error boundary envelope shapes (Failure, CallResult) |
+
+### JSON
+
+`json_dumps`, `json_parse` and `json_loads` are documented in
+[`JSON_SUPPORT.md`](JSON_SUPPORT.md). `json_loads(text, target)` populates an
+existing typed target in place and returns `false` (with no partial writes)
+when the payload does not fit. For a slot declared `ref T` **inside** the
+target (array element, struct field, map value): a slot that already holds a
+reference is written **through** it; a JSON `null` stores `null`; a non-null
+payload for a slot that is `null` (or for a new element/field) builds the `T`
+from the referent schema, allocates a fresh heap cell that owns it, and stores
+a reference to that cell — afterwards `let viz: ref T = slot; type(ref viz)`
+is `"ref"` and `*viz` reads the value. A `ref T` field or element passed
+**directly** as the target while it is `null` arrives as `null` (§4.2) and
+`json_loads` returns `false`; pass the owner instead (`json_loads(text, h)`).
 
 ### Strings
 

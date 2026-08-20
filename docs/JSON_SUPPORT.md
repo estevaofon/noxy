@@ -101,6 +101,30 @@ json_loads(json, ref conf)
 print(conf.port) // 8080
 ```
 
+### Reference slots (`ref T`)
+
+A slot declared `ref T` inside the target — `(ref T)[]` element, `ref T` struct
+field, `map[K, ref T]` value — always ends up holding a reference or `null`:
+
+| Slot before | JSON payload | Result |
+| :--- | :--- | :--- |
+| reference | non-null | written **through** the reference (the referent changes) |
+| reference or `null` | `null` | slot becomes `null` |
+| `null`, or a new element/field | non-null | `T` is built from the referent schema, a fresh heap cell owns it, and the slot gets a reference to the cell — like `let novo: T = ...; slot = ref novo` |
+
+```noxy
+let target: (ref int)[] = [null]
+json_loads("[42]", target)
+let viz: ref int = target[0]
+print(type(ref viz))   // ref
+print(*viz)            // 42
+```
+
+Passing a `null` `ref T` field or element **directly** as the target
+(`json_loads(s, h.child)`) forwards the stored `null`; there is no slot behind
+it, so the call returns `false`. Pass the owner (`json_loads(s, h)`) or point
+the slot first.
+
 ## Type Mapping
 
 | Noxy Type | JSON Type | Notes |
