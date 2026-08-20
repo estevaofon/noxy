@@ -29,7 +29,10 @@ test_report([eh_nulo(a.proximo)])`, []bool{true})
 
 // O mesmo campo, acessado atraves de uma base que e ela propria `ref Node`
 // (o caso do append recursivo: `_append(node.proximo, v)` com `node: ref`).
-// Antes: "contextual property reference base must be an instance".
+// Antes: `n == null` dava false (ref para o slot); na recursao seguinte, com
+// essa ref-para-slot como base e o slot contendo null, o deref da base dava
+// null e o opcode morria com "contextual property reference base must be an
+// instance".
 func TestNullRefFieldThroughRefBaseForwardsNull(t *testing.T) {
 	requireBoolResults(t, refNullForwardingPrelude+`
 func via_ref(node: ref Node) -> bool

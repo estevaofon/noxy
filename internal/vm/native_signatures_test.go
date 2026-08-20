@@ -511,6 +511,27 @@ end`)
 	testExpectedObject(t, 42, got)
 }
 
+// Alvo `ref any` nulo (campo) chega ao json_loads como null encaminhado: o
+// marcador OP_MARK_REF_JSON_DYNAMIC deixa o null passar (como o marcador de
+// tipo-alvo ja fazia) e o json_loads devolve false — nao ha slot por tras
+// para preencher. Antes do encaminhamento, o slot era preenchido com o
+// payload cru; sem o passthrough, era "dynamic target marker requires a
+// reference" em runtime.
+func TestTypedJSONLoadsIntoNullRefAnyFieldReturnsFalse(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+struct Holder
+    child: ref any
+end
+let h: Holder = Holder(null)
+let ok: bool = json_loads("{\"a\": 1}", h.child)
+if !ok && h.child == null then
+    test_report(42)
+else
+    test_report(0)
+end`)
+	testExpectedObject(t, 42, got)
+}
+
 func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
 	t.Run("fill null slot with referent value", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
@@ -2598,15 +2619,48 @@ end`,
 }
 
 // Escrever atraves do null encaminhado e o erro claro de ref nula — nao ha
-// slot por tras para preencher.
+// slot por tras para preencher. Vale para elemento null de array, valor null
+// de map e chave ausente de map (que le como null); para preencher, o
+// chamador escreve no dono: `stored[0] = ref novo` / `m["k"] = ref novo`.
 func TestWritingThroughForwardedNullIndexSlotIsRuntimeError(t *testing.T) {
-	err := runTypedFunctionProgramError(t, `
+	tests := []struct {
+		name   string
+		source string
+	}{
+		{
+			name: "array element",
+			source: `
 func fill(target: ref int) -> void
     *target = 42
 end
 let stored: (ref int)[] = [null]
-fill(stored[0])`)
-	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
-		t.Fatalf("error=%v", err)
+fill(stored[0])`,
+		},
+		{
+			name: "map null value",
+			source: `
+func fill(target: ref int) -> void
+    *target = 42
+end
+let stored: map[string, ref int] = {"answer": null}
+fill(stored["answer"])`,
+		},
+		{
+			name: "map missing key",
+			source: `
+func fill(target: ref int) -> void
+    *target = 42
+end
+let stored: map[string, ref int] = {}
+fill(stored["missing"])`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runTypedFunctionProgramError(t, tt.source)
+			if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
+				t.Fatalf("error=%v", err)
+			}
+		})
 	}
 }

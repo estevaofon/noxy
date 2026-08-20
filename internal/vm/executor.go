@@ -520,6 +520,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 		case chunk.OP_MARK_REF_JSON_DYNAMIC:
 			refValue := vm.peek(0)
+			// Alvo `ref any` nulo encaminhado (campo/indice): nao ha ref para
+			// marcar; deixa o null passar, como OP_MARK_REF_TARGET_TYPE —
+			// json_loads devolve false para alvo null.
+			if refValue.Type == value.VAL_NULL {
+				continue
+			}
 			ref, ok := refValue.Obj.(*value.ObjRef)
 			if refValue.Type != value.VAL_REF || !ok || ref == nil {
 				return vm.runtimeError(c, ip, "dynamic target marker requires a reference")
