@@ -4,10 +4,13 @@ struct Node
 end
 
 func _append(node: ref Node, valor: int)
-    // '*node == null' pergunta se o SLOT apontado esta vazio (padrao
-    // fill-null-slot); 'node == null' perguntaria sobre o proprio ref.
-    if *node == null then
-        *node = Node(valor, null)
+    // Quem liga o no novo e o ULTIMO no existente, escrevendo no proprio
+    // campo 'proximo'. O no novo precisa ser uma variavel (L-value) para
+    // virar 'ref novo'. Um campo 'ref' nulo passado adiante chega como ref
+    // nula ('node == null'), nao como "slot vazio para preencher".
+    if node.proximo == null then
+        let novo: Node = Node(valor, null)
+        node.proximo = ref novo
     else
         _append(node.proximo, valor)
     end

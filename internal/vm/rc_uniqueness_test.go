@@ -854,18 +854,24 @@ func TestChanRecvOnClosedEmptyChannelDoesNotRelease(t *testing.T) {
 // Task 6 (Step 1): spawn e a excecao onde retain e registro no frame.Owned
 // ficam em pontos separados do codigo (o retain acontece no loop de push,
 // sincrono, antes do goroutine ser lancado; o registro no frame manual da
-// thread e o que causa o release quando aquele frame termina). Como o
-// retain+registro sao sincronos (rodam dentro do proprio native "spawn",
-// antes do "go func(){...}()"), medimos logo apos spawn.Invoke retornar —
-// sem precisar sincronizar com a goroutine para a medida "durante".
+// thread e o que causa o release quando aquele frame termina).
+//
+// A medida "durante" precisa acontecer com a thread ainda viva: o worker
+// bloqueia num gate (canal) ate o teste medir, e so entao e liberado. Sem o
+// gate, um worker de corpo vazio terminava e liberava o Owned antes da
+// primeira leitura (1 falha em ~900 execucoes com -cpu 2,4,8; flake visto
+// no Actions windows-latest, PR #51).
 func TestSpawnRetainsArgSynchronouslyAndReleasesWhenThreadFrameEnds(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `
+let gate: any = make_chan(1)
 func worker(m: map[string, int])
+    chan_recv(gate)
 end`); err != nil {
 		t.Fatal(err)
 	}
 	workerFn, _ := machine.GetGlobal("worker")
+	gate, _ := machine.GetGlobal("gate")
 	m := value.NewMap()
 	before := value.OwnersCount(m)
 
@@ -873,9 +879,14 @@ end`); err != nil {
 	if _, err := spawn.Invoke(machine, []value.Value{workerFn, m}); err != nil {
 		t.Fatal(err)
 	}
+	// Durante: a thread esta bloqueada em chan_recv(gate), entao o Owned
+	// registrado no frame dela ainda nao foi liberado.
 	if got := value.OwnersCount(m); got != before+1 {
 		t.Fatalf("esperado Owners=%d logo apos spawn (retain sincrono no push), veio %d", before+1, got)
 	}
+
+	// Libera a thread: ela sai do chan_recv, o frame termina e solta o Owned.
+	callBuiltin(t, machine, "chan_send", gate, value.NewInt(1))
 
 	deadline := time.Now().Add(statefulBuiltinTimeout)
 	for time.Now().Before(deadline) {

@@ -191,7 +191,9 @@ end
 Structs are passed by **VALUE**: the callee's instance is independent at any depth (copy-on-write), including nested composite fields. Use `ref` when the function must modify the caller's original instance.
 
 ---
-### 2.3 The `ref` Operator
+### 2.3 References (`ref`)
+
+#### The `ref` Operator
 
 The `ref` operator produces an explicit first-class reference value according
 to the operand's type:
@@ -230,7 +232,7 @@ let forwarded: ref Error = ref r // OK: forwards the existing ref Error
 let r: ref Error = ref Error("msg") // ERROR: Cannot take reference of temporary value
 ```
 
-### 2.3 Reference Semantics (`ref`)
+#### Reference Semantics
 The `ref` keyword creates references to addressable values or explicitly
 forwards existing reference values. Noxy unifies reference usage through
 **"Automatic Dereference"** and **"Type-Based Assignment"**.
@@ -541,6 +543,30 @@ double_it(ref value)   // explicit reference is also valid
 This contextual conversion is limited to exact script signatures and public
 native contracts known by the compiler. It never applies at a dynamic
 boundary.
+
+An argument whose static type is already `ref T` — a `ref` variable, a struct
+field, an array element, or a map value declared `ref T` — needs no
+conversion: the stored reference is forwarded as is, **including `null`**,
+exactly as a `ref` variable is (§2.3, rule 2). No reference to the containing
+slot is created, so inside the callee `param == null` is true precisely when
+the stored reference was null, and writing through such a parameter is the
+ordinary null-reference error. The same forwarding applies to every position
+that takes a reference contextually — the explicit form `ref a.field`, a
+constructor argument for a `ref` field (`Node(2, a.next)`), `return ref
+n.field`, `append` into a `(ref T)[]`, and the target of `json_loads`. To
+fill an empty `ref` field, the callee receives the *owner* and rebinds the
+field:
+
+```noxy
+func append_node(node: ref Node, valor: int)
+    if node.proximo == null then
+        let novo: Node = Node(valor, null)   // a variable: `ref` needs an L-value
+        node.proximo = ref novo              // REBIND of the owner's field
+    else
+        append_node(node.proximo, valor)     // forwards the stored reference
+    end
+end
+```
 
 Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
 
