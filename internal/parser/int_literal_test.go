@@ -59,6 +59,28 @@ func TestNegativeLiteralFoldKeepsMaxIntNegatable(t *testing.T) {
 	}
 }
 
+// O tamanho em anotacao de array (`int[N]`) passa pela mesma validacao de
+// faixa dos literais de expressao — antes usava Sscanf com erro descartado e
+// um N que estourasse virava silenciosamente 0 (array sem tamanho).
+func TestArraySizeAnnotationOutOfRangeIsError(t *testing.T) {
+	p := New(lexer.New("let xs: int[99999999999999999999] = [1, 2]"))
+	_ = p.ParseProgram()
+	if len(p.Errors()) == 0 || !strings.Contains(strings.Join(p.Errors(), "\n"), "out of int64 range") {
+		t.Fatalf("errors=%v, quer erro de faixa no tamanho do array", p.Errors())
+	}
+}
+
+func TestArraySizeAnnotationInRangeIsKept(t *testing.T) {
+	p := New(lexer.New("let xs: int[3] = [1, 2, 3]"))
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	let := program.Statements[0].(*ast.LetStmt)
+	arr, ok := let.Type.(*ast.ArrayType)
+	if !ok || arr.Size != 3 {
+		t.Fatalf("tipo=%#v, quer ArrayType com Size 3", let.Type)
+	}
+}
+
 func TestUnaryMinusOnNonLiteralStaysPrefix(t *testing.T) {
 	p := New(lexer.New("let x: int = -y"))
 	program := p.ParseProgram()

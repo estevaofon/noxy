@@ -148,6 +148,39 @@ end`,
 	}
 }
 
+// O hint so pode ser armado quando o call site realmente e o template: um
+// local que sombreia o nome do template compila pelo caminho normal, e um
+// hint armado vazaria para a PRIMEIRA chamada generica aninhada nos
+// argumentos (ancorando o T de 'outro' pela anotacao de um site que nao e
+// dele — target typing em posicao de argumento, que nao existe). Mesma regra
+// de sombreamento da interceptacao de call site (isShadowedByLocal).
+func TestShadowedTemplateNameDoesNotArmHint(t *testing.T) {
+	for _, tt := range []struct{ name, body string }{
+		{"let anotado", "let y: int[] = tpl(outro())\n    return y"},
+		{"posicao de return", "return tpl(outro())"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			src := `func tpl<T>(xs: T[]) -> T[]
+    return xs
+end
+func outro<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func usa() -> int[]
+    let tpl: func(int[]) -> int[] = func(xs: int[]) -> int[]
+        return xs
+    end
+    ` + tt.body + `
+end`
+			_, _, err := New().Compile(parse(src))
+			if err == nil || !strings.Contains(err.Error(), "não foi possível inferir") {
+				t.Fatalf("outro() aninhado sem ancora propria deveria falhar, veio %v", err)
+			}
+		})
+	}
+}
+
 // Issue #44 (1), caso de erro: quando a anotacao de retorno NAO casa com o
 // retorno do template, a falha e a mesma do caminho do `let` ("retorno de
 // 'f': ..."), nao a generica "não foi possível inferir T".

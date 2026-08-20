@@ -44,10 +44,30 @@ func TestTypeBuiltinNames(t *testing.T) {
 	}
 }
 
-func TestTypeBuiltinTaskHandle(t *testing.T) {
+func TestTypeBuiltinRuntimeHandles(t *testing.T) {
 	machine := New()
-	got := callBuiltin(t, machine, "type", value.NewTask())
-	expectReportedString(t, got, "task", "type(task)")
+	tests := []struct {
+		name string
+		arg  value.Value
+		want string
+	}{
+		{"task", value.NewTask(), "task"},
+		{"channel", value.NewChannel(1), "channel"},
+		{"waitgroup", value.NewWaitGroup(), "waitgroup"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := callBuiltin(t, machine, "type", tt.arg)
+			expectReportedString(t, got, tt.want, "type()")
+		})
+	}
+}
+
+// O construtor como valor (a DEFINICAO do struct, nao uma instancia) reporta
+// "struct" — herdado do %T antigo e agora documentado na tabela do spec.
+func TestTypeBuiltinStructDefinition(t *testing.T) {
+	got := captureVMSource(t, "struct Pessoa\n    nome: string\nend\ntest_report(type(Pessoa))")
+	expectReportedString(t, got, "struct", "type(Pessoa)")
 }
 
 func TestTypeBuiltinArityIsExactlyOne(t *testing.T) {

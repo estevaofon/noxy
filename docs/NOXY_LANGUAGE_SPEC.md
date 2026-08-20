@@ -1466,6 +1466,7 @@ use is inspecting `any` values at dynamic boundaries (`call_result` and
 | array | `"array"` |
 | map | `"map"` |
 | struct instance | the nominal name — `"Pessoa"`, `"Caixa<int>"` (no module qualifier) |
+| struct definition (the constructor as a value) | `"struct"` |
 | function, closure, or native | `"function"` |
 | `ref` | `"ref"` |
 | task handle | `"task"` |
@@ -1603,8 +1604,9 @@ func is_ascii_digit(ch: string) -> bool
 end
 ```
 
-There is no `\u` escape in string literals; build a character from its code
-point with `from_char_code(code)`.
+String literals also accept `\u{...}` and `\uXXXX` escapes for writing a
+character by its code point; `from_char_code(code)` is the runtime
+equivalent for a code point computed at runtime.
 
 ### Indexação de strings
 

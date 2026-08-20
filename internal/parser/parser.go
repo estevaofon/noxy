@@ -597,7 +597,12 @@ func (p *Parser) parseType() ast.NoxyType {
 		if !p.peekTokenIs(token.RBRACKET) {
 			p.nextToken()                     // Eat the size token
 			if p.curToken.Type == token.INT { // Verify token type name
-				fmt.Sscanf(p.curToken.Literal, "%d", &size)
+				// Mesma validacao de faixa dos literais de expressao: antes
+				// (Sscanf com erro descartado) um N que estourasse virava
+				// silenciosamente um array sem tamanho.
+				if lit, ok := p.newIntegerLiteral(p.curToken).(*ast.IntegerLiteral); ok {
+					size = int(lit.Value)
+				}
 			}
 		}
 
