@@ -1,6 +1,9 @@
 package vm
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -131,5 +134,55 @@ test_report(to_str(rv[0]) + "|" + to_str(v[0]) + "|" + re["kind"] + "|" + e["kin
 `)
 	if text, _ := reported.Obj.(string); text != "1|99|runtime|hacked" {
 		t.Fatalf("envelope de task_await deve ficar intacto (CoW na copia): %q", text)
+	}
+}
+
+// sqlite.query (builtins_sqlite.go): QueryResult e dono de columns e rows;
+// cada Row e dona de values.
+func TestSQLiteQueryEnvelopeOwnsColumnsAndRowValues(t *testing.T) {
+	reported := captureVMSource(t, `
+use sqlite
+let db: sqlite.Database = sqlite.open(":memory:")
+sqlite.exec(db, "CREATE TABLE t (id INTEGER, nome TEXT)")
+sqlite.exec(db, "INSERT INTO t VALUES (1, 'a')")
+let res: sqlite.QueryResult = sqlite.query(db, "SELECT * FROM t")
+let cols: string[] = res.columns
+cols[0] = "ZZZ"
+let vals: any[] = res.rows[0].values
+vals[0] = 999
+sqlite.close(db)
+test_report(res.columns[0] + "|" + cols[0] + "|" + to_str(res.rows[0].values[0]) + "|" + to_str(vals[0]))
+`)
+	if text, _ := reported.Obj.(string); text != "id|ZZZ|1|999" {
+		t.Fatalf("envelope de sqlite.query deve ficar intacto (CoW nas copias): %q", text)
+	}
+}
+
+// io.read_lines (builtins_io.go): IOLinesResult e dono de data.
+func TestIOReadLinesEnvelopeOwnsData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "linhas.txt")
+	if err := os.WriteFile(path, []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reported := captureVMSource(t, "use io\nlet f: io.File = io.open("+strconv.Quote(path)+", \"r\")\n"+
+		"let r: io.IOLinesResult = io.read_lines(f)\nio.close(f)\n"+
+		"let d: string[] = r.data\nd[0] = \"ZZZ\"\n"+
+		"test_report(r.data[0] + \"|\" + d[0])\n")
+	if text, _ := reported.Obj.(string); text != "a|ZZZ" {
+		t.Fatalf("envelope de io.read_lines deve ficar intacto (CoW na copia): %q", text)
+	}
+}
+
+// strings.split (builtins_strings.go): SplitResult e dono de parts.
+func TestStringsSplitEnvelopeOwnsParts(t *testing.T) {
+	reported := captureVMSource(t, `
+use strings
+let r: strings.SplitResult = strings.split("a,b", ",")
+let p: string[] = r.parts
+p[0] = "ZZZ"
+test_report(r.parts[0] + "|" + p[0])
+`)
+	if text, _ := reported.Obj.(string); text != "a|ZZZ" {
+		t.Fatalf("envelope de strings.split deve ficar intacto (CoW na copia): %q", text)
 	}
 }

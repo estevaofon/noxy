@@ -382,11 +382,13 @@ func readFileContents(file *os.File) ([]byte, bool, string) {
 }
 
 func newIOReadResult(definition *value.ObjStruct, ok bool, data value.Value, errorText string) value.Value {
-	result := value.NewInstance(definition).Obj.(*value.ObjInstance)
-	result.Fields["ok"] = value.NewBool(ok)
-	result.Fields["data"] = data
-	result.Fields["error"] = value.NewString(errorText)
-	return value.Value{Type: value.VAL_OBJ, Obj: result}
+	// RC: NewInstanceWith retem data quando composto (array de read_lines);
+	// string/bytes sao no-op.
+	return value.NewInstanceWith(definition, map[string]value.Value{
+		"ok":    value.NewBool(ok),
+		"data":  data,
+		"error": value.NewString(errorText),
+	})
 }
 
 func newIOLinesResult(definition *value.ObjStruct, ok bool, lines []string, errorText string) value.Value {
