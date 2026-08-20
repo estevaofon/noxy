@@ -687,7 +687,30 @@ print(peek(ints)) // 20
 
 This works because every `let` in Noxy already requires a type annotation —
 the language already forces the caller to write the information inference
-needs. `Stack<int>` and `Stack<string>` are distinct nominal struct types;
+needs.
+
+The declared return type of the enclosing function is the same kind of
+anchor: a generic call in `return` position unifies its return type against
+the annotation, exactly as an annotated `let` does. Arguments remain the
+primary anchor; the annotation only resolves what the arguments leave open:
+
+```noxy
+func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+
+func prepara() -> int[]
+    return vazia() // T = int, from the enclosing function's return type
+end
+
+func nova() -> Stack<int>
+    return Stack([]) // the constructor argument ([]) is empty; the
+                      // return annotation supplies T = int
+end
+```
+
+`Stack<int>` and `Stack<string>` are distinct nominal struct types;
 using one where the other is expected is a compile-time type error, the same
 as any other struct mismatch.
 

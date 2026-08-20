@@ -42,6 +42,25 @@ test_report(soma_rec(xs, 0))
 	expectInt(t, got, 3, "recursao generica")
 }
 
+// Issue #44 (1): target-typing em posicao de return — a anotacao de retorno
+// da funcao envolvente ancora o T que so aparece no retorno do template, e o
+// valor flui correto em runtime.
+func TestGenericReturnPositionEndToEnd(t *testing.T) {
+	got := captureVMSource(t, `
+func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func prepara() -> int[]
+    return vazia()
+end
+let r: int[] = prepara()
+append(r, 41)
+test_report(r[0] + length(r))
+`)
+	expectInt(t, got, 42, "vazia<int> via anotacao de retorno")
+}
+
 // Chamada generica de dentro de um corpo NAO-generico: o predeclare nao
 // registra mais o template em globals, entao a interceptacao (via registry) e
 // a unica coisa que faz este programa compilar.

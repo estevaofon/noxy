@@ -1843,7 +1843,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
+		// Target-typing do §7 em posicao de return: a anotacao de retorno da
+		// funcao envolvente e ancora para o T que so aparece no retorno do
+		// template chamado (`return vazia()`), simetrica a ancora do `let`
+		// anotado — mesma disciplina de armar/limpar do LetStmt acima.
+		c.setGenericReturnHint(expected, n.ReturnValue)
+		c.setArrayElementHint(expected, n.ReturnValue)
 		_, actual, err := c.Compile(n.ReturnValue)
+		c.genericReturnHint = nil
+		c.arrayElementHint = nil
 		if err != nil {
 			return nil, nil, err
 		}

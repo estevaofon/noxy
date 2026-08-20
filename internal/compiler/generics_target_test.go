@@ -110,6 +110,61 @@ func TestBindTypeParamConflictIsStructured(t *testing.T) {
 	}
 }
 
+// Issue #44 (1): a anotacao de retorno da funcao envolvente e ancora de
+// target-typing para chamada generica em posicao de `return` — simetrica a
+// ancora do `let` anotado (§6.2). Cobre T que so aparece no retorno do
+// template, tanto funcao quanto construtor de struct generico.
+func TestReturnPositionAnchorsGenericCall(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "funcao com T so no retorno",
+			src: `func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func faz() -> int[]
+    return vazia()
+end`,
+		},
+		{
+			name: "construtor generico sem ancora nos argumentos",
+			src: `struct Pilha<T>
+    itens: T[]
+end
+func nova() -> Pilha<int>
+    return Pilha([])
+end`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, _, err := New().Compile(parse(tt.src)); err != nil {
+				t.Fatalf("retorno anotado deveria ancorar o tipo, veio %v", err)
+			}
+		})
+	}
+}
+
+// Issue #44 (1), caso de erro: quando a anotacao de retorno NAO casa com o
+// retorno do template, a falha e a mesma do caminho do `let` ("retorno de
+// 'f': ..."), nao a generica "não foi possível inferir T".
+func TestReturnPositionHintMismatchIsError(t *testing.T) {
+	src := `func vazia<T>() -> T[]
+    let xs: T[] = []
+    return xs
+end
+func faz() -> int
+    return vazia()
+end`
+	_, _, err := New().Compile(parse(src))
+	if err == nil || !strings.Contains(err.Error(), "retorno de 'vazia'") {
+		t.Fatalf("mismatch de retorno deveria unificar e falhar com atribuicao, veio %v", err)
+	}
+}
+
 // I5 (2b): erro vindo da passada BIDIRECIONAL carrega a atribuicao por
 // argumento — antes o unico contexto era o indice do argumento-template, sem
 // nenhum caminho para a mensagem "(argumento N) e (argumento M)" do §9.
