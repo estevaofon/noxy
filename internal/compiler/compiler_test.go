@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"bytes"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/lexer"
@@ -200,5 +201,18 @@ func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 		if err != nil {
 			t.Fatalf("compiler error for input %q: %s", tt.input, err)
 		}
+	}
+}
+
+func TestFixedArrayLetEmitsArrayFill(t *testing.T) {
+	code, _, err := New().Compile(parse("let a: int[5000]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(code.Code, []byte{byte(chunk.OP_ARRAY_FILL)}) {
+		t.Fatal("let T[N] should compile to OP_ARRAY_FILL")
+	}
+	if len(code.Code) > 32 {
+		t.Fatalf("bytecode has %d bytes; N elements were emitted individually", len(code.Code))
 	}
 }

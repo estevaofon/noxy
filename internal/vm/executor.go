@@ -1046,6 +1046,23 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				elements[i] = value.NewInt(0)
 			}
 			vm.push(value.NewArray(elements))
+		case chunk.OP_ARRAY_FILL:
+			countVal := vm.pop()
+			fill := vm.pop()
+			if countVal.Type != value.VAL_INT {
+				return vm.runtimeError(c, ip, "array size must be integer")
+			}
+			count := int(countVal.AsInt)
+			if count < 0 {
+				return vm.runtimeError(c, ip, "array size must be non-negative, got %d", count)
+			}
+			elements := make([]value.Value, count)
+			for i := range elements {
+				elements[i] = fill
+			}
+			// RC: NewArray retem cada slot — um default composto fica com
+			// Owners = count e a CoW clona na primeira escrita a um elemento.
+			vm.push(value.NewArray(elements))
 		case chunk.OP_GREATER:
 			b := vm.pop()
 			a := vm.pop()

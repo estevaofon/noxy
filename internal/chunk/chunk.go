@@ -59,6 +59,7 @@ const (
 	OP_ARRAY
 	OP_MAP
 	OP_ZEROS
+	OP_ARRAY_FILL
 	OP_LEN
 	OP_ADD_INT
 	OP_SUB_INT
@@ -344,6 +345,8 @@ func (op OpCode) String() string {
 		return "OP_EQUAL_INT"
 	case OP_ZEROS:
 		return "OP_ZEROS"
+	case OP_ARRAY_FILL:
+		return "OP_ARRAY_FILL"
 	case OP_LEN:
 		return "OP_LEN"
 	case OP_SELECT:
@@ -583,6 +586,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.constantLongInstruction("OP_SET_PROPERTY", offset)
 	case OP_ZEROS:
 		return c.simpleInstruction("OP_ZEROS", offset)
+	case OP_ARRAY_FILL:
+		return c.simpleInstruction("OP_ARRAY_FILL", offset)
 	case OP_LEN:
 		return c.simpleInstruction("OP_LEN", offset)
 	case OP_MODULO:

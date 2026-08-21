@@ -2715,15 +2715,14 @@ func (c *Compiler) emitDefaultInit(t ast.NoxyType) error {
 		}
 	case *ast.ArrayType:
 		if typ.Size > 0 {
-			// Initialize 'Size' elements with default value
-			for i := 0; i < typ.Size; i++ {
-				if err := c.emitDefaultInit(typ.ElementType); err != nil {
-					return err
-				}
+			// Um default + N -> OP_ARRAY_FILL: nao empilha N elementos (antes
+			// estourava a pilha de operandos em N > ~2047 e truncava o operando
+			// de 16 bits de OP_ARRAY em N > 65535).
+			if err := c.emitDefaultInit(typ.ElementType); err != nil {
+				return err
 			}
-			c.emitByte(byte(chunk.OP_ARRAY))
-			c.emitByte(byte((typ.Size >> 8) & 0xff))
-			c.emitByte(byte(typ.Size & 0xff))
+			c.emitConstant(value.NewInt(int64(typ.Size)))
+			c.emitByte(byte(chunk.OP_ARRAY_FILL))
 		} else {
 			// Empty array (dynamic)
 			c.emitByte(byte(chunk.OP_ARRAY))
