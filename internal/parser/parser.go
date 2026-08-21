@@ -986,22 +986,38 @@ func (p *Parser) parseBoolean() ast.Expression {
 }
 
 func (p *Parser) parseFString() ast.Expression {
-	// Simple F-String parser
-	// Breaks literal into parts and concatenates matches
+	// Quebra o literal em partes fixas e expressoes `{...}` e as concatena
+	// com `+`. `{{` e `}}` sao chaves literais; uma expressao que COMECA por
+	// `{` (map literal) precisa de espaco: f"{ {"a": 1}["a"] }" — mesma regra
+	// do Python. Dentro de `{...}` a expressao tem de consumir todos os
+	// tokens: sobra (ex.: `:>10`) e erro — nao ha format spec, use fmt().
 	literal := p.curToken.Literal
+	line, column := p.curToken.Line, p.curToken.Column
 	var exprs []ast.Expression
+	var pending []byte
 
-	lastIdx := 0
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		text := string(pending)
+		exprs = append(exprs, &ast.StringLiteral{
+			Token: token.Token{Type: token.STRING, Literal: text},
+			Value: text,
+		})
+		pending = nil
+	}
+
 	for i := 0; i < len(literal); i++ {
-		if literal[i] == '{' {
-			// Add previous string part
-			if i > lastIdx {
-				exprs = append(exprs, &ast.StringLiteral{
-					Token: token.Token{Type: token.STRING, Literal: literal[lastIdx:i]},
-					Value: literal[lastIdx:i],
-				})
-			}
-
+		ch := literal[i]
+		switch {
+		case ch == '{' && i+1 < len(literal) && literal[i+1] == '{':
+			pending = append(pending, '{')
+			i++
+		case ch == '}' && i+1 < len(literal) && literal[i+1] == '}':
+			pending = append(pending, '}')
+			i++
+		case ch == '{':
 			braceCount := 1
 			j := i + 1
 			for ; j < len(literal); j++ {
@@ -1014,58 +1030,47 @@ func (p *Parser) parseFString() ast.Expression {
 					}
 				}
 			}
-
 			if j >= len(literal) {
-				// Error: unclosed brace
-				p.errors = append(p.errors, fmt.Sprintf("unclosed brace in f-string"))
+				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unclosed brace in f-string", line, column))
 				return nil
 			}
-
+			flush()
 			exprContent := literal[i+1 : j]
-
-			// Parse expression
-			l := lexer.New(exprContent)
-			par := New(l) // Recursive parser
-
+			par := New(lexer.New(exprContent))
 			innerExpr := par.parseExpression(LOWEST)
-			// Check errors
 			if len(par.Errors()) > 0 {
 				for _, msg := range par.Errors() {
 					p.errors = append(p.errors, fmt.Sprintf("f-string expr error: %s", msg))
 				}
 				return nil
 			}
-
-			// Wrap in to_str() call: to_str(expr)
-			callExpr := &ast.CallExpression{
-				Token: token.Token{Type: token.IDENTIFIER, Literal: "("}, // Dummy token?
+			if !par.peekTokenIs(token.EOF) && !par.peekTokenIs(token.NEWLINE) {
+				leftover := par.peekToken.Literal
+				hint := ""
+				if par.peekTokenIs(token.COLON) {
+					hint = "\n  hint: format specs are not supported; use fmt(\"%10s\", x) for width/precision"
+				}
+				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unexpected %q in f-string expression%s", line, column, leftover, hint))
+				return nil
+			}
+			exprs = append(exprs, &ast.CallExpression{
+				Token: token.Token{Type: token.IDENTIFIER, Literal: "("},
 				Function: &ast.Identifier{
 					Token: token.Token{Type: token.IDENTIFIER, Literal: "to_str"},
 					Value: "to_str",
 				},
 				Arguments: []ast.Expression{innerExpr},
-			}
-
-			exprs = append(exprs, callExpr)
-
-			lastIdx = j + 1
-			i = j // Advance outer loop
+			})
+			i = j
+		default:
+			pending = append(pending, ch)
 		}
 	}
-
-	// Add remaining string
-	if lastIdx < len(literal) {
-		exprs = append(exprs, &ast.StringLiteral{
-			Token: token.Token{Type: token.STRING, Literal: literal[lastIdx:]},
-			Value: literal[lastIdx:],
-		})
-	}
+	flush()
 
 	if len(exprs) == 0 {
 		return &ast.StringLiteral{Token: p.curToken, Value: ""}
 	}
-
-	// Combine with +
 	combined := exprs[0]
 	for i := 1; i < len(exprs); i++ {
 		combined = &ast.InfixExpression{
@@ -1075,7 +1080,6 @@ func (p *Parser) parseFString() ast.Expression {
 			Right:    exprs[i],
 		}
 	}
-
 	return combined
 }
 

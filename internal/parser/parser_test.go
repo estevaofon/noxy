@@ -170,3 +170,27 @@ func TestParseScientificFloatLiteral(t *testing.T) {
 		t.Fatalf("got %#v, want FloatLiteral 1500", program.Statements[0])
 	}
 }
+
+func TestFStringBraceEscapesAndTrailingTokenError(t *testing.T) {
+	// A ultima variante usa f-string de aspas simples porque o mapa literal
+	// `{"a": 1}` contem aspas duplas: o lexer nao e brace-aware, entao aspas
+	// duplas dentro de `{...}` exigem f-string delimitada por aspas simples
+	// (mesma regra do caso `f'{"a"}'` logo antes) — ver §9 da spec.
+	for _, source := range []string{"f\"{{x}}\"\n", "f\"{{{x}}}\"\n", "f'{\"a\"}'\n", "f'{ {\"a\": 1}[\"a\"] }'\n"} {
+		p := New(lexer.New(source))
+		p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			t.Fatalf("source %q: %v", source, p.Errors())
+		}
+	}
+	p := New(lexer.New("f\"{name:>10}|\"\n"))
+	p.ParseProgram()
+	if len(p.Errors()) == 0 || !strings.Contains(p.Errors()[0], "unexpected \":\" in f-string expression") || !strings.Contains(p.Errors()[0], "format specs are not supported") {
+		t.Fatalf("errors=%v, want format-spec rejection with hint", p.Errors())
+	}
+	p = New(lexer.New("f\"{a b}\"\n"))
+	p.ParseProgram()
+	if len(p.Errors()) == 0 || !strings.Contains(p.Errors()[0], "unexpected \"b\" in f-string expression") {
+		t.Fatalf("errors=%v, want trailing-token rejection", p.Errors())
+	}
+}

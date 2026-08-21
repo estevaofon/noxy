@@ -64,6 +64,15 @@ func TestRuntimeConditionOnAnyMustBeBool(t *testing.T) {
 	}
 }
 
+func TestFStringBraceEscapesRender(t *testing.T) {
+	// f-string de aspas simples porque o segmento `{"a": 2}` tem aspas duplas
+	// (lexer nao e brace-aware; ver mesma nota em parser_test.go).
+	reported := captureVMSource(t, "let x: int = 1\ntest_report(f'{{x}}|{{{x}}}|{ {\"a\": 2}[\"a\"] }|' + f'{\"a\"}')\n")
+	if got := reported.Obj.(string); got != "{x}|{1}|2|a" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func runVmTests(t *testing.T, tests []vmTestCase) {
 	for _, tt := range tests {
 		testExpectedObject(t, tt.expected, captureVMSource(t, "test_report("+tt.input+")"))
