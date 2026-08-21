@@ -1,7 +1,7 @@
 use sqlite
 use sys
 
-let db: Database = sqlite.open("usuarios.db")
+let db: sqlite.Database = sqlite.open("usuarios.db")
 
 if !db.open then
     print("Erro ao abrir banco")
@@ -34,10 +34,10 @@ while true do
     end
     if opcao == "2" then
         print("\nListar Usuários")
-        let res: QueryResult = sqlite.query(db, "SELECT * FROM usuarios")
+        let res: sqlite.QueryResult = sqlite.query(db, "SELECT * FROM usuarios")
         let i: int = 0
         while i < res.row_count do
-            let row: Row = res.rows[i]
+            let row: sqlite.Row = res.rows[i]
             print(f"ID: {row.values[0]}, Nome: {row.values[1]}, Email: {row.values[2]}, Cargo: {row.values[3]}")
             i = i + 1
         end

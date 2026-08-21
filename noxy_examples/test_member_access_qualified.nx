@@ -1,0 +1,39 @@
+// Issue #58 item 1 (v0.13.0): acesso a membro de um valor tipado por struct de
+// MODULO e tipado estaticamente, com o tipo do campo traduzido para a visao do
+// programa — pela forma qualificada (io.File, strings.SplitResult) e pela forma
+// por select (File). O programa abaixo so compila porque cada anotacao bate
+// com o tipo que o compilador agora conhece para o campo.
+use io
+use io select File
+use strings
+
+struct Reader
+    file: io.File
+    pos: int
+end
+
+struct Linha
+    partes: strings.SplitResult
+end
+
+let r: Reader = Reader(io.stdin(), 7)
+let path: string = r.file.path      // campo de io.File tipado: string
+let fd: int = r.file.fd             // int
+let aberto: bool = r.file.open      // bool
+print(f"path={path} fd={fd} open={aberto}")
+
+let l: Linha = Linha(strings.split("a,b,c", ","))
+let partes: string[] = l.partes.parts   // campo de strings.SplitResult: string[]
+let n: int = l.partes.count
+print(f"count={n} first={partes[0]} last={partes[n - 1]}")
+
+// Via select, o mesmo struct e o mesmo tipo de campo.
+let mesmo: File = r.file
+let fd2: int = mesmo.fd
+print(f"same fd: {fd == fd2}")
+
+// Escrita tipada num campo de struct de modulo (Reader.pos e local; o campo
+// do io.File e checado contra o tipo declarado no modulo).
+r.pos = r.pos + fd
+print(f"pos={r.pos}")
+print("test_member_access_qualified: OK")

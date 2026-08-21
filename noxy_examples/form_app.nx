@@ -3,7 +3,7 @@ use http_parser select *
 use net select *
 use strings select *
 use io select *
-use sys select getenv
+use sys select getenv, EnvResult
 use convert select *
 
 // --- Helper Functions ---
