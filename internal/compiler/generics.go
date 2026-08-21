@@ -293,6 +293,7 @@ func (c *Compiler) newPass1Compiler() *Compiler {
 	// startup medida em `use http select *`.
 	scratch.moduleDiscovery = c.discoveryState()
 	scratch.namespaceImports = namespaceImportsCopy
+	scratch.namespaceOrder = append([]string(nil), c.namespaceOrder...)
 	scratch.pass1 = true
 	return scratch
 }

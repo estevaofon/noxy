@@ -182,80 +182,132 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 	}
 }
 
-// unresolvedQualifiedFieldError explica, como erro de COMPILACAO, por que o
-// ConstructorType de decl ficou incompleto QUANDO a causa e um campo tipado
-// com nome qualificado (`ns.T`) que nao resolve — forma nova, sem legado a
-// preservar, e sem programa valido possivel (nenhuma chamada ao construtor
-// funcionaria). Um nome SIMPLES desconhecido num campo continua tolerado
-// aqui como sempre foi (o construtor falha em runtime); nesse caso devolve
-// nil.
-func (c *Compiler) unresolvedQualifiedFieldError(decl *ast.StructStatement) error {
+// unknownFieldTypeError e checkDeclaredType aplicado a cada campo de decl:
+// todo nome de tipo num campo tem de designar um struct conhecido — erro de
+// COMPILACAO com hint, nunca o "struct constructor has incomplete runtime
+// type metadata" incondicional de runtime (issue #58 item 2; a forma
+// qualificada `ns.T` ja era erro desde a 0.12.0).
+func (c *Compiler) unknownFieldTypeError(decl *ast.StructStatement) error {
 	for _, field := range decl.FieldsList {
-		name, found := firstUnresolvedQualifiedName(field.Type, func(candidate string) bool {
-			return c.lookupStructFrom("", candidate) != nil
-		})
-		if !found {
-			continue
+		position := fmt.Sprintf("struct '%s' field '%s'", displayStructName(decl.Name), field.Name)
+		if err := c.checkDeclaredType(field.Type, decl.Token.Line, position); err != nil {
+			return err
 		}
-		ns, base, _ := strings.Cut(name, ".")
-		var reason, hint string
-		module, isNamespace := c.namespaceImports[ns]
-		switch {
-		case !isNamespace:
-			reason = fmt.Sprintf("'%s' is not an imported module", ns)
-			hint = fmt.Sprintf("add 'use %s' at the top of the file", ns)
-		default:
-			if _, loadable := c.discoverModuleStructs(module); !loadable {
-				reason = fmt.Sprintf("module '%s' could not be loaded", module)
-				hint = "check the module path"
-			} else {
-				reason = fmt.Sprintf("module '%s' has no struct '%s'", module, base)
-				hint = fmt.Sprintf("check the struct name against the structs declared in '%s'", module)
-			}
-		}
-		return fmt.Errorf("[line %d] struct '%s' field '%s': cannot resolve type '%s': %s\n  hint: %s",
-			decl.Token.Line, decl.Name, field.Name, name, reason, hint)
 	}
 	return nil
 }
 
-// firstUnresolvedQualifiedName procura em t (inclusive dentro de array, map,
-// ref, chan, assinatura e argumentos genericos) o primeiro nome de tipo com a
-// forma `ns.T` que resolves rejeita.
-func firstUnresolvedQualifiedName(t ast.NoxyType, resolves func(string) bool) (string, bool) {
+// checkSignatureTypes e checkDeclaredType aplicado aos parametros e ao
+// retorno de uma assinatura (func declarada ou literal; name vazio = literal
+// anonimo, sem prefixo "function 'f'").
+func (c *Compiler) checkSignatureTypes(name string, params []*ast.Parameter, returnType ast.NoxyType, line int) error {
+	prefix := ""
+	if name != "" {
+		prefix = fmt.Sprintf("function '%s' ", name)
+	}
+	for _, param := range params {
+		if err := c.checkDeclaredType(param.Type, line, fmt.Sprintf("%sparameter '%s'", prefix, param.Name)); err != nil {
+			return err
+		}
+	}
+	if returnType != nil {
+		if err := c.checkDeclaredType(returnType, line, prefix+"return type"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkDeclaredType exige que todo nome de struct dentro de t (inclusive em
+// array, map, ref, chan e assinatura) designe uma declaracao conhecida neste
+// compilador — nome simples via c.structs, `ns.T` via o namespace importado,
+// instancia generica ja registrada (structDeclaration). position e o lugar
+// da anotacao na mensagem ("struct 'A' field 'b'", "function 'f' parameter
+// 'x'", "function 'f' return type", "variable 'x'").
+//
+// Nome simples desconhecido: `unknown type 'T'` + hint de declarar/importar.
+// Nome qualificado: mantem o diagnostico da 0.12.0 (`cannot resolve type
+// 'io.Nope': module 'io' has no struct 'Nope'` / `'foo' is not an imported
+// module`), que diz exatamente qual metade falhou.
+func (c *Compiler) checkDeclaredType(t ast.NoxyType, line int, position string) error {
+	name, found := firstUnknownTypeName(t, func(candidate string) bool {
+		return c.structDeclaration(candidate) != nil
+	})
+	if !found {
+		return nil
+	}
+	if !isQualifiedTypeName(name) {
+		return fmt.Errorf("[line %d] %s: unknown type '%s'\n  hint: declare 'struct %s' or import it with 'use m select %s'",
+			line, position, name, name, name)
+	}
+	ns, base, _ := strings.Cut(name, ".")
+	var reason, hint string
+	module, isNamespace := c.namespaceImports[ns]
+	switch {
+	case !isNamespace:
+		reason = fmt.Sprintf("'%s' is not an imported module", ns)
+		hint = fmt.Sprintf("add 'use %s' at the top of the file", ns)
+	default:
+		if _, loadable := c.discoverModuleStructs(module); !loadable {
+			reason = fmt.Sprintf("module '%s' could not be loaded", module)
+			hint = "check the module path"
+		} else {
+			reason = fmt.Sprintf("module '%s' has no struct '%s'", module, base)
+			hint = fmt.Sprintf("check the struct name against the structs declared in '%s'", module)
+		}
+	}
+	return fmt.Errorf("[line %d] %s: cannot resolve type '%s': %s\n  hint: %s",
+		line, position, name, reason, hint)
+}
+
+// firstUnknownTypeName procura em t (inclusive dentro de array, map, ref,
+// chan, assinatura e argumentos genericos) o primeiro nome de tipo que nao e
+// primitivo e que resolves rejeita. TypeParamType nao conta: fora de template
+// resolveAnnotation ja o recusou; dentro de instancia ja foi substituido.
+func firstUnknownTypeName(t ast.NoxyType, resolves func(string) bool) (string, bool) {
 	switch typed := t.(type) {
 	case *ast.PrimitiveType:
-		if isQualifiedTypeName(typed.Name) && !resolves(typed.Name) {
+		if !isBuiltinTypeName(typed.Name) && !resolves(typed.Name) {
 			return typed.Name, true
 		}
 	case *ast.ArrayType:
-		return firstUnresolvedQualifiedName(typed.ElementType, resolves)
+		return firstUnknownTypeName(typed.ElementType, resolves)
 	case *ast.MapType:
-		if name, found := firstUnresolvedQualifiedName(typed.KeyType, resolves); found {
+		if name, found := firstUnknownTypeName(typed.KeyType, resolves); found {
 			return name, true
 		}
-		return firstUnresolvedQualifiedName(typed.ValueType, resolves)
+		return firstUnknownTypeName(typed.ValueType, resolves)
 	case *ast.RefType:
-		return firstUnresolvedQualifiedName(typed.ElementType, resolves)
+		return firstUnknownTypeName(typed.ElementType, resolves)
 	case *ast.ChanType:
-		return firstUnresolvedQualifiedName(typed.ElementType, resolves)
+		return firstUnknownTypeName(typed.ElementType, resolves)
 	case *ast.FunctionType:
 		for _, param := range typed.Params {
-			if name, found := firstUnresolvedQualifiedName(param, resolves); found {
+			if name, found := firstUnknownTypeName(param, resolves); found {
 				return name, true
 			}
 		}
 		if typed.Return != nil {
-			return firstUnresolvedQualifiedName(typed.Return, resolves)
+			return firstUnknownTypeName(typed.Return, resolves)
 		}
 	case *ast.GenericType:
 		for _, arg := range typed.Args {
-			if name, found := firstUnresolvedQualifiedName(arg, resolves); found {
+			if name, found := firstUnknownTypeName(arg, resolves); found {
 				return name, true
 			}
 		}
 	}
 	return "", false
+}
+
+// displayStructName e o nome de um struct como o usuario o escreveu: uma
+// instancia generica (`main::Caixa<int>`) aparece sem o qualificador interno
+// de modulo (`Caixa<int>`), como em displayInstanceName.
+func displayStructName(name string) string {
+	if _, display, found := strings.Cut(name, "::"); found {
+		return display
+	}
+	return name
 }
 
 // isQualifiedTypeName reconhece `ns.T` — exatamente um ponto separando dois

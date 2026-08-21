@@ -72,18 +72,9 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		}
 		nameConst := c.makeConstant(value.NewString(n.Member))
 		c.emitOpWithConstantIndex(chunk.OP_GET_PROP_MUT, nameConst)
-		var t ast.NoxyType
-		if prim, ok := leftType.(*ast.PrimitiveType); ok {
-			if structDef, exists := c.structs[prim.Name]; exists {
-				for _, f := range structDef.FieldsList {
-					if f.Name == n.Member {
-						t = f.Type
-						break
-					}
-				}
-			}
-		}
-		t, wasRef := c.derefMutIfRef(t)
+		// memberType: dono resolvido pela declaracao (`File` ≡ `io.File`) e
+		// tipo do campo ja na visao do programa (issue #58 item 1).
+		t, wasRef := c.derefMutIfRef(c.memberType(leftType, n.Member))
 		return t, wasRef, nil
 
 	default:

@@ -103,6 +103,12 @@ type Compiler struct {
 	// TestRuntimeFunctionBodyOnlyWildcardDoesNotInvalidateModule) so pode
 	// afetar o escopo daquele corpo, nunca vazar para o compilador pai.
 	namespaceImports map[string]string
+	// namespaceOrder e a lista dos aliases de namespaceImports em ORDEM DE
+	// DECLARACAO (um map nao tem ordem): programStructName precisa escolher
+	// deterministicamente o primeiro `use m [as alias]` que nomeia um struct
+	// de modulo quando o programa declarou mais de um alias para o mesmo
+	// modulo. Copiado por compilador como namespaceImports.
+	namespaceOrder []string
 	// sessionLets e a memoria de sessao do REPL (nil fora dele): nomes de
 	// `let` global de linhas ANTERIORES. O predeclare so CHECA contra ele;
 	// quem registra e o loop do REPL apos a linha compilar com sucesso —
@@ -173,6 +179,7 @@ func NewChild(parent *Compiler) *Compiler {
 	for name, module := range parent.namespaceImports {
 		childNamespaceImports[name] = module
 	}
+	childNamespaceOrder := append([]string(nil), parent.namespaceOrder...)
 	c := &Compiler{
 		enclosing:        parent,
 		currentChunk:     chunk.New(),
@@ -192,6 +199,7 @@ func NewChild(parent *Compiler) *Compiler {
 		instances:        parent.instances,
 		pass1:            parent.pass1,
 		namespaceImports: childNamespaceImports,
+		namespaceOrder:   childNamespaceOrder,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -294,6 +302,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		n.Type = resolvedAnnotation
+		// Anotacao com tipo que nao existe e `unknown type` (issue #58 item
+		// 2) — antes caia no "type mismatch: expected Inexistente, got int",
+		// que aponta para o valor em vez de para o nome errado.
+		if n.Type != nil {
+			if err := c.checkDeclaredType(n.Type, n.Token.Line, fmt.Sprintf("variable '%s'", n.Name.Value)); err != nil {
+				return nil, nil, err
+			}
+		}
 
 		var valType ast.NoxyType
 		// Compile initializer
@@ -740,17 +756,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// RESOLVE FIELD TYPE (antes de compilar o valor: §3 target-typing,
 			// posicao 4, precisa do tipo declarado do campo como alvo para
 			// decidir se n.Value e um template de funcao nu):
-			var fieldType ast.NoxyType
-			if prim, ok := leftType.(*ast.PrimitiveType); ok {
-				if structDef, exists := c.structs[prim.Name]; exists {
-					for _, f := range structDef.FieldsList {
-						if f.Name == memberExp.Member {
-							fieldType = f.Type
-							break
-						}
-					}
-				}
-			}
+			fieldType := c.memberType(leftType, memberExp.Member)
 
 			// §3 target-typing, posicao 4: `campo.transform = identity` — o
 			// tipo declarado do campo e o alvo concreto.
@@ -832,6 +838,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			})
 			c.structs[n.Name] = n
 		}
+		// Todo nome de tipo nos campos tem de designar um struct conhecido
+		// (issue #58 item 2): erro de compilacao com hint, nunca o
+		// "incomplete runtime type metadata" de runtime. Vem DEPOIS do
+		// registro do proprio nome (auto-referencia `next: ref Node`; o
+		// top-level ja veio de predeclareStructs, e os imports de topo de
+		// predeclareImport), para que referencia adiantada siga valendo.
+		if err := c.unknownFieldTypeError(n); err != nil {
+			return nil, nil, err
+		}
 
 		fields := []string{}
 		for _, f := range n.FieldsList {
@@ -863,13 +878,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 		structType := newStructFunctionType(n.Name, paramTypes)
 		structDefinition.ConstructorType = c.runtimeTypeInfo(structType)
-		if structDefinition.ConstructorType == nil {
-			// Campo `ns.T` que nao resolve: erro aqui, com hint — nunca o
-			// "incomplete runtime type metadata" incondicional de runtime.
-			if err := c.unresolvedQualifiedFieldError(n); err != nil {
-				return nil, nil, err
-			}
-		}
 
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
@@ -903,28 +911,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		nameConst := c.makeConstant(value.NewString(n.Member))
 		c.emitOpWithConstantIndex(chunk.OP_GET_PROPERTY, nameConst)
 
-		// RESOLVE FIELD TYPE:
-		// Look up struct definition if leftType is a named PrimitiveType
-		if prim, ok := leftType.(*ast.PrimitiveType); ok {
-			// So nome simples: um valor tipado `io.File` continua com acesso a
-			// membro DINAMICO (como sempre foi). Tipar pelo structDeclaration
-			// vazaria os nomes do modulo (`Row[]`) para o escopo do programa,
-			// onde `let r: sqlite.Row = q.rows[0]` passaria a ser "expected
-			// sqlite.Row, got Row" — exigiria traduzir o tipo do campo para a
-			// visao do programa (namespace/select). Follow-up.
-			if structDef, exists := c.structs[prim.Name]; exists {
-				// Find field type
-				for _, f := range structDef.FieldsList {
-					if f.Name == n.Member {
-						return c.currentChunk, f.Type, nil
-					}
-				}
-				// Field not found logic? (or let runtime handle if dynamic)
-				// For strict structs, this should probably be an error, but let's return nil (dynamic) if not found.
-			}
-		}
-
-		return c.currentChunk, nil, nil
+		// RESOLVE FIELD TYPE: memberType resolve o dono pela declaracao que
+		// designa (`File` e `io.File` igual) e devolve o tipo do campo ja na
+		// visao do programa (issue #58 item 1); nil = acesso dinamico (dono
+		// desconhecido, campo inexistente ou tipo que o programa nao consegue
+		// nomear).
+		return c.currentChunk, c.memberType(leftType, n.Member), nil
 
 	case *ast.ArrayLiteral:
 		// §3 target-typing, posicao 3: consome o hint armado pelo `let`
@@ -2049,6 +2041,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if err := c.resolveSignatureAnnotations(n.Parameters, &n.ReturnType, n.Token.Line); err != nil {
 			return nil, nil, err
 		}
+		// Parametro/retorno com tipo que nao existe e erro aqui (issue #58
+		// item 2), nao um corpo que compila e falha em runtime.
+		if err := c.checkSignatureTypes(n.Name, n.Parameters, n.ReturnType, n.Token.Line); err != nil {
+			return nil, nil, err
+		}
 		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
@@ -2076,6 +2073,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Mesmo hook do FunctionStatement: a assinatura de um literal tambem pode
 		// anotar instancias de struct generico.
 		if err := c.resolveSignatureAnnotations(n.Parameters, &n.ReturnType, n.Token.Line); err != nil {
+			return nil, nil, err
+		}
+		if err := c.checkSignatureTypes(n.Name, n.Parameters, n.ReturnType, n.Token.Line); err != nil {
 			return nil, nil, err
 		}
 
@@ -2401,24 +2401,6 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		return c.currentChunk, nil, nil
 	}
 	return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil
-}
-
-func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
-	owner = unwrapRefType(owner)
-	primitive, ok := owner.(*ast.PrimitiveType)
-	if !ok {
-		return nil
-	}
-	definition, ok := c.structs[primitive.Name]
-	if !ok {
-		return nil
-	}
-	for _, field := range definition.FieldsList {
-		if field.Name == member {
-			return field.Type
-		}
-	}
-	return nil
 }
 
 func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.NoxyType, error) {

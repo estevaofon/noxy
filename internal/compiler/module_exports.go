@@ -34,6 +34,11 @@ type moduleDiscoveryState struct {
 	origins map[*ast.StructStatement]string
 	// scopes e o memo de moduleStructScope por modulo.
 	scopes map[string]*moduleStructScope
+	// exported e o memo de discoverModuleStructs por modulo (so sucessos):
+	// structDeclaration e programStructName consultam a lista de structs
+	// exportados a cada nome qualificado / acesso a membro de valor de
+	// modulo, e a lista e uma funcao pura do Program memoizado em loaded.
+	exported map[string]map[string]*ast.StructStatement
 }
 
 // loadedModule e o resultado memoizado de loadModuleDeclarations: o Program
@@ -58,10 +63,11 @@ type loadedModule struct {
 
 func newModuleDiscoveryState() *moduleDiscoveryState {
 	return &moduleDiscoveryState{
-		active:  make(map[string]bool),
-		loaded:  make(map[string]loadedModule),
-		origins: make(map[*ast.StructStatement]string),
-		scopes:  make(map[string]*moduleStructScope),
+		active:   make(map[string]bool),
+		loaded:   make(map[string]loadedModule),
+		origins:  make(map[*ast.StructStatement]string),
+		scopes:   make(map[string]*moduleStructScope),
+		exported: make(map[string]map[string]*ast.StructStatement),
 	}
 }
 
@@ -160,6 +166,21 @@ func (c *Compiler) discoverModuleStructs(module string) (map[string]*ast.StructS
 }
 
 func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDiscoveryState) (map[string]*ast.StructStatement, bool) {
+	if cached, hit := state.exported[module]; hit {
+		return cached, true
+	}
+	structs, ok := c.buildModuleStructExports(module, state)
+	if ok {
+		// So SUCESSOS entram no memo (mesma politica de loadModuleDeclarations:
+		// uma falha pode ser contextual, ex.: guard de ciclo). O map devolvido
+		// e compartilhado entre chamadores e NAO pode ser mutado por eles —
+		// importModuleStructs copia para c.structs, nunca o contrario.
+		state.exported[module] = structs
+	}
+	return structs, ok
+}
+
+func (c *Compiler) buildModuleStructExports(module string, state *moduleDiscoveryState) (map[string]*ast.StructStatement, bool) {
 	structs := make(map[string]*ast.StructStatement)
 	program, _, ok := c.loadModuleDeclarations(module, state)
 	if !ok {
@@ -176,12 +197,28 @@ func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDi
 			structs[declaration.Name] = declaration
 			state.origins[declaration] = module
 		case *ast.UseStmt:
-			if declaration.SelectAll {
+			switch {
+			case declaration.SelectAll:
 				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
 				if !loadable {
 					return make(map[string]*ast.StructStatement), false
 				}
 				maps.Copy(structs, imported)
+			case len(declaration.Selectors) > 0:
+				// Espelho de discoverModuleExports: um nome importado por
+				// `select` e reexportado como VALOR pelo modulo (entra no
+				// ExportMap), entao a DECLARACAO do struct tem de acompanhar
+				// — senao `use a select *` ligaria o construtor T mas `let t:
+				// T` acusaria `unknown type 'T'` (issue #58 item 2).
+				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
+				if !loadable {
+					continue
+				}
+				for _, name := range declaration.Selectors {
+					if definition, exported := imported[name]; exported {
+						structs[name] = definition
+					}
+				}
 			}
 		}
 	}
@@ -380,6 +417,12 @@ func nestedTemplateImportError(line int) error {
 }
 
 func (c *Compiler) predeclareImport(declaration *ast.UseStmt) error {
+	// Os structs importados por select/select* entram em c.structs ja no
+	// predeclare (o case *ast.UseStmt repete, idempotente): como funcoes e
+	// `let` de topo, um `use` de topo vale para o arquivo inteiro, entao uma
+	// assinatura ou campo declarado ANTES da linha do `use` ja enxerga o
+	// struct — sem isso checkDeclaredType (issue #58 item 2) acusaria
+	// `unknown type` por ordem de declaracao.
 	switch {
 	case declaration.SelectAll:
 		exports, _ := c.discoverModuleExports(declaration.Module)
@@ -389,6 +432,7 @@ func (c *Compiler) predeclareImport(declaration *ast.UseStmt) error {
 				return err
 			}
 		}
+		c.importModuleStructs(declaration.Module, nil)
 	case len(declaration.Selectors) > 0:
 		bindings, _ := c.moduleTopLevelBindings(declaration.Module)
 		for _, name := range declaration.Selectors {
@@ -396,6 +440,7 @@ func (c *Compiler) predeclareImport(declaration *ast.UseStmt) error {
 				return err
 			}
 		}
+		c.importModuleStructs(declaration.Module, declaration.Selectors)
 	default:
 		name := declaration.Alias
 		if name == "" {
@@ -581,6 +626,11 @@ func (c *Compiler) importNamespace(module, bindName string) {
 	c.globals[bindName] = nil
 	if c.namespaceImports == nil {
 		c.namespaceImports = make(map[string]string)
+	}
+	if _, seen := c.namespaceImports[bindName]; !seen {
+		// Ordem de declaracao dos aliases (programStructName escolhe o
+		// primeiro); um alias redeclarado mantem a posicao original.
+		c.namespaceOrder = append(c.namespaceOrder, bindName)
 	}
 	c.namespaceImports[bindName] = module
 }

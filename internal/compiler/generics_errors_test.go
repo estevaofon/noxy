@@ -79,18 +79,19 @@ func TestNullOnlyInferenceError(t *testing.T) {
 // responde false para *ast.PrimitiveType) e "tipo 'T' não declarado" nunca é a
 // mensagem aqui. O que ESTE teste prova é a outra metade da garantia da spec:
 // `T` fora de escopo nunca vira um tipo "de mentirinha" que aceita qualquer
-// valor silenciosamente — vira um nome de tipo comum e desconhecido, que a
-// checagem de tipos do `let` rejeita do jeito de sempre (type mismatch,
-// porque "T" nunca é "int"). Sem essa segunda garantia um usuário poderia
-// escrever `T` por engano fora de um template e ver o programa compilar
-// (aceitando qualquer valor como se T fosse `any`) em vez de falhar.
+// valor silenciosamente — vira um nome de tipo comum e desconhecido, que o
+// `let` rejeita como `unknown type 'T'` (issue #58 item 2; antes da 0.13.0
+// caía no "type mismatch", porque "T" nunca é "int"). Sem essa segunda
+// garantia um usuário poderia escrever `T` por engano fora de um template e
+// ver o programa compilar (aceitando qualquer valor como se T fosse `any`)
+// em vez de falhar.
 func TestTypeParamOutOfScopeError(t *testing.T) {
 	_, _, err := New().Compile(parse("let x: T = 1"))
 	if err == nil {
 		t.Fatal("T fora de escopo deveria ser erro (nunca aceitar silenciosamente), veio nil")
 	}
-	if !strings.Contains(err.Error(), "type mismatch") {
-		t.Fatalf("esperava erro de tipo (T tratado como nome de tipo comum e desconhecido), veio %v", err)
+	if !strings.Contains(err.Error(), "unknown type 'T'") {
+		t.Fatalf("esperava 'unknown type' (T tratado como nome de tipo comum e desconhecido), veio %v", err)
 	}
 }
 
