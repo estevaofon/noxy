@@ -141,7 +141,12 @@ func (vm *VM) copyPreparedArguments(args []value.Value, params []value.ParamInfo
 
 func (vm *VM) invokePreparedCall(call PreparedCall) (err error) {
 	base := vm.stackTop
-	if base < 0 || base >= len(vm.stack) || len(call.Arguments) > len(vm.stack)-base-1 {
+	// Callee + argumentos. A folga e OBTIDA (a pilha cresce), nao apenas
+	// medida: len(vm.stack) e a alocacao de agora, nao o teto — reprovar por
+	// ela falharia a chamada diferida centenas de milhares de slots abaixo de
+	// StackMax, com um "stack overflow" que push() nao teria dado. So o teto
+	// reprova, e a mensagem continua dizendo "stack overflow".
+	if base < 0 || !vm.ensureStackHeadroom(len(call.Arguments)+1) {
 		return vm.runtimeErrorAtCurrentFrame("stack overflow while invoking deferred call")
 	}
 	temporaryTop := base

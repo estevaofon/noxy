@@ -125,6 +125,19 @@ func (vm *VM) startSupervisedTask(task *value.ObjTask, call preparedTaskCall) {
 			// captura feita em prepareTaskCall sai de escopo aqui tambem no
 			// caminho de panico, antes de sinalizar conclusao da task.
 			vm.releasePreparedArguments(call.Arguments, call.Closure.Function.Params)
+			// Sentinela de push(): a task falha como RUNTIME, igual ao ramo de
+			// err abaixo — estouro de pilha nunca vira envelope "panic" com
+			// stack Go.
+			if _, isOverflow := recovered.(stackOverflowPanic); isOverflow {
+				overflow := vm.runtimeErrorAtCurrentFrame("stack overflow: operand stack exceeds %d slots", StackMax)
+				task.Complete(value.TaskOutcome{Failure: &value.TaskFailure{
+					Kind:    "runtime",
+					Message: overflow.Error(),
+					Stack:   deepestRuntimeStack(overflow),
+					Cause:   overflow,
+				}})
+				return
+			}
 			task.Complete(value.TaskOutcome{Failure: &value.TaskFailure{
 				Kind:    "panic",
 				Message: fmt.Sprint(recovered),

@@ -77,7 +77,9 @@ func (vm *VM) runCallBoundary(callee value.Value, args []value.Value) (value.Val
 // envelope o carrega. O release da retencao de closure e identico.
 func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err error) {
 	base := vm.stackTop
-	if base < 0 || base >= len(vm.stack) || len(call.Arguments) > len(vm.stack)-base-1 {
+	// Mesma folga de invokePreparedCall (defer.go): obtida crescendo a pilha,
+	// nao medida contra a alocacao atual — so StackMax reprova.
+	if base < 0 || !vm.ensureStackHeadroom(len(call.Arguments)+1) {
 		return value.NewNull(), vm.runtimeErrorAtCurrentFrame("stack overflow while invoking call_result")
 	}
 	result = value.NewNull()
@@ -120,11 +122,27 @@ func (vm *VM) invokeBoundaryCall(call PreparedCall) (result value.Value, err err
 	// invertida o cleanup rodaria sobre frames que o unwind ainda nao
 	// desfez — vm.stackTop e vm.frameCount ficariam inconsistentes.
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			vm.hardUnwindTo(ownerFrameCount)
-			result = value.NewNull()
-			err = &boundaryPanicError{payload: fmt.Sprint(recovered), stack: string(debug.Stack())}
+		recovered := recover()
+		if recovered == nil {
+			return
 		}
+		// Sentinela de push(): a fronteira o converte no runtime error padrao
+		// — estouro de pilha e falha de RUNTIME capturavel (Failure.kind
+		// "runtime"), nunca um envelope de panic com stack Go. Construido
+		// ANTES do hardUnwind para a pilha Noxy ainda conter os frames que
+		// estouraram (o piso ja e ownerFrameCount).
+		_, isOverflow := recovered.(stackOverflowPanic)
+		var overflow error
+		if isOverflow {
+			overflow = vm.runtimeErrorAtCurrentFrame("stack overflow: operand stack exceeds %d slots", StackMax)
+		}
+		vm.hardUnwindTo(ownerFrameCount)
+		result = value.NewNull()
+		if isOverflow {
+			err = overflow
+			return
+		}
+		err = &boundaryPanicError{payload: fmt.Sprint(recovered), stack: string(debug.Stack())}
 	}()
 	vm.push(call.Callee)
 	for _, argument := range call.Arguments {

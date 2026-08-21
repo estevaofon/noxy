@@ -206,17 +206,34 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 // sob demanda. E o unico ponto do caminho normal onde os tetos sao
 // verificados: recursao profunda morre aqui com erro de runtime limpo
 // (mensagens distintas para frames e operandos), nunca com panic Go.
+//
+// So o TESTE mora aqui; crescimento e construcao de erro ficam em growForCall.
+// A divisao e load-bearing: com os dois runtimeError variadicos no corpo o
+// custo do inliner e 283 (orcamento 80) e TODA chamada Noxy passaria a pagar
+// uma chamada/retorno que nao existia antes das pilhas dinamicas.
+//
+// ATENCAO: assim o custo e 80 — EXATAMENTE o orcamento, sem folga (o no de
+// chamada de growForCall sozinho custa 57). Qualquer no a mais aqui desinlina
+// esta funcao em silencio; codigo novo vai para growForCall, nunca para este
+// corpo. Conferir com `go build -gcflags='-m -m' ./internal/vm` ao mexer.
 func (vm *VM) ensureCallCapacity(c *chunk.Chunk, ip int) error {
-	if vm.frameCount == len(vm.frames) {
-		if len(vm.frames) >= FramesMax {
-			return vm.runtimeError(c, ip, "stack overflow: call depth exceeds %d frames", FramesMax)
-		}
-		vm.growFrames()
+	if vm.frameCount == len(vm.frames) || len(vm.stack)-vm.stackTop < stackReserve {
+		return vm.growForCall(c, ip)
 	}
-	for len(vm.stack)-vm.stackTop < stackReserve {
-		if !vm.growStack() {
-			return vm.runtimeError(c, ip, "stack overflow: operand stack exceeds %d slots", StackMax)
-		}
+	return nil
+}
+
+// growForCall e o caminho FRIO de ensureCallCapacity: cresce o que faltar e
+// devolve o runtime error do teto correspondente. Fora de linha de proposito
+// (ver ensureCallCapacity).
+//
+//go:noinline
+func (vm *VM) growForCall(c *chunk.Chunk, ip int) error {
+	if vm.frameCount == len(vm.frames) && !vm.growFrames() {
+		return vm.runtimeError(c, ip, "stack overflow: call depth exceeds %d frames", FramesMax)
+	}
+	if !vm.ensureStackHeadroom(stackReserve) {
+		return vm.runtimeError(c, ip, "stack overflow: operand stack exceeds %d slots", StackMax)
 	}
 	return nil
 }

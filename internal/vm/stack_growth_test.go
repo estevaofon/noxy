@@ -129,3 +129,114 @@ func TestOperandStackAtCapIsRuntimeErrorNotPanic(t *testing.T) {
 		t.Fatalf("error=%v, want operand stack overflow", err)
 	}
 }
+
+// O guard de headroom da chamada diferida mede o TETO, nao a alocacao atual.
+// Topo encostado no fim da alocacao inicial: a chamada precisa de dois slots
+// (callee + argumento) e so um sobra, entao a pilha tem de CRESCER e a chamada
+// tem de rodar. Reprovar aqui seria um "stack overflow" ~512x abaixo do limite
+// real, num ponto em que push() cresceria sem reclamar.
+func TestDeferredCallGrowsStackInsteadOfFailingBelowTheCap(t *testing.T) {
+	machine := New()
+	ran := false
+	cleanup := value.NewNative("cleanup", func([]value.Value) value.Value {
+		ran = true
+		return value.NewNull()
+	})
+	frame := &machine.frames[0]
+	*frame = CallFrame{
+		StackBase: 0,
+		LocalBase: 0,
+		Deferred: []PreparedCall{
+			{Callee: cleanup, Arguments: []value.Value{value.NewInt(1)}, Registration: SourceLocation{File: "headroom.nx", Line: 4}},
+		},
+	}
+	machine.frameCount = 1
+	machine.currentFrame = frame
+	machine.stackTop = stackInitial - 1
+
+	outcome := machine.finishFrame(frameOutcome{Result: value.NewNull()})
+	if outcome.Err != nil {
+		t.Fatalf("err=%v, want the deferred call to grow the stack and run", outcome.Err)
+	}
+	if !ran {
+		t.Fatal("deferred call did not run")
+	}
+	if len(machine.stack) <= stackInitial {
+		t.Fatalf("stack=%d, want it grown past %d", len(machine.stack), stackInitial)
+	}
+}
+
+// Mesmo cenario visto de cima: uma funcao que consome centenas de slots de
+// operandos (literal grande) e ainda tem defer roda normalmente na alocacao
+// inicial, crescendo a pilha em vez de falhar.
+func TestFunctionWithManyOperandsAndDeferRuns(t *testing.T) {
+	machine := New()
+	limpou := false
+	machine.DefineNative("marca_limpeza", func([]value.Value) value.Value {
+		limpou = true
+		return value.NewNull()
+	})
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	source := "func com_muitos_operandos() -> int\n    let dados: int[] = [" + strings.Repeat("1, ", 399) + "1]\n    defer marca_limpeza()\n    return length(dados)\nend\ntest_report(com_muitos_operandos())"
+	if err := interpretVMSource(t, machine, source); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	if reported.Type != value.VAL_INT || reported.AsInt != 400 {
+		t.Fatalf("reported=%v, want 400", reported)
+	}
+	if !limpou {
+		t.Fatal("defer did not run")
+	}
+}
+
+// So o sentinela e recuperado: um panic estranho (aqui de um native) continua
+// subindo por run() com o valor original, nunca virando runtime error.
+func TestForeignPanicIsNotRecoveredByRun(t *testing.T) {
+	machine := New()
+	machine.DefineNative("estoura", func([]value.Value) value.Value {
+		panic("panico estranho")
+	})
+	recovered := func() (recovered any) {
+		defer func() { recovered = recover() }()
+		_ = interpretVMSource(t, machine, "estoura()\n")
+		return nil
+	}()
+	if text, _ := recovered.(string); text != "panico estranho" {
+		t.Fatalf("recovered=%v, want the original panic to propagate out of run()", recovered)
+	}
+}
+
+// Dentro de call_result o mesmo panic estranho continua virando o envelope de
+// panic da fronteira (nao o runtime error do sentinela).
+func TestForeignPanicInsideCallResultStaysAPanicEnvelope(t *testing.T) {
+	machine := New()
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	machine.DefineNative("estoura", func([]value.Value) value.Value {
+		panic("panico estranho")
+	})
+	if err := interpretVMSource(t, machine, `
+func alvo() -> int
+    estoura()
+    return 1
+end
+let r: any = call_result(alvo)
+test_report(r.failure.kind + "|" + r.failure.message)`); err != nil {
+		t.Fatalf("vm error: %v", err)
+	}
+	text, _ := reported.Obj.(string)
+	if !strings.HasPrefix(text, "panic|") || !strings.Contains(text, "panico estranho") {
+		t.Fatalf("failure=%q, want the boundary panic envelope", text)
+	}
+}

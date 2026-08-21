@@ -50,6 +50,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 	gcache := c.GlobalCache()
 	ip := frame.IP
 	defer func() {
+		// ANTES do recover: no re-panico (qualquer panic que nao seja o
+		// sentinela) a funcao nao volta mais aqui, e o IP salvo e o que a
+		// pilha Noxy de quem tratar o panico vai mostrar. Tambem e o IP que
+		// runtimeErrorAtCurrentFrame le logo abaixo.
+		if vm.currentFrame == frame {
+			frame.IP = ip
+		}
 		if recovered := recover(); recovered != nil {
 			if _, isOverflow := recovered.(stackOverflowPanic); !isOverflow {
 				panic(recovered)
@@ -57,9 +64,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Sentinela de push(): um unico frame empilhou mais do que restava
 			// ate StackMax (ensureCallCapacity cobre o caso comum, a recursao).
 			err = vm.runtimeErrorAtCurrentFrame("stack overflow: operand stack exceeds %d slots", StackMax)
-		}
-		if vm.currentFrame == frame {
-			frame.IP = ip
 		}
 		if err != nil {
 			err = vm.unwindTo(minFrameCount-1, frameOutcome{Err: err}).Err

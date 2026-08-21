@@ -164,33 +164,59 @@ func (vm *VM) growStackForPush() {
 	}
 }
 
-// growStack dobra a pilha de operandos (ate StackMax) e reaponta os upvalues
+// growStack dobra a pilha de operandos (ate StackMax) e migra os upvalues
 // ABERTOS — os unicos ponteiros para dentro de vm.stack que sobrevivem a uma
 // instrucao (fatias `args` passadas a natives sao lidas, nunca escritas, e os
-// indices de Owned/StackBase nao mudam). Devolve false se ja esta no teto.
+// indices de Owned/StackBase nao mudam). A copia do conteudo e feita por
+// RelocateOpenUpvalues, com as caixas travadas, porque uma task pode estar
+// escrevendo por uma delas nesta pilha. Devolve false so no TETO.
 func (vm *VM) growStack() bool {
 	if len(vm.stack) >= StackMax {
 		return false
 	}
 	newLen := len(vm.stack) * 2
+	if newLen == 0 {
+		// Pilha vazia dobraria para zero e nao cresceria nunca — o laco de
+		// ensureStackHeadroom giraria para sempre.
+		newLen = stackInitial
+	}
 	if newLen > StackMax {
 		newLen = StackMax
 	}
 	old := vm.stack
 	grown := make([]value.Value, newLen)
-	copy(grown, old)
+	value.RelocateOpenUpvalues(vm.openUpvalues, old, grown)
 	vm.stack = grown
-	for upvalue := vm.openUpvalues; upvalue != nil; upvalue = upvalue.Next() {
-		upvalue.Relocate(old, grown)
+	return true
+}
+
+// ensureStackHeadroom garante `slots` livres acima de stackTop, crescendo a
+// pilha sob demanda. Devolve false SO quando o teto (StackMax) nao permite
+// mais crescer — nunca por causa da alocacao atual, que e so o tamanho de
+// agora. Todo guard de "cabe empilhar N?" tem de passar por aqui: medir contra
+// len(vm.stack) reprovaria chamadas centenas de milhares de slots abaixo do
+// limite real, que push() atenderia crescendo.
+func (vm *VM) ensureStackHeadroom(slots int) bool {
+	for len(vm.stack)-vm.stackTop < slots {
+		if !vm.growStack() {
+			return false
+		}
 	}
 	return true
 }
 
 // growFrames dobra o slice de frames (ate FramesMax) e reaponta
 // vm.currentFrame, que sempre e &frames[frameCount-1] fora de uma chamada em
-// andamento. Chamado so por ensureCallCapacity, ANTES de tomar &frames[n].
-func (vm *VM) growFrames() {
+// andamento. Chamado so por growForCall, ANTES de tomar &frames[n]. Devolve
+// false no teto, como growStack.
+func (vm *VM) growFrames() bool {
+	if len(vm.frames) >= FramesMax {
+		return false
+	}
 	newLen := len(vm.frames) * 2
+	if newLen == 0 {
+		newLen = framesInitial
+	}
 	if newLen > FramesMax {
 		newLen = FramesMax
 	}
@@ -200,6 +226,7 @@ func (vm *VM) growFrames() {
 	if vm.frameCount > 0 {
 		vm.currentFrame = &vm.frames[vm.frameCount-1]
 	}
+	return true
 }
 
 func (vm *VM) pop() value.Value {

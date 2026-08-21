@@ -252,24 +252,53 @@ func (upvalue *ObjUpvalue) Close(location *Value) bool {
 	return true
 }
 
-// Relocate reaponta uma caixa ABERTA depois que a pilha do VM foi realocada:
-// location sai do slot no array antigo para o MESMO indice no novo. Caixa
-// fechada (location aponta para closed) ou que nao aponta para dentro de old
-// nao muda. Sob mu.Lock como Store/Close — tasks podem ler a caixa
-// concorrentemente (Load/IsValid/PointsTo tomam RLock).
-func (upvalue *ObjUpvalue) Relocate(old, grown []Value) {
-	if upvalue == nil || len(old) == 0 || len(grown) < len(old) {
+// RelocateOpenUpvalues migra as caixas ABERTAS de old para grown quando a
+// pilha do VM e realocada: copia o conteudo e reaponta cada location para o
+// MESMO indice no array novo. Caixa fechada (location aponta para closed) ou
+// que nao aponta para dentro de old fica como esta.
+//
+// A COPIA acontece AQUI DENTRO, com todas as caixas travadas, e nao no
+// chamador: uma task roda em VM proprio mas escreve por Store() em caixas
+// cujo location aponta para a pilha do VM que a criou (OP_SET_UPVALUE e
+// companhia). Um Store que caisse entre o `copy` e o reaponte daquela caixa
+// gravaria no array MORTO e a escrita se perderia — travar tudo antes de
+// copiar fecha essa janela.
+//
+// Percorre a lista pelo campo `next` DIRETAMENTE, lido sob o lock da propria
+// caixa, e nunca por Next(): Next() toma RLock e travaria contra o mu.Lock
+// que ja seguramos na mesma caixa. As listas de VMs distintos sao disjuntas
+// (cada captureUpvalue so cria caixas sobre a pilha do seu proprio VM), entao
+// segurar varios locks de uma vez nao cria ciclo de ordenacao.
+//
+// Assume GC nao-movel (o Go atual): as comparacoes de endereco abaixo so
+// valem porque `old` nao se move enquanto esta funcao roda.
+func RelocateOpenUpvalues(head *ObjUpvalue, old, grown []Value) {
+	locked := make([]*ObjUpvalue, 0, 8)
+	for upvalue := head; upvalue != nil; {
+		upvalue.mu.Lock()
+		locked = append(locked, upvalue)
+		upvalue = upvalue.next
+	}
+	defer func() {
+		for i := len(locked) - 1; i >= 0; i-- {
+			locked[i].mu.Unlock()
+		}
+	}()
+
+	copy(grown, old)
+	if len(old) == 0 || len(grown) < len(old) {
 		return
 	}
-	upvalue.mu.Lock()
-	defer upvalue.mu.Unlock()
 	base := uintptr(unsafe.Pointer(&old[0]))
-	addr := uintptr(unsafe.Pointer(upvalue.location))
 	size := unsafe.Sizeof(Value{})
-	if addr < base || addr >= base+uintptr(len(old))*size {
-		return
+	limit := base + uintptr(len(old))*size
+	for _, upvalue := range locked {
+		addr := uintptr(unsafe.Pointer(upvalue.location))
+		if addr < base || addr >= limit {
+			continue
+		}
+		upvalue.location = &grown[(addr-base)/size]
 	}
-	upvalue.location = &grown[(addr-base)/size]
 }
 
 func (upvalue *ObjUpvalue) Next() *ObjUpvalue {

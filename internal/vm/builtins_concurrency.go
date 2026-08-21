@@ -95,6 +95,12 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
+					// Sentinela de push(): erro de runtime da thread, nao um
+					// panic Go com stack do runtime.
+					if _, isOverflow := r.(stackOverflowPanic); isOverflow {
+						fmt.Printf("Thread Error: stack overflow: operand stack exceeds %d slots\n", StackMax)
+						return
+					}
 					fmt.Printf("Thread Panic: %v\n%s", r, debug.Stack())
 				}
 			}()
