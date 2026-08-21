@@ -1,0 +1,61 @@
+// Campo de struct tipado com o nome QUALIFICADO de um struct de outro módulo
+// (io.File, time.DateTime, strings.SplitResult): o construtor do struct local
+// aceita o valor — é a mesma identidade nominal de `use io select File`
+// (spec §11). Na 0.11.0 toda chamada ao construtor falhava com "struct
+// constructor has incomplete runtime type metadata".
+use io
+use time
+use strings
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("test_struct_field_qualified: FAIL - " + message)
+        exit(1)
+    end
+end
+
+struct Reader
+    file: io.File
+    pos: int
+end
+
+struct Evento
+    nome: string
+    quando: time.DateTime
+end
+
+struct Linha
+    partes: strings.SplitResult
+end
+
+func make_reader(f: io.File) -> Reader
+    return Reader(f, 0)
+end
+
+func pos_of(r: Reader) -> int
+    return r.pos
+end
+
+let path: string = "test_struct_field_qualified.tmp"
+let w: io.File = io.open(path, "w")
+io.write(w, "a,b,c\n")
+io.close(w)
+
+let f: io.File = io.open(path, "r")
+let r: Reader = make_reader(f)                 // construtor dentro de função
+let r2: Reader = Reader(io.stdin(), 5)        // argumento direto
+assert(r.pos == 0 && r2.pos == 5, "Reader com campo io.File")
+assert(pos_of(Reader(f, 7)) == 7, "struct passado como argumento")
+let first: io.IOResult = io.read_line(r.file)
+io.close(f)
+assert(first.ok && first.data == "a,b,c", "ler pelo campo io.File")
+
+let e: Evento = Evento("lancamento", time.make_datetime(2026, 8, 21, 9, 30, 0))
+assert(e.quando.year == 2026, "campo time.DateTime")
+
+let l: Linha = Linha(strings.split(first.data, ","))
+assert(l.partes.count == 3, "campo strings.SplitResult")
+
+assert(io.remove(path), "remove")
+print("struct_field_qualified ok")

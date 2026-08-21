@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.12.0] - 2026-08-21
+
+Dois achados pós-0.11.0 da releitura do K&R em Noxy: o campo de struct
+tipado com nome qualificado de módulo (`file: io.File`) quebrava o construtor
+em runtime, e o módulo `io` não tinha posicionamento (`seek`/`tell`) nem
+leitura parcial a partir do cursor — o `get(fd, pos, buf, n)` da seção 8.4
+era o único programa do livro que não podia ser reproduzido. Um item quebra
+compatibilidade.
+
+### Changed (BREAKING)
+
+- **`io.read`, `io.read_bytes` e `io.read_lines` leem do cursor até o fim**,
+  não mais "sempre do início". Num handle recém-aberto nada muda (é o arquivo
+  inteiro); depois de `read_line`/`read_n`/`seek` devolvem o **resto**, e um
+  segundo `read` devolve `""` (`[]`, `b""`) com `ok=true` — a regra que
+  `stdin()` já seguia, agora única para arquivo e stdin. Antes, `read` depois
+  de `read_line` recomeçava do zero (e ignoraria um `seek`). Para reler do
+  início: `io.seek(f, 0, io.SEEK_SET)` antes do `read`. `read_line` depois de
+  um `read` continua reportando `EOF` (o cursor fica no fim).
+
+### Added
+
+- **Posicionamento em `io`** (spec §12): `io.seek(f, offset, whence) ->
+  IOPositionResult` (`SEEK_SET`/`SEEK_CUR`/`SEEK_END` como constantes do
+  módulo, `position` absoluta, `ok=false` + `error` para stdin, `whence`
+  inválido, posição negativa ou arquivo fechado), `io.tell(f) ->
+  IOPositionResult` e `io.read_n(f, n) -> IOBytesResult` (até *n* bytes a
+  partir do cursor; menos só no fim; `EOF` explícito; funciona em stdin).
+  Struct novo `IOPositionResult {ok, position, error}`.
+- **`io.write`/`io.write_bytes` (e `_result`) escrevem na posição do cursor**:
+  em `"rw"`/`"r+"` sobrescrevem no lugar sem truncar — `seek` + `write`
+  atualiza um registro no meio do arquivo; `read_line` + `write` escreve logo
+  depois da linha lida (o buffer do leitor de linha é re-sincronizado com o
+  offset do SO antes de qualquer escrita, `seek` ou leitura até o fim).
+  `tell` reporta a posição lógica (o que o programa consumiu), e `read_line`
+  depois de `seek` lê da nova posição.
+
+### Fixed
+
+- **Campo de struct tipado com nome qualificado (`file: io.File`,
+  `quando: time.DateTime`, `a: geometry2.Point`) constrói normalmente.** O
+  construtor do struct local falhava em toda chamada com `struct constructor
+  has incomplete runtime type metadata`: o compilador só conhecia structs
+  importados por `select`. Agora o nome do campo resolve pela declaração que
+  designa (a mesma de `use m select T`, #56 item 8) e os campos de um struct
+  importado são resolvidos no escopo do **módulo que o declarou** — o que
+  também conserta `use m select Outer` quando `Outer` tem um campo de outro
+  struct de `m` nunca importado pelo programa. Um `ns.T` que não resolve
+  (módulo não importado, módulo sem o struct) é **erro de compilação** no
+  struct, com hint (spec §11). O acesso a membro de um valor tipado `m.T`
+  continua dinâmico (tipá-lo exige traduzir os nomes do módulo para a visão do
+  programa — follow-up).
+
+### Docs
+
+- Spec §11 (identidade de struct entre formas de importação cobre campos de
+  struct; erro de `ns.T` não resolvido), §12 (modelo de cursor do `io`,
+  tabela com `seek`/`tell`/`read_n`/`IOPositionResult`, contratos de
+  `read*`/`write*` reescritos; exemplo do `get` do K&R); exemplos
+  `noxy_examples/test_struct_field_qualified.nx`, `test_io_seek.nx`,
+  `knr_get.nx`.
+
 ## [0.11.0] - 2026-08-21
 
 Entrega dos 16 achados do relatório de validação da VM ao reescrever o K&R em

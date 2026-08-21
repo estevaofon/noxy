@@ -1840,9 +1840,25 @@ different binding and is unaffected.)
 A struct imported by namespace (`geometry.Point`) and the same struct imported
 by `select` (`Point`) are the **same nominal type** — a value of one is
 accepted wherever the other is expected, including inside function types
-(`func(Point)` ≡ `func(geometry.Point)`) and when inferring a generic parameter.
-A locally declared `Point` is a different type and is never compatible with
-`geometry.Point`.
+(`func(Point)` ≡ `func(geometry.Point)`), when inferring a generic parameter,
+and as the type of a **struct field**: `file: io.File` and `file: File` (after
+`use io select File`) declare the same field, and the enclosing struct's
+constructor accepts the same values. A field typed with an imported struct is
+resolved in the scope of the module that declared it, so `a: geometry.Segment`
+works even when `Segment` has a field of another `geometry` struct the program
+never imported. A locally declared `Point` is a different type and is never
+compatible with `geometry.Point`.
+
+A qualified field type that does not resolve is a compile error at the struct,
+never a runtime failure of its constructor:
+
+```text
+[line 3] struct 'Reader' field 'file': cannot resolve type 'io.Nope': module 'io' has no struct 'Nope'
+  hint: check the struct name against the structs declared in 'io'
+```
+
+(`'foo' is not an imported module` + `hint: add 'use foo' at the top of the
+file` when the namespace itself is unknown.)
 
 ---
 
@@ -1877,21 +1893,31 @@ Every fallible operation reports through a result struct instead of raising
 | `IOLinesResult` | `ok: bool`, `data: string[]`, `error: string` |
 | `IOWriteResult` | `success: bool`, `bytes_written: int`, `error: string` |
 | `IOCloseResult` | `success: bool`, `error: string` |
+| `IOPositionResult` | `ok: bool`, `position: int` (absolute byte offset; `-1` when `ok=false`), `error: string` |
 | `FileInfo` | `exists: bool`, `size: int`, `is_dir: bool` |
+
+Every open `File` has one **cursor** — a byte position that every read and
+write starts from and advances. A freshly opened file starts at 0 (`"a"`
+writes always go to the end, as the OS defines append mode). `seek`/`tell` move
+and query it; the constants `SEEK_SET = 0`, `SEEK_CUR = 1`, `SEEK_END = 2` name
+the three origins, as `lseek` does in C.
 
 | Function | Contract |
 |----------|----------|
-| `open(path, mode) -> File` | `mode` is `"r"`, `"w"` (truncate), `"a"` (append) or `"rw"`/`"r+"`. On failure the `File` comes back with `open=false` |
-| `stdin() -> File` | The process's standard input as a `File` (`path="<stdin>"`, read-only, not closable). Always the same handle |
+| `open(path, mode) -> File` | `mode` is `"r"`, `"w"` (truncate), `"a"` (append) or `"rw"`/`"r+"` (read and write in place, no truncation). On failure the `File` comes back with `open=false` |
+| `stdin() -> File` | The process's standard input as a `File` (`path="<stdin>"`, read-only, not closable, not seekable). Always the same handle |
 | `close(file) -> void` | Closes and forgets the handle |
 | `close_result(file) -> IOCloseResult` | Same, reporting the outcome (`success=false`, `error="stdin cannot be closed"` for `stdin()`) |
-| `read(file) -> IOResult` | The **whole** content as text: from the beginning for a regular file, everything not yet consumed for `stdin()` |
-| `read_lines(file) -> IOLinesResult` | The whole content split by line, `\r\n` normalized, **with no trailing `""`**: `"a\nb\n"` and `"a\nb"` both give `[a, b]`; `""` gives `[]` |
-| `read_line(file) -> IOResult` | **Incremental**: the next line, without `\r\n`. At end of file `ok=false, data="", error="EOF"`; a last line with no `\n` is returned normally and the next call reports EOF |
-| `read_bytes(file) -> IOBytesResult` | The whole content as raw `bytes`, no UTF-8 validation |
-| `write(file, content: string) -> void` | Writes text |
+| `read(file) -> IOResult` | Everything **from the cursor to the end** as text (the whole file on a fresh handle; what is left after `read_line`/`read_n`/`seek`; `""` with `ok=true` when already at the end). Leaves the cursor at the end |
+| `read_lines(file) -> IOLinesResult` | Same range split by line, `\r\n` normalized, **with no trailing `""`**: `"a\nb\n"` and `"a\nb"` both give `[a, b]`; `""` gives `[]` |
+| `read_bytes(file) -> IOBytesResult` | Same range as raw `bytes`, no UTF-8 validation |
+| `read_line(file) -> IOResult` | **Incremental**: the next line from the cursor, without `\r\n`. At end of file `ok=false, data="", error="EOF"`; a last line with no `\n` is returned normally and the next call reports EOF |
+| `read_n(file, n) -> IOBytesResult` | **Incremental**: up to `n` raw bytes from the cursor. Fewer than `n` only at the end of the file; nothing left gives `ok=false, error="EOF"`; `n = 0` gives `b""` with `ok=true`; `n < 0` is an error. Works on `stdin()` |
+| `seek(file, offset, whence) -> IOPositionResult` | Moves the cursor to `offset` bytes from the start (`SEEK_SET`), from the current position (`SEEK_CUR`) or from the end (`SEEK_END`) and reports the new absolute position. Past the end is allowed (a later read reports EOF; a write extends the file). Errors: `"stdin is not seekable"`, `"invalid whence N (...)"`, a negative resulting position (cursor unchanged), `"File not open"` |
+| `tell(file) -> IOPositionResult` | The current cursor position (`"stdin is not seekable"`, `"File not open"`) |
+| `write(file, content: string) -> void` | Writes text **at the cursor** (overwriting in `"rw"`/`"r+"`, never truncating) and advances it |
 | `write_result(file, content: string) -> IOWriteResult` | Same, reporting `bytes_written` (`error="stdin is read-only"` for `stdin()`) |
-| `write_bytes(file, data: bytes) -> void` | Writes raw bytes |
+| `write_bytes(file, data: bytes) -> void` | Writes raw bytes at the cursor |
 | `write_bytes_result(file, data: bytes) -> IOWriteResult` | Same, reporting `bytes_written` |
 | `exists(path) -> bool` | Whether the path exists |
 | `stat(path) -> FileInfo` | Size and `is_dir` (`exists=false` when the path is missing) |
@@ -1900,22 +1926,31 @@ Every fallible operation reports through a result struct instead of raising
 | `mkdir(path) -> bool` | Creates the directory and any missing parent |
 | `list_dir(path) -> IOLinesResult` | Entry **names** sorted by name, without the directory prefix and with no file/directory distinction — use `io.stat(path + "/" + name).is_dir` to tell them apart |
 
-`read`/`read_lines` and `read_line` are two different modes of reading and do
-not mix on the same regular-file handle: a full read repositions the file to
-its end and drops the line reader, so a `read_line` after it reports `EOF`,
-and a `read` after some `read_line` calls starts over from the beginning.
-`stdin()` has no repositionable beginning, so there both modes consume the same
-single stream and compose naturally (`input()` included).
+All reads and writes compose through the cursor: `read_line` then `write` (in
+`"rw"`) overwrites right after the line just read; `seek` then `read_line`
+reads from the new position; `read` after a few `read_line` calls returns the
+**rest** of the file and leaves the cursor at the end, so a `read_line` after
+it reports `EOF` — `seek(f, 0, io.SEEK_SET)` rewinds. `stdin()` is one
+non-seekable stream shared with `input()`; `read`/`read_lines`/`read_line`/
+`read_n` all consume from it in order.
 
 ```noxy
 use io
 
-let f: io.File = io.stdin()
-let line: io.IOResult = io.read_line(f)
-while line.ok do
-    print(line.data)
-    line = io.read_line(f)
+// K&R 8.4: get lê n bytes a partir da posição pos (b"" em erro)
+func get(f: io.File, pos: int, n: int) -> bytes
+    if io.seek(f, pos, io.SEEK_SET).ok then
+        return io.read_n(f, n).data
+    end
+    return b""
 end
+
+let f: io.File = io.open("registros.bin", "rw")
+let size: int = io.seek(f, 0, io.SEEK_END).position   // tamanho do arquivo
+let rec: bytes = get(f, 64, 32)                          // registro do meio
+io.seek(f, 64, io.SEEK_SET)
+io.write_bytes(f, rec)                                   // sobrescreve no lugar
+io.close(f)
 ```
 
 ### System (`sys`)
