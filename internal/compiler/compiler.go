@@ -1173,6 +1173,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 		}
 
+		if err := c.checkBitwiseOperands(n.Operator, leftType, rightType); err != nil {
+			return nil, nil, err
+		}
+
 		switch n.Operator {
 		case "+":
 			if isInt {
@@ -1305,24 +1309,43 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, &ast.RefType{ElementType: element}, nil
 		}
 
-		// For other operators (-, !, ~), compile Right first
+		// For other operators (*, -, !, ~), compile Right first
 		_, rightType, err := c.Compile(n.Right)
 		if err != nil {
 			return nil, nil, err
 		}
-		if _, ok := rightType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-			if ref, ok := rightType.(*ast.RefType); ok {
-				rightType = ref.ElementType
+		if n.Operator == "*" {
+			// Deref explicito. Tipo estatico conhecido e nao-ref (inclui any,
+			// que nunca guarda ref) e erro aqui: OP_DEREF em runtime PASSA um
+			// nao-ref adiante sem erro (executor), entao esta e a unica guarda.
+			// Tipo desconhecido (nil) mantem a leniencia: emite OP_DEREF.
+			ref, isRef := rightType.(*ast.RefType)
+			if !isRef && rightType != nil {
+				return nil, nil, fmt.Errorf("[line %d] cannot dereference non-reference value of type %s", c.currentLine, rightType.String())
 			}
+			c.emitByte(byte(chunk.OP_DEREF))
+			if isRef {
+				return c.currentChunk, ref.ElementType, nil
+			}
+			return c.currentChunk, nil, nil
+		}
+		if ref, ok := rightType.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_DEREF))
+			rightType = ref.ElementType
 		}
 		if n.Operator == "-" {
 			c.emitByte(byte(chunk.OP_NEGATE))
 			return c.currentChunk, rightType, nil
 		} else if n.Operator == "!" {
+			if rightType != nil && !isAny(rightType) && rightType.String() != "bool" {
+				return nil, nil, fmt.Errorf("[line %d] operand of '!' must be bool, got %s", c.currentLine, rightType.String())
+			}
 			c.emitByte(byte(chunk.OP_NOT))
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		} else if n.Operator == "~" {
+			if rightType != nil && !isAny(rightType) && rightType.String() != "int" {
+				return nil, nil, fmt.Errorf("[line %d] operand of '~' must be int, got %s", c.currentLine, rightType.String())
+			}
 			c.emitByte(byte(chunk.OP_BIT_NOT))
 			return c.currentChunk, rightType, nil
 		}
@@ -2925,6 +2948,45 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 func isAny(t ast.NoxyType) bool {
 	primitive, ok := t.(*ast.PrimitiveType)
 	return ok && primitive.Name == "any"
+}
+
+// checkBitwiseOperands rejeita em compilacao o que o runtime rejeitaria nos
+// operadores bitwise quando os tipos estaticos sao conhecidos: & | ^ aceitam
+// int ou bytes; << >> so int. any/nil passam para o runtime.
+func (c *Compiler) checkBitwiseOperands(operator string, left, right ast.NoxyType) error {
+	var allowed []string
+	switch operator {
+	case "&", "|", "^":
+		allowed = []string{"int", "bytes"}
+	case "<<", ">>":
+		allowed = []string{"int"}
+	default:
+		return nil
+	}
+	ok := func(t ast.NoxyType) bool {
+		if t == nil || isAny(t) {
+			return true
+		}
+		for _, name := range allowed {
+			if t.String() == name {
+				return true
+			}
+		}
+		return false
+	}
+	if ok(left) && ok(right) {
+		return nil
+	}
+	describe := func(t ast.NoxyType) string {
+		if t == nil {
+			return "unknown"
+		}
+		return t.String()
+	}
+	if len(allowed) == 2 {
+		return fmt.Errorf("[line %d] operands for %s must be integers or bytes, got %s and %s", c.currentLine, operator, describe(left), describe(right))
+	}
+	return fmt.Errorf("[line %d] operands for %s must be integers, got %s and %s", c.currentLine, operator, describe(left), describe(right))
 }
 
 func (c *Compiler) resolveUpvalue(name string) (int, ast.NoxyType) {

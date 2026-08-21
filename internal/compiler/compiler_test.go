@@ -66,6 +66,33 @@ func TestAssignmentTypeErrorReportsAssignmentLine(t *testing.T) {
 	}
 }
 
+func TestStaticOperandChecksForUnaryAndBitwise(t *testing.T) {
+	cases := []struct{ source, want string }{
+		{"print(2 ** 3)\n", "cannot dereference non-reference value of type int"},
+		{"print(!0)\n", "operand of '!' must be bool, got int"},
+		{"print(~true)\n", "operand of '~' must be int, got bool"},
+		{"print(1 & 3 == 1)\n", "operands for & must be integers or bytes, got int and bool"},
+		{"print(\"a\" << 1)\n", "operands for << must be integers, got string and int"},
+	}
+	for _, tc := range cases {
+		_, _, err := New().Compile(parse(tc.source))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("source %q: error=%v, want %q", tc.source, err, tc.want)
+		}
+	}
+	for _, source := range []string{
+		"let v: int = 1\nlet r: ref int = ref v\nprint(*r)\n",
+		"print(~5)\n",
+		"print(b\"\\x0f\" & b\"\\x01\")\n",
+		"print(!true)\n",
+		"print(1 << 3)\n",
+	} {
+		if _, _, err := New().Compile(parse(source)); err != nil {
+			t.Fatalf("source %q should compile: %v", source, err)
+		}
+	}
+}
+
 func TestCompileDeferEmitsArgCount(t *testing.T) {
 	fn := compiledFunction(t, `
 func cleanup(value: int) -> void
