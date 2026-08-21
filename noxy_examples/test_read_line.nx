@@ -1,0 +1,30 @@
+use io
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("test_read_line: FAIL - " + message)
+        exit(1)
+    end
+end
+
+let path: string = "test_read_line.tmp"
+let w: io.File = io.open(path, "w")
+io.write(w, "alfa\nbeta\ngama\n")
+io.close(w)
+let r: io.File = io.open(path, "r")
+let count: int = 0
+let line: io.IOResult = io.read_line(r)
+while line.ok do
+    count = count + 1
+    line = io.read_line(r)
+end
+io.close(r)
+assert(count == 3, "3 linhas")
+assert(line.error == "EOF", "EOF explicito")
+let r2: io.File = io.open(path, "r")
+let lines: io.IOLinesResult = io.read_lines(r2)
+io.close(r2)
+assert(length(lines.data) == 3, "read_lines sem linha vazia final")
+assert(io.remove(path), "remove")
+print("read_line ok")

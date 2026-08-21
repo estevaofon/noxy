@@ -1,0 +1,23 @@
+// wc: conta linhas, palavras e caracteres de stdin (K&R 1.5.4)
+// uso: printf 'a b\nc\n' | noxy noxy_examples/wc_stdin.nx
+use io
+let stdin_file: io.File = io.stdin()
+let nl: int = 0
+let nw: int = 0
+let nc: int = 0
+let r: io.IOResult = io.read_line(stdin_file)
+while r.ok do
+    nl = nl + 1
+    nc = nc + length(r.data) + 1
+    let in_word: bool = false
+    for ch in r.data do
+        if ch == " " || ch == "\t" then
+            in_word = false
+        elif !in_word then
+            in_word = true
+            nw = nw + 1
+        end
+    end
+    r = io.read_line(stdin_file)
+end
+print(f"{nl} {nw} {nc}")
