@@ -706,8 +706,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 			// Variavel de modulo via namespace (`calc.sp = 5`): leitura e viva,
 			// escrita de fora e recusada — o modulo expoe uma funcao (#56 §8b).
+			//
+			// O nome precisa ainda ser um binding PURO de namespace: alem de nao
+			// ser sombreado por local/upvalue, o global tem de ser o marcador que
+			// importNamespace deixou (presente e com tipo nil). Um `let calc: P`
+			// de topo homonimo ao `use calc` e legal hoje (a regra de redeclaracao
+			// so compara nomes de *ast.LetStmt entre si) e sobrescreve esse global
+			// com o tipo declarado — tanto no predeclare quanto no proprio
+			// LetStmt —, entao `calc.x = 2` ali e escrita numa struct do usuario,
+			// nao no modulo, e nao pode ser recusada.
 			if leftIdent, isIdent := memberExp.Left.(*ast.Identifier); isIdent {
-				if module, isNamespace := c.namespaceImports[leftIdent.Value]; isNamespace && !c.isShadowedByLocal(leftIdent.Value) {
+				globalType, isGlobal := c.globals[leftIdent.Value]
+				pureNamespaceBinding := isGlobal && globalType == nil
+				if module, isNamespace := c.namespaceImports[leftIdent.Value]; isNamespace && pureNamespaceBinding && !c.isShadowedByLocal(leftIdent.Value) {
 					return nil, nil, fmt.Errorf(
 						"[line %d] cannot assign to '%s.%s': module variables are read-only outside the module\n  hint: expose a function in '%s' that updates it",
 						c.currentLine, leftIdent.Value, memberExp.Member, module,

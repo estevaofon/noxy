@@ -671,3 +671,23 @@ func TestModuleVariableAssignmentViaNamespaceIsCompileError(t *testing.T) {
 		t.Fatalf("live read via namespace: %v / %v", reported, err)
 	}
 }
+
+// Um `let` global homonimo ao `use` e legal (a regra de redeclaracao so compara
+// nomes de `let` entre si) e sombreia o binding de namespace: `calc.x` vira
+// campo da struct do usuario e a escrita continua valendo. O guard do §8b so
+// pode valer enquanto o nome ainda e o marcador puro que importNamespace
+// deixou em c.globals (presente, com tipo nil).
+func TestGlobalLetShadowingNamespaceAllowsFieldAssignment(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{"calc.nx": "let x: int = 1\n"})
+	reported, err := runModuleProgram(t, root, `use calc
+struct P
+    x: int
+end
+let calc: P = P(1)
+calc.x = 2
+test_report(calc.x)
+`)
+	if err != nil || reported.AsInt != 2 {
+		t.Fatalf("global let shadowing namespace: %v / %v", reported, err)
+	}
+}
