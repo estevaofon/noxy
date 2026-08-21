@@ -16,9 +16,12 @@ compatibilidade.
   inteiro); depois de `read_line`/`read_n`/`seek` devolvem o **resto**, e um
   segundo `read` devolve `""` (`[]`, `b""`) com `ok=true` — a regra que
   `stdin()` já seguia, agora única para arquivo e stdin. Antes, `read` depois
-  de `read_line` recomeçava do zero (e ignoraria um `seek`). Para reler do
-  início: `io.seek(f, 0, io.SEEK_SET)` antes do `read`. `read_line` depois de
-  um `read` continua reportando `EOF` (o cursor fica no fim).
+  de `read_line` recomeçava do zero (e ignoraria um `seek`). Vale também
+  depois de `write` no **mesmo** handle (`"rw"`/`"a"`): o cursor fica depois
+  do que foi escrito, então `read` logo após `write` devolve `""` — antes
+  devolvia o arquivo inteiro. Para reler do início: `io.seek(f, 0,
+  io.SEEK_SET)` antes do `read`. `read_line` depois de um `read` continua
+  reportando `EOF` (o cursor fica no fim).
 
 ### Added
 

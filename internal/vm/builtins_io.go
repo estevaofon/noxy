@@ -496,7 +496,7 @@ func (vm *VM) defineIOBuiltins() {
 		}
 		operationResult, used := resource.use(func(file *os.File) value.Value {
 			if count < 0 {
-				return newIOReadResult(resultStruct, false, value.NewBytes(""), fmt.Sprintf("read_n: count must be >= 0, got %d", count))
+				return newIOReadResult(resultStruct, false, value.NewBytes(""), fmt.Sprintf("read_n: n must be >= 0, got %d", count))
 			}
 			if count == 0 {
 				return newIOReadResult(resultStruct, true, value.NewBytes(""), "")

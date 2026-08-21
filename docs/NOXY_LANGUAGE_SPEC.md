@@ -1908,7 +1908,7 @@ the three origins, as `lseek` does in C.
 | `stdin() -> File` | The process's standard input as a `File` (`path="<stdin>"`, read-only, not closable, not seekable). Always the same handle |
 | `close(file) -> void` | Closes and forgets the handle |
 | `close_result(file) -> IOCloseResult` | Same, reporting the outcome (`success=false`, `error="stdin cannot be closed"` for `stdin()`) |
-| `read(file) -> IOResult` | Everything **from the cursor to the end** as text (the whole file on a fresh handle; what is left after `read_line`/`read_n`/`seek`; `""` with `ok=true` when already at the end). Leaves the cursor at the end |
+| `read(file) -> IOResult` | Everything **from the cursor to the end** as text (the whole file on a fresh handle; what is left after `read_line`/`read_n`/`seek`/`write`; `""` with `ok=true` when already at the end). Leaves the cursor at the end |
 | `read_lines(file) -> IOLinesResult` | Same range split by line, `\r\n` normalized, **with no trailing `""`**: `"a\nb\n"` and `"a\nb"` both give `[a, b]`; `""` gives `[]` |
 | `read_bytes(file) -> IOBytesResult` | Same range as raw `bytes`, no UTF-8 validation |
 | `read_line(file) -> IOResult` | **Incremental**: the next line from the cursor, without `\r\n`. At end of file `ok=false, data="", error="EOF"`; a last line with no `\n` is returned normally and the next call reports EOF |
@@ -1930,7 +1930,9 @@ All reads and writes compose through the cursor: `read_line` then `write` (in
 `"rw"`) overwrites right after the line just read; `seek` then `read_line`
 reads from the new position; `read` after a few `read_line` calls returns the
 **rest** of the file and leaves the cursor at the end, so a `read_line` after
-it reports `EOF` — `seek(f, 0, io.SEEK_SET)` rewinds. `stdin()` is one
+it reports `EOF`; `read` right after `write` on the same `"rw"`/`"a"` handle
+returns `""` (the cursor sits after what was written) — `seek(f, 0,
+io.SEEK_SET)` rewinds. `stdin()` is one
 non-seekable stream shared with `input()`; `read`/`read_lines`/`read_line`/
 `read_n` all consume from it in order.
 

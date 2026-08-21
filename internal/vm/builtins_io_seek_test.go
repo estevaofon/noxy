@@ -127,7 +127,7 @@ func TestIOReadNRejectsNegativeCountAndReadsNothingForZero(t *testing.T) {
 	bytesResult := testIOBytesResultDefinition()
 	position := testIOPositionResultDefinition()
 
-	assertBytesError(t, callBuiltin(t, machine, "io_read_n", handle, value.NewInt(-1), bytesResult), bytesResult, "read_n: count must be >= 0, got -1")
+	assertBytesError(t, callBuiltin(t, machine, "io_read_n", handle, value.NewInt(-1), bytesResult), bytesResult, "read_n: n must be >= 0, got -1")
 	assertBytesResult(t, callBuiltin(t, machine, "io_read_n", handle, value.NewInt(0), bytesResult), bytesResult, "")
 	assertPositionResult(t, callBuiltin(t, machine, "io_tell", handle, position), position, 0)
 	callBuiltin(t, machine, "io_close", handle)
@@ -302,5 +302,51 @@ test_report(to_str(size) + "|" + meio + "|" + to_str(back.position) + "|" + fim 
 	want := "10|456|5|56789|10|false|invalid whence 9 (use io.SEEK_SET, io.SEEK_CUR or io.SEEK_END)"
 	if got.Type != value.VAL_OBJ || got.Obj.(string) != want {
 		t.Fatalf("reported %q, want %q", got.String(), want)
+	}
+}
+
+// seek alem do fim e permitido: uma leitura ali reporta EOF e uma escrita
+// estende o arquivo (o SO preenche o buraco com zeros).
+func TestIOSeekPastEndReadsEOFAndWriteExtendsTheFile(t *testing.T) {
+	machine := New()
+	path := writeSeekFixture(t, "short.txt", "abc")
+	cleanupFileResources(t, machine)
+	handle := openSeekFixture(t, machine, path, "rw")
+	position := testIOPositionResultDefinition()
+	bytesResult := testIOBytesResultDefinition()
+
+	assertPositionResult(t, callBuiltin(t, machine, "io_seek", handle, value.NewInt(5), value.NewInt(0), position), position, 5)
+	assertBytesError(t, callBuiltin(t, machine, "io_read_n", handle, value.NewInt(1), bytesResult), bytesResult, "EOF")
+	callBuiltin(t, machine, "io_write", handle, value.NewString("Z"))
+	assertPositionResult(t, callBuiltin(t, machine, "io_tell", handle, position), position, 6)
+	callBuiltin(t, machine, "io_close", handle)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "abc\x00\x00Z" {
+		t.Fatalf("content = %q, want %q", content, "abc\x00\x00Z")
+	}
+}
+
+// Em "a" o SO anexa sempre no fim, independentemente de seek; tell reporta
+// o fim depois da escrita.
+func TestIOAppendModeWritesAtTheEndRegardlessOfSeek(t *testing.T) {
+	machine := New()
+	path := writeSeekFixture(t, "log.txt", "abc")
+	cleanupFileResources(t, machine)
+	handle := openSeekFixture(t, machine, path, "a")
+	position := testIOPositionResultDefinition()
+
+	assertPositionResult(t, callBuiltin(t, machine, "io_seek", handle, value.NewInt(0), value.NewInt(0), position), position, 0)
+	callBuiltin(t, machine, "io_write", handle, value.NewString("XY"))
+	assertPositionResult(t, callBuiltin(t, machine, "io_tell", handle, position), position, 5)
+	callBuiltin(t, machine, "io_close", handle)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "abcXY" {
+		t.Fatalf("content = %q, want %q", content, "abcXY")
 	}
 }

@@ -151,3 +151,27 @@ test_report(w.o.i.v)`},
 		})
 	}
 }
+
+// A forma qualificada e a forma por select sao intercambiaveis no caminho
+// ESTATICO: um valor tipado `File` entra num campo `io.File` e vice-versa, e
+// o campo lido de volta aceita a outra anotacao (typesEquivalent, #56 item 8).
+func TestQualifiedAndSelectedFieldTypesAreInterchangeable(t *testing.T) {
+	got := captureVMSource(t, `use io
+use io select File
+struct ViaQualified
+    file: io.File
+end
+struct ViaSelect
+    file: File
+end
+let a: File = io.stdin()
+let b: io.File = io.stdin()
+let q: ViaQualified = ViaQualified(a)
+let s: ViaSelect = ViaSelect(b)
+let back: File = q.file
+let back2: io.File = s.file
+let fd1: int = back.fd
+let fd2: int = back2.fd
+test_report(fd1 - fd2)`)
+	assertReportedInt(t, got, 0)
+}

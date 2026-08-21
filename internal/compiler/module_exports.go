@@ -174,9 +174,6 @@ func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDi
 		switch declaration := statement.(type) {
 		case *ast.StructStatement:
 			structs[declaration.Name] = declaration
-			if state.origins == nil {
-				state.origins = make(map[*ast.StructStatement]string)
-			}
 			state.origins[declaration] = module
 		case *ast.UseStmt:
 			if declaration.SelectAll {
@@ -208,16 +205,13 @@ type moduleStructScope struct {
 func (c *Compiler) moduleStructScope(module string) (*moduleStructScope, bool) {
 	state := c.discoveryState()
 	if scope, hit := state.scopes[module]; hit {
-		return scope, scope != nil
+		return scope, true
 	}
 	scope, ok := c.buildModuleStructScope(module, state)
-	if state.scopes == nil {
-		state.scopes = make(map[string]*moduleStructScope)
-	}
 	if ok {
+		// So SUCESSOS entram no memo — mesma politica de loadModuleDeclarations
+		// (uma falha pode ser contextual, ex.: guard de ciclo).
 		state.scopes[module] = scope
-	} else {
-		state.scopes[module] = nil
 	}
 	return scope, ok
 }
@@ -241,9 +235,6 @@ func (c *Compiler) buildModuleStructScope(module string, state *moduleDiscoveryS
 				continue
 			}
 			scope.structs[declaration.Name] = declaration
-			if state.origins == nil {
-				state.origins = make(map[*ast.StructStatement]string)
-			}
 			state.origins[declaration] = module
 		case *ast.UseStmt:
 			switch {
