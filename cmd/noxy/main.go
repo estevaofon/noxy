@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/console"
@@ -23,11 +23,16 @@ import (
 	"strings"
 )
 
+// diagOut recebe TODO diagnostico da CLI (parser, compilador, runtime,
+// hints, leitura de arquivo, profiles); a saida do programa continua em
+// stdout. Variavel para os testes redirecionarem.
+var diagOut io.Writer = os.Stderr
+
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered from panic:", r)
-			debug.PrintStack()
+			fmt.Fprintln(diagOut, "Recovered from panic:", r)
+			diagOut.Write(debug.Stack())
 			// Um panic que chegou ate aqui e falha, nunca sucesso: sem este
 			// exit, scripts/CI viam codigo 0 de um programa que explodiu no
 			// meio. Este defer e o primeiro registrado em main, logo roda por
@@ -66,7 +71,7 @@ func main() {
 
 	if *getPkg != "" {
 		if err := pkgmanager.Get(*getPkg); err != nil {
-			fmt.Printf("Error getting package: %s\n", err)
+			fmt.Fprintf(diagOut, "Error getting package: %s\n", err)
 			os.Exit(1)
 		}
 		return
@@ -81,16 +86,26 @@ func main() {
 	}
 
 	filename := args[0]
-	content, err := ioutil.ReadFile(filename)
-	if err != nil {
-		fmt.Printf("Error reading file: %s\n", err)
-		return
+	content, ok := loadScript(filename)
+	if !ok {
+		os.Exit(1)
 	}
 
-	exitCode := runFile(filename, string(content), getDir(filename), *showDisassembly, *cpuProfile, *memProfile)
+	exitCode := runFile(filename, content, getDir(filename), *showDisassembly, *cpuProfile, *memProfile)
 	if exitCode != 0 {
 		os.Exit(exitCode)
 	}
+}
+
+// loadScript le o programa; em falha escreve o diagnostico em diagOut e
+// devolve ok=false — main sai com 1 (antes devolvia 0 e so imprimia).
+func loadScript(filename string) (string, bool) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		fmt.Fprintf(diagOut, "Error reading file: %s\n", err)
+		return "", false
+	}
+	return string(content), true
 }
 
 // runFile executa o arquivo cercado pelos profiles de CPU/memoria pedidos
@@ -105,12 +120,12 @@ func runFile(filename, input, rootPath string, showDisasm bool, cpuProfilePath, 
 	if cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
 		if err != nil {
-			fmt.Printf("Error creating CPU profile: %s\n", err)
+			fmt.Fprintf(diagOut, "Error creating CPU profile: %s\n", err)
 			return 1
 		}
 		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
-			fmt.Printf("Error starting CPU profile: %s\n", err)
+			fmt.Fprintf(diagOut, "Error starting CPU profile: %s\n", err)
 			return 1
 		}
 		defer pprof.StopCPUProfile()
@@ -121,12 +136,12 @@ func runFile(filename, input, rootPath string, showDisasm bool, cpuProfilePath, 
 	if memProfilePath != "" {
 		f, err := os.Create(memProfilePath)
 		if err != nil {
-			fmt.Printf("Error creating memory profile: %s\n", err)
+			fmt.Fprintf(diagOut, "Error creating memory profile: %s\n", err)
 			return 1
 		}
 		runtime.GC()
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			fmt.Printf("Error writing memory profile: %s\n", err)
+			fmt.Fprintf(diagOut, "Error writing memory profile: %s\n", err)
 		}
 		f.Close()
 	}
@@ -230,7 +245,7 @@ func startREPL(showDisasm bool) {
 
 			// Real Error
 			for _, msg := range p.Errors() {
-				fmt.Printf("%s\n", msg)
+				fmt.Fprintf(diagOut, "%s\n", msg)
 			}
 			inputBuffer = "" // Reset
 			continue
@@ -262,7 +277,7 @@ func startREPL(showDisasm bool) {
 		c.SetSessionLets(replLets)
 		chunk, _, err := c.Compile(program)
 		if err != nil {
-			fmt.Printf("Compiler error: %s\n", err)
+			fmt.Fprintf(diagOut, "Compiler error: %s\n", err)
 			inputBuffer = "" // Reset
 			continue
 		}
@@ -283,10 +298,10 @@ func startREPL(showDisasm bool) {
 		// 5. Interpret (using shared VM)
 		// VM.Interpret resets stack but keeps globals (which we want).
 		if err := machine.Interpret(chunk); err != nil {
-			fmt.Printf("Runtime error: %s\n", err)
+			fmt.Fprintf(diagOut, "Runtime error: %s\n", err)
 			var advised *vm.AdvisedError
 			if errors.As(err, &advised) {
-				fmt.Printf("hint: %s\n", advised.Advice)
+				fmt.Fprintf(diagOut, "hint: %s\n", advised.Advice)
 			}
 		}
 
@@ -334,7 +349,7 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 
 	if len(p.Errors()) > 0 {
 		for _, msg := range p.Errors() {
-			fmt.Printf("%s\n", msg)
+			fmt.Fprintf(diagOut, "%s\n", msg)
 		}
 		return 1
 	}
@@ -342,7 +357,7 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
 	chunk, _, err := c.Compile(program)
 	if err != nil {
-		fmt.Printf("Compiler error: %s\n", err)
+		fmt.Fprintf(diagOut, "Compiler error: %s\n", err)
 		return 1
 	}
 
@@ -354,10 +369,10 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
-		fmt.Printf("Runtime error: %s\n", err)
+		fmt.Fprintf(diagOut, "Runtime error: %s\n", err)
 		var advised *vm.AdvisedError
 		if errors.As(err, &advised) {
-			fmt.Printf("hint: %s\n", advised.Advice)
+			fmt.Fprintf(diagOut, "hint: %s\n", advised.Advice)
 		}
 		return 1
 	}

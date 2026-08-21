@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -28,6 +29,24 @@ func (vm *VM) defineCoreBuiltins() {
 			parts = append(parts, arg.String())
 		}
 		fmt.Print(strings.Join(parts, " "))
+		return value.NewNull()
+	})
+
+	// eprint/eiprint: print/iprint em stderr — o fprintf(stderr, ...) do C.
+	vm.DefineNative("eprint", func(args []value.Value) value.Value {
+		var parts []string
+		for _, arg := range args {
+			parts = append(parts, arg.String())
+		}
+		fmt.Fprintln(os.Stderr, strings.Join(parts, " "))
+		return value.NewNull()
+	})
+	vm.DefineNative("eiprint", func(args []value.Value) value.Value {
+		var parts []string
+		for _, arg := range args {
+			parts = append(parts, arg.String())
+		}
+		fmt.Fprint(os.Stderr, strings.Join(parts, " "))
 		return value.NewNull()
 	})
 

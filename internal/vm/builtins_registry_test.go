@@ -16,7 +16,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"chan_send", "contains", "convert_to_float_result", "convert_to_int_result",
 		"crypto_aes256_gcm_decrypt",
 		"crypto_aes256_gcm_encrypt", "crypto_pbkdf2_sha256",
-		"crypto_random_bytes", "delete", "fmt", "has_key", "hex",
+		"crypto_random_bytes", "delete", "eiprint", "eprint", "fmt", "has_key", "hex",
 		"hex_decode", "hex_encode", "input", "io_close", "io_close_result", "io_exists",
 		"io_list_dir", "io_mkdir", "io_open", "io_read", "io_read_bytes", "io_read_line", "io_read_lines",
 		"io_remove", "io_rename", "io_stat", "io_stdin", "io_write", "io_write_result", "iprint", "json_dumps",

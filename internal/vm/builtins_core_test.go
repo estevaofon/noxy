@@ -1,6 +1,8 @@
 package vm
 
 import (
+	"io"
+	"os"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -141,6 +143,26 @@ func TestFmtBuiltin(t *testing.T) {
 			got := callBuiltin(t, machine, "fmt", tt.args...)
 			assertBuiltinValue(t, got, value.NewString(tt.want))
 		})
+	}
+}
+
+func TestEprintWritesToStderrOnly(t *testing.T) {
+	stdoutReader, stdoutWriter, _ := os.Pipe()
+	stderrReader, stderrWriter, _ := os.Pipe()
+	prevOut, prevErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = stdoutWriter, stderrWriter
+	machine := New()
+	err := interpretVMSource(t, machine, "eprint(\"erro\", 42)\neiprint(\"x\")\nprint(\"ok\")\n")
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
+	os.Stdout, os.Stderr = prevOut, prevErr
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(stdoutReader)
+	errText, _ := io.ReadAll(stderrReader)
+	if string(out) != "ok\n" || string(errText) != "erro 42\nx" {
+		t.Fatalf("stdout=%q stderr=%q", out, errText)
 	}
 }
 

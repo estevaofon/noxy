@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"os"
 	"runtime/debug"
 
 	"noxy-vm/internal/value"
@@ -23,7 +24,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		fnVal := args[0]
 		if fnVal.Type != value.VAL_FUNCTION {
 			// Only script functions are supported in spawn.
-			fmt.Println("Runtime Error: spawn expects a function")
+			fmt.Fprintln(os.Stderr, "Runtime Error: spawn expects a function")
 			return value.NewNull(), nil
 		}
 
@@ -39,7 +40,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		} else if fn, ok := fnVal.Obj.(*value.ObjFunction); ok {
 			closure = &value.ObjClosure{Function: fn, Upvalues: []*value.ObjUpvalue{}, Environment: fn.Environment}
 		} else {
-			fmt.Println("Runtime Error: spawn expects a function or closure")
+			fmt.Fprintln(os.Stderr, "Runtime Error: spawn expects a function or closure")
 			return value.NewNull(), nil
 		}
 
@@ -47,7 +48,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 
 		// Check arity
 		if len(threadArgs) != fnObj.Arity {
-			fmt.Printf("Runtime Error: spawn expected %d args, got %d\n", fnObj.Arity, len(threadArgs))
+			fmt.Fprintf(os.Stderr, "Runtime Error: spawn expected %d args, got %d\n", fnObj.Arity, len(threadArgs))
 			return value.NewNull(), nil
 		}
 
@@ -98,15 +99,15 @@ func (vm *VM) defineConcurrencyBuiltins() {
 					// Sentinela de push(): erro de runtime da thread, nao um
 					// panic Go com stack do runtime.
 					if _, isOverflow := r.(stackOverflowPanic); isOverflow {
-						fmt.Printf("Thread Error: stack overflow: operand stack exceeds %d slots\n", StackMax)
+						fmt.Fprintf(os.Stderr, "Thread Error: stack overflow: operand stack exceeds %d slots\n", StackMax)
 						return
 					}
-					fmt.Printf("Thread Panic: %v\n%s", r, debug.Stack())
+					fmt.Fprintf(os.Stderr, "Thread Panic: %v\n%s", r, debug.Stack())
 				}
 			}()
 			err := threadVM.run(1, nil) // Run until finished (frame 0 popped)
 			if err != nil {
-				fmt.Printf("Thread Error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Thread Error: %v\n", err)
 			}
 		}()
 

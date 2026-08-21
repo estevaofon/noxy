@@ -261,13 +261,13 @@ func (vm *VM) defineSystemBuiltins() {
 		}
 
 		if !found {
-			fmt.Printf("Plugin Load Error: command not found: %s\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Plugin Load Error: command not found: %s\n", cmdName)
 			return value.NewBool(false), nil
 		}
 
 		client, err := plugin.LoadPlugin(name, cmdPath)
 		if err != nil {
-			fmt.Printf("Plugin Load Error: failed to load plugin: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Plugin Load Error: failed to load plugin: %v\n", err)
 			return value.NewBool(false), nil
 		}
 

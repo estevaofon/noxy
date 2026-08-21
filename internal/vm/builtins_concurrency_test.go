@@ -38,6 +38,33 @@ func captureConcurrencyStdout(t *testing.T, operation func()) string {
 	return string(output)
 }
 
+// captureConcurrencyStderr: mesma coisa que captureConcurrencyStdout, mas
+// para os.Stderr — a #56 (item 6/15) moveu os diagnosticos de spawn/thread
+// de stdout para stderr.
+func captureConcurrencyStderr(t *testing.T, operation func()) string {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stderr
+	os.Stderr = writer
+	defer func() { os.Stderr = previous }()
+
+	operation()
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return string(output)
+}
+
 func awaitBuiltinResult(t *testing.T, result <-chan value.Value, operation string) value.Value {
 	t.Helper()
 	select {
@@ -177,7 +204,7 @@ test_report(chan_recv(channel))
 	assertBuiltinValue(t, captured, value.NewString("child"))
 }
 
-func TestSpawnPreservesLegacyDiagnosticsOnStdout(t *testing.T) {
+func TestSpawnDiagnosticsGoToStderr(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `
 func worker(item: int)
@@ -197,15 +224,21 @@ end`); err != nil {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := captureConcurrencyStdout(t, func() {
-				result, err := spawn.Invoke(machine, test.args)
-				if err != nil {
-					t.Fatal(err)
-				}
-				assertBuiltinValue(t, result, value.NewNull())
+			var stdout string
+			stderr := captureConcurrencyStderr(t, func() {
+				stdout = captureConcurrencyStdout(t, func() {
+					result, err := spawn.Invoke(machine, test.args)
+					if err != nil {
+						t.Fatal(err)
+					}
+					assertBuiltinValue(t, result, value.NewNull())
+				})
 			})
-			if got != test.want {
-				t.Fatalf("stdout = %q, want %q", got, test.want)
+			if stderr != test.want {
+				t.Fatalf("stderr = %q, want %q", stderr, test.want)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty (diagnostic leaked to stdout)", stdout)
 			}
 		})
 	}
@@ -406,10 +439,12 @@ end`
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := os.Stdout
-	os.Stdout = writer
+	// Thread Error/Thread Panic agora vao para os.Stderr (#56 item 6/15), nao
+	// mais os.Stdout — a captura desta thread destacada segue o mesmo fio.
+	previous := os.Stderr
+	os.Stderr = writer
 	defer func() {
-		os.Stdout = previous
+		os.Stderr = previous
 		_ = writer.Close()
 		_ = reader.Close()
 	}()
@@ -436,7 +471,7 @@ end`
 	case <-time.After(statefulBuiltinTimeout):
 		t.Fatal("detached worker did not emit a diagnostic")
 	}
-	os.Stdout = previous
+	os.Stderr = previous
 	if _, err := io.WriteString(previous, line); err != nil {
 		t.Fatal(err)
 	}
