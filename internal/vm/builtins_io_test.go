@@ -344,7 +344,7 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	linesResult := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_lines", readHandleValue, ioLinesDefinition), ioLinesDefinition)
 	assertBuiltinValue(t, linesResult.Fields["ok"], value.NewBool(true))
 	assertBuiltinArray(t, linesResult.Fields["data"], []value.Value{
-		value.NewString("alpha"), value.NewString("beta"), value.NewString(""),
+		value.NewString("alpha"), value.NewString("beta"),
 	})
 	assertBuiltinValue(t, linesResult.Fields["error"], value.NewString(""))
 
@@ -444,5 +444,89 @@ func TestIOReadAcceptsValidUTF8(t *testing.T) {
 	captured := captureVMSource(t, source)
 	if text, _ := captured.Obj.(string); text != "acentuação e emoji \U0001F600" {
 		t.Fatalf("io.read returned %q, want the file content unchanged", text)
+	}
+}
+
+func TestIOReadLineIsIncrementalWithExplicitEOF(t *testing.T) {
+	machine := New()
+	cleanupFileResources(t, machine)
+	path := filepath.Join(t.TempDir(), "lines.txt")
+	if err := os.WriteFile(path, []byte("um\r\ndois\n\ntres"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handle := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("r"), testFileDefinition())
+	ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
+	for _, want := range []string{"um", "dois", "", "tres"} {
+		result := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
+		assertBuiltinValue(t, result.Fields["ok"], value.NewBool(true))
+		assertBuiltinValue(t, result.Fields["data"], value.NewString(want))
+	}
+	eof := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
+	assertBuiltinValue(t, eof.Fields["ok"], value.NewBool(false))
+	assertBuiltinValue(t, eof.Fields["error"], value.NewString("EOF"))
+	callBuiltin(t, machine, "io_close", handle)
+	assertIOErrorResult(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
+}
+
+func TestIOListDirAndRename(t *testing.T) {
+	machine := New()
+	root := t.TempDir()
+	for _, name := range []string{"b.txt", "a.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linesDef := value.NewStruct("IOLinesResult", []string{"ok", "data", "error"})
+	listed := requireBuiltinInstance(t, callBuiltin(t, machine, "io_list_dir", value.NewString(root), linesDef), linesDef)
+	assertBuiltinValue(t, listed.Fields["ok"], value.NewBool(true))
+	assertBuiltinArray(t, listed.Fields["data"], []value.Value{value.NewString("a.txt"), value.NewString("b.txt"), value.NewString("sub")})
+	missing := requireBuiltinInstance(t, callBuiltin(t, machine, "io_list_dir", value.NewString(filepath.Join(root, "nope")), linesDef), linesDef)
+	assertBuiltinValue(t, missing.Fields["ok"], value.NewBool(false))
+	assertBuiltinValue(t, callBuiltin(t, machine, "io_rename", value.NewString(filepath.Join(root, "a.txt")), value.NewString(filepath.Join(root, "c.txt"))), value.NewBool(true))
+	assertBuiltinValue(t, callBuiltin(t, machine, "io_exists", value.NewString(filepath.Join(root, "c.txt"))), value.NewBool(true))
+	assertBuiltinValue(t, callBuiltin(t, machine, "io_rename", value.NewString(filepath.Join(root, "nope.txt")), value.NewString(filepath.Join(root, "d.txt"))), value.NewBool(false))
+}
+
+func TestSplitLinesDropsOnlyTheTrailingEmptyLine(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"a\nb\n", []string{"a", "b"}},
+		{"a\nb", []string{"a", "b"}},
+		{"\n", []string{""}},
+		{"", []string{}},
+		{"a\n\n", []string{"a", ""}},
+	}
+	for _, tc := range cases {
+		got := splitLines(tc.in)
+		if len(got) != len(tc.want) {
+			t.Fatalf("splitLines(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("splitLines(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		}
+	}
+}
+
+func TestIOWriteBytesWrappersRoundTrip(t *testing.T) {
+	path := filepath.ToSlash(filepath.Join(t.TempDir(), "bin.dat"))
+	reported := captureVMSource(t, `
+use io
+let f: io.File = io.open("`+path+`", "w")
+let r: io.IOWriteResult = io.write_bytes_result(f, b"\x00\xff")
+io.write_bytes(f, b"\x01")
+io.close(f)
+let g: io.File = io.open("`+path+`", "r")
+let data: io.IOBytesResult = io.read_bytes(g)
+io.close(g)
+test_report(to_str(r.bytes_written) + "|" + hex_encode(data.data))`)
+	if got := reported.Obj.(string); got != "2|00ff01" {
+		t.Fatalf("got %q", got)
 	}
 }

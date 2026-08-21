@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bufio"
 	"database/sql"
 	"errors"
 	"net"
@@ -71,6 +72,19 @@ type FileResource struct {
 	operationMu sync.Mutex
 	file        *os.File
 	closed      bool
+	// reader e o leitor bufferizado de read_line, criado sob demanda; para o
+	// recurso de stdin (Task 11) e o MESMO leitor de input(). Acesso so
+	// dentro de use() (operationMu).
+	reader *bufio.Reader
+}
+
+// lineReader devolve o leitor bufferizado do recurso (cria na primeira
+// chamada). Chamar dentro de use().
+func (resource *FileResource) lineReader(file *os.File) *bufio.Reader {
+	if resource.reader == nil {
+		resource.reader = bufio.NewReader(file)
+	}
+	return resource.reader
 }
 
 func (resource *FileResource) use(operation func(*os.File) value.Value) (value.Value, bool) {

@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -299,7 +300,7 @@ func (vm *VM) defineIOBuiltins() {
 					return newIOLinesResult(resultStruct, false, nil, err.Error())
 				}
 				normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
-				lines = strings.Split(normalized, "\n")
+				lines = splitLines(normalized)
 			}
 			return newIOLinesResult(resultStruct, ok, lines, errorText)
 		})
@@ -307,6 +308,73 @@ func (vm *VM) defineIOBuiltins() {
 			return result, nil
 		}
 		return operationResult, nil
+	})
+
+	vm.DefineContextualNative("io_read_line", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 2 {
+			return value.NewNull(), nil
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resultStruct, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		result := newIOReadResult(resultStruct, false, value.NewString(""), "File not open")
+		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
+		if !exists {
+			return result, nil
+		}
+		operationResult, used := resource.use(func(file *os.File) value.Value {
+			line, readErr := resource.lineReader(file).ReadString('\n')
+			if readErr != nil && readErr != io.EOF {
+				return newIOReadResult(resultStruct, false, value.NewString(""), readErr.Error())
+			}
+			if line == "" && readErr == io.EOF {
+				return newIOReadResult(resultStruct, false, value.NewString(""), "EOF")
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if err := requireValidUTF8("io.read_line", line); err != nil {
+				return newIOReadResult(resultStruct, false, value.NewString(""), err.Error())
+			}
+			return newIOReadResult(resultStruct, true, value.NewString(line), "")
+		})
+		if !used {
+			return result, nil
+		}
+		return operationResult, nil
+	})
+
+	vm.DefineNative("io_list_dir", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		resultStruct, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+		entries, err := os.ReadDir(args[0].String())
+		if err != nil {
+			return newIOLinesResult(resultStruct, false, nil, err.Error())
+		}
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		return newIOLinesResult(resultStruct, true, names, "")
+	})
+
+	vm.DefineNative("io_rename", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewBool(false)
+		}
+		return value.NewBool(os.Rename(args[0].String(), args[1].String()) == nil)
 	})
 
 	vm.DefineNative("io_stat", func(args []value.Value) value.Value {
@@ -397,4 +465,18 @@ func newIOLinesResult(definition *value.ObjStruct, ok bool, lines []string, erro
 		values[index] = value.NewString(line)
 	}
 	return newIOReadResult(definition, ok, value.NewArray(values), errorText)
+}
+
+// splitLines separa em linhas sem produzir o "" fantasma de um conteudo
+// terminado em \n (#56 item 12): "a\nb\n" -> [a b], "a\nb" -> [a b],
+// "\n" -> [""], "" -> [].
+func splitLines(content string) []string {
+	if content == "" {
+		return []string{}
+	}
+	lines := strings.Split(content, "\n")
+	if strings.HasSuffix(content, "\n") {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }

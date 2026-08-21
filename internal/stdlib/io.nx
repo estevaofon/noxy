@@ -99,6 +99,14 @@ func mkdir(path: string) -> bool
     return io_mkdir(path)
 end
 
-func list_dir(path: string) -> IOResult
-    return io_list_dir(path, IOResult)
+func list_dir(path: string) -> IOLinesResult
+    return io_list_dir(path, IOLinesResult)
+end
+
+func write_bytes(file: File, data: bytes) -> void
+    io_write(file, data)
+end
+
+func write_bytes_result(file: File, data: bytes) -> IOWriteResult
+    return io_write_result(file, data, IOWriteResult)
 end

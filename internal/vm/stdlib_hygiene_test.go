@@ -2,20 +2,25 @@ package vm
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
+	goast "go/ast"
+	goparser "go/parser"
+	gotoken "go/token"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"noxy-vm/internal/ast"
+	"noxy-vm/internal/lexer"
+	"noxy-vm/internal/parser"
 	"noxy-vm/internal/stdlib"
+	"noxy-vm/internal/token"
 	"noxy-vm/internal/value"
 )
 
@@ -34,27 +39,27 @@ func collectNativeRegistrations(t *testing.T) map[string][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileSet := token.NewFileSet()
+	fileSet := gotoken.NewFileSet()
 	registrations := make(map[string][]string)
 	for _, source := range sources {
 		if strings.HasSuffix(source, "_test.go") {
 			continue
 		}
-		file, parseErr := parser.ParseFile(fileSet, source, nil, 0)
+		file, parseErr := goparser.ParseFile(fileSet, source, nil, 0)
 		if parseErr != nil {
 			t.Fatalf("parse %s: %v", source, parseErr)
 		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
+		goast.Inspect(file, func(node goast.Node) bool {
+			call, ok := node.(*goast.CallExpr)
 			if !ok || len(call.Args) == 0 {
 				return true
 			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
+			selector, ok := call.Fun.(*goast.SelectorExpr)
 			if !ok || !nativeRegistrationHelpers[selector.Sel.Name] {
 				return true
 			}
-			literal, ok := call.Args[0].(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
+			literal, ok := call.Args[0].(*goast.BasicLit)
+			if !ok || literal.Kind != gotoken.STRING {
 				return true
 			}
 			name, unquoteErr := strconv.Unquote(literal.Value)
@@ -207,4 +212,126 @@ test_report(r.ok)`, port)
 	if len(printed) != 0 {
 		t.Fatalf("http client printed %q, want nothing", string(printed))
 	}
+}
+
+// Todo identificador que a stdlib CHAMA e que nao declara (nem importa de
+// outro modulo da stdlib) tem de ser uma nativa registrada — io.nx declarou
+// read_line/list_dir/rename por dois releases sem nativa (#56 item 4).
+func TestStdlibWrappersCallOnlyRegisteredNatives(t *testing.T) {
+	registrations := collectNativeRegistrations(t)
+	entries, err := stdlib.FS.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{}
+	topLevel := map[string]map[string]bool{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".nx") {
+			continue
+		}
+		content, readErr := stdlib.FS.ReadFile(entry.Name())
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		module := strings.TrimSuffix(entry.Name(), ".nx")
+		sources[module] = string(content)
+		topLevel[module] = stdlibTopLevelNames(t, module, string(content))
+	}
+	checked := 0
+	for module, source := range sources {
+		for _, callee := range stdlibFreeCallees(source, module, topLevel) {
+			checked++
+			if _, registered := registrations[callee]; !registered {
+				t.Errorf("stdlib/%s.nx calls %q, which is neither declared in the module nor a registered native", module, callee)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no free callees were checked; the scanner is broken")
+	}
+}
+
+func stdlibTopLevelNames(t *testing.T, module, source string) map[string]bool {
+	t.Helper()
+	p := parser.New(lexer.New(source))
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("stdlib/%s.nx: %v", module, p.Errors())
+	}
+	names := map[string]bool{}
+	for _, statement := range program.Statements {
+		switch declaration := statement.(type) {
+		case *ast.FunctionStatement:
+			names[declaration.Name] = true
+		case *ast.StructStatement:
+			names[declaration.Name] = true
+		case *ast.LetStmt:
+			names[declaration.Name.Value] = true
+		}
+	}
+	return names
+}
+
+// stdlibFreeCallees devolve (ordenados, sem repeticao) os identificadores
+// usados como alvo de chamada `nome(` que nao sao: declarados no topo do
+// modulo; parametros/campos/lets (qualquer `IDENT :` ou `let IDENT`);
+// membros (`x.nome(`); nem trazidos por `use m select a, b` / `select *`.
+func stdlibFreeCallees(source, module string, topLevel map[string]map[string]bool) []string {
+	declared := map[string]bool{}
+	for name := range topLevel[module] {
+		declared[name] = true
+	}
+	var tokens []token.Token
+	lex := lexer.New(source)
+	for {
+		tok := lex.NextToken()
+		tokens = append(tokens, tok)
+		if tok.Type == token.EOF {
+			break
+		}
+	}
+	for i, tok := range tokens {
+		if tok.Type != token.IDENTIFIER {
+			continue
+		}
+		if i+1 < len(tokens) && tokens[i+1].Type == token.COLON {
+			declared[tok.Literal] = true
+		}
+		if i > 0 && tokens[i-1].Type == token.LET {
+			declared[tok.Literal] = true
+		}
+	}
+	for i := 0; i+2 < len(tokens); i++ {
+		if tokens[i].Type != token.USE || tokens[i+1].Type != token.IDENTIFIER || tokens[i+2].Type != token.SELECT {
+			continue
+		}
+		imported := tokens[i+1].Literal
+		for j := i + 3; j < len(tokens) && tokens[j].Type != token.NEWLINE && tokens[j].Type != token.EOF; j++ {
+			if tokens[j].Literal == "*" {
+				for name := range topLevel[imported] {
+					declared[name] = true
+				}
+			} else if tokens[j].Type == token.IDENTIFIER {
+				declared[tokens[j].Literal] = true
+			}
+		}
+	}
+	seen := map[string]bool{}
+	var callees []string
+	for i := 0; i+1 < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Type != token.IDENTIFIER || tokens[i+1].Type != token.LPAREN {
+			continue
+		}
+		if i > 0 && tokens[i-1].Type == token.DOT {
+			continue
+		}
+		if declared[tok.Literal] || seen[tok.Literal] {
+			continue
+		}
+		seen[tok.Literal] = true
+		callees = append(callees, tok.Literal)
+	}
+	sort.Strings(callees)
+	return callees
 }
