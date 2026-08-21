@@ -1,0 +1,48 @@
+use io
+use sys
+use strings select index_of
+
+// find: imprime as linhas que casam com o padrão; -x inverte, -n numera
+// uso: noxy ch05_find.nx [-x] [-n] padrão arquivo
+func main()
+    let argv: string[] = sys.argv()
+    let except: bool = false
+    let number: bool = false
+    let i: int = 2
+    while i < length(argv) && argv[i][0] == "-" do
+        let opts: string = slice(argv[i], 1, length(argv[i]))
+        for c in opts do
+            if c == "x" then
+                except = true
+            elif c == "n" then
+                number = true
+            else
+                print("find: opção ilegal " + c)
+                sys.exit(1)
+            end
+        end
+        i = i + 1
+    end
+    if i + 1 >= length(argv) then
+        print("Uso: find [-x] [-n] padrão arquivo")
+        sys.exit(1)
+    end
+    let pattern: string = argv[i]
+    let f: io.File = io.open(argv[i + 1], "r")
+    let lines: string[] = io.read_lines(f).data
+    io.close(f)
+    let lineno: int = 0
+    let found: int = 0
+    for line in lines do
+        lineno = lineno + 1
+        if (index_of(line, pattern) >= 0) != except then
+            if number then
+                iprint(to_str(lineno) + ":")
+            end
+            print(line)
+            found = found + 1
+        end
+    end
+    print(found)
+end
+main()

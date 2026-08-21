@@ -1,0 +1,34 @@
+use io
+use sys
+use strings select char_code
+
+// conta dígitos, espaços em branco e outros caracteres
+func main()
+    let f: io.File = io.open(sys.argv()[2], "r")
+    let text: io.IOResult = io.read(f)
+    io.close(f)
+
+    let nwhite: int = 0
+    let nother: int = 0
+    let ndigit: int[10] = zeros(10)
+
+    for c in text.data do
+        if c >= "0" && c <= "9" then
+            let d: int = char_code(c) - char_code("0")
+            ndigit[d] = ndigit[d] + 1
+        elif c == " " || c == "\n" || c == "\t" then
+            nwhite = nwhite + 1
+        else
+            nother = nother + 1
+        end
+    end
+
+    iprint("digits =")
+    let i: int = 0
+    while i < 10 do
+        iprint(" " + to_str(ndigit[i]))
+        i = i + 1
+    end
+    print(", white space = " + to_str(nwhite) + ", other = " + to_str(nother))
+end
+main()

@@ -1,0 +1,23 @@
+// o outro lado do void*: uma memória, vários tipos ao mesmo tempo
+struct Point
+    x: int
+    y: int
+end
+
+let arena: any[] = []
+
+func store(v: any) -> int
+    append(arena, v)
+    return length(arena) - 1
+end
+
+let i: int = store(42)
+let s: int = store("texto")
+let p: int = store(Point(1, 2))
+
+for h in [i, s, p] do
+    print(h, type(arena[h]))        // o valor sabe o que é
+end
+
+let back: Point = arena[p]          // o "cast" — verificado
+print(back.x + back.y)

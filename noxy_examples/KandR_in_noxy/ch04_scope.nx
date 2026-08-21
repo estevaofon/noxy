@@ -1,0 +1,16 @@
+// uma função pode usar uma global declarada mais abaixo no arquivo,
+// desde que o 'let' já tenha sido executado quando a função rodar
+func show()
+    print(counter)
+end
+
+let counter: int = 42
+show()
+
+// uma variável local com o mesmo nome esconde a global dentro da função
+func shadow()
+    let counter: int = 7
+    print(counter)
+end
+shadow()
+print(counter)      // a global não foi tocada

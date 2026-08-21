@@ -1,0 +1,26 @@
+// calc_stack.nx: a pilha de valores da calculadora
+
+let MAXVAL: int = 100       // profundidade máxima da pilha
+let sp: int = 0             // próxima posição livre
+let val: float[100]         // a pilha
+
+// push: empilha f
+func push(f: float)
+    if sp < MAXVAL then
+        val[sp] = f
+        sp = sp + 1
+    else
+        print("erro: pilha cheia, não dá para empilhar " + to_str(f))
+    end
+end
+
+// pop: desempilha e devolve o valor do topo
+func pop() -> float
+    if sp > 0 then
+        sp = sp - 1
+        return val[sp]
+    else
+        print("erro: pilha vazia")
+        return 0.0
+    end
+end

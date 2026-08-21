@@ -1,0 +1,23 @@
+// reverse: inverte a string s, caractere a caractere
+func reverse(s: string) -> string
+    let out: string = ""
+    let i: int = length(s) - 1
+    while i >= 0 do
+        out = out + s[i]
+        i = i - 1
+    end
+    return out
+end
+
+print(reverse("hello, world"))
+print(reverse("áéí"))      // por caractere, não por byte
+
+// a versão com for: percorre e antepõe
+func reverse2(s: string) -> string
+    let out: string = ""
+    for c in s do
+        out = c + out
+    end
+    return out
+end
+print(reverse2("abc"))

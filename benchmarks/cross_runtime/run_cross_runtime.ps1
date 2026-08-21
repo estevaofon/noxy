@@ -1,5 +1,7 @@
 param(
     [string]$Noxy = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) "noxy.exe"),
+    [string]$NoxyBaseline = "",
+    [string]$BaselineLabel = "noxy_base",
     [string]$Python = "python",
     [string]$Lua = "lua",
     [int]$Runs = 9
@@ -26,6 +28,13 @@ param(
 # 3. Copia os fontes para disco local. Este repo vive em OneDrive, e medir de
 #    la inflou os tempos em ~2x (filtro de sync + antivirus no read). Aponte
 #    -Noxy para um binario em disco local tambem.
+#
+# -NoxyBaseline adiciona uma segunda versao do proprio Noxy como coluna extra,
+# intercalada junto com o resto. E a unica forma valida de comparar duas
+# versoes: os tempos absolutos dependem fortemente da carga da maquina na hora
+# (entre duas sessoes deste repo o piso de processo do Lua dobrou, 38 -> 85 ms),
+# entao colunas de rodadas diferentes nao se comparam. Dentro de uma sessao,
+# sim.
 #
 # Cada implementacao de um bench imprime a mesma linha CHECKSUM: o script
 # aborta se divergirem, porque ai nao seria a mesma carga.
@@ -58,7 +67,7 @@ try {
     }
 
     # Ordem fixa: define a ordem das colunas e a ordem do intercalamento.
-    $order = @("noxy", "python", "lua", "go")
+    $order = @("noxy", $BaselineLabel, "python", "lua", "go")
 
     $rows = @()
     foreach ($p in (Get-ChildItem $work -Filter "*.nx" | Sort-Object Name)) {
@@ -67,6 +76,10 @@ try {
         # Monta so os runtimes que existem para este bench.
         $cmds = [ordered]@{}
         $cmds["noxy"]   = { & $Noxy   $p.FullName }.GetNewClosure()
+        if ($NoxyBaseline) {
+            $nb = $NoxyBaseline
+            $cmds[$BaselineLabel] = { & $nb $p.FullName }.GetNewClosure()
+        }
         $py = [IO.Path]::ChangeExtension($p.FullName, ".py")
         if (Test-Path $py) { $cmds["python"] = { & $Python $py }.GetNewClosure() }
         $lu = [IO.Path]::ChangeExtension($p.FullName, ".lua")
@@ -115,17 +128,25 @@ function Cell($v) { if ($null -eq $v) { "-" } else { "{0:N1}" -f $v } }
 # Liquido: total menos o piso de processo do proprio runtime. Para runtimes
 # rapidos o trabalho pode caber dentro do ruido do piso, e a subtracao vai a
 # zero ou fica negativa — reportamos "~0" em vez de fingir precisao.
+function NetVal($v, $floor) {
+    if ($null -eq $v -or $null -eq $floor) { return $null }
+    $n = $v - $floor
+    if ($n -le 5) { return $null }
+    return $n
+}
+
 function Net($v, $floor) {
     if ($null -eq $v -or $null -eq $floor) { return "-" }
-    $n = $v - $floor
-    if ($n -le 5) { return "~0" }
+    $n = NetVal $v $floor
+    if ($null -eq $n) { return "~0" }
     return "{0:N1}" -f $n
 }
 
 $lines = @(
     "# Cross-runtime: Noxy x CPython x Lua x Go",
     "",
-    "- noxy: ``$Noxy``",
+    "- noxy: ``$Noxy`` ($((& $Noxy --version 2>&1) -join ''))",
+    $(if ($NoxyBaseline) { "- $($BaselineLabel): ``$NoxyBaseline`` ($((& $NoxyBaseline --version 2>&1) -join ''))" }),
     "- python: $((& $Python --version 2>&1) -join '')",
     "- lua: $(if (Have $Lua) { (& $Lua -v 2>&1) -join '' } else { 'ausente' })",
     "- go: $(if (Have 'go') { (& go version) -join '' } else { 'ausente' })",
@@ -156,6 +177,33 @@ foreach ($r in $rows) {
 }
 $lines += ""
 $lines += "``~0`` = o trabalho cabe dentro do ruido do piso de processo do runtime."
+
+# Razoes sobre o liquido. Os ms absolutos dependem da carga da maquina na hora
+# e nao se comparam entre rodadas; a razao contra um runtime medido na MESMA
+# janela intercalada, sim — e por isso ela e o numero a citar fora daqui.
+$others = $present | Where-Object { $_ -ne "noxy" }
+if ($others.Count -gt 0) {
+    $lines += @(
+        "",
+        "## Razoes sobre o tempo liquido (noxy / outro)",
+        "",
+        ("| bench | " + (($others | ForEach-Object { "/ $_" }) -join " | ") + " |"),
+        ("|---" * ($others.Count + 1) + "|")
+    )
+    foreach ($r in $rows) {
+        if ($r.bench -eq "startup") { continue }
+        $mine = NetVal $r.noxy $base.noxy
+        $cells = $others | ForEach-Object {
+            $theirs = NetVal $r.$_ $base.$_
+            if ($null -eq $mine -or $null -eq $theirs) { "-" } else { "{0:N2}x" -f ($mine / $theirs) }
+        }
+        $lines += "| ``$($r.bench)`` | " + ($cells -join " | ") + " |"
+    }
+    $lines += ""
+    $lines += "Menor e melhor. ``-`` = um dos lados cai dentro do ruido do piso e a razao nao tem significado."
+}
+
+$lines = $lines | Where-Object { $null -ne $_ }
 
 $outDir = Join-Path $PSScriptRoot "results"
 New-Item -ItemType Directory -Force $outDir | Out-Null

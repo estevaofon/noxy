@@ -1,0 +1,12 @@
+use io
+use sys
+
+// leitura incremental: uma linha por chamada, EOF explícito no fim
+let f: io.File = io.open(sys.argv()[2], "r")
+let r: io.IOResult = io.read_line(f)
+while r.ok do
+    print("[" + r.data + "]")
+    r = io.read_line(f)
+end
+print(r.ok, r.error)        // false EOF
+io.close(f)

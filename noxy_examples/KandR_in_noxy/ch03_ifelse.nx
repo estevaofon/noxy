@@ -1,0 +1,20 @@
+let n: int = 0
+if n != 0 then
+    print("n não é zero")
+else
+    print("n é zero")
+end
+
+// o else se liga ao if mais interno — em Noxy o 'end' torna isso visível
+let a: int = 5
+let b: int = 3
+if a > 0 then
+    if b > 10 then
+        print("b grande")
+    else
+        print("b pequeno")   // este else pertence ao if interno
+    end
+end
+
+// uma linha só, quando o corpo é curto
+if a > b then print("a maior") else print("b maior") end

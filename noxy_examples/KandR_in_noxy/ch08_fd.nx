@@ -1,0 +1,9 @@
+use io
+
+// um File é um struct comum, com o descritor e os metadados da abertura
+let f: io.File = io.open("ch07_a.txt", "r")
+print(f.fd, f.path, f.mode, f.open)
+io.close(f)
+
+let g: io.File = io.open("nao_existe.txt", "r")
+print(g.fd, g.open)         // abrir falhou: open == false; não há errno

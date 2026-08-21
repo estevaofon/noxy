@@ -1,0 +1,20 @@
+// a tabela de símbolos com o map embutido: hash, lookup e install já vêm prontos
+let defs: map[string, string] = {}
+defs["YES"] = "1"
+defs["NO"] = "0"
+defs["YES"] = "true"                    // substitui
+print(defs["YES"], has_key(defs, "MAYBE"), defs["MAYBE"])   // ausente: null
+delete(defs, "NO")
+print(length(defs))
+
+// a contagem de palavras da seção 6.5, sem árvore
+let counts: map[string, int] = {}
+for w in ["the", "cat", "the", "dog", "the"] do
+    if has_key(counts, w) then
+        counts[w] = counts[w] + 1
+    else
+        counts[w] = 1
+    end
+end
+print(counts["the"], counts["cat"], length(counts))
+print(length(keys(counts)))             // keys() devolve as chaves (em ordem indefinida)

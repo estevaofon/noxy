@@ -1,0 +1,19 @@
+// binsearch: acha x em v[0] <= v[1] <= ... <= v[n-1]
+func binsearch(x: int, v: int[]) -> int
+    let low: int = 0
+    let high: int = length(v) - 1
+    while low <= high do
+        let mid: int = (low + high) / 2
+        if x < v[mid] then
+            high = mid - 1
+        elif x > v[mid] then
+            low = mid + 1
+        else
+            return mid      // achou
+        end
+    end
+    return -1               // não achou
+end
+
+let v: int[] = [2, 3, 5, 7, 11, 13, 17, 19, 23]
+print(binsearch(13, v), binsearch(4, v), binsearch(2, v), binsearch(23, v))

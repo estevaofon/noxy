@@ -1,0 +1,43 @@
+use io
+
+// fsize: imprime o tamanho de um arquivo; para um diretório, desce nele
+func fsize(name: string)
+    let info: io.FileInfo = io.stat(name)
+    if info.is_dir then
+        print(fmt("%8s %s", "<dir>", name))
+        dirwalk(name, fsize)
+    else
+        print(fmt("%8d %s", info.size, name))
+    end
+end
+
+// dirwalk: aplica fn a cada entrada do diretório dir
+func dirwalk(dir: string, fn: func(string) -> void)
+    let entries: io.IOLinesResult = io.list_dir(dir)
+    if !entries.ok then
+        eprint("dirwalk: não consegui abrir " + dir)
+        return
+    end
+    for name in entries.data do
+        if name != "." && name != ".." then
+            fn(dir + "/" + name)
+        end
+    end
+end
+
+// monta uma pequena árvore de diretórios, lista e desmonta
+io.mkdir("ch08_tree")
+io.mkdir("ch08_tree/sub")
+let f1: io.File = io.open("ch08_tree/a.txt", "w")
+io.write(f1, "alpha\n")
+io.close(f1)
+let f2: io.File = io.open("ch08_tree/sub/b.txt", "w")
+io.write(f2, "beta e gama\n")
+io.close(f2)
+
+fsize("ch08_tree")
+
+io.remove("ch08_tree/sub/b.txt")
+io.remove("ch08_tree/sub")
+io.remove("ch08_tree/a.txt")
+io.remove("ch08_tree")

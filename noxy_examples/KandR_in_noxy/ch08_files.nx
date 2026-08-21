@@ -1,0 +1,18 @@
+use io
+
+let name: string = "ch08_tmp.txt"
+let f: io.File = io.open(name, "w")         // cria ou trunca, como creat()
+io.write(f, "linha 1\n")
+io.close(f)
+let a: io.File = io.open(name, "a")         // acrescenta ao fim
+io.write(a, "linha 2\n")
+io.close(a)
+
+print(io.exists(name))
+let info: io.FileInfo = io.stat(name)
+print(info.size, info.is_dir)
+print(io.rename(name, "ch08_tmp2.txt"))     // rename
+print(io.exists(name), io.exists("ch08_tmp2.txt"))
+print(io.remove("ch08_tmp2.txt"))           // unlink
+print(io.exists("ch08_tmp2.txt"))
+print(io.mkdir("ch08_dir"), io.stat("ch08_dir").is_dir, io.remove("ch08_dir"))

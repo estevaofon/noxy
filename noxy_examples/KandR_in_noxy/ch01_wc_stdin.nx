@@ -1,0 +1,30 @@
+use io
+
+let IN: int = 1     // dentro de uma palavra
+let OUT: int = 0    // fora de uma palavra
+
+// conta linhas, palavras e caracteres da entrada padrão
+func main()
+    let stdin: io.File = io.stdin()
+    let state: int = OUT
+    let nl: int = 0
+    let nw: int = 0
+    let nc: int = 0
+    let line: io.IOResult = io.read_line(stdin)
+    while line.ok do
+        nl = nl + 1
+        nc = nc + length(line.data) + 1   // +1 pelo \n que read_line removeu
+        state = OUT
+        for c in line.data do
+            if c == " " || c == "\t" then
+                state = OUT
+            elif state == OUT then
+                state = IN
+                nw = nw + 1
+            end
+        end
+        line = io.read_line(stdin)
+    end
+    print(nl, nw, nc)
+end
+main()

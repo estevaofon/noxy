@@ -1,0 +1,14 @@
+// imprime a tabela Fahrenheit-Celsius
+// para fahr = 0, 20, ..., 300; versão em ponto flutuante
+let fahr: float
+let celsius: float
+let lower: int = 0
+let upper: int = 300
+let step: int = 20
+
+fahr = to_float(lower)
+while fahr <= to_float(upper) do
+    celsius = (5.0 / 9.0) * (fahr - 32.0)
+    print(fmt("%3.0f %6.1f", fahr, celsius))
+    fahr = fahr + to_float(step)
+end

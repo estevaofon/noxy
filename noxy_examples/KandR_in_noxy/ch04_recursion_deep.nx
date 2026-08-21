@@ -1,0 +1,8 @@
+// a profundidade de chamadas cresce sob demanda (teto: 100 000 frames)
+func depth(n: int) -> int
+    if n == 0 then return 0 end
+    return 1 + depth(n - 1)
+end
+
+print(depth(100))
+print(depth(50000))

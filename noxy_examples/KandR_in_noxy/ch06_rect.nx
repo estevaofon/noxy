@@ -1,0 +1,66 @@
+struct Point
+    x: int
+    y: int
+end
+
+struct Rect
+    pt1: Point
+    pt2: Point
+end
+
+// makepoint: constrói um ponto a partir das componentes x e y
+func makepoint(x: int, y: int) -> Point
+    return Point(x, y)
+end
+
+// addpoint: soma dois pontos (recebe cópias, devolve um ponto novo)
+func addpoint(p1: Point, p2: Point) -> Point
+    p1.x = p1.x + p2.x      // altera só a cópia local
+    p1.y = p1.y + p2.y
+    return p1
+end
+
+// ptinrect: devolve true se p está dentro de r
+func ptinrect(p: Point, r: Rect) -> bool
+    return p.x >= r.pt1.x && p.x < r.pt2.x && p.y >= r.pt1.y && p.y < r.pt2.y
+end
+
+func min(a: int, b: int) -> int
+    if a < b then return a end
+    return b
+end
+
+func max(a: int, b: int) -> int
+    if a > b then return a end
+    return b
+end
+
+// canonrect: canoniza as coordenadas de um retângulo
+func canonrect(r: Rect) -> Rect
+    let temp: Rect = Rect(Point(0, 0), Point(0, 0))
+    temp.pt1.x = min(r.pt1.x, r.pt2.x)
+    temp.pt1.y = min(r.pt1.y, r.pt2.y)
+    temp.pt2.x = max(r.pt1.x, r.pt2.x)
+    temp.pt2.y = max(r.pt1.y, r.pt2.y)
+    return temp
+end
+
+let screen: Rect = Rect(makepoint(0, 0), makepoint(320, 200))
+let middle: Point = makepoint((screen.pt1.x + screen.pt2.x) / 2,
+                              (screen.pt1.y + screen.pt2.y) / 2)
+print(middle.x, middle.y, ptinrect(middle, screen), ptinrect(makepoint(400, 10), screen))
+
+let a: Point = makepoint(1, 2)
+let sum: Point = addpoint(a, makepoint(10, 20))
+print(sum.x, sum.y, a.x, a.y)       // a não foi alterado
+
+let r: Rect = canonrect(Rect(makepoint(320, 200), makepoint(0, 0)))
+print(r.pt1.x, r.pt1.y, r.pt2.x, r.pt2.y)
+
+// para alterar o struct do chamador, ref — o "ponteiro para struct" da seção 6.4
+func translate(p: ref Point, dx: int, dy: int)
+    p.x = p.x + dx          // através de uma ref, p.x é o campo do original
+    p.y = p.y + dy
+end
+translate(ref a, 100, 100)
+print(a.x, a.y)

@@ -1,0 +1,25 @@
+use strings select char_code, is_space, is_digit
+
+// atoi: converte s para inteiro; versão 2, com espaços iniciais e sinal
+func atoi(s: string) -> int
+    let n: int = length(s)
+    let i: int = 0
+    while i < n && is_space(s[i]) do      // pula espaços em branco
+        i = i + 1
+    end
+    let sign: int = 1
+    if i < n && (s[i] == "+" || s[i] == "-") then
+        if s[i] == "-" then
+            sign = -1
+        end
+        i = i + 1                          // pula o sinal
+    end
+    let val: int = 0
+    while i < n && is_digit(s[i]) do
+        val = 10 * val + (char_code(s[i]) - char_code("0"))
+        i = i + 1
+    end
+    return sign * val
+end
+
+print(atoi("  -123abc"), atoi("+42"), atoi("7"), atoi("   "))

@@ -1,0 +1,21 @@
+// power: eleva base à n-ésima potência; n >= 0; versão 2
+func power(base: int, n: int) -> int
+    let p: int = 1
+    while n > 0 do
+        p = p * base
+        n = n - 1        // altera apenas a cópia local de n
+    end
+    return p
+end
+
+// em Noxy, arrays também são passados por valor
+func zera(v: int[])
+    v[0] = 0             // altera apenas a cópia local do array
+end
+
+let expoente: int = 5
+print(power(2, expoente), expoente)   // expoente continua 5
+
+let nums: int[] = [7, 8, 9]
+zera(nums)
+print(nums)                           // nums continua [7, 8, 9]

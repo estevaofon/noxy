@@ -1,0 +1,27 @@
+use strings select char_code
+
+// atoi: converte s para inteiro; só dígitos, sem sinal
+func atoi(s: string) -> int
+    let n: int = 0
+    for c in s do
+        if c >= "0" && c <= "9" then
+            n = 10 * n + (char_code(c) - char_code("0"))
+        else
+            break
+        end
+    end
+    return n
+end
+
+print(atoi("12345"), atoi("42abc"), atoi(""))
+
+// as conversões embutidas: explícitas, sempre
+print(to_int("12345") + 1)
+print(to_float("3.5") * 2.0)
+print(to_str(42) + "!")
+print(to_int(3.99), to_int(-3.99), to_float(7))
+
+let i: int = 7
+let f: float = to_float(i) / 2.0   // int -> float só com to_float
+print(f)
+print(7 / 2.0)                     // ...exceto dentro de uma expressão mista

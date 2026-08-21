@@ -1,0 +1,21 @@
+use io
+
+// imprime a linha mais longa da entrada padrão
+func main()
+    let stdin: io.File = io.stdin()
+    let max: int = 0            // comprimento máximo visto até agora
+    let longest: string = ""    // a linha mais longa
+    let line: io.IOResult = io.read_line(stdin)
+    while line.ok do
+        let len: int = length(line.data)
+        if len > max then
+            max = len
+            longest = line.data // strings são valores: isto é uma cópia
+        end
+        line = io.read_line(stdin)
+    end
+    if max > 0 then             // havia alguma linha
+        print(longest)
+    end
+end
+main()

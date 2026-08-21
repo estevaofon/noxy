@@ -1,0 +1,22 @@
+// swap: troca os valores de duas variáveis do chamador
+func swap(px: ref int, py: ref int)
+    let temp: int = px      // lê o valor apontado por px
+    *px = *py               // escreve em *px o valor apontado por py
+    *py = temp
+end
+
+let a: int = 1
+let b: int = 2
+swap(ref a, ref b)          // como swap(&a, &b) em C
+print(a, b)
+swap(a, b)                  // com assinatura exata, o ref pode ficar implícito
+print(a, b)
+
+// a versão sem ref não funciona, pelo mesmo motivo que em C
+func bad_swap(x: int, y: int)
+    let temp: int = x
+    x = y
+    y = temp
+end
+bad_swap(a, b)
+print(a, b)                 // inalterados

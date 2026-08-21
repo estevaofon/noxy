@@ -1,0 +1,111 @@
+// o alocador do K&R (malloc/free com lista circular de blocos livres) sobre um int[]:
+// a "memória" é o array mem; um header ocupa 2 células: [índice do próximo livre, tamanho em unidades];
+// uma unidade = 2 células; um "ponteiro" é um índice em mem; NULL é -1
+
+let MEMSIZE: int = 2000
+let mem: int[] = zeros(MEMSIZE)     // toda a memória
+let brk: int = 2                    // próxima célula que o "sistema" ainda não entregou (0-1 é a base)
+let NALLOC: int = 64                // mínimo de unidades por pedido ao sistema
+let NULL: int = -1
+let freep: int = NULL               // início da lista de livres
+
+func ptr(h: int) -> int return mem[h] end
+func size(h: int) -> int return mem[h + 1] end
+func set_ptr(h: int, v: int) mem[h] = v end
+func set_size(h: int, v: int) mem[h + 1] = v end
+
+// sbrk: pede nu unidades ao "sistema"; devolve o índice do início ou NULL
+func sbrk(nu: int) -> int
+    if brk + 2 * nu > MEMSIZE then return NULL end
+    let start: int = brk
+    brk = brk + 2 * nu
+    return start
+end
+
+// morecore: pede mais memória ao sistema e a põe na lista de livres
+func morecore(nu: int) -> int
+    if nu < NALLOC then nu = NALLOC end
+    let up: int = sbrk(nu)
+    if up == NULL then return NULL end   // sem espaço
+    set_size(up, nu)
+    kr_free(up + 2)
+    return freep
+end
+
+// kr_malloc: alocador de propósito geral; devolve o índice da primeira célula útil
+func kr_malloc(ncells: int) -> int
+    let nunits: int = (ncells + 2 - 1) / 2 + 1     // arredonda e soma o header
+    if freep == NULL then                           // ainda não há lista de livres
+        set_ptr(0, 0)                               // a base aponta para si mesma
+        set_size(0, 0)
+        freep = 0
+    end
+    let prevp: int = freep
+    let p: int = ptr(prevp)
+    while true do
+        if size(p) >= nunits then                   // grande o bastante
+            if size(p) == nunits then               // exatamente: tira da lista
+                set_ptr(prevp, ptr(p))
+            else                                    // aloca a parte final do bloco
+                set_size(p, size(p) - nunits)
+                p = p + 2 * size(p)
+                set_size(p, nunits)
+            end
+            freep = prevp
+            return p + 2                            // pula o header
+        end
+        if p == freep then                          // deu a volta na lista
+            p = morecore(nunits)
+            if p == NULL then return NULL end
+        end
+        prevp = p
+        p = ptr(p)
+    end
+    return NULL                                     // nunca chega aqui; o compilador exige
+end
+
+// kr_free: devolve o bloco ap à lista de livres, juntando-o aos vizinhos
+func kr_free(ap: int)
+    let bp: int = ap - 2                            // o header do bloco
+    let p: int = freep
+    while !(bp > p && bp < ptr(p)) do
+        if p >= ptr(p) && (bp > p || bp < ptr(p)) then
+            break                                   // bloco no início ou no fim da arena
+        end
+        p = ptr(p)
+    end
+    if bp + 2 * size(bp) == ptr(p) then             // junta com o vizinho de cima
+        set_size(bp, size(bp) + size(ptr(p)))
+        set_ptr(bp, ptr(ptr(p)))
+    else
+        set_ptr(bp, ptr(p))
+    end
+    if p + 2 * size(p) == bp then                   // junta com o vizinho de baixo
+        set_size(p, size(p) + size(bp))
+        set_ptr(p, ptr(bp))
+    else
+        set_ptr(p, bp)
+    end
+    freep = p
+end
+
+let a: int = kr_malloc(10)
+let b: int = kr_malloc(20)
+let c: int = kr_malloc(5)
+print(a, b, c)                  // blocos distintos, alocados do fim da arena para o início
+mem[a] = 42                     // usa a memória alocada
+print(mem[a])
+kr_free(b)
+let d: int = kr_malloc(4)       // cabe no buraco deixado por b
+print(d, d > b && d < a)
+kr_free(a)
+kr_free(c)
+kr_free(d)
+// percorre a lista de livres a partir da base: deve haver um único bloco de 64 unidades
+let h: int = ptr(0)
+while h != 0 do
+    iprint(fmt("[header %d: %d unidades] ", h, size(h)))
+    h = ptr(h)
+end
+print("")
+print(kr_malloc(5000))          // maior que a arena: NULL

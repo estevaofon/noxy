@@ -1,0 +1,43 @@
+let daytab: int[][] = [
+    [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31],
+    [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+]
+
+func is_leap(year: int) -> int
+    if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 then
+        return 1
+    end
+    return 0
+end
+
+// day_of_year: converte mês e dia em dia do ano
+func day_of_year(year: int, month: int, day: int) -> int
+    let leap: int = is_leap(year)
+    let i: int = 1
+    while i < month do
+        day = day + daytab[leap][i]
+        i = i + 1
+    end
+    return day
+end
+
+// month_day: converte dia do ano em mês e dia, devolvidos por referência
+func month_day(year: int, yearday: int, pmonth: ref int, pday: ref int)
+    let leap: int = is_leap(year)
+    let i: int = 1
+    while yearday > daytab[leap][i] do
+        yearday = yearday - daytab[leap][i]
+        i = i + 1
+    end
+    *pmonth = i
+    *pday = yearday
+end
+
+print(day_of_year(1988, 3, 1))      // 61: 1988 é bissexto
+print(day_of_year(2023, 12, 31))    // 365
+let m: int = 0
+let d: int = 0
+month_day(1988, 60, ref m, ref d)
+print(m, d)                          // 2 29
+month_day(2026, 100, ref m, ref d)
+print(m, d)                          // 4 10

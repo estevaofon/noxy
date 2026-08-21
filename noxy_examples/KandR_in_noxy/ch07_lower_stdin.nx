@@ -1,0 +1,13 @@
+use io
+use strings select to_lower
+
+// lower: converte a entrada padrão para minúsculas — um filtro
+func main()
+    let stdin: io.File = io.stdin()
+    let line: io.IOResult = io.read_line(stdin)
+    while line.ok do
+        print(to_lower(line.data))
+        line = io.read_line(stdin)
+    end
+end
+main()

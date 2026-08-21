@@ -1,0 +1,2 @@
+let x: int = 42
+x = 3.14            // ERRO: o tipo de x é int, e não muda

@@ -1,0 +1,39 @@
+use io
+use sys
+
+let BUFSIZE: int = 8            // pequeno de propósito, para o laço aparecer
+
+// filecopy: copia src para dst em blocos de BUFSIZE bytes
+func filecopy(src: io.File, dst: io.File) -> int
+    let total: int = 0
+    let block: io.IOBytesResult = io.read_n(src, BUFSIZE)   // o read()
+    while block.ok do
+        io.write_bytes(dst, block.data)                      // o write()
+        total = total + length(block.data)
+        block = io.read_n(src, BUFSIZE)
+    end
+    return total
+end
+
+// copia um arquivo em blocos: noxy ch08_copy_blocks.nx origem destino
+func main()
+    let argv: string[] = sys.argv()
+    let src: io.File = io.open(argv[2], "r")
+    if !src.open then
+        eprint("copy: não consegui abrir " + argv[2])
+        sys.exit(1)
+    end
+    defer io.close(src)
+    let dst: io.File = io.open(argv[3], "w")
+    defer io.close(dst)
+    print(filecopy(src, dst), "bytes copiados")
+end
+main()
+
+// confere e limpa
+let a: io.File = io.open(sys.argv()[2], "r")
+let b: io.File = io.open(sys.argv()[3], "r")
+print(to_str(io.read_bytes(a).data) == to_str(io.read_bytes(b).data))
+io.close(a)
+io.close(b)
+io.remove(sys.argv()[3])

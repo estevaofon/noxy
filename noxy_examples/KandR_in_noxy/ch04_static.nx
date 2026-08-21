@@ -1,0 +1,15 @@
+// em C, 'static int count' dentro de uma função sobrevive entre chamadas;
+// em Noxy, uma variável capturada por uma closure faz o mesmo papel
+func make_counter() -> func() -> int
+    let count: int = 0          // nasce uma vez e vive enquanto a closure viver
+    return func() -> int
+        count = count + 1
+        return count
+    end
+end
+
+let next_id: func() -> int = make_counter()
+print(next_id(), next_id(), next_id())
+
+let other: func() -> int = make_counter()   // estado independente
+print(other())

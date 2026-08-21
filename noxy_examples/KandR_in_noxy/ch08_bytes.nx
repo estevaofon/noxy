@@ -1,0 +1,9 @@
+use io
+
+// leitura "de baixo nível": io.read_bytes devolve os bytes crus, sem validar UTF-8
+let f: io.File = io.open("ch07_a.txt", "r")
+let res: io.IOBytesResult = io.read_bytes(f)
+io.close(f)
+print(res.ok, length(res.data))
+let head: bytes = slice(res.data, 0, 5)
+print(hex_encode(head), head[0], to_str(head))   // bytes -> hex; byte por índice; bytes -> string

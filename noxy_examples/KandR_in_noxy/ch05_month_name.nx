@@ -1,0 +1,16 @@
+// a tabela é global para não ser reconstruída a cada chamada (o 'static' do K&R)
+let name: string[] = [
+    "Illegal month",
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+]
+
+// month_name: devolve o nome do n-ésimo mês
+func month_name(n: int) -> string
+    if n < 1 || n > 12 then
+        return name[0]
+    end
+    return name[n]
+end
+
+print(month_name(1), month_name(12), month_name(13))

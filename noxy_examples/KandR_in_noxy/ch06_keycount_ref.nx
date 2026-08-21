@@ -1,0 +1,72 @@
+use io
+use sys
+use strings select is_alpha, is_alnum
+
+struct Key
+    word: string
+    count: int
+end
+
+let keytab: Key[] = [
+    Key("break", 0), Key("case", 0), Key("continue", 0), Key("default", 0),
+    Key("defer", 0), Key("do", 0), Key("elif", 0), Key("else", 0),
+    Key("end", 0), Key("false", 0), Key("for", 0), Key("func", 0),
+    Key("if", 0), Key("in", 0), Key("let", 0), Key("null", 0),
+    Key("return", 0), Key("select", 0), Key("struct", 0), Key("then", 0),
+    Key("true", 0), Key("use", 0), Key("while", 0)
+]
+
+// getword: extrai a próxima palavra de text a partir de *pos; "" no fim
+func getword(text: string, pos: ref int) -> string
+    let n: int = length(text)
+    let i: int = pos
+    while i < n && !is_alpha(text[i]) && text[i] != "_" do
+        i = i + 1
+    end
+    let word: string = ""
+    while i < n && (is_alnum(text[i]) || text[i] == "_") do
+        word = word + text[i]
+        i = i + 1
+    end
+    *pos = i
+    return word
+end
+
+// binsearch: acha a palavra em keytab; devolve uma referência à entrada, ou null
+func binsearch(word: string) -> ref Key
+    let low: int = 0
+    let high: int = length(keytab) - 1
+    while low <= high do
+        let mid: int = (low + high) / 2
+        if word < keytab[mid].word then
+            high = mid - 1
+        elif word > keytab[mid].word then
+            low = mid + 1
+        else
+            return ref keytab[mid]        // referência ao elemento do array
+        end
+    end
+    return null
+end
+
+// conta as palavras-chave de Noxy em um arquivo-fonte; versão com referências
+func main()
+    let f: io.File = io.open(sys.argv()[2], "r")
+    let text: string = io.read(f).data
+    io.close(f)
+    let pos: int = 0
+    let word: string = getword(text, ref pos)
+    while word != "" do
+        let p: ref Key = binsearch(word)
+        if p != null then
+            p.count = p.count + 1         // escreve no elemento, através da referência
+        end
+        word = getword(text, ref pos)
+    end
+    for k in keytab do                    // o "for (p = keytab; p < keytab + NKEYS; p++)"
+        if k.count > 0 then
+            print(fmt("%4d %s", k.count, k.word))
+        end
+    end
+end
+main()

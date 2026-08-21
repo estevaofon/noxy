@@ -1,0 +1,25 @@
+struct Point
+    x: int
+    y: int
+end
+
+let origin: Point = Point(0, 0)
+let pp: ref Point = ref origin      // pp aponta para origin  (C: struct point *pp = &origin)
+print(pp.x, pp.y)                   // o acesso a campos dispensa o -> de C
+pp.x = 7                            // escreve no original através da referência
+print(origin.x)
+
+let copy: Point = pp                // let lê através da ref: copia o struct
+copy.y = 99
+print(origin.y, copy.y)
+
+let pn: ref Point = null
+print(pn == null)
+
+// uma função que devolve uma referência para um struct recém-criado
+func new_point(x: int, y: int) -> ref Point
+    let p: Point = Point(x, y)      // a variável local é promovida à heap...
+    return ref p                    // ...porque uma referência a ela escapa
+end
+let q: ref Point = new_point(3, 4)
+print(q.x, q.y)

@@ -1,0 +1,25 @@
+use time
+use rand
+use sys
+
+// time: medições e datas
+let t0: int = time.now_ms()
+let x: int = 0
+let i: int = 0
+while i < 100000 do
+    x = x + i
+    i = i + 1
+end
+let elapsed: int = time.now_ms() - t0
+print(x, elapsed >= 0)
+
+let dt: time.DateTime = time.make_datetime(1988, 12, 25, 0, 0, 0)
+print(time.format_date(dt), time.weekday_name(dt.weekday), time.is_leap_year(1988))
+
+// rand: números pseudoaleatórios
+let r: int = rand.random_int(1, 6)
+print(r >= 1 && r <= 6)
+
+// sys: ambiente e sistema operacional
+let path: sys.EnvResult = sys.getenv("PATH")
+print(path.ok, sys.os() != "")

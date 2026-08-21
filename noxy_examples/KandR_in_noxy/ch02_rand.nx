@@ -1,0 +1,20 @@
+let next: int = 1
+
+// rand: devolve um inteiro pseudoaleatório em 0..32767
+func rand() -> int
+    next = (next * 1103515245 + 12345) & 0x7fffffff
+    return (next / 65536) % 32768
+end
+
+// srand: define a semente de rand()
+func srand(seed: int)
+    next = seed
+end
+
+srand(42)
+let i: int = 0
+while i < 5 do
+    iprint(to_str(rand()) + " ")
+    i = i + 1
+end
+print("")

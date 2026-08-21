@@ -1,0 +1,28 @@
+// não há módulo de matemática: sqrt por Newton-Raphson, pow por multiplicação, fabs à mão
+func sqrt(x: float) -> float
+    if x <= 0.0 then return 0.0 end
+    let z: float = x
+    let i: int = 0
+    while i < 30 do
+        z = (z + x / z) / 2.0
+        i = i + 1
+    end
+    return z
+end
+
+func pow(base: float, n: int) -> float
+    let p: float = 1.0
+    let i: int = 0
+    while i < n do
+        p = p * base
+        i = i + 1
+    end
+    return p
+end
+
+func fabs(x: float) -> float
+    if x < 0.0 then return -x end
+    return x
+end
+
+print(fmt("%.6f %.1f %.2f", sqrt(2.0), pow(2.0, 10), fabs(-3.5)))

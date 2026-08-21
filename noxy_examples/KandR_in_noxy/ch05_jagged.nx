@@ -1,0 +1,16 @@
+// um array de strings de tamanhos diferentes: cada string é independente
+let words: string[] = ["a", "longa", "médio"]
+for w in words do
+    print(length(w), w)
+end
+
+// um array de arrays de tamanhos diferentes ("irregular"): linhas independentes
+let tri: int[][] = [[1], [1, 1], [1, 2, 1], [1, 3, 3, 1]]
+for row in tri do
+    print(row)
+end
+
+// uma matriz "retangular" é só o caso em que todas as linhas têm o mesmo tamanho
+let grid: int[][] = [[0, 0, 0], [0, 0, 0]]
+grid[1][2] = 7
+print(grid, length(grid), length(grid[0]))

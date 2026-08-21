@@ -1,0 +1,22 @@
+// não há union; um campo 'any' guarda um valor de qualquer tipo, e type() diz qual
+struct Symbol
+    name: string
+    value: any              // int, float ou string — o que em C seria uma union
+end
+
+let syms: Symbol[] = [Symbol("n", 42), Symbol("pi", 3.14), Symbol("msg", "hello")]
+for s in syms do
+    let t: string = type(s.value)
+    if t == "int" then
+        print(s.name, "inteiro", s.value)
+    elif t == "float" then
+        print(s.name, "real", s.value)
+    elif t == "string" then
+        print(s.name, "texto", s.value)
+    end
+end
+
+// ler um any como o tipo certo: to_int/to_float/to_str fazem o estreitamento
+let v: any = syms[0].value
+let n: int = to_int(v)
+print(n + 1)

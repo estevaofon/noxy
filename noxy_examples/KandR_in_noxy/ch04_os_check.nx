@@ -1,0 +1,12 @@
+use sys
+
+// não há #ifdef: a "compilação condicional" vira um teste em tempo de execução
+let HDR: string = ""
+if sys.os() == "windows" then
+    HDR = "windows.h"
+elif sys.os() == "linux" then
+    HDR = "linux.h"
+else
+    HDR = "default.h"
+end
+print(sys.os(), HDR)

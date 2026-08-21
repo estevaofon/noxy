@@ -1,0 +1,37 @@
+// calc_getop.nx: o analisador léxico da calculadora
+use calc_getch
+
+let NUMBER: string = "number"   // sinal de que um número foi encontrado
+let token: string = ""          // o texto do último número lido
+
+func isdigit(c: string) -> bool
+    return c >= "0" && c <= "9"
+end
+
+// getop: obtém o próximo operador ou operando numérico
+func getop() -> string
+    let c: string = calc_getch.getch()
+    while c == " " || c == "\t" do
+        c = calc_getch.getch()
+    end
+    token = ""
+    if !isdigit(c) && c != "." then
+        return c
+    end
+    while isdigit(c) do
+        token = token + c
+        c = calc_getch.getch()
+    end
+    if c == "." then
+        token = token + c
+        c = calc_getch.getch()
+        while isdigit(c) do
+            token = token + c
+            c = calc_getch.getch()
+        end
+    end
+    if c != "" then
+        calc_getch.ungetch(c)
+    end
+    return NUMBER
+end

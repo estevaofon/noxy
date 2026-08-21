@@ -1,0 +1,12 @@
+use sys
+
+// echo: imprime os argumentos da linha de comando
+let argv: string[] = sys.argv()
+let argc: int = length(argv)
+let i: int = 2                  // argv[0] é o noxy, argv[1] é o script
+while i < argc do
+    let sep: string = " "
+    if i == argc - 1 then sep = "\n" end
+    iprint(argv[i] + sep)
+    i = i + 1
+end

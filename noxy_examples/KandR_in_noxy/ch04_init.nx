@@ -1,0 +1,14 @@
+let i: int              // 0
+let f: float            // 0.0
+let s: string           // ""
+let b: bool             // false
+let a: int[]            // []
+let fixed: int[4]       // [0, 0, 0, 0]
+print(i, f, "[" + s + "]", b, a, fixed)
+
+let days: int[] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+print(length(days))     // o tamanho vem do inicializador
+
+let pattern: string = "ould"      // uma string é uma string, não um array de chars
+let m: map[string, int] = {"a": 1, "b": 2}
+print(m["a"], m["b"], length(m))

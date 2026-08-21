@@ -1,0 +1,3 @@
+// um array de tamanho fixo grande estoura a pilha da VM
+let buf: int[10000]
+print(length(buf))

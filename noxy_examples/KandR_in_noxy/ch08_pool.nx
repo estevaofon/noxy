@@ -1,0 +1,49 @@
+// a resposta idiomática ao void*: um pool de slots, genérico no tipo guardado.
+// O metadado (o encadeamento dos livres) fica FORA de banda, num int[] paralelo
+// aos slots — em C isso custaria uma segunda alocação.
+
+struct Pool<T>
+    items: T[]          // os slots
+    next: int[]         // encadeamento dos livres, paralelo a items
+    free_head: int      // primeiro slot livre, ou -1
+end
+
+// pool_alloc: guarda v num slot e devolve seu índice (o "ponteiro")
+func pool_alloc<T>(p: ref Pool<T>, v: T) -> int
+    if p.free_head >= 0 then
+        let i: int = p.free_head        // reaproveita um slot liberado
+        p.free_head = p.next[i]
+        p.items[i] = v
+        p.next[i] = -1
+        return i
+    end
+    append(p.items, v)                  // sem slots livres: cresce
+    append(p.next, -1)
+    return length(p.items) - 1
+end
+
+// pool_free: devolve o slot i à lista de livres
+func pool_free<T>(p: ref Pool<T>, i: int)
+    p.next[i] = p.free_head
+    p.free_head = i
+end
+
+struct Node
+    value: int
+    next: int           // índice em items, não ref
+end
+
+let nodes: Pool<Node> = Pool([], [], -1)    // T vem da anotação do let
+let a: int = pool_alloc(ref nodes, Node(10, -1))
+let b: int = pool_alloc(ref nodes, Node(20, -1))
+let c: int = pool_alloc(ref nodes, Node(30, -1))
+print(a, b, c, length(nodes.items))
+
+pool_free(ref nodes, b)
+let d: int = pool_alloc(ref nodes, Node(99, -1))
+print("reaproveitou o slot de b?", d == b, "| slots:", length(nodes.items))
+
+// o MESMO código, outro tipo: o compilador gera uma versão para cada
+let names: Pool<string> = Pool([], [], -1)
+print(pool_alloc(ref names, "ana"), pool_alloc(ref names, "bruno"), names.items)
+print(type(nodes), type(names))             // dois tipos distintos

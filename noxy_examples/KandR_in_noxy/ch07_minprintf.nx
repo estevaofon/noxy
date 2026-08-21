@@ -1,0 +1,33 @@
+// minprintf: versão mínima de printf; os argumentos variáveis vêm em um array de any
+func minprintf(format: string, args: any[]) -> string
+    let out: string = ""
+    let argi: int = 0               // próximo argumento a consumir
+    let i: int = 0
+    let n: int = length(format)
+    while i < n do
+        let c: string = format[i]
+        if c != "%" then
+            out = out + c
+        else
+            i = i + 1
+            let spec: string = format[i]
+            if spec == "d" then
+                out = out + to_str(to_int(args[argi]))
+                argi = argi + 1
+            elif spec == "f" then
+                out = out + fmt("%f", to_float(args[argi]))
+                argi = argi + 1
+            elif spec == "s" then
+                out = out + to_str(args[argi])
+                argi = argi + 1
+            else
+                out = out + spec        // %% e desconhecidos: copia o caractere
+            end
+        end
+        i = i + 1
+    end
+    return out
+end
+
+print(minprintf("%d itens a %f cada: %s", [3, 2.5, "ok"]))
+print(minprintf("100%% certo", []))

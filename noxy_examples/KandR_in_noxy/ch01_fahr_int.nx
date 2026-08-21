@@ -1,0 +1,14 @@
+// imprime a tabela Fahrenheit-Celsius
+// para fahr = 0, 20, ..., 300
+let fahr: int = 0
+let celsius: int
+let lower: int = 0      // limite inferior da tabela
+let upper: int = 300    // limite superior
+let step: int = 20      // incremento
+
+fahr = lower
+while fahr <= upper do
+    celsius = 5 * (fahr - 32) / 9
+    print(fmt("%d\t%d", fahr, celsius))
+    fahr = fahr + step
+end

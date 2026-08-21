@@ -1,0 +1,15 @@
+let s: string = "hello, world"      // 12 caracteres
+print(fmt(":%s:", s))
+print(fmt(":%10s:", s))
+print(fmt(":%.10s:", s))
+print(fmt(":%-10s:", s))
+print(fmt(":%.15s:", s))
+print(fmt(":%-15s:", s))
+print(fmt(":%15.10s:", s))
+print(fmt(":%-15.10s:", s))
+
+print(fmt("%d|%5d|%-5d|%05d|%+d", 42, 42, 42, 42, 42))
+print(fmt("%f|%.2f|%8.3f|%e|%g", 3.14159, 3.14159, 3.14159, 3.14159, 3.14159))
+print(fmt("%x|%X|%o|%b|%c|%%", 255, 255, 8, 5, 65))
+print(fmt("%t|%v|%v|%q", true, [1, 2], 3.5, "texto"))
+print(fmt("%T %T %T", 1, "a", 2.0))

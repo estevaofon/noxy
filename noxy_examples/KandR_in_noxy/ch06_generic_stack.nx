@@ -1,0 +1,22 @@
+// não há typedef; o que se parametriza é o struct, com um tipo genérico
+struct Stack<T>
+    items: T[]
+end
+
+func push<T>(s: ref Stack<T>, item: T)
+    append(s.items, item)
+end
+
+func take<T>(s: ref Stack<T>) -> T
+    return pop(s.items)
+end
+
+let ints: Stack<int> = Stack([])        // T = int, pela anotação
+push(ref ints, 1)
+push(ref ints, 2)
+print(take(ref ints), length(ints.items))
+
+let strs: Stack<string> = Stack([])     // T = string: outro tipo, mesmo código-fonte
+push(ref strs, "a")
+print(take(ref strs))
+print(type(ints), type(strs))

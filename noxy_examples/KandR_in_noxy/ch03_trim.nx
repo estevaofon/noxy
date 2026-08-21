@@ -1,0 +1,14 @@
+// trim: remove espaços, tabulações e quebras de linha do fim da string
+func trim(s: string) -> string
+    let n: int = length(s) - 1
+    while n >= 0 do
+        if s[n] != " " && s[n] != "\t" && s[n] != "\n" then
+            break
+        end
+        n = n - 1
+    end
+    return slice(s, 0, n + 1)
+end
+
+print("[" + trim("texto com espaços no fim    \t\n") + "]")
+print("[" + trim("      ") + "]")

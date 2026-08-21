@@ -1,0 +1,10 @@
+use array_utils select range
+
+let LOWER: int = 0      // limite inferior da tabela
+let UPPER: int = 300    // limite superior
+let STEP: int = 20      // incremento
+
+// imprime a tabela Celsius-Fahrenheit
+for celsius in range(UPPER, LOWER - 1, -STEP) do
+    print(fmt("%3d %6.1f", celsius, 9.0 / 5.0 * to_float(celsius) + 32.0))
+end

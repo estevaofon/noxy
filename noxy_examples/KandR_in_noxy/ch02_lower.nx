@@ -1,0 +1,18 @@
+use strings select char_code, from_char_code, to_lower
+
+// lower: converte c para minúscula; só ASCII
+func lower(c: string) -> string
+    if c >= "A" && c <= "Z" then
+        return from_char_code(char_code(c) + char_code("a") - char_code("A"))
+    else
+        return c
+    end
+end
+
+let s: string = ""
+for c in "Hello, WORLD" do
+    s = s + lower(c)
+end
+print(s)
+print(to_lower("Hello, WORLD"))   // a versão da biblioteca...
+print(to_lower("ÁGUA"))           // ...que entende Unicode

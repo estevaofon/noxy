@@ -1,0 +1,30 @@
+// qsort: ordena v[left]...v[right] em ordem crescente
+func qsort(v: ref int[], left: int, right: int)
+    if left >= right then           // nada a fazer com menos de dois elementos
+        return
+    end
+    swap(v, left, (left + right) / 2)   // move o elemento de partição para v[left]
+    let last: int = left
+    let i: int = left + 1
+    while i <= right do                 // particiona
+        if v[i] < v[left] then
+            last = last + 1
+            swap(v, last, i)
+        end
+        i = i + 1
+    end
+    swap(v, left, last)                 // restaura o elemento de partição
+    qsort(v, left, last - 1)
+    qsort(v, last + 1, right)
+end
+
+// swap: troca v[i] e v[j]
+func swap(v: ref int[], i: int, j: int)
+    let temp: int = v[i]
+    v[i] = v[j]
+    v[j] = temp
+end
+
+let nums: int[] = [9, 4, 7, 1, 8, 2, 6, 3, 5, 0]
+qsort(ref nums, 0, length(nums) - 1)
+print(nums)

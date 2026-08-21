@@ -1,0 +1,11 @@
+// bitcount: conta os bits 1 de x
+func bitcount(x: int) -> int
+    let b: int = 0
+    while x != 0 do
+        x = x & (x - 1)     // apaga o bit 1 mais à direita
+        b = b + 1
+    end
+    return b
+end
+
+print(bitcount(0), bitcount(1), bitcount(0xFF), bitcount(0b10110))

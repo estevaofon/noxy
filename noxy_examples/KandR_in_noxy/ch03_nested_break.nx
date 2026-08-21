@@ -1,0 +1,32 @@
+// procura o primeiro elemento comum a dois arrays; em C seria um goto found,
+// em Noxy a saída de laços aninhados é um return (ou uma variável de controle)
+func first_common(a: int[], b: int[]) -> int
+    for x in a do
+        for y in b do
+            if x == y then
+                return x        // sai dos dois laços de uma vez
+            end
+        end
+    end
+    return -1
+end
+
+print(first_common([1, 2, 3, 4], [9, 8, 3, 2]))
+print(first_common([1, 2], [3, 4]))
+
+// a mesma coisa com uma variável de controle, quando um return não serve
+let found: bool = false
+let a: int[] = [1, 2, 3, 4]
+let b: int[] = [9, 8, 3, 2]
+let i: int = 0
+while i < length(a) && !found do
+    let j: int = 0
+    while j < length(b) && !found do
+        if a[i] == b[j] then
+            found = true
+            print("comum:", a[i])
+        end
+        j = j + 1
+    end
+    i = i + 1
+end

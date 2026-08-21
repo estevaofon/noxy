@@ -1,0 +1,125 @@
+use sys
+use strings select is_alnum, is_space
+
+// dcl: traduz um tipo Noxy para palavras
+//   noxy ch05_dcl.nx "(func(int) -> int)[]"   ->   array de função que recebe (int) e devolve int
+
+let tokens: string[] = []    // os tokens do tipo
+let tp: int = 0              // próximo token
+
+// tokenize: separa identificadores, números e pontuação; "->" é um token só
+func tokenize(s: string)
+    let n: int = length(s)
+    let i: int = 0
+    while i < n do
+        let c: string = s[i]
+        if is_space(c) then
+            i = i + 1
+        elif is_alnum(c) || c == "_" then
+            let word: string = ""
+            while i < n && (is_alnum(s[i]) || s[i] == "_") do
+                word = word + s[i]
+                i = i + 1
+            end
+            append(tokens, word)
+        elif c == "-" && i + 1 < n && s[i + 1] == ">" then
+            append(tokens, "->")
+            i = i + 2
+        else
+            append(tokens, c)
+            i = i + 1
+        end
+    end
+end
+
+func peek() -> string
+    if tp < length(tokens) then
+        return tokens[tp]
+    end
+    return ""
+end
+
+func next() -> string
+    let t: string = peek()
+    tp = tp + 1
+    return t
+end
+
+func expect(t: string)
+    if next() != t then
+        eprint("dcl: esperava '" + t + "'")
+        sys.exit(1)
+    end
+end
+
+// suffixes: aplica os sufixos [] e [N] ao tipo já descrito
+func suffixes(desc: string) -> string
+    while peek() == "[" do
+        next()
+        if peek() == "]" then
+            next()
+            desc = "array de " + desc
+        else
+            let n: string = next()
+            expect("]")
+            desc = "array de " + n + " " + desc
+        end
+    end
+    return desc
+end
+
+// type: descreve um tipo completo
+func type_desc() -> string
+    let t: string = next()
+    if t == "ref" then
+        return "referência para " + type_desc()   // ref cola em tudo o que vem depois
+    end
+    if t == "func" then
+        expect("(")
+        let params: string = ""
+        while peek() != ")" do
+            if params != "" then
+                params = params + ", "
+            end
+            params = params + type_desc()
+            if peek() == "," then next() end
+        end
+        expect(")")
+        let ret: string = "nada"
+        if peek() == "->" then
+            next()
+            ret = type_desc()                        // o [] de um retorno pertence ao retorno
+        end
+        return suffixes("função que recebe (" + params + ") e devolve " + ret)
+    end
+    if t == "map" then
+        expect("[")
+        let k: string = type_desc()
+        expect(",")
+        let v: string = type_desc()
+        expect("]")
+        return suffixes("map de " + k + " para " + v)
+    end
+    if t == "(" then
+        let inner: string = type_desc()
+        expect(")")
+        return suffixes(inner)
+    end
+    // nome de tipo, possivelmente genérico: Nome<T>
+    let name: string = t
+    if peek() == "<" then
+        next()
+        name = name + " de " + type_desc()
+        expect(">")
+    end
+    return suffixes(name)
+end
+
+func main()
+    tokenize(sys.argv()[2])
+    print(sys.argv()[2] + ":  " + type_desc())
+    if tp < length(tokens) then
+        eprint("dcl: sobra depois do tipo: " + peek())
+    end
+end
+main()

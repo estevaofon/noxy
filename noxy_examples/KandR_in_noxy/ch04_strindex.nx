@@ -1,0 +1,36 @@
+use io
+use sys
+
+let pattern: string = "ould"   // padrão a procurar
+
+// strindex: devolve o índice de t em s, ou -1 se não houver
+func strindex(s: string, t: string) -> int
+    let i: int = 0
+    while i <= length(s) - length(t) do
+        let j: int = 0
+        while j < length(t) && s[i + j] == t[j] do
+            j = j + 1
+        end
+        if j == length(t) then
+            return i
+        end
+        i = i + 1
+    end
+    return -1
+end
+
+// acha todas as linhas do arquivo que contêm o padrão
+func main()
+    let f: io.File = io.open(sys.argv()[2], "r")
+    let lines: io.IOLinesResult = io.read_lines(f)
+    io.close(f)
+    let found: int = 0
+    for line in lines.data do
+        if strindex(line, pattern) >= 0 then
+            print(line)
+            found = found + 1
+        end
+    end
+    print(found)
+end
+main()

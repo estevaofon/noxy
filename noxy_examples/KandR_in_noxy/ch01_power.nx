@@ -1,0 +1,20 @@
+// power: eleva base à n-ésima potência; n >= 0
+func power(base: int, n: int) -> int
+    let p: int = 1
+    let i: int = 1
+    while i <= n do
+        p = p * base
+        i = i + 1
+    end
+    return p
+end
+
+// testa a função power
+func main()
+    let i: int = 0
+    while i < 10 do
+        print(fmt("%d %d %d", i, power(2, i), power(-3, i)))
+        i = i + 1
+    end
+end
+main()

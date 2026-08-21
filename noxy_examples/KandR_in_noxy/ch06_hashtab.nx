@@ -1,0 +1,53 @@
+use strings select char_code
+
+struct Nlist                    // entrada da tabela
+    next: ref Nlist             // próxima entrada na cadeia
+    name: string                // o nome definido
+    defn: string                // o texto de substituição
+end
+
+let HASHSIZE: int = 101
+let hashtab: (ref Nlist)[101]   // a tabela: um array de cadeias, todas vazias (null)
+
+// hash: calcula o valor de hash da string s
+func hash(s: string) -> int
+    let hashval: int = 0
+    for c in s do
+        hashval = (char_code(c) + 31 * hashval) & 0x7fffffff
+    end
+    return hashval % HASHSIZE
+end
+
+// lookup: procura s em hashtab; devolve a entrada, ou null
+func lookup(s: string) -> ref Nlist
+    let np: ref Nlist = hashtab[hash(s)]
+    while np != null do
+        if s == np.name then
+            return np               // achou
+        end
+        np = np.next                // rebind: avança na cadeia
+    end
+    return null                     // não achou
+end
+
+// install: põe (name, defn) em hashtab; substitui se já existir
+func install(name: string, defn: string) -> ref Nlist
+    let np: ref Nlist = lookup(name)
+    if np == null then              // não encontrado
+        let hashval: int = hash(name)
+        let novo: Nlist = Nlist(hashtab[hashval], name, defn)
+        hashtab[hashval] = ref novo // a entrada nova vai para a frente da cadeia
+        return ref novo
+    end
+    np.defn = defn                  // já existia: substitui a definição
+    return np
+end
+
+install("YES", "1")
+install("NO", "0")
+install("MAXLINE", "1000")
+install("YES", "true")              // redefine
+let e: ref Nlist = lookup("YES")
+print(e.name, e.defn)
+print(lookup("MAXLINE").defn)
+print(lookup("MAYBE") == null)

@@ -1,0 +1,29 @@
+use strings select char_code
+
+// strcpy: em C copia t para s caractere a caractere; em Noxy é uma atribuição
+let t: string = "hello"
+let s: string = t           // cópia: strings são valores
+print(s)
+
+// strcmp: devolve <0, 0 ou >0 conforme s < t, s == t ou s > t
+func strcmp(s: string, t: string) -> int
+    let i: int = 0
+    while i < length(s) && i < length(t) do
+        if s[i] != t[i] then
+            return char_code(s[i]) - char_code(t[i])
+        end
+        i = i + 1
+    end
+    return length(s) - length(t)
+end
+print(strcmp("abc", "abd"), strcmp("abc", "abc"), strcmp("abcd", "abc"))
+
+// ...e os operadores relacionais fazem o mesmo diretamente
+print("abc" < "abd", "abc" == "abc", "abcd" > "abc")
+
+// amessage e pmessage do K&R: duas variáveis com o mesmo texto são independentes
+let amessage: string = "now is the time"
+let pmessage: string = amessage
+pmessage = pmessage + "!"
+print(amessage)
+print(pmessage)

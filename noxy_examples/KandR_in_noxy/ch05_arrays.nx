@@ -1,0 +1,27 @@
+let a: int[] = [10, 20, 30, 40, 50]
+
+// uma referência a um elemento, não ao array — e não há aritmética sobre ela
+let pa: ref int = ref a[0]
+*pa = 11
+print(a)
+
+// "&a[2]" — um subarray — é um array novo, copiado
+let tail: int[] = slice(a, 2, length(a))
+tail[0] = 0
+print(tail, a)              // a não muda: slice copia
+
+// strlen com for: não há '\0' para procurar
+func strlen(s: string) -> int
+    let n: int = 0
+    for c in s do
+        n = n + 1
+    end
+    return n
+end
+print(strlen("hello, world"), strlen(""))
+
+// uma função recebe o array por valor; f(&a[2]) vira f(slice(a, 2, 5))
+func first(v: int[]) -> int
+    return v[0]
+end
+print(first(a), first(slice(a, 2, 5)))

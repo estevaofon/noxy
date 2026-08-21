@@ -1,0 +1,7 @@
+for year in [1900, 2000, 2024, 2025, 2100] do
+    if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 then
+        print(fmt("%d é bissexto", year))
+    else
+        print(fmt("%d não é bissexto", year))
+    end
+end

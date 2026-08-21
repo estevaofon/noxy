@@ -1,0 +1,18 @@
+use strings select from_char_code
+
+// printd: imprime n em decimal, recursivamente
+func printd(n: int)
+    if n < 0 then
+        iprint("-")
+        n = -n
+    end
+    if n / 10 > 0 then
+        printd(n / 10)
+    end
+    iprint(from_char_code(n % 10 + 48))    // 48 é o código de "0"
+end
+
+printd(123)
+print("")
+printd(-9876)
+print("")

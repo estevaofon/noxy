@@ -1,0 +1,15 @@
+use io
+use sys
+
+// cópia "de baixo nível": bytes crus de um arquivo para outro, sem passar por string
+func main()
+    let src: io.File = io.open(sys.argv()[2], "r")
+    let data: io.IOBytesResult = io.read_bytes(src)    // o read()
+    io.close(src)
+    let dst: io.File = io.open(sys.argv()[3], "w")
+    io.write_bytes(dst, data.data)                     // o write()
+    io.close(dst)
+    print(length(data.data), io.stat(sys.argv()[3]).size)
+    io.remove(sys.argv()[3])
+end
+main()

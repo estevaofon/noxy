@@ -1,0 +1,25 @@
+use io
+use sys
+
+// numera as linhas de um arquivo, escrevendo o resultado em outro (fgets/fputs)
+func main()
+    let src: io.File = io.open(sys.argv()[2], "r")
+    defer io.close(src)                 // fechados ao sair de main, em ordem inversa
+    let dst: io.File = io.open(sys.argv()[3], "w")
+    defer io.close(dst)
+
+    let n: int = 0
+    let line: io.IOResult = io.read_line(src)    // o fgets
+    while line.ok do
+        n = n + 1
+        io.write(dst, fmt("%3d  %s\n", n, line.data))   // o fputs
+        line = io.read_line(src)
+    end
+end
+main()
+
+// lê o resultado de volta, para conferir, e apaga o arquivo
+let back: io.File = io.open(sys.argv()[3], "r")
+iprint(io.read(back).data)
+io.close(back)
+io.remove(sys.argv()[3])

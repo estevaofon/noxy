@@ -1,0 +1,23 @@
+// shellsort: ordena v em ordem crescente
+func shellsort(v: ref int[])
+    let n: int = length(v)
+    let gap: int = n / 2
+    while gap > 0 do
+        let i: int = gap
+        while i < n do
+            let j: int = i - gap
+            while j >= 0 && v[j] > v[j + gap] do
+                let temp: int = v[j]
+                v[j] = v[j + gap]
+                v[j + gap] = temp
+                j = j - gap
+            end
+            i = i + 1
+        end
+        gap = gap / 2
+    end
+end
+
+let nums: int[] = [23, 5, 17, 2, 11, 19, 3, 13, 7]
+shellsort(ref nums)
+print(nums)

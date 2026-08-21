@@ -1,0 +1,15 @@
+// não há campos de bits; flags são bits em um int, manipulados com máscaras
+let KEYWORD: int = 1        // 01
+let EXTERNAL: int = 2       // 02
+let STATIC: int = 4         // 04
+
+let flags: int = 0
+flags = flags | EXTERNAL | STATIC           // liga os dois bits
+print(fmt("%03b", flags))
+flags = flags & ~(EXTERNAL | STATIC)        // desliga os dois
+print(flags)
+flags = flags | KEYWORD
+if (flags & (EXTERNAL | STATIC)) == 0 then
+    print("nem EXTERNAL nem STATIC")
+end
+print((flags & KEYWORD) != 0)

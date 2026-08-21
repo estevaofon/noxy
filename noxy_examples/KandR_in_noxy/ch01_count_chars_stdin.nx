@@ -1,0 +1,12 @@
+use io
+
+// conta os caracteres da entrada padrão
+func main()
+    let text: io.IOResult = io.read(io.stdin())   // toda a entrada, de uma vez
+    let nc: int = 0
+    for c in text.data do
+        nc = nc + 1
+    end
+    print(nc)
+end
+main()

@@ -1,0 +1,42 @@
+use io
+
+let MAXLINE: int = 1000     // tamanho máximo de linha aceito
+
+let line: string = ""       // linha de entrada atual
+let longest: string = ""    // linha mais longa até agora
+let max: int = 0            // comprimento máximo visto até agora
+
+// getline: lê a próxima linha da entrada para 'line' e devolve seu
+// comprimento; devolve -1 no fim da entrada
+func getline() -> int
+    let res: io.IOResult = io.read_line(io.stdin())
+    if !res.ok then
+        return -1
+    end
+    line = res.data
+    if length(line) > MAXLINE then
+        line = slice(line, 0, MAXLINE)
+    end
+    return length(line)
+end
+
+// copy: copia 'line' para 'longest'; assume que 'line' é maior
+func copy()
+    longest = line
+end
+
+// imprime a linha mais longa; versão especializada
+func main()
+    let len: int = getline()
+    while len >= 0 do
+        if len > max then
+            max = len
+            copy()
+        end
+        len = getline()
+    end
+    if max > 0 then
+        print(longest)
+    end
+end
+main()

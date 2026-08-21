@@ -1,0 +1,71 @@
+use io
+
+// um "FILE" de usuário: buffer de uma linha, recarregado sob demanda (o _fillbuf do K&R)
+struct Reader
+    file: io.File
+    buf: string             // a linha atual, com o \n
+    pos: int                // próximo caractere de buf
+    eof: bool
+    pushed: string          // caractere devolvido por ungetc ("" se nenhum)
+end
+
+let EOF: string = ""
+
+// ropen: abre o arquivo; nada é lido até o primeiro getc
+func ropen(path: string) -> Reader
+    return Reader(io.open(path, "r"), "", 0, false, "")
+end
+
+// fillbuf: recarrega o buffer com a próxima linha; devolve false no fim
+func fillbuf(r: ref Reader) -> bool
+    let res: io.IOResult = io.read_line(r.file)
+    if !res.ok then
+        r.eof = true
+        return false
+    end
+    r.buf = res.data + "\n"
+    r.pos = 0
+    return true
+end
+
+// getc: devolve o próximo caractere, ou EOF
+func getc(r: ref Reader) -> string
+    if r.pushed != "" then
+        let c: string = r.pushed
+        r.pushed = ""
+        return c
+    end
+    if r.pos >= length(r.buf) then          // buffer vazio: recarrega
+        if r.eof || !fillbuf(r) then
+            return EOF
+        end
+    end
+    let c: string = r.buf[r.pos]
+    r.pos = r.pos + 1
+    return c
+end
+
+// ungetc: devolve c para o fluxo
+func ungetc(c: string, r: ref Reader)
+    r.pushed = c
+end
+
+func rclose(r: ref Reader)
+    io.close(r.file)
+end
+
+let rd: Reader = ropen("ch07_a.txt")
+let c: string = getc(ref rd)
+let count: int = 0
+while c != EOF do
+    count = count + 1
+    c = getc(ref rd)
+end
+rclose(ref rd)
+print(count)                                // 11: "alpha\nbeta\n"
+
+let rd2: Reader = ropen("ch07_a.txt")
+let first: string = getc(ref rd2)
+ungetc(first, ref rd2)
+print(getc(ref rd2) == first)
+rclose(ref rd2)

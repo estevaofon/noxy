@@ -1,0 +1,28 @@
+use strings select split, trim, SplitResult
+use convert select *
+
+// a calculadora rudimentar do K&R usa scanf("%lf"); aqui, conversão verificada linha a linha
+let lines: string[] = ["1.5", "2.25", "abc", "  -0.75 "]
+let sum: float = 0.0
+for line in lines do
+    let r: FloatResult = to_float_result(trim(line))
+    if r.ok then
+        sum = sum + r.value
+    else
+        print("ignorando [" + line + "]: " + r.error)
+    end
+end
+print(fmt("%.2f", sum))
+
+// scanf("%d %s %d", &day, monthname, &year) para "25 Dec 1988"
+let parts: SplitResult = split("25 Dec 1988", " ")
+let day: IntResult = to_int_result(parts.parts[0])
+let month: string = parts.parts[1]
+let year: IntResult = to_int_result(parts.parts[2])
+if day.ok && year.ok then
+    print(day.value, month, year.value)
+end
+
+// scanf("%d/%d/%d", &month, &day, &year) para "12/25/1988"
+let mdy: SplitResult = split("12/25/1988", "/")
+print(mdy.count, to_int(mdy.parts[0]), to_int(mdy.parts[1]), to_int(mdy.parts[2]))

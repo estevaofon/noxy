@@ -1,0 +1,25 @@
+struct Point
+    x: int
+    y: int
+end
+
+struct Rect
+    pt1: Point
+    pt2: Point
+end
+
+let maxpt: Point = Point(320, 200)      // construtor: os campos, na ordem da declaração
+print(maxpt.x, maxpt.y)
+
+let pt: Point = Point(0, 0)
+pt.x = 5
+print(pt)                               // um struct impresso diretamente
+print(fmt("%d,%d", pt.x, pt.y))
+
+let screen: Rect = Rect(Point(0, 0), maxpt)
+screen.pt2.y = 250                      // campos aninhados
+print(screen.pt2.x, screen.pt2.y, maxpt.y)   // maxpt não mudou: o construtor copiou
+
+let p2: Point = pt                      // atribuição copia
+p2.x = 99
+print(pt.x, p2.x, pt == p2, pt == Point(5, 0))   // == compara campo a campo

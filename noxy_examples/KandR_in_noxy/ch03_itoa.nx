@@ -1,0 +1,25 @@
+use strings select from_char_code
+
+// itoa: converte n para uma string de dígitos
+func itoa(n: int) -> string
+    let s: string = ""
+    let sign: int = n
+    if n < 0 then
+        n = -n                  // torna n positivo
+    end
+    // o do-while de C vira um laço infinito com saída no fim do corpo:
+    while true do
+        s = from_char_code(n % 10 + 48) + s   // gera o próximo dígito (48 = "0")
+        n = n / 10
+        if n <= 0 then
+            break
+        end
+    end
+    if sign < 0 then
+        s = "-" + s
+    end
+    return s
+end
+
+print(itoa(12345), itoa(-987), itoa(0))
+print(to_str(12345))            // a versão embutida

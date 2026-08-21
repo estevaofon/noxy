@@ -1,0 +1,34 @@
+use sys
+use calc_stack
+use calc_getch
+use calc_getop
+
+// calculadora polonesa reversa, versão em módulos
+func main()
+    calc_getch.set_input(sys.argv()[2])
+    let typ: string = calc_getop.getop()
+    while typ != "" do
+        if typ == calc_getop.NUMBER then
+            calc_stack.push(to_float(calc_getop.token))
+        elif typ == "+" then
+            calc_stack.push(calc_stack.pop() + calc_stack.pop())
+        elif typ == "*" then
+            calc_stack.push(calc_stack.pop() * calc_stack.pop())
+        elif typ == "-" then
+            let op2: float = calc_stack.pop()
+            calc_stack.push(calc_stack.pop() - op2)
+        elif typ == "/" then
+            let op2: float = calc_stack.pop()
+            if op2 != 0.0 then
+                calc_stack.push(calc_stack.pop() / op2)
+            else
+                print("erro: divisor zero")
+            end
+        else
+            print("erro: comando desconhecido " + typ)
+        end
+        typ = calc_getop.getop()
+    end
+    print(fmt("\t%.8g", calc_stack.pop()))
+end
+main()

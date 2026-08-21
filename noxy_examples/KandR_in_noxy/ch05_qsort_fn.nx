@@ -1,0 +1,68 @@
+use io
+use sys
+
+// numcmp: compara s1 e s2 numericamente
+func numcmp(s1: string, s2: string) -> int
+    let v1: float = to_float(s1)
+    let v2: float = to_float(s2)
+    if v1 < v2 then return -1 end
+    if v1 > v2 then return 1 end
+    return 0
+end
+
+// strcmp: compara s1 e s2 lexicograficamente
+func strcmp(s1: string, s2: string) -> int
+    if s1 < s2 then return -1 end
+    if s1 > s2 then return 1 end
+    return 0
+end
+
+// qsort: ordena v[left]...v[right] em ordem crescente segundo comp
+func qsort(v: ref string[], left: int, right: int, comp: func(string, string) -> int)
+    if left >= right then
+        return
+    end
+    swap(v, left, (left + right) / 2)
+    let last: int = left
+    let i: int = left + 1
+    while i <= right do
+        if comp(v[i], v[left]) < 0 then
+            last = last + 1
+            swap(v, last, i)
+        end
+        i = i + 1
+    end
+    swap(v, left, last)
+    qsort(v, left, last - 1, comp)
+    qsort(v, last + 1, right, comp)
+end
+
+func swap(v: ref string[], i: int, j: int)
+    let temp: string = v[i]
+    v[i] = v[j]
+    v[j] = temp
+end
+
+// ordena as linhas de um arquivo; com -n, em ordem numérica
+func main()
+    let argv: string[] = sys.argv()
+    let numeric: bool = false
+    let i: int = 2
+    if i < length(argv) && argv[i] == "-n" then
+        numeric = true
+        i = i + 1
+    end
+    let f: io.File = io.open(argv[i], "r")
+    let lines: string[] = io.read_lines(f).data
+    io.close(f)
+
+    let comp: func(string, string) -> int = strcmp   // a função é um valor
+    if numeric then
+        comp = numcmp
+    end
+    qsort(ref lines, 0, length(lines) - 1, comp)
+    for line in lines do
+        print(line)
+    end
+end
+main()

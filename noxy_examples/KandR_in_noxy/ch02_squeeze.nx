@@ -1,0 +1,18 @@
+// squeeze: remove todas as ocorrências de c em s
+func squeeze(s: string, c: string) -> string
+    let out: string = ""
+    for ch in s do
+        if ch != c then
+            out = out + ch
+        end
+    end
+    return out
+end
+
+// strcat: concatena t ao fim de s — em Noxy, é só o operador +
+func strcat(s: string, t: string) -> string
+    return s + t
+end
+
+print(squeeze("banana", "a"))
+print(strcat("hello, ", "world"))

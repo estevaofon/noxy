@@ -1,0 +1,21 @@
+use array_utils select range
+
+// imprime os elementos de a, dez por linha, separados por um espaço
+let a: int[] = range(1, 24, 1)
+let n: int = length(a)
+let i: int = 0
+while i < n do
+    let sep: string = " "
+    if i % 10 == 9 || i == n - 1 then
+        sep = "\n"
+    end
+    iprint(fmt("%6d", a[i]) + sep)
+    i = i + 1
+end
+
+// z = (a > b) ? a : b;  vira uma função
+func max(a: int, b: int) -> int
+    if a > b then return a end
+    return b
+end
+print(max(3, 7), max(10, 2))

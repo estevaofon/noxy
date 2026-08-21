@@ -1,0 +1,6 @@
+use calc_stack
+use calc_stack select sp, push
+
+push(1.5)                   // a função importada opera no estado do módulo...
+print(calc_stack.sp)        // ...que o acesso qualificado enxerga: 1
+print(sp)                   // ...mas a cópia trazida por 'select' ficou em 0

@@ -1,0 +1,45 @@
+use io
+
+// get: lê n bytes a partir da posição pos; devolve bytes vazios se não der
+func get(f: io.File, pos: int, n: int) -> bytes
+    let p: io.IOPositionResult = io.seek(f, pos, io.SEEK_SET)
+    if !p.ok then
+        return b""
+    end
+    return io.read_n(f, n).data
+end
+
+// um "banco de dados" de registros de tamanho fixo
+let RECLEN: int = 16            // 16 bytes por registro
+let path: string = "ch08_recs.dat"
+
+func record_offset(i: int) -> int
+    return i * RECLEN
+end
+
+// escreve três registros de tamanho fixo
+let w: io.File = io.open(path, "w")
+io.write(w, "ana...........  ")
+io.write(w, "bruno.........  ")
+io.write(w, "carla.........  ")
+io.close(w)
+
+// lê o registro do meio SEM ler os outros dois
+let f: io.File = io.open(path, "r")
+print("[" + to_str(get(f, record_offset(1), RECLEN)) + "]")
+print("[" + to_str(get(f, record_offset(2), RECLEN)) + "]")
+print("[" + to_str(get(f, record_offset(0), RECLEN)) + "]")   // pode voltar
+print("posição depois das leituras:", io.tell(f).position)
+print("fora do arquivo:", length(get(f, 9999, RECLEN)))
+io.close(f)
+
+// atualiza o registro 1 no lugar, sem reescrever o arquivo
+let rw: io.File = io.open(path, "rw")
+io.seek(rw, record_offset(1), io.SEEK_SET)
+io.write(rw, "BRUNO (editado) ")
+io.close(rw)
+
+let check: io.File = io.open(path, "r")
+print("[" + io.read(check).data + "]")
+io.close(check)
+io.remove(path)

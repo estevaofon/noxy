@@ -1,0 +1,40 @@
+use strings select char_code
+
+// atof: converte a string s para float
+func atof(s: string) -> float
+    let n: int = length(s)
+    let i: int = 0
+    while i < n && (s[i] == " " || s[i] == "\t") do   // pula brancos
+        i = i + 1
+    end
+    let sign: float = 1.0
+    if i < n && (s[i] == "+" || s[i] == "-") then
+        if s[i] == "-" then sign = -1.0 end
+        i = i + 1
+    end
+    let val: float = 0.0
+    while i < n && s[i] >= "0" && s[i] <= "9" do
+        val = 10.0 * val + to_float(char_code(s[i]) - 48)
+        i = i + 1
+    end
+    let power: float = 1.0
+    if i < n && s[i] == "." then
+        i = i + 1
+        while i < n && s[i] >= "0" && s[i] <= "9" do
+            val = 10.0 * val + to_float(char_code(s[i]) - 48)
+            power = power * 10.0
+            i = i + 1
+        end
+    end
+    return sign * val / power
+end
+
+print(atof("3.14159"), atof("  -2.5"), atof("42"))
+print(to_float("3.14159"))          // a versão embutida
+
+// a calculadora rudimentar do K&R: soma os números de uma lista de linhas
+let sum: float = 0.0
+for line in ["1.5", "2.25", "-0.75"] do
+    sum = sum + atof(line)
+end
+print(fmt("%.2f", sum))

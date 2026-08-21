@@ -1,0 +1,19 @@
+use strings select char_code, from_char_code
+
+print(1234, 0x1F, 0b1010)               // decimal, hexadecimal, binário
+print(3.14, 0.5, 100.0)                 // ponto flutuante: sempre com o ponto
+print(-9223372036854775808)             // o menor int cabe como literal
+
+print("A", char_code("A"), from_char_code(65))  // "caractere" e seu código
+print("\u{41}\u{e9}\u00e7")                // escapes Unicode: \u{...} ou \uXXXX
+print("aspas \"internas\", barra \ e tab\tfim")
+print('aspas simples "podem" conter aspas duplas')
+
+let s: string = "hello, " + "world"     // não há junção de literais adjacentes: use +
+print(s)
+
+let ml: string = "um literal pode
+ocupar mais de uma linha"
+print(ml)
+
+print(b"bytes", true, false, null)

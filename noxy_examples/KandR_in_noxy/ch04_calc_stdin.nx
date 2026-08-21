@@ -1,0 +1,131 @@
+use io
+
+let MAXVAL: int = 100       // profundidade máxima da pilha de valores
+let sp: int = 0             // próxima posição livre na pilha
+let val: float[100]         // a pilha de valores
+
+// push: empilha f
+func push(f: float)
+    if sp < MAXVAL then
+        val[sp] = f
+        sp = sp + 1
+    else
+        eprint("erro: pilha cheia, não dá para empilhar " + to_str(f))
+    end
+end
+
+// pop: desempilha e devolve o valor do topo
+func pop() -> float
+    if sp > 0 then
+        sp = sp - 1
+        return val[sp]
+    else
+        eprint("erro: pilha vazia")
+        return 0.0
+    end
+end
+
+let BUFSIZE: int = 100
+let buf: string[100]        // buffer para ungetch
+let bufp: int = 0           // próxima posição livre em buf
+let linebuf: string = ""    // a linha de entrada atual
+let pos: int = 0            // próximo caractere de linebuf ainda não lido
+let eof: bool = false
+
+// getch: devolve o próximo caractere da entrada (possivelmente devolvido); "" no fim
+func getch() -> string
+    if bufp > 0 then
+        bufp = bufp - 1
+        return buf[bufp]
+    end
+    if pos >= length(linebuf) then          // acabou a linha: lê a próxima
+        if eof then
+            return ""
+        end
+        let res: io.IOResult = io.read_line(io.stdin())
+        if !res.ok then
+            eof = true
+            return ""
+        end
+        linebuf = res.data + "\n"           // devolve o \n que read_line removeu
+        pos = 0
+    end
+    let c: string = linebuf[pos]
+    pos = pos + 1
+    return c
+end
+
+// ungetch: devolve o caractere c para a entrada
+func ungetch(c: string)
+    if bufp >= BUFSIZE then
+        eprint("ungetch: caracteres demais")
+    else
+        buf[bufp] = c
+        bufp = bufp + 1
+    end
+end
+
+let NUMBER: string = "number"   // sinal de que um número foi encontrado
+let token: string = ""          // o texto do último número lido por getop
+
+func isdigit(c: string) -> bool
+    return c >= "0" && c <= "9"
+end
+
+// getop: obtém o próximo operador ou operando numérico
+func getop() -> string
+    let c: string = getch()
+    while c == " " || c == "\t" do
+        c = getch()
+    end
+    token = ""
+    if !isdigit(c) && c != "." then
+        return c            // operador, "\n", ou "" no fim
+    end
+    while isdigit(c) do     // junta a parte inteira
+        token = token + c
+        c = getch()
+    end
+    if c == "." then        // junta a parte fracionária
+        token = token + c
+        c = getch()
+        while isdigit(c) do
+            token = token + c
+            c = getch()
+        end
+    end
+    if c != "" then
+        ungetch(c)
+    end
+    return NUMBER
+end
+
+// calculadora polonesa reversa: lê expressões da entrada padrão, uma por linha
+func main()
+    let typ: string = getop()
+    while typ != "" do
+        if typ == NUMBER then
+            push(to_float(token))
+        elif typ == "+" then
+            push(pop() + pop())
+        elif typ == "*" then
+            push(pop() * pop())
+        elif typ == "-" then
+            let op2: float = pop()
+            push(pop() - op2)
+        elif typ == "/" then
+            let op2: float = pop()
+            if op2 != 0.0 then
+                push(pop() / op2)
+            else
+                eprint("erro: divisor zero")
+            end
+        elif typ == "\n" then
+            print(fmt("\t%.8g", pop()))
+        else
+            eprint("erro: comando desconhecido " + typ)
+        end
+        typ = getop()
+    end
+end
+main()

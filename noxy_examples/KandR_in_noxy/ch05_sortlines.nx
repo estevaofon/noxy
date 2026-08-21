@@ -1,0 +1,65 @@
+use io
+use sys
+
+let MAXLINES: int = 5000        // máximo de linhas a ordenar
+
+// readlines: lê as linhas do arquivo para lineptr; devolve quantas leu, ou -1
+func readlines(path: string, lineptr: ref string[]) -> int
+    let f: io.File = io.open(path, "r")
+    if !f.open then return -1 end
+    let lines: string[] = io.read_lines(f).data
+    io.close(f)
+    if length(lines) > MAXLINES then return -1 end
+    for line in lines do
+        append(lineptr, line)
+    end
+    return length(lines)
+end
+
+// writelines: imprime as linhas
+func writelines(lineptr: string[], nlines: int)
+    let i: int = 0
+    while i < nlines do
+        print(lineptr[i])
+        i = i + 1
+    end
+end
+
+// qsort: ordena v[left]...v[right] em ordem crescente
+func qsort(v: ref string[], left: int, right: int)
+    if left >= right then
+        return
+    end
+    swap(v, left, (left + right) / 2)
+    let last: int = left
+    let i: int = left + 1
+    while i <= right do
+        if v[i] < v[left] then
+            last = last + 1
+            swap(v, last, i)
+        end
+        i = i + 1
+    end
+    swap(v, left, last)
+    qsort(v, left, last - 1)
+    qsort(v, last + 1, right)
+end
+
+func swap(v: ref string[], i: int, j: int)
+    let temp: string = v[i]
+    v[i] = v[j]
+    v[j] = temp
+end
+
+// ordena as linhas de um arquivo
+func main()
+    let lineptr: string[] = []
+    let nlines: int = readlines(sys.argv()[2], ref lineptr)
+    if nlines >= 0 then
+        qsort(ref lineptr, 0, nlines - 1)
+        writelines(lineptr, nlines)
+    else
+        print("erro: entrada grande demais para ordenar")
+    end
+end
+main()

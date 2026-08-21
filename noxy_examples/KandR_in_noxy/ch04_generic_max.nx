@@ -1,0 +1,7 @@
+// o que em C seria #define max(A, B) ((A) > (B) ? (A) : (B))
+func max<T>(a: T, b: T) -> T
+    if a > b then return a end
+    return b
+end
+
+print(max(3, 7), max(2.5, 1.5), max("abc", "abd"))

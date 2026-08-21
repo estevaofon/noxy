@@ -1,0 +1,14 @@
+use strings select *
+
+let s: string = "  Noxy, a linguagem  "
+print("[" + trim(s) + "]")
+print(to_upper("noxy"), to_lower("NOXY"))
+print(length("linguagem"), index_of("linguagem", "gua"), contains("linguagem", "gem"))
+print(starts_with("noxy.nx", "noxy"), ends_with("noxy.nx", ".nx"))
+print(substring("linguagem", 0, 6), slice("linguagem", 6, 9))
+print(replace("a-b-c", "-", "+"), repeat("ab", 3), reverse("abc"))
+
+let r: SplitResult = split("a,b,c", ",")
+print(r.count, r.parts, join_count(r.parts, ";", r.count))
+print(pad_left("42", 5, "0"), is_digit("123"), is_alpha("abc"), is_space(" "))
+print(char_at("noxy", 1), char_code("n"), from_char_code(110), codes("né"))

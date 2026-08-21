@@ -1,0 +1,38 @@
+// calc_getch.nx: leitura de caracteres com devolução
+
+let BUFSIZE: int = 100
+let buf: string[100]        // buffer para ungetch
+let bufp: int = 0           // próxima posição livre em buf
+let expr: string = ""       // a expressão sendo lida
+let pos: int = 0            // próximo caractere ainda não lido
+
+// set_input: define a expressão a ser lida
+func set_input(s: string)
+    expr = s
+    pos = 0
+    bufp = 0
+end
+
+// getch: devolve o próximo caractere (possivelmente devolvido); "" no fim
+func getch() -> string
+    if bufp > 0 then
+        bufp = bufp - 1
+        return buf[bufp]
+    end
+    if pos >= length(expr) then
+        return ""
+    end
+    let c: string = expr[pos]
+    pos = pos + 1
+    return c
+end
+
+// ungetch: devolve o caractere c para a entrada
+func ungetch(c: string)
+    if bufp >= BUFSIZE then
+        print("ungetch: caracteres demais")
+    else
+        buf[bufp] = c
+        bufp = bufp + 1
+    end
+end

@@ -1,0 +1,22 @@
+// getline: copia até lim-1 caracteres de s, parando na primeira quebra de linha
+func getline(s: string, lim: int) -> string
+    let out: string = ""
+    let i: int = 0
+    while i < lim - 1 && i < length(s) && s[i] != "\n" do
+        out = out + s[i]
+        i = i + 1
+    end
+    return out
+end
+
+print(getline("primeira linha\nsegunda linha", 100))
+print(getline("uma linha muito comprida mesmo", 10))
+
+let valid: bool = false
+if !valid then
+    print("não é válido")
+end
+print(5 > 3, 5 == 3, 5 != 3)
+
+let t: bool = 5 > 3         // o resultado de uma comparação é um bool
+print(t == true)

@@ -3,6 +3,116 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.6.0 (68209be) × v0.13.0 (63ab106) — sete versões de saldo
+
+**Data:** 2026-08-21 · Windows 11 · i7-1165G7 · protocolo intercalado. Duas
+sessões: mediana de 9 (**a reportada**) e mediana de 5 (corroboração). Máquina
+com carga de fundo (Zoom/Chrome/Slack) — o que valida a comparação é ela ser
+intercalada, não a máquina estar limpa.
+
+Esta seção não é o A/B de uma mudança: é o **saldo acumulado** da v0.6.0 (fim
+da fase 1 de perf de dispatch e chamadas) até a v0.13.0, atravessando CoW por
+valor, invariante de slot `ref`, genéricos monomorfizados, `io` com cursor e
+tipagem estática de membro qualificado. Nenhuma dessas versões teve fase de
+perf; várias adicionaram guards de RC/CoW no caminho quente.
+
+**Resumo:** o trabalho do VM ficou **empatado** — ganhos de 5% a 15% no caminho
+de chamada tipada, regressões de ~4% na leitura O(n) de array, e o resto no
+ruído. O ganho grande do intervalo está em outro eixo e não aparece nos
+`bench_*.nx`: **carga de módulos, 2,9x a 9,8x mais rápida** (seção própria
+abaixo).
+
+| bench | v060_ms | v0130_ms | delta (n=9) | delta (n=5) | veredito |
+|---|---|---|---|---|---|
+| bench_typed_call_map | 175,0 | 148,2 | **−15,3%** | −16,3% | ✅ ganho |
+| bench_value_call_mutate | 169,2 | 147,4 | **−12,9%** | −17,2% | ✅ ganho |
+| bench_call_light | 166,6 | 156,5 | **−6,1%** | −3,9% | ✅ ganho |
+| bench_path_update | 935,9 | 891,3 | **−4,8%** | −4,3% | ✅ ganho |
+| bench_spawn_sum | 947,7 | 933,2 | −1,5% | −2,4% | ✅ ganho pequeno |
+| bench_conway | 2615,6 | 2637,2 | +0,8% | −1,3% | ➖ ruído (sinal troca) |
+| bench_share_mutate | 405,3 | 406,4 | +0,3% | −12,9% | ➖ ruído (sinal troca) |
+| bench_map_churn | 938,9 | 913,8 | −2,7% | +1,5% | ➖ ruído (sinal troca) |
+| bench_call_ref | 4593,3 | 4674,2 | +1,8% | +2,9% | ⚠️ regressão pequena |
+| bench_call_readonly | 1510,7 | 1573,7 | **+4,2%** | +9,1% | ⚠️ regressão |
+| bench_bubblesort | 4377,0 | 4587,3 | **+4,8%** | +9,0% | ⚠️ regressão |
+
+`bench_generic_vs_hand` foi **pulado**: usa `<T>`, que a v0.6.0 não faz parse.
+Ver a nota sobre o guard de checksum abaixo.
+
+### Leitura
+
+**O caminho de chamada tipada ficou materialmente mais rápido.** Os três
+maiores ganhos — `typed_call_map` (−15,3%), `value_call_mutate` (−12,9%) e
+`call_light` (−6,1%) — são todos chamada com composto tipado atravessando a
+fronteira. O candidato mais provável é `58f2cad` (#55, v0.10.1): construtores
+de `internal/value` viraram donos duráveis dos filhos, `invokeBoundaryCall`
+**deixou de reter o result** e `retainingArray`/`retainingMap` sumiram — ou
+seja, retain/release a menos exatamente por chamada que cruza a fronteira.
+Atribuição por coincidência de perfil, não por bisect: 155 commits separam os
+dois binários e nenhum bisect foi feito nesta rodada.
+
+Não é a validação de tipos O(1) por tag (PR #31): ela foi mergeada em
+2026-08-16 e **já está na v0.6.0** (tag de 2026-08-18) — os dois binários a
+têm.
+
+**As duas maiores regressões estão no lado da leitura.** `call_readonly` (+4,2%) e
+`bench_bubblesort` (+4,8%) são leitura O(n) de array — indexação repetida,
+sem mutação. É o perfil onde os guards de `Shared`/RC por acesso aparecem sem
+nada para compensar. **É o item a investigar**, e coincide com o que o
+cross-runtime aponta como pior ponto absoluto (indexação de array, 8,5x do
+CPython).
+
+**Três benches ficaram no ruído com troca de sinal** (`conway`, `share_mutate`,
+`map_churn`). `share_mutate` foi de −12,9% para +0,3% entre as duas sessões, e
+o baseline de `map_churn` variou 53% (612,9 → 938,9 ms) só por carga — lembrete
+de que o piso de ruído desta suíte não é ±1%, e que delta abaixo de ~3% em uma
+única sessão não é conclusivo.
+
+### O maior ganho do intervalo não está na tabela acima: carga de módulos
+
+Os `bench_*.nx` são todos de um arquivo só, então nenhum deles exercita `use`.
+As sondas de startup (`startup_use_*.nx`, que o `interleaved_compare.ps1` não
+varre) medem exatamente isso — mínimo de 15 execuções intercaladas:
+
+| sonda | v060_ms | v0130_ms | delta |
+|---|---|---|---|
+| `startup_use_selectall.nx` (`use http select *`) | 1873,2 | 190,5 | **−89,8%** (9,8x) |
+| `startup_use_namespace.nx` (`use http`) | 437,2 | 148,5 | **−66,0%** (2,9x) |
+| `startup.nx` (nenhum `use`, controle) | 154,9 | 130,0 | −16,1% |
+
+Causa: `19156a7`, memoização de `loadModuleDeclarations`
+(`internal/compiler/module_exports.go`). Antes, cada `use` era recarregado por
+chamador e dobrado pelo two-pass; agora é uma carga por módulo.
+
+O comentário em `startup_use_selectall.nx` atribui a amplificação ao branch de
+genéricos, mas **a v0.6.0 é anterior a genéricos e mesmo assim paga 1,87 s** —
+ou seja, o recarregamento por chamador já existia antes, e genéricos apenas o
+dobraram. A memoização consertou os dois.
+
+Isto é custo de **compilador**, não de VM: aparece uma vez por processo, e é o
+que domina o tempo de qualquer script curto que use a stdlib — o caso Lambda,
+por exemplo. O controle sem `use` (−16,1%) confirma que há também um ganho
+menor e separado no piso de processo puro, esse ainda sem causa atribuída.
+
+**Contexto de sistema:** o cross-runtime da mesma data mede o mesmo par de
+binários contra CPython/Lua/Go e conclui empate no trabalho do VM com startup
+−15% — ver
+[`cross_runtime/README.md`](cross_runtime/README.md).
+
+### Correção de metodologia aplicada nesta rodada
+
+`interleaved_compare.ps1` **não validava equivalência** entre os dois binários.
+Um bench que o baseline não compila sai do erro em ~30 ms e entrava na tabela
+como regressão gigante do candidato — a comparação seria entre um programa e
+uma mensagem de erro. `bench_generic_vs_hand` é exatamente esse caso contra a
+v0.6.0.
+
+O script agora exige linha `CHECKSUM:` idêntica dos dois lados no warmup (mesmo
+guard que `cross_runtime/run_cross_runtime.ps1` já tinha) e **pula** o bench,
+listando-o no relatório, em vez de medi-lo. Os rótulos das colunas também
+deixaram de ser fixos em `baseline`/`cow` (herança da rodada do CoW) e passaram
+a `-BaselineLabel`/`-CandidateLabel`.
+
 ## develop (bff429a) × genéricos paramétricos (feat/generics)
 
 **Data:** 2026-08-18 · Windows 11 · protocolo intercalado, mediana de 9
@@ -613,8 +723,17 @@ seções) — dentro de cada seção, a comparação é intercalada e válida.
 powershell -File benchmarks/run_benchmarks.ps1 -Binary <exe> -Label <label>
 
 # comparação intercalada (grava results/interleaved.md) — preferir esta
-powershell -File benchmarks/interleaved_compare.ps1 -Baseline <exe> -Candidate <exe>
+powershell -File benchmarks/interleaved_compare.ps1 -Baseline <exe> -Candidate <exe> `
+           -BaselineLabel v060 -CandidateLabel v0130 -Runs 9
 
 # corpus de exemplos baseline × candidato
 powershell -File benchmarks/compare_examples.ps1 -Baseline <exe> -Candidate <exe>
+
+# referência externa (Noxy × CPython × Lua × Go), com as duas versões juntas
+powershell -File benchmarks/cross_runtime/run_cross_runtime.ps1 -Noxy <exe> `
+           -NoxyBaseline <exe-antigo> -BaselineLabel v060
 ```
+
+Os binários têm de estar em **disco local**: este repo vive em OneDrive e medir
+de lá infla os tempos em ~2x (filtro de sync + antivírus no read). Benches que
+não rodam nos dois binários são pulados e listados no relatório, não medidos.

@@ -1,0 +1,34 @@
+func double(n: int) -> int return n * 2 end
+func inc(n: int) -> int return n + 1 end
+
+// array de funções de int para int: os parênteses são obrigatórios...
+let transforms: (func(int) -> int)[] = [double, inc]
+
+// ...sem eles, o [] pertence ao tipo de retorno: função que devolve int[]
+func evens(n: int) -> int[]
+    let out: int[] = []
+    let i: int = 0
+    while i < n do
+        append(out, i * 2)
+        i = i + 1
+    end
+    return out
+end
+let factory: func(int) -> int[] = evens
+print(transforms[0](5), transforms[1](5), factory(4))
+
+// ref int[] é uma referência a um array; (ref int)[] é um array de referências
+let a: int = 1
+let b: int = 2
+let refs: (ref int)[] = [ref a, ref b]
+*refs[0] = 10
+print(a, b)
+
+// uma função que recebe duas funções e devolve uma função
+func compose(f: func(int) -> int, g: func(int) -> int) -> func(int) -> int
+    return func(x: int) -> int
+        return f(g(x))
+    end
+end
+let h: func(int) -> int = compose(double, inc)
+print(h(5))                 // double(inc(5)) = 12

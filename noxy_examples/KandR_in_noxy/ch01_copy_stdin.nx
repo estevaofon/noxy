@@ -1,0 +1,12 @@
+use io
+
+// copia a entrada padrão para a saída padrão, linha a linha
+func main()
+    let stdin: io.File = io.stdin()
+    let line: io.IOResult = io.read_line(stdin)
+    while line.ok do                 // ok vira false no fim da entrada (EOF)
+        print(line.data)
+        line = io.read_line(stdin)
+    end
+end
+main()

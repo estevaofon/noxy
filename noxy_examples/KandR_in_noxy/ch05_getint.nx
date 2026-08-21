@@ -1,0 +1,92 @@
+use io
+use strings select is_digit, is_space, char_code
+
+let text: string = ""       // toda a entrada
+let pos: int = 0            // próximo caractere ainda não lido
+let pushed: string = ""     // um caractere devolvido por ungetch
+let EOF: int = -1
+
+// getch: devolve o próximo caractere da entrada; "" no fim
+func getch() -> string
+    if pushed != "" then
+        let c: string = pushed
+        pushed = ""
+        return c
+    end
+    if pos >= length(text) then
+        return ""
+    end
+    let c: string = text[pos]
+    pos = pos + 1
+    return c
+end
+
+// ungetch: devolve o caractere c para a entrada
+func ungetch(c: string)
+    pushed = c
+end
+
+// getint: lê o próximo inteiro da entrada e o deposita em *pn;
+// devolve EOF no fim, 0 se o que vem não é número, 1 se leu um
+func getint(pn: ref int) -> int
+    let c: string = getch()
+    while c != "" && is_space(c) do      // pula espaços em branco
+        c = getch()
+    end
+    if c == "" then
+        return EOF
+    end
+    let sign: int = 1
+    if c == "+" || c == "-" then
+        if c == "-" then
+            sign = -1
+        end
+        c = getch()
+    elif !is_digit(c) then
+        ungetch(c)                       // não é número: devolve e avisa
+        return 0
+    end
+    if !is_digit(c) then                 // sinal sem dígito (ver exercício 5-1)
+        ungetch(c)
+        return 0
+    end
+    let n: int = 0
+    while is_digit(c) do
+        n = 10 * n + (char_code(c) - 48)
+        c = getch()
+    end
+    if c != "" then
+        ungetch(c)                       // devolve o que não faz parte do número
+    end
+    *pn = sign * n                       // o valor sai pelo parâmetro ref...
+    return 1                             // ...e o status, pelo return
+end
+
+// skip_token: descarta o que não é número, até o próximo branco
+func skip_token()
+    let c: string = getch()
+    while c != "" && !is_space(c) do
+        c = getch()
+    end
+end
+
+// lê até SIZE inteiros da entrada padrão
+func main()
+    text = io.read(io.stdin()).data
+    let SIZE: int = 10
+    let array: int[] = zeros(SIZE)
+    let n: int = 0
+    while n < SIZE do
+        let status: int = getint(ref array[n])
+        if status == EOF then
+            break
+        end
+        if status > 0 then
+            n = n + 1                    // só avança se leu um número
+        else
+            skip_token()                 // descarta e segue
+        end
+    end
+    print(slice(array, 0, n))
+end
+main()

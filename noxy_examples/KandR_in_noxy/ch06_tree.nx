@@ -1,0 +1,66 @@
+use io
+use sys
+use strings select is_alpha, is_alnum, to_lower
+
+struct Tnode                // o nó da árvore
+    word: string            // a palavra
+    count: int              // número de ocorrências
+    left: ref Tnode         // filho esquerdo
+    right: ref Tnode        // filho direito
+end
+
+// addtree: adiciona um nó com w em p ou abaixo dele; devolve a (sub)árvore
+func addtree(p: ref Tnode, w: string) -> ref Tnode
+    if p == null then                   // chegou uma palavra nova
+        let novo: Tnode = Tnode(w, 1, null, null)
+        return ref novo                 // a variável local vai para a heap
+    elif w == p.word then
+        p.count = p.count + 1           // palavra repetida
+    elif w < p.word then                // menor: vai para a subárvore esquerda
+        p.left = addtree(p.left, w)
+    else                                // maior: vai para a direita
+        p.right = addtree(p.right, w)
+    end
+    return p
+end
+
+// treeprint: impressão em ordem da árvore p
+func treeprint(p: ref Tnode)
+    if p != null then
+        treeprint(p.left)
+        print(fmt("%4d %s", p.count, p.word))
+        treeprint(p.right)
+    end
+end
+
+// getword: extrai a próxima palavra de text a partir de *pos; "" no fim
+func getword(text: string, pos: ref int) -> string
+    let n: int = length(text)
+    let i: int = pos
+    while i < n && !is_alpha(text[i]) do
+        i = i + 1
+    end
+    let word: string = ""
+    while i < n && is_alnum(text[i]) do
+        word = word + text[i]
+        i = i + 1
+    end
+    *pos = i
+    return word
+end
+
+// conta a frequência das palavras de um arquivo
+func main()
+    let f: io.File = io.open(sys.argv()[2], "r")
+    let text: string = io.read(f).data
+    io.close(f)
+    let root: ref Tnode = null
+    let pos: int = 0
+    let word: string = getword(text, ref pos)
+    while word != "" do
+        root = addtree(root, to_lower(word))
+        word = getword(text, ref pos)
+    end
+    treeprint(root)
+end
+main()

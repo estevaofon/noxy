@@ -1,0 +1,17 @@
+// getbits: devolve os n bits de x a partir da posição p
+// (o bit menos significativo é a posição 0)
+func getbits(x: int, p: int, n: int) -> int
+    return (x >> (p + 1 - n)) & ~(~0 << n)
+end
+
+print(getbits(0xF0, 7, 4))      // os 4 bits altos de 11110000 -> 15
+print(getbits(0b101101, 4, 3))  // bits 4,3,2 de 101101 -> 011 -> 3
+
+let flags: int = 0
+let ON: int = 1 << 3
+flags = flags | ON              // liga o bit
+print(flags, (flags & ON) != 0) // os parênteses são obrigatórios aqui
+flags = flags & ~ON             // desliga o bit
+print(flags)
+
+print(fmt("%b %x %o", 0b1100, 0xFF, 8))

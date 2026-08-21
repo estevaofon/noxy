@@ -1,0 +1,32 @@
+use io
+use sys
+
+// filecopy: copia o arquivo f para a saída, linha a linha
+func filecopy(f: io.File)
+    let line: io.IOResult = io.read_line(f)
+    while line.ok do
+        print(line.data)
+        line = io.read_line(f)
+    end
+end
+
+// cat: concatena arquivos; sem argumentos, copia a entrada padrão
+func main()
+    let argv: string[] = sys.argv()
+    if length(argv) == 2 then             // sem argumentos: entrada padrão
+        filecopy(io.stdin())
+    else
+        let i: int = 2
+        while i < length(argv) do
+            let f: io.File = io.open(argv[i], "r")
+            if !f.open then
+                eprint("cat: não consegui abrir " + argv[i])   // vai para stderr
+                sys.exit(1)
+            end
+            filecopy(f)
+            io.close(f)
+            i = i + 1
+        end
+    end
+end
+main()

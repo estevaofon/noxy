@@ -1,0 +1,7 @@
+// lê três linhas da entrada padrão e as ecoa
+let a: string = input()
+let b: string = input()
+let c: string = input()
+print("1: [" + a + "]")
+print("2: [" + b + "]")
+print("3: [" + c + "]")

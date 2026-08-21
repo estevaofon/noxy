@@ -1,0 +1,14 @@
+use io
+
+// conta as linhas da entrada padrão
+func main()
+    let stdin: io.File = io.stdin()
+    let nl: int = 0
+    let line: io.IOResult = io.read_line(stdin)
+    while line.ok do
+        nl = nl + 1
+        line = io.read_line(stdin)
+    end
+    print(nl)
+end
+main()

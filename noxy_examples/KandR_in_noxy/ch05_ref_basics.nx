@@ -1,0 +1,23 @@
+let x: int = 1
+let y: int = 2
+let z: int[] = [10, 20, 30]
+
+let ip: ref int = ref x     // ip aponta para x        (C: int *ip = &x)
+let n: int = ip             // lê x através de ip        (C: y = *ip)
+print(n)
+*ip = 0                     // x agora é 0               (C: *ip = 0)
+print(x)
+ip = ref z[0]               // ip agora aponta para z[0] (C: ip = &z[0])
+*ip = *ip + 1               // z[0] agora é 11           (C: *ip += 1)
+print(z)
+
+let iq: ref int = ip        // iq aponta para o mesmo lugar que ip
+*iq = 99
+print(z[0], ip == iq)       // true: == entre refs compara identidade, não valor
+
+y = *ip                     // numa atribuição a leitura tem de ser explícita
+print(y)
+
+let r: ref int = null       // a referência nula
+print(r == null)
+print(addr(ref x))          // a "identidade" de x, como string

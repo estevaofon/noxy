@@ -1,0 +1,5 @@
+Este é um arquivo de exemplo.
+Ele tem algumas linhas	com tabulações e espaços.
+
+Esta é a linha mais longa de todas, escrita de propósito para o teste.
+fim
