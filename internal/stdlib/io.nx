@@ -40,6 +40,20 @@ struct FileInfo
     is_dir: bool
 end
 
+// Resultado de seek/tell: position é a posição absoluta (em bytes) do cursor
+// lógico; -1 quando ok=false.
+struct IOPositionResult
+    ok: bool
+    position: int
+    error: string
+end
+
+// whence de seek, como o lseek de C: a partir do início, da posição atual
+// ou do fim do arquivo.
+let SEEK_SET: int = 0
+let SEEK_CUR: int = 1
+let SEEK_END: int = 2
+
 
 // Wrappers para funções built-in (para uso com 'select *' como 'open(...)')
 
@@ -113,4 +127,20 @@ end
 
 func write_bytes_result(file: File, data: bytes) -> IOWriteResult
     return io_write_result(file, data, IOWriteResult)
+end
+
+// Posicionamento (0.12.0): seek/tell movem e consultam o cursor lógico;
+// read_n lê até n bytes a partir dele. read_line, read_n, write e as
+// leituras de arquivo inteiro compõem com seek — ver spec §12.
+
+func seek(file: File, offset: int, whence: int) -> IOPositionResult
+    return io_seek(file, offset, whence, IOPositionResult)
+end
+
+func tell(file: File) -> IOPositionResult
+    return io_tell(file, IOPositionResult)
+end
+
+func read_n(file: File, n: int) -> IOBytesResult
+    return io_read_n(file, n, IOBytesResult)
 end

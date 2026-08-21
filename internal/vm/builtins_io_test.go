@@ -336,11 +336,17 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	assertBuiltinValue(t, textResult.Fields["data"], value.NewString(contents))
 	assertBuiltinValue(t, textResult.Fields["error"], value.NewString(""))
 
+	// 0.12.0: as leituras "inteiras" partem do cursor, que io_read deixou no
+	// fim — rebobina antes de ler de novo pelo mesmo handle.
+	ioPositionDefinition := value.NewStruct("IOPositionResult", []string{"ok", "position", "error"})
+	rewound := requireBuiltinInstance(t, callBuiltin(t, machine, "io_seek", readHandleValue, value.NewInt(0), value.NewInt(0), ioPositionDefinition), ioPositionDefinition)
+	assertBuiltinValue(t, rewound.Fields["position"], value.NewInt(0))
 	bytesResult := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_bytes", readHandleValue, ioBytesDefinition), ioBytesDefinition)
 	assertBuiltinValue(t, bytesResult.Fields["ok"], value.NewBool(true))
 	assertBuiltinValue(t, bytesResult.Fields["data"], value.NewBytes(contents))
 	assertBuiltinValue(t, bytesResult.Fields["error"], value.NewString(""))
 
+	callBuiltin(t, machine, "io_seek", readHandleValue, value.NewInt(0), value.NewInt(0), ioPositionDefinition)
 	linesResult := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_lines", readHandleValue, ioLinesDefinition), ioLinesDefinition)
 	assertBuiltinValue(t, linesResult.Fields["ok"], value.NewBool(true))
 	assertBuiltinArray(t, linesResult.Fields["data"], []value.Value{
@@ -599,9 +605,10 @@ test_report(all.data + "|" + to_str(w.success) + "|" + w.error + "|" + to_str(c.
 	})
 }
 
-// Ler o arquivo INTEIRO (io_read/io_read_bytes/io_read_lines) invalida o leitor
-// de linha: o buffer pendente ficaria dessincronizado do offset do SO, que
-// termina em EOF. O proximo read_line abre leitor novo — e ve EOF.
+// Ler "o arquivo inteiro" (io_read/io_read_bytes/io_read_lines) parte do
+// cursor LOGICO (0.12.0: regra unica com stdin) — depois de um read_line le o
+// RESTO — e invalida o leitor de linha: o offset do SO termina em EOF e o
+// proximo read_line abre leitor novo dali — e ve EOF.
 func TestWholeFileReadDiscardsTheLineReader(t *testing.T) {
 	machine := New()
 	cleanupFileResources(t, machine)
@@ -619,7 +626,7 @@ func TestWholeFileReadDiscardsTheLineReader(t *testing.T) {
 
 	whole := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read", handle, ioResult), ioResult)
 	assertBuiltinValue(t, whole.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, whole.Fields["data"], value.NewString(contents))
+	assertBuiltinValue(t, whole.Fields["data"], value.NewString(strings.TrimPrefix(contents, "um\n")))
 
 	eof := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
 	assertBuiltinValue(t, eof.Fields["ok"], value.NewBool(false))

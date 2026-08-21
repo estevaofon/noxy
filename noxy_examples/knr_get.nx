@@ -1,0 +1,52 @@
+// K&R, seção 8.4 — acesso aleatório: get(fd, pos, buf, n) é lseek + read.
+// E a cópia em blocos de BUFSIZ bytes da seção 8.3 (cp): read_n + write_bytes
+// a partir do cursor, sem ler o arquivo inteiro de uma vez.
+use io
+use sys select exit
+
+let BUFSIZ: int = 4
+
+// get: lê n bytes a partir da posição pos; devolve b"" em erro
+func get(f: io.File, pos: int, n: int) -> bytes
+    if io.seek(f, pos, io.SEEK_SET).ok then
+        return io.read_n(f, n).data
+    end
+    return b""
+end
+
+// filecopy: copia src para dst em blocos de BUFSIZ bytes; devolve o total
+func filecopy(src: io.File, dst: io.File) -> int
+    let total: int = 0
+    let block: io.IOBytesResult = io.read_n(src, BUFSIZ)
+    while block.ok do
+        io.write_bytes(dst, block.data)
+        total = total + length(block.data)
+        block = io.read_n(src, BUFSIZ)
+    end
+    return total
+end
+
+let origem: string = "knr_get_src.tmp"
+let copia: string = "knr_get_dst.tmp"
+let w: io.File = io.open(origem, "w")
+io.write(w, "The quick brown fox jumps over the lazy dog")
+io.close(w)
+
+let src: io.File = io.open(origem, "r")
+let dst: io.File = io.open(copia, "w")
+let copied: int = filecopy(src, dst)
+io.close(src)
+io.close(dst)
+print("copiados " + to_str(copied) + " bytes em blocos de " + to_str(BUFSIZ))
+
+let f: io.File = io.open(copia, "r")
+print("get(f, 4, 5)   -> " + to_str(get(f, 4, 5)))
+print("get(f, 16, 3)  -> " + to_str(get(f, 16, 3)))
+print("get(f, 40, 10) -> " + to_str(get(f, 40, 10)))       // menos de n no fim
+print("get(f, -1, 5)  -> '" + to_str(get(f, -1, 5)) + "'")  // posição inválida: b""
+io.close(f)
+
+if !(io.remove(origem) && io.remove(copia)) then
+    print("knr_get: FAIL - remove")
+    exit(1)
+end

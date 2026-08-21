@@ -73,13 +73,17 @@ type FileResource struct {
 	operationMu sync.Mutex
 	file        *os.File
 	closed      bool
-	// reader e o leitor bufferizado de read_line, criado sob demanda; para o
-	// recurso de stdin (Task 11) e o MESMO leitor de input(). Acesso so
-	// dentro de use() (operationMu). Uma leitura do arquivo INTEIRO
-	// (readAll em arquivo comum) DESCARTA o leitor de linha: ela reposiciona
-	// o offset do SO (Seek + read ate o fim) e o que estava no buffer deixa de
-	// corresponder a esse offset — o read_line seguinte abre leitor novo e ve
-	// EOF.
+	// reader e o leitor bufferizado de read_line/read_n, criado sob demanda;
+	// para o recurso de stdin (Task 11) e o MESMO leitor de input(). Acesso
+	// so dentro de use() (operationMu).
+	//
+	// Posicao LOGICA x fisica: o leitor adianta o offset do SO alem do que o
+	// programa consumiu (Buffered() bytes). Toda operacao que vai direto ao
+	// *os.File — seek, tell, write, leitura ate o fim — passa antes por
+	// syncCursor/logicalPosition, que recolocam o offset do SO na posicao
+	// logica e descartam o leitor; o read_line seguinte abre leitor novo
+	// exatamente dali. E assim que `seek` + `read_line`, `read_line` + `write`
+	// e `read_line` + `read` compoem sem surpresa.
 	reader *bufio.Reader
 	// stdin marca o recurso de os.Stdin: close() nao fecha o descritor e
 	// read/read_lines leem "o restante" pelo reader (pipe nao tem Stat/Seek).
@@ -109,16 +113,57 @@ func (resource *FileResource) use(operation func(*os.File) value.Value) (value.V
 	return operation(file), true
 }
 
-// readAll devolve o conteudo "inteiro": do inicio em arquivo comum
-// (readFileContents), o que ainda nao foi consumido em stdin. Chamar dentro de
-// use().
+// buffered devolve quantos bytes o leitor ja tirou do SO e ainda nao
+// entregou ao programa (0 sem leitor). Chamar dentro de use().
+func (resource *FileResource) buffered() int {
+	if resource.reader == nil {
+		return 0
+	}
+	return resource.reader.Buffered()
+}
+
+// syncCursor recoloca o offset do SO na posicao LOGICA (offset fisico menos o
+// buffer pendente) e descarta o leitor, para que a operacao seguinte va
+// direto ao *os.File a partir de onde o programa parou. No-op sem leitor.
+// Nao chamar para stdin (pipe nao tem Seek). Chamar dentro de use().
+func (resource *FileResource) syncCursor(file *os.File) error {
+	if resource.reader == nil {
+		return nil
+	}
+	pending := resource.reader.Buffered()
+	resource.reader = nil
+	if pending == 0 {
+		return nil
+	}
+	_, err := file.Seek(int64(-pending), io.SeekCurrent)
+	return err
+}
+
+// logicalPosition e a posicao que o programa ve: offset fisico menos o buffer
+// pendente. Chamar dentro de use(); nao para stdin.
+func (resource *FileResource) logicalPosition(file *os.File) (int64, error) {
+	physical, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return -1, err
+	}
+	return physical - int64(resource.buffered()), nil
+}
+
+// readAll devolve o conteudo do cursor LOGICO ate o fim — regra unica para
+// arquivo comum e stdin (0.12.0): num handle recem-aberto e o arquivo
+// inteiro; depois de read_line/read_n/seek e o resto; um segundo readAll
+// devolve vazio. Em arquivo comum o leitor de linha e descartado (o offset do
+// SO termina no fim); em stdin o mesmo leitor continua. Chamar dentro de use().
 func (resource *FileResource) readAll(file *os.File) ([]byte, bool, string) {
 	if !resource.stdin {
-		content, ok, errorText := readFileContents(file)
-		// O offset do SO terminou no fim do arquivo e o buffer pendente ficou
-		// dessincronizado: o leitor de linha e refeito na proxima chamada.
-		resource.reader = nil
-		return content, ok, errorText
+		if err := resource.syncCursor(file); err != nil {
+			return nil, false, err.Error()
+		}
+		content, err := io.ReadAll(file)
+		if err != nil {
+			return nil, false, err.Error()
+		}
+		return content, true, ""
 	}
 	content, err := io.ReadAll(resource.lineReader(file))
 	if err != nil {

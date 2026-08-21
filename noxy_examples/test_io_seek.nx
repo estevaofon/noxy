@@ -1,0 +1,61 @@
+// Posicionamento em io (0.12.0): seek/tell/read_n, escrita no cursor em "rw",
+// leituras inteiras a partir do cursor e a composição com read_line (spec §12).
+use io
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("test_io_seek: FAIL - " + message)
+        exit(1)
+    end
+end
+
+let path: string = "test_io_seek.tmp"
+let w: io.File = io.open(path, "w")
+io.write(w, "0123456789")
+io.close(w)
+
+// seek / tell / read_n
+let f: io.File = io.open(path, "r")
+assert(io.seek(f, 0, io.SEEK_END).position == 10, "SEEK_END dá o tamanho")
+assert(io.seek(f, 3, io.SEEK_SET).position == 3, "SEEK_SET")
+let chunk: io.IOBytesResult = io.read_n(f, 4)
+assert(chunk.ok && to_str(chunk.data) == "3456", "read_n lê 4 bytes a partir de 3")
+assert(io.tell(f).position == 7, "tell após read_n")
+assert(io.seek(f, -2, io.SEEK_CUR).position == 5, "SEEK_CUR negativo")
+let rest: io.IOResult = io.read(f)
+assert(rest.ok && rest.data == "56789", "read lê do cursor até o fim")
+let again: io.IOResult = io.read(f)
+assert(again.ok && again.data == "", "segundo read é vazio com ok=true")
+let eof: io.IOBytesResult = io.read_n(f, 1)
+assert(!eof.ok && eof.error == "EOF", "read_n no fim: EOF")
+let bad: io.IOPositionResult = io.seek(f, 0, 9)
+assert(!bad.ok && bad.position == -1, "whence inválido")
+io.close(f)
+
+// escrita posicional em rw: sobrescreve no lugar, sem truncar
+let rw: io.File = io.open(path, "rw")
+io.seek(rw, 4, io.SEEK_SET)
+io.write(rw, "AB")
+io.close(rw)
+let check: io.File = io.open(path, "r")
+let content: io.IOResult = io.read(check)
+assert(content.data == "0123AB6789", "write no cursor sem truncar")
+io.close(check)
+
+// read_line e seek compõem
+let g: io.File = io.open(path, "r")
+let line: io.IOResult = io.read_line(g)
+assert(line.data == "0123AB6789", "read_line")
+assert(!io.read_line(g).ok, "EOF depois da única linha")
+io.seek(g, 0, io.SEEK_SET)
+let reread: io.IOResult = io.read_line(g)
+assert(reread.data == "0123AB6789", "read_line após seek relê do início")
+io.close(g)
+
+// stdin não é posicionável
+let s: io.IOPositionResult = io.seek(io.stdin(), 0, io.SEEK_SET)
+assert(!s.ok && s.error == "stdin is not seekable", "stdin não é posicionável")
+
+assert(io.remove(path), "remove")
+print("io_seek ok")

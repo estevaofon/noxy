@@ -141,6 +141,11 @@ func (vm *VM) defineIOBuiltins() {
 			if resource.stdin {
 				return value.NewNull()
 			}
+			// Escreve na posicao LOGICA do cursor: alinha o offset do SO com o
+			// que read_line/read_n ja consumiram antes de escrever.
+			if err := resource.syncCursor(file); err != nil {
+				return value.NewNull()
+			}
 			if args[1].Type == value.VAL_BYTES {
 				_, _ = file.Write([]byte(args[1].Obj.(string)))
 			} else {
@@ -180,6 +185,10 @@ func (vm *VM) defineIOBuiltins() {
 		operationResult, used := resource.use(func(file *os.File) value.Value {
 			if resource.stdin {
 				result.Fields["error"] = value.NewString("stdin is read-only")
+				return value.Value{Type: value.VAL_OBJ, Obj: result}
+			}
+			if err := resource.syncCursor(file); err != nil {
+				result.Fields["error"] = value.NewString(err.Error())
 				return value.Value{Type: value.VAL_OBJ, Obj: result}
 			}
 			var written int
@@ -368,6 +377,147 @@ func (vm *VM) defineIOBuiltins() {
 		return operationResult, nil
 	})
 
+	// io_seek(file, offset, whence, IOPositionResult): posiciona o cursor
+	// LOGICO (SEEK_SET=0, SEEK_CUR=1, SEEK_END=2, como o lseek de C) e devolve
+	// a nova posicao absoluta. stdin nao e posicionavel.
+	vm.DefineContextualNative("io_seek", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 4 {
+			return value.NewNull(), nil
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resultStruct, ok := args[3].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		offset := args[1].AsInt
+		whence := args[2].AsInt
+		result := newIOPositionResult(resultStruct, false, -1, "File not open")
+		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
+		if !exists {
+			return result, nil
+		}
+		operationResult, used := resource.use(func(file *os.File) value.Value {
+			if resource.stdin {
+				return newIOPositionResult(resultStruct, false, -1, "stdin is not seekable")
+			}
+			if whence < 0 || whence > 2 {
+				return newIOPositionResult(resultStruct, false, -1,
+					fmt.Sprintf("invalid whence %d (use io.SEEK_SET, io.SEEK_CUR or io.SEEK_END)", whence))
+			}
+			// SEEK_CUR e relativo a posicao LOGICA: alinha o offset do SO com
+			// ela (descartando o buffer de read_line/read_n) antes de mover. Um
+			// Seek invalido (posicao negativa) falha sem mover.
+			if err := resource.syncCursor(file); err != nil {
+				return newIOPositionResult(resultStruct, false, -1, err.Error())
+			}
+			position, seekErr := file.Seek(offset, int(whence))
+			if seekErr != nil {
+				return newIOPositionResult(resultStruct, false, -1, seekErr.Error())
+			}
+			return newIOPositionResult(resultStruct, true, position, "")
+		})
+		if !used {
+			return result, nil
+		}
+		return operationResult, nil
+	})
+
+	// io_tell(file, IOPositionResult): posicao LOGICA atual (offset do SO
+	// menos o que o leitor bufferizado ainda nao entregou).
+	vm.DefineContextualNative("io_tell", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 2 {
+			return value.NewNull(), nil
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resultStruct, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		result := newIOPositionResult(resultStruct, false, -1, "File not open")
+		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
+		if !exists {
+			return result, nil
+		}
+		operationResult, used := resource.use(func(file *os.File) value.Value {
+			if resource.stdin {
+				return newIOPositionResult(resultStruct, false, -1, "stdin is not seekable")
+			}
+			position, positionErr := resource.logicalPosition(file)
+			if positionErr != nil {
+				return newIOPositionResult(resultStruct, false, -1, positionErr.Error())
+			}
+			return newIOPositionResult(resultStruct, true, position, "")
+		})
+		if !used {
+			return result, nil
+		}
+		return operationResult, nil
+	})
+
+	// io_read_n(file, count, IOBytesResult): ate count bytes a partir do
+	// cursor logico, pelo MESMO leitor bufferizado de read_line (os dois
+	// compoem). Menos de count so no fim do arquivo; sem nada para ler,
+	// ok=false e error="EOF" — o contrato de read_line. Funciona em stdin.
+	vm.DefineContextualNative("io_read_n", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 3 {
+			return value.NewNull(), nil
+		}
+		inst, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		resultStruct, ok := args[2].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		count := args[1].AsInt
+		result := newIOReadResult(resultStruct, false, value.NewBytes(""), "File not open")
+		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
+		if !exists {
+			return result, nil
+		}
+		operationResult, used := resource.use(func(file *os.File) value.Value {
+			if count < 0 {
+				return newIOReadResult(resultStruct, false, value.NewBytes(""), fmt.Sprintf("read_n: count must be >= 0, got %d", count))
+			}
+			if count == 0 {
+				return newIOReadResult(resultStruct, true, value.NewBytes(""), "")
+			}
+			// LimitReader + ReadAll: cresce o buffer conforme le, em vez de
+			// alocar count bytes de uma vez para um count enorme.
+			data, readErr := io.ReadAll(io.LimitReader(resource.lineReader(file), count))
+			if readErr != nil {
+				return newIOReadResult(resultStruct, false, value.NewBytes(""), readErr.Error())
+			}
+			if len(data) == 0 {
+				return newIOReadResult(resultStruct, false, value.NewBytes(""), "EOF")
+			}
+			return newIOReadResult(resultStruct, true, value.NewBytes(string(data)), "")
+		})
+		if !used {
+			return result, nil
+		}
+		return operationResult, nil
+	})
+
 	vm.DefineNative("io_list_dir", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
@@ -495,21 +645,14 @@ func markFileClosed(shared *SharedState, instance *value.ObjInstance) {
 	shared.fileMetaMu.Unlock()
 }
 
-func readFileContents(file *os.File) ([]byte, bool, string) {
-	stat, err := file.Stat()
-	if err != nil {
-		return nil, false, err.Error()
-	}
-	if stat.Size() == 0 {
-		return []byte{}, true, ""
-	}
-	buffer := make([]byte, stat.Size())
-	_, _ = file.Seek(0, 0)
-	n, readErr := file.Read(buffer)
-	if readErr == nil || n > 0 {
-		return buffer[:n], true, ""
-	}
-	return nil, false, readErr.Error()
+// newIOPositionResult monta IOPositionResult {ok, position, error}; position
+// e -1 sempre que ok=false.
+func newIOPositionResult(definition *value.ObjStruct, ok bool, position int64, errorText string) value.Value {
+	return value.NewInstanceWith(definition, map[string]value.Value{
+		"ok":       value.NewBool(ok),
+		"position": value.NewInt(position),
+		"error":    value.NewString(errorText),
+	})
 }
 
 func newIOReadResult(definition *value.ObjStruct, ok bool, data value.Value, errorText string) value.Value {
