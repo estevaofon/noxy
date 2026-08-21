@@ -238,6 +238,39 @@ func runCompilerTests(t *testing.T, tests []compilerTestCase) {
 	}
 }
 
+func TestConditionsMustBeBool(t *testing.T) {
+	rejected := []struct{ source, want string }{
+		{"if 0 then print(1) end\n", "condition must be bool, got int"},
+		{"if \"\" then print(1) end\n", "condition must be bool, got string"},
+		{"if null then print(1) end\n", "condition must be bool, got null"},
+		{"let xs: int[] = []\nif xs then print(1) end\n", "condition must be bool, got int[]"},
+		{"struct P\n    x: int\nend\nlet p: P = P(1)\nif p then print(1) end\n", "condition must be bool, got P"},
+		{"let n: int = 3\nwhile n do n = n - 1 end\n", "condition must be bool, got int"},
+		{"let v: int = 1\nlet r: ref int = ref v\nif r then print(1) end\n", "condition must be bool, got int"},
+		{"if 1 || true then print(1) end\n", "logical operators require boolean operands, got int and bool"},
+		{"let x: int = 1\nif x > 0 then print(1) elif x then print(2) end\n", "condition must be bool, got int"},
+	}
+	for _, tc := range rejected {
+		_, _, err := New().Compile(parse(tc.source))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("source %q: error=%v, want %q", tc.source, err, tc.want)
+		}
+		if !strings.Contains(err.Error(), "hint: use an explicit comparison") && !strings.Contains(err.Error(), "logical operators") {
+			t.Fatalf("source %q: missing hint in %v", tc.source, err)
+		}
+	}
+	for _, source := range []string{
+		"let v: bool = true\nlet r: ref bool = ref v\nif r then print(1) end\n",
+		"let x: int = 0\nif x == 0 then print(1) end\nwhile x < 0 do x = x + 1 end\n",
+		"let a: any = true\nif a then print(1) end\n",
+		"if true && false then print(1) end\n",
+	} {
+		if _, _, err := New().Compile(parse(source)); err != nil {
+			t.Fatalf("source %q should compile: %v", source, err)
+		}
+	}
+}
+
 func TestFixedArrayLetEmitsArrayFill(t *testing.T) {
 	code, _, err := New().Compile(parse("let a: int[5000]\n"))
 	if err != nil {

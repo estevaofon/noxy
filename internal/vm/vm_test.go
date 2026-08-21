@@ -2,6 +2,7 @@ package vm
 
 import (
 	"noxy-vm/internal/value"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,17 @@ func TestBooleanLogic(t *testing.T) {
 	}
 
 	runVmTests(t, tests)
+}
+
+func TestRuntimeConditionOnAnyMustBeBool(t *testing.T) {
+	err := interpretOrCompileErr(t, New(), "let a: any = 0\nif a then print(1) end\n")
+	if err == nil || !strings.Contains(err.Error(), "condition must be bool, got int") {
+		t.Fatalf("error=%v, want runtime bool check", err)
+	}
+	reported := captureVMSource(t, "let a: any = true\nlet n: int = 0\nif a then n = 1 end\ntest_report(n)\n")
+	if reported.AsInt != 1 {
+		t.Fatalf("any bool condition should be taken, got %v", reported)
+	}
 }
 
 func runVmTests(t *testing.T, tests []vmTestCase) {

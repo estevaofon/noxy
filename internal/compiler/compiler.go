@@ -1077,17 +1077,28 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
 		if n.Operator == "||" {
-			_, _, err := c.Compile(n.Left)
+			_, leftType, err := c.Compile(n.Left)
 			if err != nil {
 				return nil, nil, err
 			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_TRUE)
 			c.emitByte(byte(chunk.OP_POP))
-			_, _, err = c.Compile(n.Right)
+			_, rightType, err := c.Compile(n.Right)
 			if err != nil {
 				return nil, nil, err
 			}
 			c.patchJump(endJump)
+			if !c.areTypesCompatible(&ast.PrimitiveType{Name: "bool"}, leftType) || !c.areTypesCompatible(&ast.PrimitiveType{Name: "bool"}, rightType) {
+				l := "nil"
+				if leftType != nil {
+					l = leftType.String()
+				}
+				r := "nil"
+				if rightType != nil {
+					r = rightType.String()
+				}
+				return nil, nil, fmt.Errorf("[line %d] logical operators require boolean operands, got %s and %s", c.currentLine, l, r)
+			}
 
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		}
@@ -1386,8 +1397,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, ok := condType.(*ast.RefType); ok {
+			if ref, ok := condType.(*ast.RefType); ok {
 				c.emitByte(byte(chunk.OP_DEREF))
+				condType = ref.ElementType
+			}
+			if err := c.checkCondition(condType); err != nil {
+				return nil, nil, err
 			}
 
 			// Emit JumpIfFalse
@@ -1446,8 +1461,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, ok := condType.(*ast.RefType); ok {
+			if ref, ok := condType.(*ast.RefType); ok {
 				c.emitByte(byte(chunk.OP_DEREF))
+				condType = ref.ElementType
+			}
+			if err := c.checkCondition(condType); err != nil {
+				return nil, nil, err
 			}
 
 			// Exit jump
@@ -2948,6 +2967,19 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 func isAny(t ast.NoxyType) bool {
 	primitive, ok := t.(*ast.PrimitiveType)
 	return ok && primitive.Name == "any"
+}
+
+// checkCondition exige bool numa posicao de condicao quando o tipo estatico e
+// conhecido; any/nil ficam para o runtime (OP_JUMP_IF_FALSE/TRUE). Noxy nao
+// tem truthy/falsy — `if n` com n: int e erro, nao "n != 0".
+func (c *Compiler) checkCondition(t ast.NoxyType) error {
+	if t == nil || isAny(t) {
+		return nil
+	}
+	if primitive, ok := t.(*ast.PrimitiveType); ok && primitive.Name == "bool" {
+		return nil
+	}
+	return fmt.Errorf("[line %d] condition must be bool, got %s\n  hint: use an explicit comparison, e.g. 'x != 0', 'x != \"\"', 'x != null' or 'length(x) > 0'", c.currentLine, t.String())
 }
 
 // checkBitwiseOperands rejeita em compilacao o que o runtime rejeitaria nos

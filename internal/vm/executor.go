@@ -136,7 +136,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			condition := vm.peek(0)
-			if condition.Type == value.VAL_BOOL && !condition.AsBool {
+			if condition.Type != value.VAL_BOOL {
+				return vm.runtimeError(c, ip, "condition must be bool, got %s", runtimeTypeName(condition))
+			}
+			if !condition.AsBool {
 				ip += offset
 			}
 
@@ -144,7 +147,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			condition := vm.peek(0)
-			if condition.Type == value.VAL_BOOL && condition.AsBool {
+			if condition.Type != value.VAL_BOOL {
+				return vm.runtimeError(c, ip, "condition must be bool, got %s", runtimeTypeName(condition))
+			}
+			if condition.AsBool {
 				ip += offset
 			}
 
