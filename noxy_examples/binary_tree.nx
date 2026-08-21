@@ -30,7 +30,7 @@ end
 
 // Função para obter elemento de uma posição
 func obter_elemento(arr: ref DynamicArray, posicao: int) -> int
-    if posicao < 0 | posicao >= arr.tamanho then
+    if posicao < 0 || posicao >= arr.tamanho then
         print("ERRO: Posição inválida: " + to_str(posicao))
         return 0
     end
