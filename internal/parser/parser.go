@@ -328,10 +328,18 @@ func (p *Parser) parseLetStatement() *ast.LetStmt {
 func (p *Parser) parseReturnStatement() *ast.ReturnStmt {
 	stmt := &ast.ReturnStmt{Token: p.curToken}
 
+	// `return` vazio seguido de end/else/elif na MESMA linha: NAO avancar — o
+	// contrato de parseBlockStatement e que o statement termine com curToken
+	// no seu ULTIMO token e o bloco faca o nextToken. Avancar aqui comia o
+	// 'end' (mesmo bug corrigido no break).
+	if p.peekTokenIs(token.END) || p.peekTokenIs(token.ELSE) || p.peekTokenIs(token.ELIF) {
+		return stmt
+	}
+
 	p.nextToken()
 
 	// Handle return void
-	if p.curToken.Type == token.NEWLINE || p.curToken.Type == token.EOF || p.curToken.Type == token.END {
+	if p.curToken.Type == token.NEWLINE || p.curToken.Type == token.EOF {
 		return stmt
 	}
 

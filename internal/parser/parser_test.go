@@ -145,3 +145,18 @@ func TestParseContinueStatementKeepsInlineEnd(t *testing.T) {
 		t.Fatalf("expected ContinueStmt, got %T", cond.Consequence.Statements[0])
 	}
 }
+
+func TestParseVoidReturnBeforeInlineEndElseElif(t *testing.T) {
+	for _, source := range []string{
+		"func f(x: int)\n    if x > 0 then return end\n    print(1)\nend\n",
+		"func f(x: int)\n    if x > 0 then return else print(2) end\nend\n",
+		"func f(x: int)\n    if x > 0 then return elif x < 0 then print(3) end\nend\n",
+		"func f(x: int)\n    if x > 0 then\n        return\n    end\nend\n",
+	} {
+		p := New(lexer.New(source))
+		p.ParseProgram()
+		if len(p.Errors()) != 0 {
+			t.Fatalf("source %q: %v", source, p.Errors())
+		}
+	}
+}
