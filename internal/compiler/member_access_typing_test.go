@@ -251,6 +251,68 @@ let s: string = w.o.i
 	requireErrorMentions(t, err, "expected string, got mod_a.Inner")
 }
 
+// --- instancia generica do proprio modulo -----------------------------------
+
+// Um campo de struct de modulo cujo tipo e uma INSTANCIA de template do
+// proprio modulo (`c: Caixa<int>` dentro de g.nx) e resolvido pelo validador
+// do modulo com o nome interno `main::Caixa<int>` — que NAO e identidade
+// global: o importador nomeia a mesma instancia `g::Caixa<int>` e um
+// template homonimo LOCAL tambem gera `main::Caixa<int>`. O programa nao tem
+// como escrever esse nome: o campo fica DINAMICO (comportamento da 0.12.0),
+// nunca o nome cru (que rejeitava `let k: Caixa<int> = h.c` — programa valido
+// — ou, pior, tipava o campo pelo template local homonimo).
+const genericModule = `struct Meta
+    k: int
+end
+struct Caixa<T>
+    v: T
+    meta: Meta
+end
+struct H
+    c: Caixa<int>
+end
+func mk() -> H
+    return H(Caixa(1, Meta(2)))
+end
+`
+
+func TestModuleFieldTypedAsModuleOwnGenericInstanceStaysDynamic(t *testing.T) {
+	root := t.TempDir()
+	writeModuleFile(t, root, "g.nx", genericModule)
+	err := compileSourceAtRoot(t, root, `use g
+use g select Caixa, Meta
+let h: g.H = g.mk()
+let k: Caixa<int> = h.c
+let s: string = h.c
+`)
+	requireNoError(t, err)
+}
+
+// --- null em campo de struct de modulo ----------------------------------
+
+// `null` e aceito onde um struct e esperado (acceptsNull); o nome do struct
+// pode ser qualificado (`io.File`) ou traduzido (`mod_a.Inner`) — a checagem
+// resolve pela declaracao, nao por nome simples em c.structs.
+func TestNullAssignableToQualifiedAndTranslatedStructFields(t *testing.T) {
+	_, err := compileFunctionSource(t, `use io
+struct A
+    f: io.File
+end
+let a: A = A(io.stdin())
+a.f = null
+let g: io.File = null
+`)
+	requireNoError(t, err)
+	err = compileSourceAtRoot(t, modARoot(t), `use mod_a
+struct W
+    o: mod_a.Outer
+end
+let w: W = W(mod_a.make(5))
+w.o.i = null
+`)
+	requireNoError(t, err)
+}
+
 // --- escrita e ref -------------------------------------------------------
 
 func TestFieldAssignmentOnQualifiedStructValueIsTyped(t *testing.T) {

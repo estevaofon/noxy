@@ -188,9 +188,17 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 // type metadata" incondicional de runtime (issue #58 item 2; a forma
 // qualificada `ns.T` ja era erro desde a 0.12.0).
 func (c *Compiler) unknownFieldTypeError(decl *ast.StructStatement) error {
+	// Instancia de template IMPORTADO (`caixas::Caixa<int>`): o campo que nao
+	// resolve foi escrito dentro do modulo do template, entao o hint pode
+	// dizer de onde importa-lo (`use caixas select Meta`) em vez do `m`
+	// generico. Instancia de template local (`main::...`) e struct comum: "".
+	importFrom := ""
+	if module, _, isInstance := strings.Cut(decl.Name, "::"); isInstance && module != c.moduleName {
+		importFrom = module
+	}
 	for _, field := range decl.FieldsList {
 		position := fmt.Sprintf("struct '%s' field '%s'", displayStructName(decl.Name), field.Name)
-		if err := c.checkDeclaredType(field.Type, decl.Token.Line, position); err != nil {
+		if err := c.checkDeclaredTypeFrom(field.Type, decl.Token.Line, position, importFrom); err != nil {
 			return err
 		}
 	}
@@ -230,6 +238,13 @@ func (c *Compiler) checkSignatureTypes(name string, params []*ast.Parameter, ret
 // 'io.Nope': module 'io' has no struct 'Nope'` / `'foo' is not an imported
 // module`), que diz exatamente qual metade falhou.
 func (c *Compiler) checkDeclaredType(t ast.NoxyType, line int, position string) error {
+	return c.checkDeclaredTypeFrom(t, line, position, "")
+}
+
+// checkDeclaredTypeFrom e checkDeclaredType com o modulo sugerido no hint de
+// importacao (`use <importFrom> select T`) quando o chamador sabe de onde o
+// nome veio; "" usa o `m` generico.
+func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, importFrom string) error {
 	name, found := firstUnknownTypeName(t, func(candidate string) bool {
 		return c.structDeclaration(candidate) != nil
 	})
@@ -237,8 +252,12 @@ func (c *Compiler) checkDeclaredType(t ast.NoxyType, line int, position string) 
 		return nil
 	}
 	if !isQualifiedTypeName(name) {
-		return fmt.Errorf("[line %d] %s: unknown type '%s'\n  hint: declare 'struct %s' or import it with 'use m select %s'",
-			line, position, name, name, name)
+		module := importFrom
+		if module == "" {
+			module = "m"
+		}
+		return fmt.Errorf("[line %d] %s: unknown type '%s'\n  hint: declare 'struct %s' or import it with 'use %s select %s'",
+			line, position, name, name, module, name)
 	}
 	ns, base, _ := strings.Cut(name, ".")
 	var reason, hint string

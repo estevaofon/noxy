@@ -49,8 +49,11 @@ func (c *Compiler) acceptsNull(t ast.NoxyType) bool {
 	if !ok {
 		return false
 	}
-	_, isStruct := c.structs[primitive.Name]
-	return isStruct
+	// Pela DECLARACAO, nao por nome simples em c.structs: o nome pode ser
+	// qualificado (`io.File`) ou traduzido de um campo de struct de modulo
+	// (`mod_a.Inner` — memberType), e `a.f = null` / `w.o.i = null` tem de
+	// valer igual para os tres (#58).
+	return c.structDeclaration(primitive.Name) != nil
 }
 
 func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool) bool {
@@ -61,8 +64,8 @@ func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool
 		if typed.Name == "func" {
 			return true
 		}
-		definition, ok := c.structs[typed.Name]
-		if !ok {
+		definition := c.structDeclaration(typed.Name)
+		if definition == nil {
 			return false
 		}
 		if visiting == nil {
@@ -128,7 +131,7 @@ var arithmeticOperators = map[string]bool{
 func (c *Compiler) structOperandName(leftType, rightType ast.NoxyType) (string, bool) {
 	for _, t := range [...]ast.NoxyType{leftType, rightType} {
 		if prim, ok := t.(*ast.PrimitiveType); ok {
-			if _, exists := c.structs[prim.Name]; exists {
+			if c.structDeclaration(prim.Name) != nil {
 				return prim.Name, true
 			}
 		}

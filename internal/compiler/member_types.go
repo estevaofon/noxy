@@ -63,11 +63,21 @@ func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
 func (c *Compiler) programViewType(t ast.NoxyType, origin string) (ast.NoxyType, bool) {
 	switch typed := t.(type) {
 	case *ast.PrimitiveType:
-		if isBuiltinTypeName(typed.Name) || isGenericInstanceName(typed.Name) {
-			// Primitivos sao universais; nomes de instancia generica
-			// (`mod::Caixa<int>`) ja sao identidade global, iguais em qualquer
-			// unidade de compilacao.
+		if isBuiltinTypeName(typed.Name) {
+			// Primitivos sao universais.
 			return typed, true
+		}
+		if isGenericInstanceName(typed.Name) {
+			// Instancia de template resolvida DENTRO do modulo (`c: Caixa<int>`
+			// em g.nx vira `main::Caixa<int>`, porque o validador de modulo
+			// compila com moduleName "main"): o qualificador NAO e identidade
+			// global — o importador nomeia a mesma instancia `g::Caixa<int>`, e
+			// um template LOCAL homonimo tambem produz `main::Caixa<int>`.
+			// Devolver o nome cru rejeitava `let k: Caixa<int> = h.c` (programa
+			// valido) ou, pior, tipava o campo pelo template local. O nome
+			// estruturado (template + args) nao sobrevive no nome achatado;
+			// sem como reconstrui-lo na visao do programa, o campo e dinamico.
+			return nil, false
 		}
 		definition := c.lookupStructFrom(origin, typed.Name)
 		if definition == nil {

@@ -1887,7 +1887,13 @@ The translation applies to nested types (`Row[]`, `map[string, Row]`,
 `ref Row`, `func(Row) -> Row`) and along a chain (`w.o.i.v` re-applies it at
 each step). A type that is only *partially* nameable (`map[string, Row]` with
 no way to write `Row`) becomes dynamic as a whole — never a half-typed
-`map[string, ???]`. Because the names are the program's own, both annotations
+`map[string, ???]`. A field whose type is an instance of a generic struct of
+the module itself (`c: Caixa<int>` declared inside the module) is also
+dynamic: the instance's internal name is not an identity across compilation
+units. `null` is accepted wherever such a (qualified or translated) struct
+type is expected, as for a local struct. In the REPL, `use` aliases and the
+imported structs' origins carry over to later lines, so `use io` on one line
+and `let f: io.File = ...` on the next behave as in a file. Because the names are the program's own, both annotations
 then type-check: `let r: sqlite.Row = res.rows[0]` and, with the `select`,
 `let r: Row = res.rows[0]`. Writing something wrong about such a field is a
 compile error — `let x: string = a.f.fd` (`expected string, got int`),
@@ -1898,10 +1904,13 @@ runtime failure.
 
 Every type name in a `let` annotation, a parameter, a return type or a struct
 field must name a known type: a primitive, a struct declared in the program
-(anywhere in the file — forward references between top-level structs, self
-references and structs declared inside functions all resolve), a struct
-imported by `select`/`select *`, a qualified `m.T` through a namespace import,
-or a generic instance (`Caixa<int>`). Anything else is a compile error:
+(anywhere in the file for top-level structs — forward references and self
+references resolve; a struct declared inside a function is visible in that
+body after its declaration), a struct imported by `select`/`select *`, a
+qualified `m.T` through a namespace import, or a generic instance
+(`Caixa<int>`). A function's signature is resolved in the scope where the
+function is declared, so a struct that only exists inside its body cannot be
+a parameter or return type. Anything else is a compile error:
 
 ```text
 [line 2] struct 'A' field 'b': unknown type 'Inexistente'

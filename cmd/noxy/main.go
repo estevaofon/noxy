@@ -185,6 +185,11 @@ func startREPL(showDisasm bool) {
 	// replLets: `let` globais de linhas anteriores — a sessao segue a mesma
 	// regra de redeclaracao de um arquivo (spec §3), linha a linha.
 	replLets := make(map[string]int)
+	// replModules: aliases de `use m` e cache de descoberta de modulos das
+	// linhas anteriores — `use io` numa linha e `let f: io.File` na seguinte
+	// (e a origem dos structs importados, para tipar `f.path`) so funcionam
+	// se o estado de modulos acompanhar globals/structs (0.13.0, #58).
+	var replModules *compiler.ModuleState
 
 	var inputBuffer string
 
@@ -275,6 +280,7 @@ func startREPL(showDisasm bool) {
 		c := compiler.NewWithState(replGlobals, replStructs, "REPL")
 		c.SetGenericState(replGenerics)
 		c.SetSessionLets(replLets)
+		c.SetModuleState(replModules)
 		chunk, _, err := c.Compile(program)
 		if err != nil {
 			fmt.Fprintf(diagOut, "Compiler error: %s\n", err)
@@ -284,6 +290,7 @@ func startREPL(showDisasm bool) {
 
 		// Update globals
 		replGlobals = c.GetGlobals()
+		replModules = c.ModuleState()
 		// Sessao lembra os let desta linha — SO apos compilar com sucesso,
 		// para uma linha rejeitada nao queimar o nome.
 		for name, line := range c.ProgramLets() {

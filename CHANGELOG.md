@@ -60,9 +60,26 @@ tê-lo importado.
   declarados dentro de função, instâncias genéricas (`Caixa<int>`) e `T`
   dentro de template; um `use … select` de topo vale para o arquivo inteiro
   (campo ou assinatura declarado antes da linha do `use` já enxerga o struct).
+  A assinatura de uma função é resolvida no escopo em que a função é
+  declarada: um struct declarado **dentro do corpo** não pode aparecer no
+  parâmetro/retorno (`func make() -> Pair` com `struct Pair` no corpo era
+  aceito, com retorno dinâmico; agora `function 'make' return type: unknown
+  type 'Pair'` — mova o struct para o top level). Um campo de struct de módulo
+  cujo tipo é uma **instância de template do próprio módulo** (`c: Caixa<int>`
+  dentro de `g.nx`) continua dinâmico no acesso a membro (o nome interno da
+  instância não é identidade entre unidades de compilação).
 
 ### Fixed
 
+- **`null` em campo de struct nomeado por `ns.T`** (`a.f = null` com
+  `f: io.File`, `let g: io.File = null`) e em campo traduzido de struct de
+  módulo (`w.o.i = null`) é aceito: a checagem de `null` resolve pela
+  declaração do struct, não por nome simples.
+- **REPL lembra os `use` de linhas anteriores** (aliases de namespace e o
+  cache de módulos): `use io` numa linha e `let f: io.File = io.open(...)` na
+  seguinte funcionam, e os structs importados por `select` mantêm a origem
+  para o acesso a membro tipado. Antes, um campo `f: io.File` numa linha
+  posterior ao `use` era recusado (`'io' is not an imported module`).
 - **Struct reexportado por `select` é conhecido pelo importador.** Se `a.nx`
   faz `use b select T` e uma função de `a` devolve `T`, `use a select *` (ou
   `use a select T, mk`) no programa já ligava o construtor `T` como valor, mas

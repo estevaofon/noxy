@@ -150,6 +150,55 @@ func TestStructsPersistedAcrossCompilationsAreKnown(t *testing.T) {
 	}
 }
 
+func TestReplCarriesNamespaceImportsAcrossLines(t *testing.T) {
+	// REPL: cada linha e um compilador novo que compartilha globals/structs;
+	// o estado de modulos (aliases de `use m` e o cache de descoberta) tem de
+	// acompanhar, senao `use io` numa linha e `let f: io.File` na seguinte
+	// acusaria "'io' is not an imported module" — e o acesso a membro de um
+	// valor tipado por struct de modulo perderia a origem (structOrigin) na
+	// linha seguinte.
+	root := dbRoot(t)
+	globals := make(map[string]ast.NoxyType)
+	structs := make(map[string]*ast.StructStatement)
+	var modules *ModuleState
+	for _, line := range []string{
+		"use io\n",
+		"let f: io.File = io.stdin()\n",
+		"let p: string = f.path\n",
+		// Struct importado por select numa linha anterior: a ORIGEM (db) tem
+		// de ser lembrada para `res.rows` ser traduzido (Row nao nomeavel ->
+		// dinamico) em vez de vazar `Row[]` cru — que faria `let s: string`
+		// falhar com "got Row[]".
+		"use db select QueryResult, q\n",
+		"let res: QueryResult = q()\n",
+		"let s: string = res.rows\n",
+		"use db\n",
+		"let r2: db.QueryResult = db.q()\n",
+		"let bad: string = r2.rows\n",
+	} {
+		program := parser.New(lexer.New(line)).ParseProgram()
+		c := NewWithStateAndRoot(globals, structs, "REPL", root)
+		c.SetModuleState(modules)
+		_, _, err := c.Compile(program)
+		modules = c.ModuleState()
+		if strings.HasPrefix(line, "let bad") {
+			requireErrorMentions(t, err, "expected string, got db.Row[]")
+			continue
+		}
+		if err != nil {
+			t.Fatalf("line %q: unexpected compile error: %v", line, err)
+		}
+	}
+}
+
+func TestFunctionSignatureCannotNameStructDeclaredInItsOwnBody(t *testing.T) {
+	// A assinatura e resolvida no escopo em que a funcao e declarada: um
+	// struct que so existe dentro do corpo nao e nomeavel por quem chama —
+	// antes compilava (retorno dinamico) e agora e erro (documentado, 0.13.0).
+	_, err := compileFunctionSource(t, "func make() -> Pair\n    struct Pair\n        a: int\n    end\n    return Pair(1)\nend\n")
+	requireErrorMentions(t, err, "[line 1]", "function 'make' return type: unknown type 'Pair'")
+}
+
 func TestStructReexportedBySelectiveImportIsKnownToImporter(t *testing.T) {
 	// `a` importa T de `b` por `use b select T` e a reexporta (uma funcao de
 	// `a` devolve T; `use a select *` no programa liga T como valor — ver
@@ -178,8 +227,10 @@ func TestInstanceOfImportedTemplateNeedsItsStructDependencyImported(t *testing.T
 	// compilada como struct comum no pass 2.)
 	root := t.TempDir()
 	writeModuleFile(t, root, "caixas.nx", "struct Meta\n    k: int\nend\nstruct Caixa<T>\n    v: T\n    meta: Meta\nend\nfunc make_meta(k: int) -> Meta\n    return Meta(k)\nend\n")
+	// A linha e a da INSTANCIACAO no programa (nao a do template dentro do
+	// modulo) e o hint nomeia o modulo que declara o struct que falta.
 	err := compileSourceAtRoot(t, root, "use caixas select Caixa, make_meta\nlet c: Caixa<int> = Caixa(1, make_meta(2))\n")
-	requireErrorMentions(t, err, "struct 'Caixa<int>' field 'meta': unknown type 'Meta'", "hint:", "use m select Meta")
+	requireErrorMentions(t, err, "[line 2]", "struct 'Caixa<int>' field 'meta': unknown type 'Meta'", "hint:", "use caixas select Meta")
 	err = compileSourceAtRoot(t, root, "use caixas select Caixa, Meta, make_meta\nlet c: Caixa<int> = Caixa(1, make_meta(2))\nlet k: int = c.meta.k\n")
 	requireNoError(t, err)
 }

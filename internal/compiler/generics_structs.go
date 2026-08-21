@@ -245,6 +245,15 @@ func (c *Compiler) ensureStructInstance(tpl *StructTemplate, args []ast.NoxyType
 		bindings[typeParam] = args[index]
 	}
 	instance := substituteStruct(tpl, bindings, name)
+	if tpl.Module != c.moduleName {
+		// Template IMPORTADO: o clone herda o token do template, cuja linha e
+		// do ARQUIVO DO MODULO — um erro na compilacao da instancia (ex.:
+		// campo com struct nao importado, #58) apontaria para uma linha que
+		// nao existe no programa. A linha da primeira instanciacao e a do
+		// programa. Template local mantem a linha da declaracao (mesmo
+		// arquivo, e e la que o campo esta escrito).
+		instance.Token.Line = line
+	}
 	queue.structInstances[name] = instance
 	queue.structKeys[name] = structInstanceKey{Base: base, Args: args}
 	c.registerStructInstance(instance)

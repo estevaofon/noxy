@@ -212,6 +212,12 @@ func (c *Compiler) buildModuleStructExports(module string, state *moduleDiscover
 				// T` acusaria `unknown type 'T'` (issue #58 item 2).
 				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
 				if !loadable {
+					// Dependencia que nao carrega (ou alcancada por dentro da
+					// propria carga — guard de ciclo): segue sem esses nomes,
+					// como buildModuleStructScope. O resultado deste modulo
+					// ainda e memoizado como sucesso; num ciclo, a parte que
+					// faltou e a do proprio modulo em carga, cuja lista sai
+					// completa pela chamada de fora.
 					continue
 				}
 				for _, name := range declaration.Selectors {

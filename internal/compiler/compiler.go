@@ -221,6 +221,45 @@ func (c *Compiler) ProgramLets() map[string]int {
 	return c.programLets
 }
 
+// ModuleState e o estado de modulos de uma sessao interativa (REPL): os
+// aliases de `use m [as alias]` (namespaceImports + ordem) e o cache de
+// descoberta de modulos (moduleDiscovery — inclusive origins, que diz de qual
+// modulo veio cada struct em c.structs). Opaco para quem esta fora do pacote.
+type ModuleState struct {
+	namespaceImports map[string]string
+	namespaceOrder   []string
+	discovery        *moduleDiscoveryState
+}
+
+// ModuleState devolve o estado de modulos deste compilador para a proxima
+// linha do REPL herdar via SetModuleState. O cache de descoberta e
+// COMPARTILHADO (nao copiado): e um memo por modulo e os ponteiros de
+// declaracao que c.structs (tambem compartilhado entre linhas) guarda sao os
+// dele — uma descoberta nova por linha reparsearia cada modulo e perderia a
+// origem (structOrigin) dos structs importados em linhas anteriores.
+func (c *Compiler) ModuleState() *ModuleState {
+	return &ModuleState{
+		namespaceImports: c.namespaceImports,
+		namespaceOrder:   c.namespaceOrder,
+		discovery:        c.discoveryState(),
+	}
+}
+
+// SetModuleState instala o estado de modulos de linhas anteriores do REPL.
+// nil (primeira linha) e um no-op. Os aliases sao copiados (por compilador,
+// como em NewChild); o cache de descoberta e compartilhado.
+func (c *Compiler) SetModuleState(state *ModuleState) {
+	if state == nil {
+		return
+	}
+	c.namespaceImports = make(map[string]string, len(state.namespaceImports))
+	for name, module := range state.namespaceImports {
+		c.namespaceImports[name] = module
+	}
+	c.namespaceOrder = append([]string(nil), state.namespaceOrder...)
+	c.moduleDiscovery = state.discovery
+}
+
 func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	switch n := node.(type) {
 	case *ast.Program:
