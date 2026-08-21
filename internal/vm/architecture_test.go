@@ -79,7 +79,7 @@ func TestBuiltinSourceLayout(t *testing.T) {
 
 func TestStackAndCallSourceLayout(t *testing.T) {
 	expected := map[string][]string{
-		"stack.go": {"readShort", "isFalsey", "valuesEqual", "readConstant", "push", "pop", "peek", "captureUpvalue", "closeUpvalue"},
+		"stack.go": {"readShort", "valuesEqual", "readConstant", "push", "pop", "peek", "captureUpvalue", "closeUpvalue"},
 		"calls.go": {"callValue", "call", "copyValue"},
 	}
 	for filename, names := range expected {

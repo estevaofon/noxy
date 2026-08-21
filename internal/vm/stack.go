@@ -7,11 +7,6 @@ func (vm *VM) readShort() uint16 {
 	return uint16(vm.chunk.Code[vm.ip-2])<<8 | uint16(vm.chunk.Code[vm.ip-1])
 }
 
-// isFalsey returns true if the value is false or null
-func isFalsey(v value.Value) bool {
-	return v.Type == value.VAL_NULL || (v.Type == value.VAL_BOOL && !v.AsBool)
-}
-
 func valuesEqual(a, b value.Value) bool {
 	if a.Type == b.Type {
 		switch a.Type {

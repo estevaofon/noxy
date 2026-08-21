@@ -1526,6 +1526,11 @@ Runtime error: [programa.nx:line 7] stack overflow: operand stack exceeds 104857
 Os dois são erros de runtime comuns: dentro de `call_result` viram um
 `Failure` capturável, como qualquer outro erro.
 
+O stack Noxy capturado em erros de runtime (`Failure.stack`) mostra no máximo
+96 frames — os 64 mais internos e os 32 mais externos, com uma linha
+`... N frames omitted ...` no meio — para não reter uma string gigante em
+`call_result`/`task_await` numa recursão profunda.
+
 ---
 
 ## 8. Expressions

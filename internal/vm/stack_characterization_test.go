@@ -21,10 +21,7 @@ func TestLegacyConstantReaders(t *testing.T) {
 	}
 }
 
-func TestFalseyAndEqualityMatrix(t *testing.T) {
-	if !isFalsey(value.NewNull()) || !isFalsey(value.NewBool(false)) || isFalsey(value.NewBool(true)) {
-		t.Fatal("falsey semantics changed")
-	}
+func TestValuesEqualMatrix(t *testing.T) {
 	pairs := []struct {
 		left, right value.Value
 		want        bool

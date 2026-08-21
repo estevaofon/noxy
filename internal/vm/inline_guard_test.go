@@ -50,6 +50,36 @@ func TestPushStaysInlinedInsideRun(t *testing.T) {
 	if inlined < minPushInlineSitesInRun {
 		t.Errorf("push foi inlinada em %d call sites de executor.go, esperado >= %d (custo reportado: %d)", inlined, minPushInlineSitesInRun, cost)
 	}
+
+	// ensureCallCapacity (calls.go) e chamada em call()/callPreparedClosure, que
+	// NAO sao "big function" (calls.go fica bem abaixo de 5000 nos de AST), entao
+	// o orcamento de inline aqui e o normal (80), nao os 20 de dentro de run().
+	// O corpo custa EXATAMENTE 80 hoje — sem folga, de proposito (ver o
+	// comentario "sem folga" em calls.go): qualquer no a mais desinlina esta
+	// funcao, e toda chamada Noxy passaria a pagar uma call/ret que o desenho
+	// atual evita (ensureCallCapacity roda na ENTRADA de toda chamada).
+	ensureCallCapacityCostPattern := regexp.MustCompile(`can inline \(\*VM\)\.ensureCallCapacity with cost (\d+)`)
+	ensureMatch := ensureCallCapacityCostPattern.FindStringSubmatch(report)
+	if ensureMatch == nil {
+		t.Fatalf("o compilador nao inlina (*VM).ensureCallCapacity de jeito nenhum — procure por 'cannot inline (*VM).ensureCallCapacity' na saida de `go build -gcflags=-m=2 ./internal/vm`")
+	}
+	ensureCost, ensureConvErr := strconv.Atoi(ensureMatch[1])
+	if ensureConvErr != nil {
+		t.Fatalf("custo de inline ilegivel em %q: %v", ensureMatch[0], ensureConvErr)
+	}
+	if ensureCost > inlineNormalMaxCost {
+		t.Errorf("ensureCallCapacity tem custo de inline %d, maximo %d — tire nos do corpo (ver o comentario \"sem folga\" em calls.go)", ensureCost, inlineNormalMaxCost)
+	}
+
+	ensureInlinedInCalls := 0
+	for _, line := range strings.Split(report, "\n") {
+		if strings.Contains(line, "calls.go") && strings.Contains(line, "inlining call to (*VM).ensureCallCapacity") {
+			ensureInlinedInCalls++
+		}
+	}
+	if ensureInlinedInCalls < minEnsureCallCapacityInlineSitesInCalls {
+		t.Errorf("ensureCallCapacity foi inlinada em %d call sites de calls.go, esperado >= %d (custo reportado: %d)", ensureInlinedInCalls, minEnsureCallCapacityInlineSitesInCalls, ensureCost)
+	}
 }
 
 // inlineBigFunctionMaxCost espelha a constante homonima do compilador
@@ -57,7 +87,16 @@ func TestPushStaysInlinedInsideRun(t *testing.T) {
 // grande como run().
 const inlineBigFunctionMaxCost = 20
 
+// inlineNormalMaxCost e o orcamento padrao do inliner (cmd/compile/internal/
+// inline.inlineMaxBudget) para callees dentro de uma funcao "normal" (<= 5000
+// nos de AST) — o caso de ensureCallCapacity, chamada de dentro de calls.go.
+const inlineNormalMaxCost = 80
+
 // minPushInlineSitesInRun e uma margem sob os 117 call sites de hoje — o teste
 // e sobre "push continua inlinada dentro de run()", nao sobre a contagem
 // exata, que muda quando opcodes sao acrescentados ou removidos.
 const minPushInlineSitesInRun = 100
+
+// minEnsureCallCapacityInlineSitesInCalls e uma margem sob o unico call site
+// de hoje (call(), calls.go).
+const minEnsureCallCapacityInlineSitesInCalls = 1

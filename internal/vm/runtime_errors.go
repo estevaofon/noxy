@@ -101,11 +101,28 @@ func sourceLocation(c *chunk.Chunk, ip int) SourceLocation {
 	return location
 }
 
+// maxCapturedStackFrames e o teto de linhas que captureNoxyStack renderiza:
+// capturedStackFramesHead mais internos + capturedStackFramesTail mais
+// externos, com uma linha "... N frames omitted ..." no meio. Sem o corte,
+// uma recursao infinita no teto de FramesMax (100 000 frames) rende uma
+// string de ate ~16 MB por erro — retida inteira em call_result/task_await
+// (medido na issue #56). As pontas sao o que importa para depurar: onde a
+// recursao comecou (externo) e onde ela finalmente estourou (interno).
+const (
+	maxCapturedStackFrames  = 96
+	capturedStackFramesHead = 64
+	capturedStackFramesTail = 32
+)
+
 // captureNoxyStack renderiza os frames Noxy vivos, do mais recente para o mais
 // antigo. Para em vm.stackCaptureFloor — 0 fora de uma fronteira de
 // call_result, ou seja, pilha completa como sempre; dentro da fronteira, o
 // piso e o frame count do chamador, o que corta exatamente os frames abaixo
 // (e inclusive) do ponto onde call_result foi chamado.
+//
+// Acima de maxCapturedStackFrames so os extremos sao renderizados (ver
+// comentario da constante) — o meio e substituido por uma unica linha, nunca
+// formatado, para nao pagar a alocacao das strings descartadas.
 func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
 	floor := vm.stackCaptureFloor
 	if floor < 0 {
@@ -114,12 +131,13 @@ func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
 	if floor > vm.frameCount {
 		floor = vm.frameCount
 	}
-	frames := make([]string, 0, vm.frameCount-floor)
-	for i := vm.frameCount - 1; i >= floor; i-- {
+
+	renderable := func(i int) bool {
 		frame := &vm.frames[i]
-		if frame.Closure == nil || frame.Closure.Function == nil {
-			continue
-		}
+		return frame.Closure != nil && frame.Closure.Function != nil
+	}
+	render := func(i int) string {
+		frame := &vm.frames[i]
 		c, _ := frame.Closure.Function.Chunk.(*chunk.Chunk)
 		ip := frame.IP
 		if i == vm.frameCount-1 {
@@ -127,7 +145,38 @@ func (vm *VM) captureNoxyStack(activeChunk *chunk.Chunk, activeIP int) string {
 			ip = activeIP
 		}
 		location := sourceLocation(c, ip)
-		frames = append(frames, fmt.Sprintf("[%s] in %s", location, frame.Closure.Function.Name))
+		return fmt.Sprintf("[%s] in %s", location, frame.Closure.Function.Name)
+	}
+
+	// indices, do mais interno (frameCount-1) para o mais externo (floor) —
+	// so os frames renderizaveis (Closure/Function presentes). Guardar
+	// indices (int) em vez de strings ja formatadas mantem o custo baixo
+	// mesmo com dezenas de milhares de frames: so formatamos as pontas
+	// mantidas abaixo.
+	indices := make([]int, 0, vm.frameCount-floor)
+	for i := vm.frameCount - 1; i >= floor; i-- {
+		if renderable(i) {
+			indices = append(indices, i)
+		}
+	}
+
+	total := len(indices)
+	if total <= maxCapturedStackFrames {
+		frames := make([]string, total)
+		for pos, i := range indices {
+			frames[pos] = render(i)
+		}
+		return strings.Join(frames, "\n")
+	}
+
+	frames := make([]string, 0, maxCapturedStackFrames+1)
+	for _, i := range indices[:capturedStackFramesHead] {
+		frames = append(frames, render(i))
+	}
+	omitted := total - capturedStackFramesHead - capturedStackFramesTail
+	frames = append(frames, fmt.Sprintf("    ... %d frames omitted ...", omitted))
+	for _, i := range indices[total-capturedStackFramesTail:] {
+		frames = append(frames, render(i))
 	}
 	return strings.Join(frames, "\n")
 }
