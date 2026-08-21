@@ -1,5 +1,167 @@
 # Changelog
 
+## [0.11.0] - 2026-08-21
+
+Entrega dos 16 achados do relatório de validação da VM ao reescrever o K&R em
+Noxy (issue #56); design em
+`docs/superpowers/specs/2026-08-20-issue-56-knr-findings-design.md`. Três itens
+quebram compatibilidade.
+
+### Changed (BREAKING)
+
+- **A condição de `if`/`elif`/`while` — e os operandos de `!`, `&&`, `||` —
+  tem de ser `bool`.** Não há valores truthy/falsy: antes `if 0`, `if ""` e
+  `if null` entravam no `then` em silêncio. Com o tipo estático conhecido é
+  erro de compilação (`[line N] condition must be bool, got int` +
+  `hint: use an explicit comparison, e.g. 'x != 0', 'x != ""', 'x != null' or 'length(x) > 0'`);
+  para `any`, erro de runtime (`condition must be bool, got int`). Migração:
+
+  | Antes | Depois |
+  |-------|--------|
+  | `if n then` (`int`/`float`) | `if n != 0 then` |
+  | `if s then` (`string`) | `if s != "" then` |
+  | `if p then` (struct, array, map, `ref`) | `if p != null then` |
+  | `if xs then` ("não vazio") | `if length(xs) > 0 then` |
+
+  A varredura de todos os `.nx` do repositório (`noxy_examples/`, `tests/`,
+  `internal/stdlib/`, `noxy_libs/`) encontrou **um** arquivo a migrar:
+  `noxy_examples/binary_tree.nx:33`, que usava o bitwise `|` como "ou" lógico
+  entre dois `bool` (`posicao < 0 | posicao >= arr.tamanho` → `||`) — bug
+  latente exposto pela checagem estática de bitwise (abaixo). Nota: `if r` com
+  `r: ref bool` continua compilando (deref automático), mas `&&`/`||` nunca
+  derefam, então `r || x` passa a ser erro (`logical operators require boolean
+  operands, got ref bool and bool`) — já era assim para `&&`, e `||`, que não
+  checava nada, herda a regra; escreva `*r || x`.
+- **Os diagnósticos da VM e da CLI saem em stderr.** Erros de parser, de
+  compilador e de runtime (com o `hint:`), `Error reading file:` e os erros de
+  thread/plugin passam a ser escritos em **stderr**; `print`/`iprint` continuam
+  em stdout. Quem capturava mensagens de erro pela saída padrão precisa de
+  `2>&1` (`noxy programa.nx > tudo.txt 2>&1`).
+- **`io.read_lines` não devolve mais um `""` final.** `"a\nb\n"` agora é
+  `[a, b]` (era `[a, b, ""]`), `"a\nb"` é `[a, b]`, `"\n"` é `[""]` e `""` é
+  `[]` (era `[""]`). Código que descartava a última linha vazia à mão (ou que
+  fazia `length(linhas) - 1`) precisa parar de fazê-lo.
+- **`io.list_dir` devolve `IOLinesResult`** em vez de `IOResult`: `data` é
+  `string[]` com os nomes das entradas, ordenados por nome e sem o caminho do
+  diretório. A assinatura antiga (`data: string`) nunca chegou a funcionar — a
+  nativa não existia. Para distinguir arquivo de diretório use
+  `io.stat(path + "/" + nome).is_dir`.
+- **F-string: `{{` e `}}` são escapes de chave literal**, e uma expressão que
+  *começa* por `{` (um map literal) precisa de espaço: `f'{ {"a": 1}["a"] }'`
+  — antes `f'{{"a": 1}["a"]}'` era aceito. É a mesma regra do Python. Sobra
+  depois da expressão interpolada também deixa de ser aceita em silêncio:
+  `f"{x:>10}"` é erro de sintaxe (`unexpected ":" in f-string expression` +
+  `hint: format specs are not supported; use fmt("%10s", x) for width/precision`).
+
+### Added
+
+- **`continue`** em `while` e `for` (nova keyword): pula para a próxima
+  iteração — reavalia a condição no `while`, avança o elemento no `for`.
+  Aninhamento segue o laço mais interno; fora de laço é erro de compilação.
+- **`eprint(args...)` e `eiprint(args...)`** — `print`/`iprint` em stderr, o
+  `fprintf(stderr, ...)` do C.
+- **`io.stdin() -> File`** — o stdin do processo como `io.File`
+  (`path="<stdin>"`, só leitura, não fechável: `close_result` devolve
+  `"stdin cannot be closed"` e `write_result` `"stdin is read-only"`), para ler
+  com `io.read_line` e ter EOF explícito. As leituras de stdin de tasks
+  concorrentes são serializadas pelo mesmo recurso.
+- **`io.read_line(file) -> IOResult`** — leitura incremental: devolve a próxima
+  linha sem `\r\n`; no fim, `ok=false, data="", error="EOF"`; a última linha sem
+  `\n` é devolvida normalmente e a chamada seguinte é que dá EOF.
+- **`io.list_dir`, `io.rename`, `io.write_bytes` e `io.write_bytes_result`** —
+  as nativas que faltavam (`list_dir`/`rename`) e a API explícita para gravar
+  `bytes` (antes só funcionava pela forma de namespace, que não checa o tipo do
+  argumento).
+- **Literais float em notação científica**: `1e3`, `1.5e-3`, `2E+10`. O
+  expoente faz o literal ser `float` mesmo sem ponto decimal; `.5` continua não
+  sendo aceito.
+- **Escapes `{{`/`}}` em f-strings** (ver a quebra acima): `f"{{x}}"` produz
+  `{x}`.
+- **`OP_ARRAY_FILL`** — `let a: T[N]` sem inicializador passa a emitir
+  `default; N; OP_ARRAY_FILL` em vez de empilhar N elementos: `int[100000]`
+  funciona, e não há mais o operando de 16 bits truncando N > 65535 em
+  silêncio.
+- **Pilhas de frames e de operandos dinâmicas**: cada VM nasce com 64 frames e
+  4096 slots e cresce sob demanda até os tetos de **100 000 frames** e
+  **1 048 576 slots**; no teto o erro é de runtime
+  (`stack overflow: call depth exceeds 100000 frames` /
+  `stack overflow: operand stack exceeds 1048576 slots`), nunca um panic Go, e
+  dentro de `call_result` vira um `Failure` capturável. Custo medido em
+  rodadas intercaladas (mediana de 9): corpus `benchmarks/bench_*.nx` com
+  **mediana +0,95 %** (faixa −6,8 %…+8,3 %) e `BenchmarkNoxyCallOverhead` em
+  **+2–3 %** — piso de ruído do ambiente.
+- **Exemplos** `noxy_examples/test_continue.nx` e `test_read_line.nx`, mais
+  `wc_stdin.nx` (o `wc` do K&R, excluído do runner por ler stdin). Runner:
+  173/173.
+
+### Fixed
+
+- **Recursão deixa de morrer em 62 níveis.** As pilhas eram arrays fixos
+  (`FramesMax = 64`, `StackMax = 2048`) embutidos na `VM`: `depth(10000)` da
+  issue dava `stack overflow` com 62 chamadas aninhadas. Agora crescem sob
+  demanda (acima).
+- **`let a: int[N]` com N grande não derruba mais a VM.** N > ~2047 estourava a
+  pilha de operandos com um panic Go ("Stack overflow"); N > 65535 truncava o
+  operando de `OP_ARRAY` em silêncio.
+- **`input()` com stdin redirecionado lê todas as linhas.** Cada chamada criava
+  um `bufio.Reader` novo sobre `os.Stdin`, e a primeira engolia até 4 KB — a
+  segunda chamada via EOF. Agora existe um leitor único por `SharedState`,
+  compartilhado com `io.stdin()`, e o erro de leitura não é mais ignorado.
+  `input()` continua sem sinalizar EOF (devolve `""`, indistinguível de linha
+  vazia) — para distinguir, use `io.read_line(io.stdin())`.
+- **Wrappers de `io` sem nativa por trás.** `io.read_line`, `io.list_dir` e
+  `io.rename` existiam em `internal/stdlib/io.nx` apontando para nativas
+  inexistentes. Um teste de higiene (`stdlib_hygiene_test.go`) passa a exigir
+  que todo identificador chamado por um módulo da stdlib seja declarado no
+  módulo, importado de outro módulo ou registrado como nativa.
+- **`if c then return end` em uma linha** deixa de ser erro de sintaxe: um
+  `return` sem valor seguido de `end`/`else`/`elif` é aceito.
+- **O erro de tipo em atribuição aponta a linha da atribuição**, não a última
+  linha compilada antes dela.
+- **`noxy arquivo_inexistente.nx` sai com código 1** (saía com 0 depois de
+  imprimir `Error reading file:`).
+- **`*` em não-ref, `!` em não-bool, `~` em não-int e bitwise com tipos errados
+  são erros de compilação** quando o tipo estático é conhecido: `2 ** 3` (não
+  existe operador de exponenciação) reporta
+  `cannot dereference non-reference value of type int`; `~true` reporta
+  `operand of '~' must be int, got bool`; `1 & true` reporta
+  `operands for & must be integers or bytes, got int and bool`. `&`, `|` e `^`
+  aceitam `int` ou `bytes`; `<<` e `>>` só `int`.
+- **`break` e `continue` fecham os upvalues dos locais capturados.** `break`
+  emitia `OP_POP` cru e deixava aberta a caixa de um `let` do corpo capturado
+  por uma closure: o slot era reusado pela iteração seguinte e a closure
+  passava a ler outro valor. Os dois agora usam a mesma regra do `endScope`.
+- **`m.x = v` tem erro claro.** Atribuir a uma variável de módulo pela forma de
+  namespace é erro de compilação
+  (`cannot assign to 'm.x': module variables are read-only outside the module`
+  + `hint: expose a function in 'm' that updates it`), em vez de gravar num
+  binding que ninguém lê.
+- **`geometry.Point` e `Point` (via `select`) são o mesmo tipo nominal.**
+  Misturar as duas formas de import do mesmo struct dava erro de tipo; a
+  comparação passa a ser estrutural com identidade de declaração, inclusive em
+  tipos de função (`func(Point)` ≡ `func(geometry.Point)`) e na inferência de
+  genéricos. Um struct local de mesmo nome continua sendo um tipo diferente.
+
+### Docs
+
+- Spec §1.2 (`continue`), §2.1 (notação científica; `.5` não é aceito), §2.2
+  (**a ordem de iteração e de impressão de um `map` é indefinida**), §7
+  (condição obrigatoriamente `bool` com tabela de migração, `break`/`continue`,
+  `if c then return end`, subseção *Limites de chamada*), §8 (**a aritmética de
+  `int` dá a volta em overflow** — complemento de dois, como Go, sem erro em
+  `+ - *`; `!`/`&&`/`||` exigem `bool`; tipos dos bitwise; `*` unário só em
+  `ref`), §9 (escapes, ausência de format spec, regra do espaço, aspas
+  simples), §10 (`print`/`iprint`/`eprint`/`eiprint` e o contrato de `input`),
+  §11 (**`select` de variável copia o valor** — snapshot no import; `m.x = v`
+  é erro; identidade nominal entre namespace e `select`), §12 (tabela completa
+  da API `io`, incluindo quando **não** misturar `read`/`read_lines` com
+  `read_line`; nota de `sys.exec_output` no Windows: já roda via `cmd /C`, não
+  aninhar `cmd /c`, saída não-UTF-8 dá `ok=false`) e §13 (pilhas dinâmicas).
+- README (builtins `eprint`/`input`/`fmt`, stderr e exit code em *Usage*) e
+  AGENTS.md (§E: stdout do programa × stderr do diagnóstico; §Segurança:
+  overflow não é checado e `ensureCallCapacity` é o único ponto de checagem dos
+  tetos).
+
 ## [0.10.1] - 2026-08-20
 
 ### Fixed — contêineres criados por natives/plugins são donos dos filhos (issue #55)

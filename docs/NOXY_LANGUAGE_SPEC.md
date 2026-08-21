@@ -23,7 +23,7 @@ The current implementation is a **Stack-based VM** written in **Go**.
 | Category | Keywords |
 |----------|----------|
 | Declarations | `let`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `for`, `in`, `defer`, `when`, `case`, `default` |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in`, `defer`, `when`, `case`, `default` |
 | Types | `int`, `float`, `string`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
@@ -86,7 +86,7 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
 | Type | Description | Example |
 |------|-------------|---------|
 | `int` | 64-bit Integer | `42`, `-10`, `0` |
-| `float` | Double precision Floating Point | `3.14`, `-0.5`, `1.0` |
+| `float` | Double precision Floating Point | `3.14`, `-0.5`, `1.0`, `1.5e3`, `2E-10` |
 | `string` | Character string | `"Hello"`, `""` |
 | `bool` | Boolean value | `true`, `false` |
 | `void` | Absence of value (function return only) | - |
@@ -103,6 +103,19 @@ literal is part of the literal, so the minimum of the type is writable as
 let min: int = -9223372036854775808 // ok — exact
 let bad: int = 9223372036854775808  // ERROR: integer literal out of int64 range
 ```
+
+A `float` literal accepts scientific notation: an exponent `e`/`E`, optionally
+signed, after the digits (and after the optional fraction). The exponent makes
+the literal a `float` even without a decimal point.
+
+```noxy
+let a: float = 1e3      // 1000.0
+let b: float = 1.5e-3   // 0.0015
+let c: float = 2E+10    // 20000000000.0
+```
+
+A leading dot is **not** accepted: write `0.5`, never `.5`. An `e` that is not
+followed by (an optional sign and) a digit is not part of the literal.
 
 ### 2.2 Composite Types
 
@@ -177,6 +190,11 @@ scores["Bob"] = 50
 
 **Pass-by-Value Behavior**:
 Maps are passed by **VALUE**: the callee's map is independent at any depth (copy-on-write). Use `ref` when the function must modify the caller's map.
+
+**Iteration order is undefined**: a map is backed by a Go map, so `for k in m`,
+`keys(m)` and printing a map may produce a different order on each run and
+across versions. Never depend on it — sort `keys(m)` when the output has to be
+stable.
 
 #### Structs
 
@@ -1050,10 +1068,63 @@ else
 end
 ```
 
+A whole `if` may be written on a single line, including a bare `return`:
+
+```noxy
+func abs(n: int) -> int
+    if n >= 0 then return n end
+    return -n
+end
+```
+
+#### The condition must be `bool`
+
+There are no truthy/falsy values in Noxy. The condition of `if`, `elif` and
+`while` — and the operands of `!`, `&&`, `||` — must be `bool`. When the static
+type is known and is not `bool`, the program is rejected at compile time:
+
+```text
+[line 3] condition must be bool, got int
+  hint: use an explicit comparison, e.g. 'x != 0', 'x != ""', 'x != null' or 'length(x) > 0'
+```
+
+Write the comparison explicitly:
+
+| Instead of | Write |
+|-----------|-------|
+| `if n then` (`int`/`float`) | `if n != 0 then` |
+| `if s then` (`string`) | `if s != "" then` |
+| `if p then` (struct, array, map, `ref`) | `if p != null then` |
+| `if xs then` (collection, meaning "not empty") | `if length(xs) > 0 then` |
+
+A `ref bool` condition is fine — `if r then` dereferences automatically — but
+`&&`/`||` never dereference, so `r || x` is a compile-time error; write
+`*r || x`.
+
+For a value whose static type is `any`, the check happens at runtime:
+`condition must be bool, got int`.
+
 ### While Loop
 ```noxy
 while condition do
     // ...
+end
+```
+
+`break` leaves the innermost loop; `continue` skips to its next iteration —
+in a `while` it re-evaluates the condition, in a `for` it advances to the next
+element. Both discard the locals declared in the loop body, closing the box of
+any local a closure captured, so a closure built in one iteration keeps that
+iteration's values. `break` or `continue` outside a loop is a compile-time
+error.
+
+```noxy
+let i: int = 0
+while i < 10 do
+    i = i + 1
+    if i % 2 == 0 then continue end
+    if i > 7 then break end
+    print(i)          // 1, 3, 5, 7
 end
 ```
 
@@ -1434,12 +1505,43 @@ Any value a channel can carry — including a generic struct instance such as
 `Caixa<int>` (§6) — travels through `chan_send`/`chan_recv` and is received
 by `when`/`case` exactly like any other value.
 
+### Limites de chamada
+
+A profundidade de chamada é limitada apenas pela memória: cada VM começa com
+64 frames e 4096 slots de operandos e **cresce sob demanda** até os tetos de
+**100 000 frames** e **1 048 576 slots** (§13). Uma recursão de 50 000 níveis
+roda; uma recursão infinita para com erro de runtime, nunca com um panic:
+
+```text
+Runtime error: [programa.nx:line 2] stack overflow: call depth exceeds 100000 frames
+```
+
+Uma única expressão que empilhe temporários demais (um literal gigantesco)
+esbarra no outro teto:
+
+```text
+Runtime error: [programa.nx:line 7] stack overflow: operand stack exceeds 1048576 slots
+```
+
+Os dois são erros de runtime comuns: dentro de `call_result` viram um
+`Failure` capturável, como qualquer outro erro.
+
 ---
 
 ## 8. Expressions
 
 ### Mathematical
 `+`, `-`, `*`, `/`, `%`
+
+`int` arithmetic **wraps around** on overflow (two's complement, exactly like
+Go): `+`, `-` and `*` never raise an overflow error.
+
+```noxy
+print(9223372036854775807 + 1)   // -9223372036854775808
+```
+
+Division by zero and `%` by zero are runtime errors; overflow is not. When a
+range matters, check it before the operation (or work in `float`).
 
 ### Comparison
 `>`, `<`, `>=`, `<=`, `==`, `!=`
@@ -1457,12 +1559,31 @@ numbers or strings`); bridge bytes through `to_str` first. Equality
 - `||` (OR)
 - `!` (NOT)
 
+All three require `bool` operands — there is no truthy/falsy conversion (§7).
+With a known static type that is not `bool` the program is rejected at compile
+time (`operand of '!' must be bool, got int`, `logical operators require
+boolean operands, got int and bool`); an `any` operand is checked at runtime.
+`&&` and `||` do **not** dereference: with `r: ref bool`, `if r then` works but
+`r || x` is an error — write `*r || x`.
+
 ### Bitwise
 - `&` (AND)
 - `|` (OR)
 - `^` (XOR)
 - `~` (NOT)
 - `<<`, `>>` (Shift)
+
+The bitwise operators are strictly bitwise: they are never a substitute for
+`&&`/`||`. `&`, `|` and `^` accept two `int` or two `bytes` of the same length;
+`<<` and `>>` accept `int` only; `~` accepts `int` only. Wrong static types are
+compile-time errors with the same text as the runtime check
+(`[line N] operands for & must be integers or bytes, got int and bool`,
+`operand of '~' must be int, got bool`).
+
+Unary `*` is the dereference operator and applies only to a `ref`. With a known
+non-`ref` static type it is a compile-time error, so `2 ** 3` (there is no
+exponentiation operator in Noxy) reports
+`[line N] cannot dereference non-reference value of type int`.
 
 ---
 
@@ -1475,10 +1596,66 @@ let name: string = "Noxy"
 print(f"Hello, {name}!")
 ```
 
+**Literal braces.** `{{` produces `{` and `}}` produces `}`:
+
+```noxy
+let x: int = 1
+print(f"{{x}} = {x}")      // {x} = 1
+print(f"{{{x}}}")          // {1}
+```
+
+**No format specs.** Anything left over after the interpolated expression is a
+syntax error — there is no `:spec` mini-language, so `f"{name:>10}"` reports:
+
+```text
+[2:7] SyntaxError: unexpected ":" in f-string expression
+  hint: format specs are not supported; use fmt("%10s", x) for width/precision
+```
+
+Use `fmt` for width and precision: `fmt("%6.2f", value)`, or interpolate the
+call itself (see the quoting rule below): `f'{fmt("%10s", x)}'`.
+
+**Double quotes inside `{}`** close an `f"..."` string: use a single-quoted
+f-string when the interpolated expression contains a string literal.
+
+```noxy
+print(f'{"a"}')               // a
+```
+
+**An expression that starts with `{`** (a map literal) needs a space, otherwise
+the `{{` is read as an escape — the same rule as Python:
+
+```noxy
+print(f'{ {"a": 1}["a"] }')   // 1
+```
+
 ## 10. Built-in Functions
 
 ### I/O
-- `print(expr)`: Prints to stdout.
+- `print(args...)`: prints to **stdout**, followed by a newline.
+- `iprint(args...)`: the same, **without** the trailing newline.
+- `eprint(args...)`: prints to **stderr**, followed by a newline.
+- `eiprint(args...)`: stderr, without the trailing newline.
+- `input(prompt?) -> string`: reads one line from stdin.
+
+Program output goes to stdout; diagnostics go to stderr. Every message the
+VM/CLI itself produces — parser and compiler errors, `Runtime error:` and its
+`hint:`, `Error reading file:`, thread and plugin errors — is written to
+**stderr**, so a shell pipeline that used to capture them from stdout now needs
+`2>&1`. `eprint`/`eiprint` are the Noxy-level equivalent of
+`fprintf(stderr, ...)`.
+
+```noxy
+eprint("could not open:", path)   // arguments are joined with a space
+```
+
+`input(prompt)` prints the prompt (always, including at end of input), reads a
+line from stdin and returns it without the trailing `\n`/`\r\n`. All calls
+share one reader, so it also works with redirected stdin (`noxy p.nx < in.txt`)
+— reading every line, not just the first. **`input()` does not signal EOF**: at
+end of input it returns `""`, indistinguishable from an empty line. To tell
+them apart, read stdin as a file: `io.read_line(io.stdin())` returns
+`ok=false, error="EOF"` (§12).
 
 ### Conversions
 - `to_str(val)`
@@ -1630,6 +1807,38 @@ use strings select to_upper, to_lower
 print(to_upper("hello"))
 ```
 
+`select` binds functions and structs **by name**. For a top-level `let`
+variable it binds a **snapshot**: the value is copied at import time, and later
+updates made by the module are not visible through the imported name. Use the
+namespace form (`m.x`) to observe live module state.
+
+```noxy
+use counter select total    // snapshot of counter.total at import time
+use counter                 // counter.total reads the live value
+```
+
+### Module state is read-only from outside
+
+Assigning to a module variable through the namespace is a compile-time error:
+
+```text
+[line 7] cannot assign to 'counter.total': module variables are read-only outside the module
+  hint: expose a function in 'counter' that updates it
+```
+
+Expose a function in the module that performs the update. (The rule covers the
+direct form `m.x = v`; a global `let` that shadows the namespace name is a
+different binding and is unaffected.)
+
+### Struct identity across import forms
+
+A struct imported by namespace (`geometry.Point`) and the same struct imported
+by `select` (`Point`) are the **same nominal type** — a value of one is
+accepted wherever the other is expected, including inside function types
+(`func(Point)` ≡ `func(geometry.Point)`) and when inferring a generic parameter.
+A locally declared `Point` is a different type and is never compatible with
+`geometry.Point`.
+
 ---
 
 ## 12. Standard Library
@@ -1649,6 +1858,69 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
 | `errors` | Error boundary envelope shapes (Failure, CallResult) |
+
+### I/O (`io`)
+
+Every fallible operation reports through a result struct instead of raising
+(§7, *Errors: raise for bugs, results for data*):
+
+| Struct | Fields |
+|--------|--------|
+| `File` | `fd: int`, `path: string`, `mode: string`, `open: bool` |
+| `IOResult` | `ok: bool`, `data: string`, `error: string` |
+| `IOBytesResult` | `ok: bool`, `data: bytes`, `error: string` |
+| `IOLinesResult` | `ok: bool`, `data: string[]`, `error: string` |
+| `IOWriteResult` | `success: bool`, `bytes_written: int`, `error: string` |
+| `IOCloseResult` | `success: bool`, `error: string` |
+| `FileInfo` | `exists: bool`, `size: int`, `is_dir: bool` |
+
+| Function | Contract |
+|----------|----------|
+| `open(path, mode) -> File` | `mode` is `"r"`, `"w"` (truncate), `"a"` (append) or `"rw"`/`"r+"`. On failure the `File` comes back with `open=false` |
+| `stdin() -> File` | The process's standard input as a `File` (`path="<stdin>"`, read-only, not closable). Always the same handle |
+| `close(file) -> void` | Closes and forgets the handle |
+| `close_result(file) -> IOCloseResult` | Same, reporting the outcome (`success=false`, `error="stdin cannot be closed"` for `stdin()`) |
+| `read(file) -> IOResult` | The **whole** content as text: from the beginning for a regular file, everything not yet consumed for `stdin()` |
+| `read_lines(file) -> IOLinesResult` | The whole content split by line, `\r\n` normalized, **with no trailing `""`**: `"a\nb\n"` and `"a\nb"` both give `[a, b]`; `""` gives `[]` |
+| `read_line(file) -> IOResult` | **Incremental**: the next line, without `\r\n`. At end of file `ok=false, data="", error="EOF"`; a last line with no `\n` is returned normally and the next call reports EOF |
+| `read_bytes(file) -> IOBytesResult` | The whole content as raw `bytes`, no UTF-8 validation |
+| `write(file, content: string) -> void` | Writes text |
+| `write_result(file, content: string) -> IOWriteResult` | Same, reporting `bytes_written` (`error="stdin is read-only"` for `stdin()`) |
+| `write_bytes(file, data: bytes) -> void` | Writes raw bytes |
+| `write_bytes_result(file, data: bytes) -> IOWriteResult` | Same, reporting `bytes_written` |
+| `exists(path) -> bool` | Whether the path exists |
+| `stat(path) -> FileInfo` | Size and `is_dir` (`exists=false` when the path is missing) |
+| `remove(path) -> bool` | Deletes a file |
+| `rename(src, dst) -> bool` | Renames/moves; `false` on failure |
+| `mkdir(path) -> bool` | Creates the directory and any missing parent |
+| `list_dir(path) -> IOLinesResult` | Entry **names** sorted by name, without the directory prefix and with no file/directory distinction — use `io.stat(path + "/" + name).is_dir` to tell them apart |
+
+`read`/`read_lines` and `read_line` are two different modes of reading and do
+not mix on the same regular-file handle: a full read repositions the file to
+its end and drops the line reader, so a `read_line` after it reports `EOF`,
+and a `read` after some `read_line` calls starts over from the beginning.
+`stdin()` has no repositionable beginning, so there both modes consume the same
+single stream and compose naturally (`input()` included).
+
+```noxy
+use io
+
+let f: io.File = io.stdin()
+let line: io.IOResult = io.read_line(f)
+while line.ok do
+    print(line.data)
+    line = io.read_line(f)
+end
+```
+
+### System (`sys`)
+
+`sys.exec_output(command, ...)` runs the command through the platform shell:
+`sh -c` on Unix and **`cmd /C` on Windows**. The command string is therefore
+already inside a `cmd` invocation — do not nest another `cmd /c ...`. The
+captured output (stdout and stderr combined) is handed back as a Noxy `string`,
+so it must be valid UTF-8: binary or non-UTF-8 output yields `ok=false` with
+the UTF-8 error in `error`, even when the process exited with code 0.
 
 ### JSON
 
@@ -1922,7 +2194,17 @@ register, roll back, poison, or close the resource again.
     - **Function Calls**: A parameter without `ref` receives an independent value at any depth (copy-on-write).
     - **Reference Parameters**: A parameter declared with `ref` shares the caller's slot — the only sharing mechanism.
 
+### Call and operand stacks
+
+Both stacks are **grown on demand**, per VM. Each VM starts with 64 call frames
+and 4096 operand slots and doubles them as needed up to the caps of **100 000
+frames** and **1 048 576 operand slots** — so recursion depth is bounded by
+memory, not by a small fixed array, and a task or `spawn` still starts cheap.
+Reaching a cap is an ordinary runtime error (`stack overflow: call depth
+exceeds 100000 frames` / `stack overflow: operand stack exceeds 1048576
+slots`), never a Go panic; see §7, *Limites de chamada*.
+
 ---
-*Version: 0.7.2*
+*Version: 0.11.0*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*

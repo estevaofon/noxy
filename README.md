@@ -1,4 +1,4 @@
-[![noxy 0.10.1](https://img.shields.io/badge/noxy-0.10.1-blue)](CHANGELOG.md)
+[![noxy 0.11.0](https://img.shields.io/badge/noxy-0.11.0-blue)](CHANGELOG.md)
 
 # Noxy VM 🚀
 
@@ -69,14 +69,22 @@ go run ./cmd/noxy/main.go program.nx
 
 # Start Interactive REPL
 ./noxy
+
+# Diagnostics go to stderr — redirect to capture them with the program output
+./noxy program.nx > out.txt 2>&1
 ```
+
+The program's own output (`print`, `iprint`) goes to **stdout**; everything the
+VM/CLI reports — parser, compiler and runtime errors, hints, "Error reading
+file" — goes to **stderr**. A failing run (including a missing script file)
+exits with code `1`.
 
 ## Interactive REPL
 
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.10.1
+Noxy REPL v0.11.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
@@ -257,7 +265,10 @@ print(peek(ints))  // 20
 
 | Function | Description |
 |--------|-----------|
-| `print(expr)` | Prints value |
+| `print(expr)` | Prints value to stdout |
+| `eprint(expr)` | Prints value to stderr |
+| `input(prompt)` | Reads one line from stdin (`""` at end of input) |
+| `fmt(format, args...)` | printf-style formatting (`%s`, `%d`, `%.2f`, ...) |
 | `to_str(val)` | Converts to string |
 | `length(arr)` | Length of array/string |
 | `append(arr, val)` | Appends element to array |

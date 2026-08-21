@@ -113,6 +113,10 @@ case chunk.OP_NEW_OPCODE:
    `value.NewArrayAdopting` para elementos que **você** já reteve em nome do array,
    com comentário `// RC: move` (sites atuais: `OP_ARRAY`, `copyValue`, merge de
    `causes` do `call_result`).
+6. **Saída: stdout é do programa, stderr é do diagnóstico.** `print`/`iprint`
+   escrevem em stdout; `eprint`/`eiprint` em stderr. Nunca use `fmt.Print*` para
+   erro, aviso ou trace — escreva em `os.Stderr` (na VM) ou em `diagOut`
+   (`cmd/noxy/main.go`), o único destino dos diagnósticos da CLI.
 
 ```go
 func (vm *VM) builtinNewFunc(args []value.Value) (value.Value, error) {
@@ -184,7 +188,7 @@ Tempo Total: 3450 ms
 #### 🚫 Arquivos Excluídos
 
 O runner automaticamente ignora:
-- **Servers/Interativos**: `http_server.nx`, `web_app.nx`, `todo_app.nx`
+- **Servers/Interativos**: `http_server.nx`, `web_app.nx`, `todo_app.nx`, `wc_stdin.nx` (lê stdin)
 - **Erros Intencionais**: `division_error.nx`, `test_let_error.nx`
 - **Benchmarks/Stress**: `benchmark_parallel.nx`, `stress_test.nx`
 - **Visualizações**: `conway.nx`, `langtons_ant.nx`, `brainfuck.nx`
@@ -353,17 +357,20 @@ if len(args) == 0 {
 if index < 0 || index >= len(array) {
     return vm.runtimeError("index out of bounds")
 }
-
-// Overflow protection
-if a > 0 && b > math.MaxInt64-a {
-    return vm.runtimeError("integer overflow")
-}
-
-// Resource limits
-if vm.sp >= StackMax {
-    return vm.runtimeError("stack overflow")
-}
 ```
+
+**Overflow de `int` NÃO é checado**: a aritmética dá a volta (complemento de
+dois, como Go) — decisão de linguagem, documentada na spec §8. Não adicione
+checagem de overflow em `+ - *`.
+
+**Resource limits**: `ensureCallCapacity` (`internal/vm/calls.go`) é o **único**
+ponto que verifica os tetos `FramesMax`/`StackMax` no caminho normal — as duas
+pilhas crescem sob demanda e o erro é sempre um runtime error
+(`stack overflow: ...`), nunca um panic Go. `push` **nunca** cresce a pilha:
+ela precisa caber no orçamento de inline de `run()` (custo ≤ 20; qualquer nó a
+mais desinlina `push` em ~117 call sites e custa ~20 % no interpretador). Esse
+contrato é travado por `internal/vm/inline_guard_test.go` — se você mexer em
+`push`, rode esse teste.
 
 ---
 
@@ -391,7 +398,7 @@ if vm.sp >= StackMax {
 
 ---
 
-**Última Atualização**: 2025-01-27  
-**Versão**: 1.0 (Noxy VM 1.2.0+)
+**Última Atualização**: 2026-08-21  
+**Versão**: 1.0 (Noxy VM 0.11.0)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*
