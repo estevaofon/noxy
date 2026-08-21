@@ -303,7 +303,7 @@ func TestFinishFrameAggregatesPreparedCallHeadroomFailureAndContinues(t *testing
 	machine.currentFrame = frame
 	// Pilha no teto: ensureCallCapacity nao consegue a folga e a chamada
 	// diferida falha com stack overflow (o cenario "sem headroom" do teste).
-	machine.stack = make([]value.Value, StackMax)
+	machine.installStack(make([]value.Value, StackMax))
 	machine.stackTop = StackMax - 1
 	machine.stack[StackMax-2] = value.NewInt(99)
 

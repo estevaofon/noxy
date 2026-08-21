@@ -136,32 +136,40 @@ func (vm *VM) readConstant() value.Value {
 	return vm.chunk.Constants[index]
 }
 
-// stackOverflowPanic e o sentinela que push() lanca quando a pilha de
-// operandos ja esta no teto; run() recupera SO este tipo e o converte no
+// stackOverflowPanic e o sentinela que push() lanca quando a folga garantida
+// na entrada do frame acabou; run() recupera SO este tipo e o converte no
 // runtime error padrao. Qualquer outro panic continua subindo.
 type stackOverflowPanic struct{}
 
+// errStackOverflow e o sentinela PRONTO (variavel, nao literal composto: o
+// literal custa 1 no inliner e estoura o orcamento de 20 de run()).
+var errStackOverflow = stackOverflowPanic{}
+
+// push NAO cresce a pilha, de proposito. run() tem mais de 5000 nos de AST,
+// entao o inliner o trata como "big function" e so inlina callees de custo
+// <= 20 (inlineBigFunctionMaxCost), nao 80. Este corpo custa exatamente 20 e
+// e inlinado nos 117 call sites de executor.go; qualquer no a mais (chamar
+// growStack no ramo frio, um literal composto no panic, ou comparar com
+// len(vm.stack) em vez de vm.stackLimit) o tira do inline em TODOS eles e
+// custa ~20 % no interpretador. O crescimento mora em ensureCallCapacity
+// (entrada do frame) e ensureStackHeadroom (defer / call_result); quando um
+// unico frame esgota a folga de stackReserve, o sentinela abaixo vira runtime
+// error limpo. internal/vm/inline_guard_test.go trava esta propriedade.
 func (vm *VM) push(v value.Value) {
-	if vm.stackTop >= len(vm.stack) {
-		vm.growStackForPush()
+	if vm.stackTop >= vm.stackLimit {
+		panic(errStackOverflow)
 	}
 	vm.stack[vm.stackTop] = v
 	vm.stackTop++
 }
 
-// growStackForPush e o caminho FRIO de push(): cresce a pilha ou, ja no teto,
-// lanca o sentinela. Mora em funcao propria, e com //go:noinline, DE
-// PROPOSITO: com o corpo dentro de push o custo do inliner vai a 82 (orcamento
-// 80) e push — a operacao mais quente do interpretador — deixa de ser inlinada;
-// sem o pragma o inliner traz este corpo de volta e o custo sobe a 84. Com os
-// dois, push fica em 77 e continua inlinada, como era antes das pilhas
-// dinamicas. Conferir com `go build -gcflags='-m -m'` ao mexer aqui.
-//
-//go:noinline
-func (vm *VM) growStackForPush() {
-	if !vm.growStack() {
-		panic(stackOverflowPanic{})
-	}
+// installStack e o funil unico de troca da pilha de operandos: mantem
+// stackLimit em sincronia com len(stack). Atribuir vm.stack direto deixaria
+// push() lendo um limite velho — pequeno demais (pushes rejeitados sem motivo)
+// ou grande demais (escrita fora da pilha nova).
+func (vm *VM) installStack(stack []value.Value) {
+	vm.stack = stack
+	vm.stackLimit = len(stack)
 }
 
 // growStack dobra a pilha de operandos (ate StackMax) e migra os upvalues
@@ -186,7 +194,7 @@ func (vm *VM) growStack() bool {
 	old := vm.stack
 	grown := make([]value.Value, newLen)
 	value.RelocateOpenUpvalues(vm.openUpvalues, old, grown)
-	vm.stack = grown
+	vm.installStack(grown)
 	return true
 }
 
@@ -195,7 +203,8 @@ func (vm *VM) growStack() bool {
 // mais crescer — nunca por causa da alocacao atual, que e so o tamanho de
 // agora. Todo guard de "cabe empilhar N?" tem de passar por aqui: medir contra
 // len(vm.stack) reprovaria chamadas centenas de milhares de slots abaixo do
-// limite real, que push() atenderia crescendo.
+// limite real. Junto com ensureCallCapacity, e o unico lugar onde a pilha
+// cresce — push() nao cresce (ver push).
 func (vm *VM) ensureStackHeadroom(slots int) bool {
 	for len(vm.stack)-vm.stackTop < slots {
 		if !vm.growStack() {

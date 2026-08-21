@@ -15,13 +15,16 @@ const StackMax = 1 << 20 // slots da pilha de operandos
 const FramesMax = 100_000
 
 const framesInitial = 64
-const stackInitial = 2048
+const stackInitial = 4096
 
 // stackReserve e a folga de operandos que ensureCallCapacity garante na
-// ENTRADA de cada frame: com ela, recursao profunda sempre esbarra no teto
-// ali (erro limpo), e push() so panica com o sentinela se UM frame empilhar
-// mais do que resta ate o teto de uma vez.
-const stackReserve = 256
+// ENTRADA de cada frame. push() NAO cresce a pilha (precisa caber no orcamento
+// de inline de run(); ver stack.go): todo o crescimento acontece aqui e em
+// ensureStackHeadroom. Com 2048, qualquer frame tem, em qualquer profundidade,
+// a mesma folga de temporarios que a pilha fixa de 2048 slots dava antes desta
+// task; um unico frame que precise de mais bate no sentinela de push() e vira
+// runtime error limpo.
+const stackReserve = 2048
 
 func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interface{}) error {
 	return vm.runtimeErrorCause(c, ip, nil, format, args...)
@@ -93,9 +96,17 @@ type VM struct {
 
 	// stack cresce em growStack (dobro ate StackMax); os unicos ponteiros para
 	// dentro dela que sobrevivem a uma instrucao sao os upvalues ABERTOS
-	// (vm.openUpvalues), reapontados por Relocate na realocacao.
+	// (vm.openUpvalues), migrados por RelocateOpenUpvalues na realocacao.
+	// Trocar a pilha e SEMPRE por installStack, nunca por atribuicao direta —
+	// stackLimit tem de acompanhar.
 	stack    []value.Value
 	stackTop int
+
+	// stackLimit == len(stack). Campo proprio porque push() so cabe no
+	// orcamento de inline de run() (20, por run() ser "big function")
+	// comparando com um campo; comparar com len(vm.stack) custa 1 a mais e
+	// desinlina push nos 117 call sites de executor.go.
+	stackLimit int
 
 	shared *SharedState
 	Config VMConfig
@@ -135,8 +146,8 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		shared: shared,
 		Config: cfg,
 		frames: make([]CallFrame, framesInitial),
-		stack:  make([]value.Value, stackInitial),
 	}
+	vm.installStack(make([]value.Value, stackInitial))
 
 	shared.builtinsOnce.Do(vm.defineBuiltins)
 	return vm
