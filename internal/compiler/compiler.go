@@ -704,6 +704,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// Only REBIND allowed for Ref Fields.
 			// *obj.field = val is handled by PrefixExpression.
 
+			// Variavel de modulo via namespace (`calc.sp = 5`): leitura e viva,
+			// escrita de fora e recusada — o modulo expoe uma funcao (#56 §8b).
+			if leftIdent, isIdent := memberExp.Left.(*ast.Identifier); isIdent {
+				if module, isNamespace := c.namespaceImports[leftIdent.Value]; isNamespace && !c.isShadowedByLocal(leftIdent.Value) {
+					return nil, nil, fmt.Errorf(
+						"[line %d] cannot assign to '%s.%s': module variables are read-only outside the module\n  hint: expose a function in '%s' that updates it",
+						c.currentLine, leftIdent.Value, memberExp.Member, module,
+					)
+				}
+			}
+
 			// 1. Compile Object — CoW: cadeia MUT uniciza cada nível do
 			// caminho (inclui OP_DEREF_MUT quando a base é ref)
 			// compileLValueBase ja devolve o tipo DESEMBRULHADO (emite
@@ -2948,6 +2959,9 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if expected.String() == actual.String() {
 		return true
 	}
+	if c.typesEquivalent(expected, actual) {
+		return true
+	}
 	if isAny(expected) || isAny(actual) {
 		return true
 	}
@@ -2962,6 +2976,132 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 			c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
 	}
 	return false
+}
+
+// typesEquivalent compara dois tipos estruturalmente, tratando como iguais
+// dois nomes que designam a MESMA declaracao de struct — `Point` importado por
+// select e `geometry.Point` via namespace (#56 §8c). nil so equivale a nil.
+func (c *Compiler) typesEquivalent(a, b ast.NoxyType) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	switch x := a.(type) {
+	case *ast.PrimitiveType:
+		y, ok := b.(*ast.PrimitiveType)
+		if !ok {
+			return false
+		}
+		if x.Name == y.Name {
+			return true
+		}
+		da := c.structDeclaration(x.Name)
+		return da != nil && da == c.structDeclaration(y.Name)
+	case *ast.ArrayType:
+		y, ok := b.(*ast.ArrayType)
+		return ok && x.Size == y.Size && c.typesEquivalent(x.ElementType, y.ElementType)
+	case *ast.MapType:
+		y, ok := b.(*ast.MapType)
+		return ok && c.typesEquivalent(x.KeyType, y.KeyType) && c.typesEquivalent(x.ValueType, y.ValueType)
+	case *ast.RefType:
+		y, ok := b.(*ast.RefType)
+		return ok && c.typesEquivalent(x.ElementType, y.ElementType)
+	case *ast.ChanType:
+		y, ok := b.(*ast.ChanType)
+		return ok && c.typesEquivalent(x.ElementType, y.ElementType)
+	case *ast.FunctionType:
+		y, ok := b.(*ast.FunctionType)
+		if !ok || len(x.Params) != len(y.Params) {
+			return false
+		}
+		for i := range x.Params {
+			if !c.typesEquivalent(x.Params[i], y.Params[i]) {
+				return false
+			}
+		}
+		return c.typesEquivalent(x.Return, y.Return)
+	case *ast.GenericType:
+		y, ok := b.(*ast.GenericType)
+		if !ok || x.Name != y.Name || len(x.Args) != len(y.Args) {
+			return false
+		}
+		for i := range x.Args {
+			if !c.typesEquivalent(x.Args[i], y.Args[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return a.String() == b.String()
+	}
+}
+
+// structDeclaration resolve um nome de tipo para a declaracao de struct que
+// ele designa: nome simples via c.structs; `ns.Name` via o modulo que `ns`
+// importou (namespaceImports) e a descoberta MEMOIZADA de structs desse
+// modulo (mesmo ponteiro que importModuleStructs guardou em c.structs). nil
+// quando nao e struct conhecido.
+func (c *Compiler) structDeclaration(name string) *ast.StructStatement {
+	if decl, ok := c.structs[name]; ok {
+		return decl
+	}
+	ns, base, found := strings.Cut(name, ".")
+	if !found {
+		return nil
+	}
+	module, isNamespace := c.namespaceImports[ns]
+	if !isNamespace {
+		return nil
+	}
+	discovered, loadable := c.discoverModuleStructs(module)
+	if !loadable {
+		return nil
+	}
+	return discovered[base]
+}
+
+// looselySameType e a comparacao das funcoes PURAS de unificacao de genericos
+// (unify/bindTypeParam, sem *Compiler): iguais quando as strings coincidem
+// apos remover qualificadores de namespace dos nomes (geometry.Point ~ Point).
+// Mais permissiva que typesEquivalent — unify nunca e mais estrita que a
+// checagem da pass 2, que decide com o compilador completo.
+func looselySameType(a, b ast.NoxyType) bool {
+	return unqualifiedTypeString(a) == unqualifiedTypeString(b)
+}
+
+func unqualifiedTypeString(t ast.NoxyType) string {
+	if t == nil {
+		return "<nil>"
+	}
+	clone := ast.CloneType(t)
+	stripTypeQualifiers(clone)
+	return clone.String()
+}
+
+func stripTypeQualifiers(t ast.NoxyType) {
+	switch x := t.(type) {
+	case *ast.PrimitiveType:
+		if i := strings.LastIndex(x.Name, "."); i >= 0 {
+			x.Name = x.Name[i+1:]
+		}
+	case *ast.ArrayType:
+		stripTypeQualifiers(x.ElementType)
+	case *ast.MapType:
+		stripTypeQualifiers(x.KeyType)
+		stripTypeQualifiers(x.ValueType)
+	case *ast.RefType:
+		stripTypeQualifiers(x.ElementType)
+	case *ast.ChanType:
+		stripTypeQualifiers(x.ElementType)
+	case *ast.FunctionType:
+		for _, param := range x.Params {
+			stripTypeQualifiers(param)
+		}
+		stripTypeQualifiers(x.Return)
+	case *ast.GenericType:
+		for _, arg := range x.Args {
+			stripTypeQualifiers(arg)
+		}
+	}
 }
 
 func isAny(t ast.NoxyType) bool {

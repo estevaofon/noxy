@@ -213,7 +213,12 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 		return isBareFunctionType(expected)
 	}
 	if _, ok := expected.(*ast.FunctionType); ok {
-		return sameExactType(expected, actual)
+		// sameExactType e uma funcao PURA (compara nomes de folha), entao nao
+		// enxerga que `Point` e `geometry.Point` sao a MESMA declaracao: sem o
+		// typesEquivalent aqui, `func(Point) -> int` recusaria uma lambda
+		// anotada com o nome qualificado. O default abaixo nao cobre este caso
+		// — FunctionType sai por este return (#56 §8c).
+		return sameExactType(expected, actual) || c.typesEquivalent(expected, actual)
 	}
 	switch e := expected.(type) {
 	case *ast.ArrayType:
@@ -231,7 +236,7 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 		a, ok := actual.(*ast.RefType)
 		return ok && c.areStrictTypesCompatible(e.ElementType, a.ElementType)
 	default:
-		return expected.String() == actual.String()
+		return expected.String() == actual.String() || c.typesEquivalent(expected, actual)
 	}
 }
 

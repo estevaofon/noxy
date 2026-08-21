@@ -558,3 +558,116 @@ end
 		})
 	}
 }
+
+func writeModuleFiles(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func runModuleProgram(t *testing.T, root, source string) (value.Value, error) {
+	t.Helper()
+	l := lexer.New(source)
+	p := parser.New(l)
+	program := p.ParseProgram()
+	if len(p.Errors()) != 0 {
+		t.Fatalf("parser errors: %v", p.Errors())
+	}
+	code, _, err := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filepath.Join(root, "main.nx"), root).Compile(program)
+	if err != nil {
+		return value.NewNull(), err
+	}
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	reported := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) != 0 {
+			reported = args[0]
+		}
+		return value.NewNull()
+	})
+	// Interpret ANTES do return: `return reported, machine.Interpret(code)`
+	// dependeria da ordem de avaliacao entre um operando comum e uma chamada,
+	// que a spec do Go deixa em aberto — aqui reported so e lido depois.
+	runErr := machine.Interpret(code)
+	return reported, runErr
+}
+
+const geometryModule = `struct Point
+    x: int
+    y: int
+end
+func dist2(a: Point, b: Point) -> int
+    return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
+end
+func apply(f: func(Point) -> int, p: Point) -> int
+    return f(p)
+end
+func first<T>(a: T, b: T) -> T
+    return a
+end
+`
+
+func TestNamespaceAndSelectNameTheSameStruct(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{"geometry.nx": geometryModule})
+	reported, err := runModuleProgram(t, root, `use geometry
+use geometry select dist2, Point, apply, first
+let a: geometry.Point = geometry.Point(0, 0)
+let b: Point = Point(3, 4)
+let viaSelect: int = dist2(a, b)
+let viaNamespace: int = geometry.dist2(b, a)
+let viaFunc: int = apply(func(p: geometry.Point) -> int return p.x end, b)
+let viaGeneric: Point = first(a, b)
+test_report(to_str(viaSelect) + "|" + to_str(viaNamespace) + "|" + to_str(viaFunc) + "|" + to_str(viaGeneric.x))
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reported.Obj.(string); got != "25|25|3|0" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// O struct `Point` declarado no importador NAO e o `Point` de geometry:
+// typesEquivalent so aproxima dois nomes que resolvem para a MESMA
+// *ast.StructStatement, entao `geometry.Point` (declaracao do modulo) continua
+// recusado onde se espera o `Point` local. E o guard contra a versao frouxa da
+// regra (looselySameType, que compara so o nome sem qualificador, aceitaria os
+// dois como iguais).
+//
+// O caminho inverso — `use geometry select dist2` com um `Point` local, sem o
+// namespace — nao e detectavel: a assinatura importada carrega o nome NU
+// `Point`, que o importador resolve para o proprio struct. Qualificar os tipos
+// das assinaturas importadas esta fora do §8c ("c.structs nao passa a indexar
+// nomes qualificados").
+func TestLocalStructIsNotTheModuleStructOfTheSameName(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{"geometry.nx": geometryModule})
+	_, err := runModuleProgram(t, root, `use geometry
+use geometry select dist2
+struct Point
+    x: int
+    y: int
+end
+let fromModule: geometry.Point = geometry.Point(0, 0)
+dist2(fromModule, fromModule)
+`)
+	if err == nil || !strings.Contains(err.Error(), "expected Point, got geometry.Point") {
+		t.Fatalf("error=%v, want nominal mismatch", err)
+	}
+}
+
+func TestModuleVariableAssignmentViaNamespaceIsCompileError(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{"calc.nx": "let sp: int = 0\nfunc push() -> void\n    sp = sp + 1\nend\n"})
+	_, err := runModuleProgram(t, root, "use calc\ncalc.push()\ncalc.sp = 5\n")
+	if err == nil || !strings.Contains(err.Error(), "cannot assign to 'calc.sp': module variables are read-only outside the module") || !strings.Contains(err.Error(), "hint: expose a function in 'calc'") {
+		t.Fatalf("error=%v", err)
+	}
+	reported, err := runModuleProgram(t, root, "use calc\ncalc.push()\ntest_report(calc.sp)\n")
+	if err != nil || reported.AsInt != 1 {
+		t.Fatalf("live read via namespace: %v / %v", reported, err)
+	}
+}

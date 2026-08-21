@@ -375,7 +375,7 @@ func bindTypeParam(bindings map[string]ast.NoxyType, name string, value ast.Noxy
 		return nil
 	}
 	if existing, ok := bindings[name]; ok {
-		if existing.String() != value.String() {
+		if !looselySameType(existing, value) {
 			return &conflictError{Param: name, Existing: existing, New: value}
 		}
 		return nil

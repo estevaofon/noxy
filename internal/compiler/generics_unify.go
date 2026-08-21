@@ -85,7 +85,7 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 			return nil
 		}
 		if existing, ok := bindings[tp.Name]; ok {
-			if existing.String() != actual.String() {
+			if !looselySameType(existing, actual) {
 				return &conflictError{Param: tp.Name, Existing: existing, New: actual}
 			}
 			return nil
