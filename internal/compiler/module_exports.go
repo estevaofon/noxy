@@ -28,6 +28,12 @@ import (
 type moduleDiscoveryState struct {
 	active map[string]bool
 	loaded map[string]loadedModule
+	// origins: declaracao de struct -> modulo que a declarou. Chave por
+	// PONTEIRO (estavel, porque o Program e memoizado em loaded); um struct
+	// do programa nunca entra aqui — structOrigin devolve "" para ele.
+	origins map[*ast.StructStatement]string
+	// scopes e o memo de moduleStructScope por modulo.
+	scopes map[string]*moduleStructScope
 }
 
 // loadedModule e o resultado memoizado de loadModuleDeclarations: o Program
@@ -52,8 +58,10 @@ type loadedModule struct {
 
 func newModuleDiscoveryState() *moduleDiscoveryState {
 	return &moduleDiscoveryState{
-		active: make(map[string]bool),
-		loaded: make(map[string]loadedModule),
+		active:  make(map[string]bool),
+		loaded:  make(map[string]loadedModule),
+		origins: make(map[*ast.StructStatement]string),
+		scopes:  make(map[string]*moduleStructScope),
 	}
 }
 
@@ -166,6 +174,10 @@ func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDi
 		switch declaration := statement.(type) {
 		case *ast.StructStatement:
 			structs[declaration.Name] = declaration
+			if state.origins == nil {
+				state.origins = make(map[*ast.StructStatement]string)
+			}
+			state.origins[declaration] = module
 		case *ast.UseStmt:
 			if declaration.SelectAll {
 				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
@@ -177,6 +189,129 @@ func (c *Compiler) discoverModuleStructsWithState(module string, state *moduleDi
 		}
 	}
 	return structs, true
+}
+
+// moduleStructScope e o que um struct declarado DENTRO de um modulo enxerga
+// ao nomear o tipo de um campo: os structs visiveis por nome simples (os
+// proprios, os de `use d select *` e os de `use d select A, B`) e os
+// namespaces (`use d [as x]`) pelos quais um campo `x.T` resolve.
+//
+// Difere de discoverModuleStructs, que e a lista do que o modulo EXPORTA
+// (proprios + `select *` transitivo): um `use net select Socket` dentro do
+// modulo nao reexporta Socket, mas um campo `listener: Socket` do modulo tem
+// de resolver.
+type moduleStructScope struct {
+	structs    map[string]*ast.StructStatement
+	namespaces map[string]string
+}
+
+func (c *Compiler) moduleStructScope(module string) (*moduleStructScope, bool) {
+	state := c.discoveryState()
+	if scope, hit := state.scopes[module]; hit {
+		return scope, scope != nil
+	}
+	scope, ok := c.buildModuleStructScope(module, state)
+	if state.scopes == nil {
+		state.scopes = make(map[string]*moduleStructScope)
+	}
+	if ok {
+		state.scopes[module] = scope
+	} else {
+		state.scopes[module] = nil
+	}
+	return scope, ok
+}
+
+func (c *Compiler) buildModuleStructScope(module string, state *moduleDiscoveryState) (*moduleStructScope, bool) {
+	program, _, ok := c.loadModuleDeclarations(module, state)
+	if !ok {
+		return nil, false
+	}
+	scope := &moduleStructScope{
+		structs:    make(map[string]*ast.StructStatement),
+		namespaces: make(map[string]string),
+	}
+	if program == nil {
+		return scope, true
+	}
+	for _, statement := range program.Statements {
+		switch declaration := statement.(type) {
+		case *ast.StructStatement:
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
+			scope.structs[declaration.Name] = declaration
+			if state.origins == nil {
+				state.origins = make(map[*ast.StructStatement]string)
+			}
+			state.origins[declaration] = module
+		case *ast.UseStmt:
+			switch {
+			case declaration.SelectAll:
+				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
+				if loadable {
+					maps.Copy(scope.structs, imported)
+				}
+			case len(declaration.Selectors) > 0:
+				imported, loadable := c.discoverModuleStructsWithState(declaration.Module, state)
+				if !loadable {
+					continue
+				}
+				for _, name := range declaration.Selectors {
+					if definition, exported := imported[name]; exported {
+						scope.structs[name] = definition
+					}
+				}
+			default:
+				name := declaration.Alias
+				if name == "" {
+					parts := strings.Split(declaration.Module, ".")
+					name = parts[len(parts)-1]
+				}
+				scope.namespaces[name] = declaration.Module
+			}
+		}
+	}
+	return scope, true
+}
+
+// structOrigin devolve o modulo que declarou decl, ou "" para um struct do
+// proprio programa (inclusive os declarados dentro de funcoes).
+func (c *Compiler) structOrigin(decl *ast.StructStatement) string {
+	if decl == nil || c.moduleDiscovery == nil {
+		return ""
+	}
+	return c.moduleDiscovery.origins[decl]
+}
+
+// lookupStructFrom resolve um nome de tipo como ele seria lido DENTRO de
+// origin: "" e o programa (c.structs por nome simples, namespaceImports para
+// `ns.T` — structDeclaration); um nome de modulo usa o escopo desse modulo
+// (moduleStructScope). nil quando nao designa struct conhecido.
+func (c *Compiler) lookupStructFrom(origin, name string) *ast.StructStatement {
+	if origin == "" {
+		return c.structDeclaration(name)
+	}
+	scope, ok := c.moduleStructScope(origin)
+	if !ok {
+		return nil
+	}
+	if decl, found := scope.structs[name]; found {
+		return decl
+	}
+	ns, base, found := strings.Cut(name, ".")
+	if !found {
+		return nil
+	}
+	dependency, isNamespace := scope.namespaces[ns]
+	if !isNamespace {
+		return nil
+	}
+	discovered, loadable := c.discoverModuleStructs(dependency)
+	if !loadable {
+		return nil
+	}
+	return discovered[base]
 }
 
 // importModuleStructs registers struct field layouts for the names a use

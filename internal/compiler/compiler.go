@@ -863,6 +863,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 		structType := newStructFunctionType(n.Name, paramTypes)
 		structDefinition.ConstructorType = c.runtimeTypeInfo(structType)
+		if structDefinition.ConstructorType == nil {
+			// Campo `ns.T` que nao resolve: erro aqui, com hint — nunca o
+			// "incomplete runtime type metadata" incondicional de runtime.
+			if err := c.unresolvedQualifiedFieldError(n); err != nil {
+				return nil, nil, err
+			}
+		}
 
 		if c.scopeDepth > 0 {
 			// Local scope: struct is a local variable
@@ -899,6 +906,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// RESOLVE FIELD TYPE:
 		// Look up struct definition if leftType is a named PrimitiveType
 		if prim, ok := leftType.(*ast.PrimitiveType); ok {
+			// So nome simples: um valor tipado `io.File` continua com acesso a
+			// membro DINAMICO (como sempre foi). Tipar pelo structDeclaration
+			// vazaria os nomes do modulo (`Row[]`) para o escopo do programa,
+			// onde `let r: sqlite.Row = q.rows[0]` passaria a ser "expected
+			// sqlite.Row, got Row" — exigiria traduzir o tipo do campo para a
+			// visao do programa (namespace/select). Follow-up.
 			if structDef, exists := c.structs[prim.Name]; exists {
 				// Find field type
 				for _, f := range structDef.FieldsList {
