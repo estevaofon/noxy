@@ -1,4 +1,4 @@
-[![noxy 0.12.0](https://img.shields.io/badge/noxy-0.12.0-blue)](CHANGELOG.md)
+[![noxy 0.13.0](https://img.shields.io/badge/noxy-0.13.0-blue)](CHANGELOG.md)
 
 # Noxy VM 🚀
 
