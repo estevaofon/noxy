@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.13.0] - 2026-08-21
+
+Os dois follow-ups da 0.12.0 registrados na issue #58, ambos sobre checagem
+estática do compilador: o acesso a membro de um valor tipado por struct de
+módulo (`m.T`) passa a ser tipado, e um nome de tipo que não existe passa a ser
+erro de compilação em campo de struct, parâmetro, retorno e `let`. Os dois
+itens quebram compatibilidade — sempre de programas que já estavam errados
+(compilavam e falhavam em runtime) ou que nomeavam um struct de módulo sem
+tê-lo importado.
+
+### Changed (BREAKING)
+
+- **Acesso a membro de um valor tipado por struct de módulo é tipado
+  estaticamente.** `a.f.path` com `f: io.File`, `res.rows` com
+  `res: sqlite.QueryResult` (e o mesmo com a forma por `select`) têm tipo
+  conhecido pelo compilador. O tipo do campo é **traduzido para a visão do
+  programa** (spec §11): `rows: Row[]`, escrito dentro de `sqlite.nx`, vira
+  `Row[]` se o programa fez `use sqlite select Row`; `sqlite.Row[]` (ou
+  `db.Row[]` com `use sqlite as db` — vale o primeiro alias declarado) se fez
+  `use sqlite`; e fica **dinâmico**, como antes, se o programa não tem como
+  nomear o struct — um tipo só parcialmente nomeável (`map[string, Row]` sem
+  `Row` acessível) fica inteiro dinâmico, nunca meio-tipado. Consequência:
+  código que escrevia algo errado sobre um campo desses (`let x: string =
+  a.f.fd`, `a.f.fd = "x"`, `inc(ref a.f.path)` com `inc(r: ref int)`)
+  compilava e falhava em runtime; agora é erro de compilação (`type mismatch
+  in 'x' declaration: expected string, got int`). Vale para leitura,
+  atribuição de campo, encadeamento (`w.o.i.v`) e `ref campo`. Um programa com
+  `use sqlite select QueryResult` (sem `Row`) que lia `res.rows` como `Row[]`
+  cru — nome que nunca importou — passa a vê-lo dinâmico; para tipá-lo,
+  importe `Row` ou use `use sqlite`.
+- **Tipo inexistente em anotação é erro de compilação** — `[line N]
+  <posição>: unknown type 'Inexistente'` + `hint: declare 'struct Inexistente'
+  or import it with 'use m select Inexistente'`, em campo de struct (`struct
+  'A' field 'b'`), parâmetro (`function 'f' parameter 'x'`), retorno
+  (`function 'f' return type`) e `let` (`variable 'x'`). Antes,
+  campo/parâmetro/retorno compilavam em silêncio (o construtor do struct
+  falhava em toda chamada com `struct constructor has incomplete runtime type
+  metadata`) e `let` rejeitava pela via errada (`type mismatch: expected
+  Inexistente, got int`, apontando para o valor). A forma qualificada mantém a
+  mensagem da 0.12.0 (`cannot resolve type 'io.Nope': module 'io' has no
+  struct 'Nope'` / `'foo' is not an imported module`), agora também em
+  parâmetro, retorno e `let` — inclusive `m.T` com módulo que não carrega
+  (`module 'm' could not be loaded`), que antes compilava e só falhava no `use`
+  em runtime. **Migração**: um struct de módulo só pode ser nomeado se o
+  programa o importou — `use io` + `let f: File = io.open(...)` passa a exigir
+  `let f: io.File` (ou `use io select File`); `use sys select getenv` + `let e:
+  EnvResult` exige `select getenv, EnvResult`. A varredura dos `.nx` do
+  repositório corrigiu três exemplos (`test_import_sugar.nx`,
+  `cadastro_usuarios.nx`, `form_app.nx`); os exemplos de servidor
+  `http_server_basic.nx`, `http_server_docs.nx` e `form_app.nx` já estavam
+  desatualizados em relação à API atual (`server_poll`/`RequestEvent` não
+  existem) e passam a falhar na compilação em vez de em runtime; o livro *A
+  Linguagem de Programação Noxy* não tem nenhum bloco afetado. Instância de
+  struct genérico importado (`use m select Caixa`) cujo campo nomeia outro
+  struct de `m` exige importar esse struct junto (`select Caixa, Meta` — a
+  regra do §6.4), com o mesmo erro. Seguem compilando: referência adiantada
+  entre structs de topo, auto-referência (`next: ref Node`), structs
+  declarados dentro de função, instâncias genéricas (`Caixa<int>`) e `T`
+  dentro de template; um `use … select` de topo vale para o arquivo inteiro
+  (campo ou assinatura declarado antes da linha do `use` já enxerga o struct).
+
+### Fixed
+
+- **Struct reexportado por `select` é conhecido pelo importador.** Se `a.nx`
+  faz `use b select T` e uma função de `a` devolve `T`, `use a select *` (ou
+  `use a select T, mk`) no programa já ligava o construtor `T` como valor, mas
+  não a declaração — `let t: T = mk()` só compilava por igualdade de nome (e
+  `t.v` era dinâmico). A declaração acompanha o valor.
+
+### Docs
+
+- Spec §2.0 (tipo desconhecido em anotação é erro), §11 (acesso a membro de
+  `m.T` tipado e a regra de tradução do tipo do campo para a visão do
+  programa; `unknown type` nas quatro posições); exemplo
+  `noxy_examples/test_member_access_qualified.nx`; exemplos corrigidos acima.
+
 ## [0.12.0] - 2026-08-21
 
 Dois achados pós-0.11.0 da releitura do K&R em Noxy: o campo de struct

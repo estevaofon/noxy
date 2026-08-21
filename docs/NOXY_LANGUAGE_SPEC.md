@@ -80,6 +80,12 @@ x = "text"       // ✗ ERROR - cannot assign string to int variable
   **before** execution.
 - The compiler checks compatibility in assignments, exact function calls, and
   operations. Dynamic boundaries validate the contracts available at runtime.
+- A type annotation must name a type that exists — a primitive, a struct
+  declared or imported into the program, a qualified `m.T`, or a generic
+  instance. `let x: Inexistente = 1`, `func f(x: Inexistente)`, a return type
+  or a struct field naming an unknown type is a compile error (`unknown type
+  'Inexistente'` + hint), never a runtime failure — see §11, *Unknown type
+  names*.
 
 ### 2.1 Primitive Types
 
@@ -1858,7 +1864,58 @@ never a runtime failure of its constructor:
 ```
 
 (`'foo' is not an imported module` + `hint: add 'use foo' at the top of the
-file` when the namespace itself is unknown.)
+file` when the namespace itself is unknown.) The same diagnostics apply to a
+qualified name in a parameter, return type or `let` annotation.
+
+### Member access on values of module struct types
+
+Reading, assigning or taking `ref` of a field of a value whose type is a
+module struct (`a.f.path` with `f: io.File`; `res.rows` with
+`res: sqlite.QueryResult`, or `QueryResult` after `use sqlite select
+QueryResult`) is **statically typed**, exactly like a field of a local struct.
+The field's declared type is written in the module's own vocabulary
+(`rows: Row[]` inside `sqlite.nx`), so the compiler **translates it to the
+program's view**, name by name, before using it:
+
+| The program imported `Row` as… | `res.rows` has type |
+|---|---|
+| `use sqlite select Row` (or `select *`) | `Row[]` — the name the program wrote |
+| `use sqlite` / `use sqlite as db` (namespace only) | `sqlite.Row[]` / `db.Row[]` — the first alias declared, when there are several |
+| neither (the program cannot name `Row`) | dynamic (unknown), as before |
+
+The translation applies to nested types (`Row[]`, `map[string, Row]`,
+`ref Row`, `func(Row) -> Row`) and along a chain (`w.o.i.v` re-applies it at
+each step). A type that is only *partially* nameable (`map[string, Row]` with
+no way to write `Row`) becomes dynamic as a whole — never a half-typed
+`map[string, ???]`. Because the names are the program's own, both annotations
+then type-check: `let r: sqlite.Row = res.rows[0]` and, with the `select`,
+`let r: Row = res.rows[0]`. Writing something wrong about such a field is a
+compile error — `let x: string = a.f.fd` (`expected string, got int`),
+`a.f.fd = "x"`, `inc(ref a.f.path)` against `inc(r: ref int)` — instead of a
+runtime failure.
+
+### Unknown type names
+
+Every type name in a `let` annotation, a parameter, a return type or a struct
+field must name a known type: a primitive, a struct declared in the program
+(anywhere in the file — forward references between top-level structs, self
+references and structs declared inside functions all resolve), a struct
+imported by `select`/`select *`, a qualified `m.T` through a namespace import,
+or a generic instance (`Caixa<int>`). Anything else is a compile error:
+
+```text
+[line 2] struct 'A' field 'b': unknown type 'Inexistente'
+  hint: declare 'struct Inexistente' or import it with 'use m select Inexistente'
+```
+
+The position reads `struct 'A' field 'b'`, `function 'f' parameter 'x'`,
+`function 'f' return type` or `variable 'x'`. A module struct is only nameable
+if the program imported it: with only `use io`, `let f: File = io.open(...)`
+is an error — write `io.File` or add `use io select File`. A top-level `use …
+select` counts for the whole file, so a signature declared before the `use`
+line already sees the struct. An instance of an imported generic struct whose
+field names another struct of its module needs that struct imported as well
+(`use m select Caixa, Meta`, §6.4).
 
 ---
 
