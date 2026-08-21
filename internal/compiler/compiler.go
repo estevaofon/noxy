@@ -421,6 +421,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, &ast.PrimitiveType{Name: "bytes"}, nil
 
 	case *ast.AssignStmt:
+		c.setLine(n.Token.Line)
 		if prefixExp, ok := n.Target.(*ast.PrefixExpression); ok {
 			// Explicit Dereference Assignment: *ref = val
 			// This signals an UPDATE (writing to the value pointed to).

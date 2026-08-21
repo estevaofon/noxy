@@ -59,6 +59,13 @@ func containsOpcode(code []byte, opcode chunk.OpCode) bool {
 	return false
 }
 
+func TestAssignmentTypeErrorReportsAssignmentLine(t *testing.T) {
+	_, _, err := New().Compile(parse("let x: int = 42\nx = 3.14\n"))
+	if err == nil || !strings.HasPrefix(err.Error(), "[line 2]") {
+		t.Fatalf("error=%v, want it to start with [line 2]", err)
+	}
+}
+
 func TestCompileDeferEmitsArgCount(t *testing.T) {
 	fn := compiledFunction(t, `
 func cleanup(value: int) -> void
