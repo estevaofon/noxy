@@ -297,6 +297,18 @@ func (l *Lexer) readNumber() (token.TokenType, string) {
 			l.readChar()
 		}
 	}
+	// Expoente: [eE][+-]?digitos — so quando de fato ha digito depois, para
+	// que `1e` seguido de outra coisa continue lexando INT + identificador.
+	if (l.ch == 'e' || l.ch == 'E') && l.exponentAhead() {
+		isFloat = true
+		l.readChar() // e
+		if l.ch == '+' || l.ch == '-' {
+			l.readChar()
+		}
+		for isDigit(l.ch) {
+			l.readChar()
+		}
+	}
 	if isFloat {
 		return token.FLOAT, l.input[position:l.position]
 	}
@@ -309,6 +321,22 @@ func isBinaryDigit(ch byte) bool {
 
 func isHexDigit(ch byte) bool {
 	return isDigit(ch) || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+}
+
+// exponentAhead responde se, com l.ch em 'e'/'E', os proximos caracteres
+// formam um expoente valido: digito, ou sinal seguido de digito.
+func (l *Lexer) exponentAhead() bool {
+	next := l.peekChar()
+	if isDigit(next) {
+		return true
+	}
+	if next != '+' && next != '-' {
+		return false
+	}
+	if l.readPosition+1 >= len(l.input) {
+		return false
+	}
+	return isDigit(l.input[l.readPosition+1])
 }
 
 // literalKind selects which escape rules apply to a quoted literal.

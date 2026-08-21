@@ -160,3 +160,13 @@ func TestParseVoidReturnBeforeInlineEndElseElif(t *testing.T) {
 		}
 	}
 }
+
+func TestParseScientificFloatLiteral(t *testing.T) {
+	p := New(lexer.New("1.5e3\n"))
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	literal, ok := program.Statements[0].(*ast.ExpressionStmt).Expression.(*ast.FloatLiteral)
+	if !ok || literal.Value != 1500.0 {
+		t.Fatalf("got %#v, want FloatLiteral 1500", program.Statements[0])
+	}
+}

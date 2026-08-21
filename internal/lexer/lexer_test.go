@@ -215,3 +215,20 @@ map[string, int]
 		}
 	}
 }
+
+func TestNumberLiteralsWithExponent(t *testing.T) {
+	lex := New("1e3 1.5e3 2E-10 1e+2 1e x")
+	want := []struct {
+		typ token.TokenType
+		lit string
+	}{
+		{token.FLOAT, "1e3"}, {token.FLOAT, "1.5e3"}, {token.FLOAT, "2E-10"}, {token.FLOAT, "1e+2"},
+		{token.INT, "1"}, {token.IDENTIFIER, "e"}, {token.IDENTIFIER, "x"},
+	}
+	for i, w := range want {
+		got := lex.NextToken()
+		if got.Type != w.typ || got.Literal != w.lit {
+			t.Fatalf("token %d = %#v, want %s %q", i, got, w.typ, w.lit)
+		}
+	}
+}
