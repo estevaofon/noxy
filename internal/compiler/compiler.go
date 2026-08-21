@@ -37,6 +37,11 @@ type Local struct {
 type Loop struct {
 	EnclosingLocals int
 	BreakJumps      []int
+	// ContinueTarget >= 0: alvo para tras (while: inicio da condicao), emitido
+	// como OP_LOOP direto; -1: alvo adiante (for: passo de incremento),
+	// registrado em ContinueJumps e patchado quando o alvo e emitido.
+	ContinueTarget int
+	ContinueJumps  []int
 }
 
 type Upvalue struct {
@@ -1400,7 +1405,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		loopStart := len(c.currentChunk.Code)
 
 		// Push Loop
-		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
+		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}, ContinueTarget: loopStart}
 		c.loops = append(c.loops, loop)
 
 		// Compile condition: fusao especulativa (comparacao int + salto) com
@@ -1509,7 +1514,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		// 6. Loop Setup
 		loopStart := len(c.currentChunk.Code)
-		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}}
+		loop := &Loop{EnclosingLocals: len(c.locals), BreakJumps: []int{}, ContinueTarget: -1}
 		c.loops = append(c.loops, loop)
 
 		// 7. Condition: $index < $len
@@ -1553,6 +1558,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		c.endScope() // Pops User Variable
+
+		// continue: chega aqui com a mesma pilha da saida normal do corpo
+		// ([$collection, $index, $len]) — a variavel do laco e os locais do
+		// corpo ja foram descartados pelo emitLocalsExit do ContinueStmt.
+		for _, jump := range loop.ContinueJumps {
+			c.patchJump(jump)
+		}
 
 		// 10. Increment Index
 		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
@@ -1766,14 +1778,24 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		loop := c.loops[len(c.loops)-1]
 
 		// Pop locals
-		toPop := len(c.locals) - loop.EnclosingLocals
-		for i := 0; i < toPop; i++ {
-			c.emitByte(byte(chunk.OP_POP))
-		}
+		c.emitLocalsExit(loop.EnclosingLocals)
 
 		// Emit Jump
 		jump := c.emitJump(chunk.OP_JUMP)
 		loop.BreakJumps = append(loop.BreakJumps, jump)
+		return c.currentChunk, nil, nil
+
+	case *ast.ContinueStmt:
+		if len(c.loops) == 0 {
+			return nil, nil, fmt.Errorf("continue outside of loop")
+		}
+		loop := c.loops[len(c.loops)-1]
+		c.emitLocalsExit(loop.EnclosingLocals)
+		if loop.ContinueTarget >= 0 {
+			c.emitLoop(loop.ContinueTarget)
+		} else {
+			loop.ContinueJumps = append(loop.ContinueJumps, c.emitJump(chunk.OP_JUMP))
+		}
 		return c.currentChunk, nil, nil
 
 	case *ast.UseStmt:
@@ -2612,6 +2634,22 @@ func (c *Compiler) emitConstant(v value.Value) {
 
 func (c *Compiler) beginScope() {
 	c.scopeDepth++
+}
+
+// emitLocalsExit emite o descarte dos locais a partir do indice keep SEM
+// remove-los da tabela do compilador — para break/continue, que saem do
+// escopo em runtime mas nao em compilacao. Mesma regra do endScope: local
+// capturado fecha a caixa (OP_CLOSE_UPVALUE), os demais OP_POP. Com OP_POP
+// cru o upvalue de um `let` do corpo ficava aberto sobre um slot que a
+// proxima iteracao reusa (a closure passava a ler o valor dela).
+func (c *Compiler) emitLocalsExit(keep int) {
+	for i := len(c.locals) - 1; i >= keep; i-- {
+		if c.locals[i].IsCaptured {
+			c.emitByte(byte(chunk.OP_CLOSE_UPVALUE))
+		} else {
+			c.emitByte(byte(chunk.OP_POP))
+		}
+	}
 }
 
 func (c *Compiler) endScope() {

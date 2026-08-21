@@ -953,6 +953,8 @@ func collectBoundNamesInStatement(s ast.Statement, bound map[string]bool) {
 		collectBoundNamesInExpression(n.Call, bound)
 	case *ast.BreakStmt:
 		// sem nome, sem sub-no.
+	case *ast.ContinueStmt:
+		// sem nome, sem sub-no.
 	case *ast.UseStmt:
 		// sem identificador de valor vinculado por este walker.
 	case *ast.ExpressionStmt:
@@ -1068,6 +1070,7 @@ func collectFreeInStatement(s ast.Statement, bound, free map[string]bool) {
 	case *ast.DeferStmt:
 		collectFreeInExpression(n.Call, bound, free)
 	case *ast.BreakStmt:
+	case *ast.ContinueStmt:
 	case *ast.UseStmt:
 	case *ast.ExpressionStmt:
 		collectFreeInExpression(n.Expression, bound, free)

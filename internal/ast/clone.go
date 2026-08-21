@@ -20,6 +20,8 @@ func CloneStatement(s Statement) Statement {
 		return &DeferStmt{Token: n.Token, Call: cloneCallExpression(n.Call)}
 	case *BreakStmt:
 		return &BreakStmt{Token: n.Token}
+	case *ContinueStmt:
+		return &ContinueStmt{Token: n.Token}
 	case *UseStmt:
 		return &UseStmt{
 			Token:     n.Token,

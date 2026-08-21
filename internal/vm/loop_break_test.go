@@ -149,3 +149,101 @@ test_trace(99)`)
 
 	requireTrace(t, trace, 3, 99)
 }
+
+// continue dentro de while volta para a condicao pulando o resto do corpo.
+func TestContinueInWhileSkipsRestOfBody(t *testing.T) {
+	trace := traceVMSource(t, `
+let i: int = 0
+while i < 6 do
+    i = i + 1
+    if i % 2 == 0 then continue end
+    test_trace(i)
+end
+test_trace(99)`)
+
+	requireTrace(t, trace, 1, 3, 5, 99)
+}
+
+// continue dentro de for...in salta para o passo de incremento: a iteracao
+// seguinte roda normalmente.
+func TestContinueInForEachSkipsToNextElement(t *testing.T) {
+	trace := traceVMSource(t, `
+for item in [1, 2, 3, 4] do
+    let dobro: int = item * 2
+    if dobro == 4 then continue end
+    test_trace(dobro)
+end
+test_trace(99)`)
+
+	requireTrace(t, trace, 2, 6, 8, 99)
+}
+
+// continue mira sempre o laco mais interno.
+func TestContinueInNestedLoopsTargetsInnermost(t *testing.T) {
+	trace := traceVMSource(t, `
+for a in [1, 2] do
+    let j: int = 0
+    while j < 3 do
+        j = j + 1
+        if j == 2 then continue end
+        test_trace(a * 10 + j)
+    end
+end`)
+
+	requireTrace(t, trace, 11, 13, 21, 23)
+}
+
+// let do corpo capturado por closure + continue DEPOIS da closure: o continue
+// tem de fechar a caixa (como endScope) — senao o slot e reusado pela
+// iteracao seguinte e a closure passa a ler o valor dela.
+func TestContinueClosesUpvalueOfCapturedBodyLocal(t *testing.T) {
+	trace := traceVMSource(t, `
+let saved: func() -> int = func() -> int return -1 end
+let i: int = 0
+while i < 2 do
+    i = i + 1
+    let x: int = i
+    if i == 1 then
+        saved = func() -> int return x end
+        continue
+    end
+end
+test_trace(saved())`)
+
+	requireTrace(t, trace, 1)
+}
+
+// Mesmo bug latente no break: closure capturada no corpo e break depois dela.
+func TestBreakClosesUpvalueOfCapturedBodyLocal(t *testing.T) {
+	trace := traceVMSource(t, `
+let saved: func() -> int = func() -> int return -1 end
+for item in [7, 8, 9] do
+    let x: int = item
+    saved = func() -> int return x end
+    break
+end
+let other: int[] = [1, 2, 3]
+test_trace(saved())`)
+
+	requireTrace(t, trace, 7)
+}
+
+// Closure textualmente DEPOIS do continue: a iteracao que continua nunca cria
+// a caixa; as outras guardam o valor certo.
+func TestContinueBeforeClosureCreationKeepsOtherIterationsIntact(t *testing.T) {
+	trace := traceVMSource(t, `
+let saved1: func() -> int = func() -> int return -1 end
+let saved3: func() -> int = func() -> int return -1 end
+let i: int = 0
+while i < 3 do
+    i = i + 1
+    let x: int = i
+    if i == 2 then continue end
+    if i == 1 then saved1 = func() -> int return x end end
+    if i == 3 then saved3 = func() -> int return x end end
+end
+test_trace(saved1())
+test_trace(saved3())`)
+
+	requireTrace(t, trace, 1, 3)
+}

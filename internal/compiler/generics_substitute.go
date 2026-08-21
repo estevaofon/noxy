@@ -143,6 +143,8 @@ func substituteInStatement(s ast.Statement, b map[string]ast.NoxyType) {
 		substituteInExpression(n.Call, b)
 	case *ast.BreakStmt:
 		// sem tipo, sem sub-no.
+	case *ast.ContinueStmt:
+		// sem tipo, sem sub-no.
 	case *ast.UseStmt:
 		// sem tipo, sem sub-no.
 	case *ast.ExpressionStmt:

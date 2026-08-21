@@ -131,3 +131,17 @@ func TestParseMap(t *testing.T) {
 		t.Fatalf("map.Keys has wrong length. got=%d", len(mapLit.Keys))
 	}
 }
+
+func TestParseContinueStatementKeepsInlineEnd(t *testing.T) {
+	p := New(lexer.New("while true do\n    if x then continue end\n    print(1)\nend\n"))
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+	loop, ok := program.Statements[0].(*ast.WhileStatement)
+	if !ok || len(loop.Body.Statements) != 2 {
+		t.Fatalf("while body should have 2 statements, got %#v", program.Statements[0])
+	}
+	cond := loop.Body.Statements[0].(*ast.IfStatement)
+	if _, ok := cond.Consequence.Statements[0].(*ast.ContinueStmt); !ok {
+		t.Fatalf("expected ContinueStmt, got %T", cond.Consequence.Statements[0])
+	}
+}

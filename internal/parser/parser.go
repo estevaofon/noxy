@@ -153,6 +153,8 @@ func (p *Parser) parseStatement() ast.Statement {
 		return p.parseFunctionStatement()
 	case token.BREAK:
 		return p.parseBreakStatement()
+	case token.CONTINUE:
+		return p.parseContinueStatement()
 	case token.USE:
 		return p.parseUseStatement()
 	case token.WHEN:
@@ -370,6 +372,13 @@ func (p *Parser) parseBreakStatement() *ast.BreakStmt {
 	// (`if cond then break end`), fazendo o bloco terminar no 'end' do laco
 	// externo.
 	return &ast.BreakStmt{Token: p.curToken}
+}
+
+// parseContinueStatement segue o contrato de parseBreakStatement: nao avanca
+// token — o laco chamador faz o nextToken, entao `if c then continue end`
+// nao engole o 'end'.
+func (p *Parser) parseContinueStatement() *ast.ContinueStmt {
+	return &ast.ContinueStmt{Token: p.curToken}
 }
 
 func (p *Parser) parseUseStatement() *ast.UseStmt {

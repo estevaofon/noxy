@@ -228,6 +228,14 @@ func (bs *BreakStmt) statementNode()       {}
 func (bs *BreakStmt) TokenLiteral() string { return bs.Token.Literal }
 func (bs *BreakStmt) String() string       { return "break" }
 
+type ContinueStmt struct {
+	Token token.Token
+}
+
+func (cs *ContinueStmt) statementNode()       {}
+func (cs *ContinueStmt) TokenLiteral() string { return cs.Token.Literal }
+func (cs *ContinueStmt) String() string       { return "continue" }
+
 type UseStmt struct {
 	Token     token.Token // 'use'
 	Module    string
