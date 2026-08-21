@@ -647,3 +647,76 @@ func TestIOCloseLeavesStdinRegisteredAndUsable(t *testing.T) {
 		assertBuiltinValue(t, line.Fields["data"], value.NewString("linha"))
 	})
 }
+
+// input() e io.read_line(io.stdin()) leem o MESMO *bufio.Reader; VMs de tasks
+// compartilham o SharedState, entao as duas leituras tem de passar pelo mesmo
+// operationMu do recurso de stdin. Sem isso -race acusa mutacao concorrente do
+// leitor, e uma linha pode se perder ou sair duplicada.
+func TestConcurrentInputAndStdinReadLineShareOneBuffer(t *testing.T) {
+	const total = 200
+	var content strings.Builder
+	for index := range total {
+		content.WriteString("linha-" + strconv.Itoa(index) + "\n")
+	}
+	withStdin(t, content.String(), func() {
+		machine := New()
+		worker := NewWithShared(machine.shared, machine.Config)
+		ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
+		stdinFile := callBuiltin(t, machine, "io_stdin", testFileDefinition())
+		inputNative := requireBuiltin(t, machine, "input")
+		readLineNative := requireBuiltin(t, worker, "io_read_line")
+
+		collected := make(chan []string, 2)
+		go func() {
+			var lines []string
+			for {
+				got, err := inputNative.Invoke(machine, nil)
+				if err != nil {
+					t.Errorf("input: %v", err)
+					break
+				}
+				// Nenhuma linha da entrada e vazia: "" so acontece no EOF.
+				line, _ := got.Obj.(string)
+				if line == "" {
+					break
+				}
+				lines = append(lines, line)
+			}
+			collected <- lines
+		}()
+		go func() {
+			var lines []string
+			for {
+				got, err := readLineNative.Invoke(worker, []value.Value{stdinFile, ioResult})
+				if err != nil {
+					t.Errorf("io_read_line: %v", err)
+					break
+				}
+				result, ok := got.Obj.(*value.ObjInstance)
+				if !ok || !result.Fields["ok"].AsBool {
+					break
+				}
+				line, _ := result.Fields["data"].Obj.(string)
+				lines = append(lines, line)
+			}
+			collected <- lines
+		}()
+
+		seen := map[string]int{}
+		read := 0
+		for range 2 {
+			for _, line := range <-collected {
+				seen[line]++
+				read++
+			}
+		}
+		if read != total {
+			t.Fatalf("as duas goroutines leram %d linhas, want %d", read, total)
+		}
+		for index := range total {
+			if got := seen["linha-"+strconv.Itoa(index)]; got != 1 {
+				t.Fatalf("linha-%d foi lida %d vezes, want 1", index, got)
+			}
+		}
+	})
+}

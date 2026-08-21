@@ -437,8 +437,23 @@ func (vm *VM) defineIOBuiltins() {
 		// Leitor unico (SharedState): em pipe/arquivo le TODAS as linhas. No
 		// EOF devolve o parcial, ou "" — input() nao sinaliza EOF; para isso
 		// use io.read_line(io.stdin()).
-		text, _ := machine.shared.stdin().ReadString('\n')
-		return value.NewString(strings.TrimRight(text, "\r\n")), nil
+		//
+		// A leitura passa pelo RECURSO de stdin (nao pelo shared.stdin() cru)
+		// para pegar o mesmo operationMu que io.read_line/io.read usam: VMs de
+		// tasks compartilham o SharedState, entao input() concorrente com
+		// io.read_line(io.stdin()) mexeria no mesmo *bufio.Reader em paralelo.
+		resource, exists := machine.shared.Files.get(machine.shared.stdinHandle())
+		if !exists {
+			return value.NewString(""), nil
+		}
+		text, used := resource.use(func(file *os.File) value.Value {
+			line, _ := resource.lineReader(file).ReadString('\n')
+			return value.NewString(strings.TrimRight(line, "\r\n"))
+		})
+		if !used {
+			return value.NewString(""), nil
+		}
+		return text, nil
 	})
 
 	vm.DefineContextualNative("io_stdin", func(context value.NativeContext, args []value.Value) (value.Value, error) {
@@ -454,8 +469,11 @@ func (vm *VM) defineIOBuiltins() {
 			return value.NewNull(), nil
 		}
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		// stdinHandle toma Files.mu: fora do fileMetaMu, para nao aninhar os
+		// dois mutexes.
+		handle := machine.shared.stdinHandle()
 		machine.shared.fileMetaMu.Lock()
-		inst.Fields["fd"] = value.NewInt(int64(machine.shared.stdinHandle()))
+		inst.Fields["fd"] = value.NewInt(int64(handle))
 		inst.Fields["path"] = value.NewString("<stdin>")
 		inst.Fields["mode"] = value.NewString("r")
 		inst.Fields["open"] = value.NewBool(true)
