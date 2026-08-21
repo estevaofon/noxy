@@ -118,10 +118,6 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 		return false, vm.runtimeError(c, ip, "expected %d arguments but got %d", fn.Arity, argCount)
 	}
 
-	if vm.frameCount == FramesMax {
-		return false, vm.runtimeError(c, ip, "stack overflow")
-	}
-
 	// Handle Pass-by-Value (Copy) for non-ref parameters
 	// Args are at vm.stackTop - argCount
 	baseArgs := vm.stackTop - argCount
@@ -136,8 +132,8 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 }
 
 func (vm *VM) callPreparedClosure(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip int) (bool, error) {
-	if vm.frameCount == FramesMax {
-		return false, vm.runtimeError(c, ip, "stack overflow")
+	if err := vm.ensureCallCapacity(c, ip); err != nil {
+		return false, err
 	}
 
 	frame := &vm.frames[vm.frameCount]
@@ -203,4 +199,24 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 	default:
 		return v
 	}
+}
+
+// ensureCallCapacity garante espaco para UM frame novo e uma folga de
+// stackReserve slots de operandos acima de stackTop, crescendo as duas pilhas
+// sob demanda. E o unico ponto do caminho normal onde os tetos sao
+// verificados: recursao profunda morre aqui com erro de runtime limpo
+// (mensagens distintas para frames e operandos), nunca com panic Go.
+func (vm *VM) ensureCallCapacity(c *chunk.Chunk, ip int) error {
+	if vm.frameCount == len(vm.frames) {
+		if len(vm.frames) >= FramesMax {
+			return vm.runtimeError(c, ip, "stack overflow: call depth exceeds %d frames", FramesMax)
+		}
+		vm.growFrames()
+	}
+	for len(vm.stack)-vm.stackTop < stackReserve {
+		if !vm.growStack() {
+			return vm.runtimeError(c, ip, "stack overflow: operand stack exceeds %d slots", StackMax)
+		}
+	}
+	return nil
 }

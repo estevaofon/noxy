@@ -8,8 +8,20 @@ import (
 	"sync"
 )
 
-const StackMax = 2048
-const FramesMax = 64
+// Tetos por VM (spec #56 §1). As pilhas NASCEM pequenas (framesInitial /
+// stackInitial) e dobram sob demanda ate estes valores; no teto o erro e
+// sempre o runtime error `stack overflow: ...`, nunca um panic Go.
+const StackMax = 1 << 20 // slots da pilha de operandos
+const FramesMax = 100_000
+
+const framesInitial = 64
+const stackInitial = 2048
+
+// stackReserve e a folga de operandos que ensureCallCapacity garante na
+// ENTRADA de cada frame: com ela, recursao profunda sempre esbarra no teto
+// ali (erro limpo), e push() so panica com o sentinela se UM frame empilhar
+// mais do que resta ate o teto de uma vez.
+const stackReserve = 256
 
 func (vm *VM) runtimeError(c *chunk.Chunk, ip int, format string, args ...interface{}) error {
 	return vm.runtimeErrorCause(c, ip, nil, format, args...)
@@ -54,16 +66,16 @@ type SharedState struct {
 }
 
 type VM struct {
-	// frames e um array de VALORES, reusado por indice a cada chamada (nunca
-	// realocado): callPreparedClosure escreve em &frames[frameCount] em vez
-	// de heap-alocar um *CallFrame novo. As capacidades de Owned/Deferred de
-	// cada slot sao load-bearing para isso — finalizeCurrentFrame (unwind.go)
-	// trunca as duas com `[:0]`, nunca com `= nil`; setar `= nil` devolveria
-	// o custo de uma alocacao por chamada que esta troca existe para eliminar
-	// (ver BenchmarkNoxyCallOverhead em call_alloc_bench_test.go). vm.currentFrame
-	// aponta para dentro deste array — estavel porque o array tem tamanho
-	// fixo e nunca e realocado.
-	frames       [FramesMax]CallFrame
+	// frames e um slice de VALORES reusado por indice a cada chamada:
+	// callPreparedClosure escreve em &frames[frameCount] em vez de heap-alocar
+	// um *CallFrame novo. As capacidades de Owned/Deferred de cada slot sao
+	// load-bearing para isso — finalizeCurrentFrame (unwind.go) trunca as duas
+	// com `[:0]`, nunca com `= nil` (ver BenchmarkNoxyCallOverhead). O slice
+	// CRESCE (growFrames, dobro ate FramesMax) apenas em ensureCallCapacity,
+	// que reaponta vm.currentFrame; qualquer *CallFrame segurado em variavel
+	// Go atraves de uma chamada reentrante tem de ser reobtido por indice
+	// (finalizeCurrentFrame faz isso; o loop de run() recarrega apos OP_CALL).
+	frames       []CallFrame
 	frameCount   int
 	currentFrame *CallFrame
 
@@ -79,7 +91,10 @@ type VM struct {
 	chunk *chunk.Chunk // Removed, accessed via frame
 	ip    int          // Removed, accessed via frame (or cached)
 
-	stack    [StackMax]value.Value
+	// stack cresce em growStack (dobro ate StackMax); os unicos ponteiros para
+	// dentro dela que sobrevivem a uma instrucao sao os upvalues ABERTOS
+	// (vm.openUpvalues), reapontados por Relocate na realocacao.
+	stack    []value.Value
 	stackTop int
 
 	shared *SharedState
@@ -119,6 +134,8 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 	vm := &VM{
 		shared: shared,
 		Config: cfg,
+		frames: make([]CallFrame, framesInitial),
+		stack:  make([]value.Value, stackInitial),
 	}
 
 	shared.builtinsOnce.Do(vm.defineBuiltins)

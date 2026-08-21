@@ -19,10 +19,15 @@ func (vm *VM) unwindTo(targetFrameCount int, outcome frameOutcome) frameOutcome 
 }
 
 func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
-	frame := vm.currentFrame
-	if frame == nil || vm.frameCount == 0 {
+	if vm.currentFrame == nil || vm.frameCount == 0 {
 		return outcome
 	}
+	// Por INDICE, nao por ponteiro: invokePreparedCall reentra a VM e pode
+	// realocar vm.frames (growFrames); um *CallFrame segurado atraves da
+	// chamada apontaria para o array velho — a posse e o Closure seriam
+	// "liberados" na copia morta e o slot novo ficaria sujo.
+	index := vm.frameCount - 1
+	frame := &vm.frames[index]
 
 	for len(frame.Deferred) > 0 {
 		last := len(frame.Deferred) - 1
@@ -36,6 +41,7 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 				Cause:        err,
 			})
 		}
+		frame = &vm.frames[index]
 	}
 
 	// RC: fecha os upvalues ANTES de soltar os vinculos do frame —
@@ -59,9 +65,10 @@ func (vm *VM) finalizeCurrentFrame(outcome frameOutcome) frameOutcome {
 	// o velho e atualizam a entrada (ownSlot); nao ha guard de stackTop
 	// porque o release agora e por objeto, nao por leitura de vm.stack.
 	//
-	// vm.frames e um array de VALORES reusado entre chamadas (nao realocado
-	// por chamada) — este slot do array sobrevive ao frame e volta a ser
-	// escrito pela PROXIMA chamada que cair neste indice. Por isso:
+	// vm.frames e um slice de VALORES reusado entre chamadas (so realocado por
+	// growFrames, em ensureCallCapacity) — este slot do slice sobrevive ao
+	// frame e volta a ser escrito pela PROXIMA chamada que cair neste indice.
+	// Por isso:
 	//   1. cada entrada de Owned e ZERADA (nao so "esquecida" pelo truncamento
 	//      abaixo) antes do truncamento: um `range frame.Owned` futuro respeita
 	//      len, nao cap, entao uma entrada nao-zerada alem do novo len jamais

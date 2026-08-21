@@ -50,6 +50,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 	gcache := c.GlobalCache()
 	ip := frame.IP
 	defer func() {
+		if recovered := recover(); recovered != nil {
+			if _, isOverflow := recovered.(stackOverflowPanic); !isOverflow {
+				panic(recovered)
+			}
+			// Sentinela de push(): um unico frame empilhou mais do que restava
+			// ate StackMax (ensureCallCapacity cobre o caso comum, a recursao).
+			err = vm.runtimeErrorAtCurrentFrame("stack overflow: operand stack exceeds %d slots", StackMax)
+		}
 		if vm.currentFrame == frame {
 			frame.IP = ip
 		}

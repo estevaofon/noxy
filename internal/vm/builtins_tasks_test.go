@@ -478,6 +478,7 @@ func TestSpawnTaskDeferredHeadroomFailureHasNoxyStack(t *testing.T) {
 		if err != nil {
 			return value.NewNull(), err
 		}
+		worker.stack = make([]value.Value, StackMax)
 		worker.stackTop = StackMax
 		return value.NewNull(), nil
 	})

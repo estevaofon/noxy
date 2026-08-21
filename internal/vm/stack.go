@@ -136,12 +136,70 @@ func (vm *VM) readConstant() value.Value {
 	return vm.chunk.Constants[index]
 }
 
+// stackOverflowPanic e o sentinela que push() lanca quando a pilha de
+// operandos ja esta no teto; run() recupera SO este tipo e o converte no
+// runtime error padrao. Qualquer outro panic continua subindo.
+type stackOverflowPanic struct{}
+
 func (vm *VM) push(v value.Value) {
-	if vm.stackTop >= StackMax {
-		panic("Stack overflow")
+	if vm.stackTop >= len(vm.stack) {
+		vm.growStackForPush()
 	}
 	vm.stack[vm.stackTop] = v
 	vm.stackTop++
+}
+
+// growStackForPush e o caminho FRIO de push(): cresce a pilha ou, ja no teto,
+// lanca o sentinela. Mora em funcao propria, e com //go:noinline, DE
+// PROPOSITO: com o corpo dentro de push o custo do inliner vai a 82 (orcamento
+// 80) e push — a operacao mais quente do interpretador — deixa de ser inlinada;
+// sem o pragma o inliner traz este corpo de volta e o custo sobe a 84. Com os
+// dois, push fica em 77 e continua inlinada, como era antes das pilhas
+// dinamicas. Conferir com `go build -gcflags='-m -m'` ao mexer aqui.
+//
+//go:noinline
+func (vm *VM) growStackForPush() {
+	if !vm.growStack() {
+		panic(stackOverflowPanic{})
+	}
+}
+
+// growStack dobra a pilha de operandos (ate StackMax) e reaponta os upvalues
+// ABERTOS — os unicos ponteiros para dentro de vm.stack que sobrevivem a uma
+// instrucao (fatias `args` passadas a natives sao lidas, nunca escritas, e os
+// indices de Owned/StackBase nao mudam). Devolve false se ja esta no teto.
+func (vm *VM) growStack() bool {
+	if len(vm.stack) >= StackMax {
+		return false
+	}
+	newLen := len(vm.stack) * 2
+	if newLen > StackMax {
+		newLen = StackMax
+	}
+	old := vm.stack
+	grown := make([]value.Value, newLen)
+	copy(grown, old)
+	vm.stack = grown
+	for upvalue := vm.openUpvalues; upvalue != nil; upvalue = upvalue.Next() {
+		upvalue.Relocate(old, grown)
+	}
+	return true
+}
+
+// growFrames dobra o slice de frames (ate FramesMax) e reaponta
+// vm.currentFrame, que sempre e &frames[frameCount-1] fora de uma chamada em
+// andamento. Chamado so por ensureCallCapacity, ANTES de tomar &frames[n].
+func (vm *VM) growFrames() {
+	newLen := len(vm.frames) * 2
+	if newLen > FramesMax {
+		newLen = FramesMax
+	}
+	grown := make([]CallFrame, newLen)
+	copy(grown, vm.frames)
+	vm.frames = grown
+	if vm.frameCount > 0 {
+		vm.currentFrame = &vm.frames[vm.frameCount-1]
+	}
 }
 
 func (vm *VM) pop() value.Value {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
 type ValueType int
@@ -249,6 +250,26 @@ func (upvalue *ObjUpvalue) Close(location *Value) bool {
 	upvalue.closed = *location
 	upvalue.location = &upvalue.closed
 	return true
+}
+
+// Relocate reaponta uma caixa ABERTA depois que a pilha do VM foi realocada:
+// location sai do slot no array antigo para o MESMO indice no novo. Caixa
+// fechada (location aponta para closed) ou que nao aponta para dentro de old
+// nao muda. Sob mu.Lock como Store/Close — tasks podem ler a caixa
+// concorrentemente (Load/IsValid/PointsTo tomam RLock).
+func (upvalue *ObjUpvalue) Relocate(old, grown []Value) {
+	if upvalue == nil || len(old) == 0 || len(grown) < len(old) {
+		return
+	}
+	upvalue.mu.Lock()
+	defer upvalue.mu.Unlock()
+	base := uintptr(unsafe.Pointer(&old[0]))
+	addr := uintptr(unsafe.Pointer(upvalue.location))
+	size := unsafe.Sizeof(Value{})
+	if addr < base || addr >= base+uintptr(len(old))*size {
+		return
+	}
+	upvalue.location = &grown[(addr-base)/size]
 }
 
 func (upvalue *ObjUpvalue) Next() *ObjUpvalue {
