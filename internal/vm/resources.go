@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -74,8 +75,15 @@ type FileResource struct {
 	closed      bool
 	// reader e o leitor bufferizado de read_line, criado sob demanda; para o
 	// recurso de stdin (Task 11) e o MESMO leitor de input(). Acesso so
-	// dentro de use() (operationMu).
+	// dentro de use() (operationMu). Uma leitura do arquivo INTEIRO
+	// (readAll em arquivo comum) DESCARTA o leitor de linha: ela reposiciona
+	// o offset do SO (Seek + read ate o fim) e o que estava no buffer deixa de
+	// corresponder a esse offset — o read_line seguinte abre leitor novo e ve
+	// EOF.
 	reader *bufio.Reader
+	// stdin marca o recurso de os.Stdin: close() nao fecha o descritor e
+	// read/read_lines leem "o restante" pelo reader (pipe nao tem Stat/Seek).
+	stdin bool
 }
 
 // lineReader devolve o leitor bufferizado do recurso (cria na primeira
@@ -101,11 +109,36 @@ func (resource *FileResource) use(operation func(*os.File) value.Value) (value.V
 	return operation(file), true
 }
 
+// readAll devolve o conteudo "inteiro": do inicio em arquivo comum
+// (readFileContents), o que ainda nao foi consumido em stdin. Chamar dentro de
+// use().
+func (resource *FileResource) readAll(file *os.File) ([]byte, bool, string) {
+	if !resource.stdin {
+		content, ok, errorText := readFileContents(file)
+		// O offset do SO terminou no fim do arquivo e o buffer pendente ficou
+		// dessincronizado: o leitor de linha e refeito na proxima chamada.
+		resource.reader = nil
+		return content, ok, errorText
+	}
+	content, err := io.ReadAll(resource.lineReader(file))
+	if err != nil {
+		return nil, false, err.Error()
+	}
+	return content, true, ""
+}
+
 func (resource *FileResource) close() error {
 	resource.stateMu.Lock()
 	if resource.closed || resource.file == nil {
 		resource.stateMu.Unlock()
 		return os.ErrClosed
+	}
+	if resource.stdin {
+		// os.Stdin e do processo, nao do programa Noxy: fechar o descritor
+		// deixaria qualquer leitura seguinte (inclusive de outro VM do mesmo
+		// estado) sem entrada.
+		resource.stateMu.Unlock()
+		return nil
 	}
 	resource.closed = true
 	file := resource.file

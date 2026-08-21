@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -67,7 +66,13 @@ func (vm *VM) defineIOBuiltins() {
 			return value.NewNull(), nil
 		}
 
-		resource, exists := machine.shared.Files.remove(fileHandle(machine.shared, inst))
+		handle := fileHandle(machine.shared, inst)
+		// stdin nao fecha e continua registrado: o handle de io.stdin() e unico
+		// e vale por todo o processo.
+		if resource, ok := machine.shared.Files.get(handle); ok && resource.stdin {
+			return value.NewNull(), nil
+		}
+		resource, exists := machine.shared.Files.remove(handle)
 		if exists {
 			_ = resource.close()
 			markFileClosed(machine.shared, inst)
@@ -95,7 +100,12 @@ func (vm *VM) defineIOBuiltins() {
 		result := value.NewInstance(resultStruct).Obj.(*value.ObjInstance)
 		result.Fields["success"] = value.NewBool(false)
 		result.Fields["error"] = value.NewString("File not open")
-		resource, exists := machine.shared.Files.remove(fileHandle(machine.shared, inst))
+		handle := fileHandle(machine.shared, inst)
+		if resource, ok := machine.shared.Files.get(handle); ok && resource.stdin {
+			result.Fields["error"] = value.NewString("stdin cannot be closed")
+			return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
+		}
+		resource, exists := machine.shared.Files.remove(handle)
 		if !exists {
 			return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
 		}
@@ -128,6 +138,9 @@ func (vm *VM) defineIOBuiltins() {
 			return value.NewNull(), nil
 		}
 		resource.use(func(file *os.File) value.Value {
+			if resource.stdin {
+				return value.NewNull()
+			}
 			if args[1].Type == value.VAL_BYTES {
 				_, _ = file.Write([]byte(args[1].Obj.(string)))
 			} else {
@@ -165,6 +178,10 @@ func (vm *VM) defineIOBuiltins() {
 		}
 
 		operationResult, used := resource.use(func(file *os.File) value.Value {
+			if resource.stdin {
+				result.Fields["error"] = value.NewString("stdin is read-only")
+				return value.Value{Type: value.VAL_OBJ, Obj: result}
+			}
 			var written int
 			var writeErr error
 			if args[1].Type == value.VAL_BYTES {
@@ -210,7 +227,7 @@ func (vm *VM) defineIOBuiltins() {
 			return result, nil
 		}
 		operationResult, used := resource.use(func(file *os.File) value.Value {
-			content, ok, errorText := readFileContents(file)
+			content, ok, errorText := resource.readAll(file)
 			if ok {
 				if err := requireValidUTF8("io.read", string(content)); err != nil {
 					return newIOReadResult(resultStruct, false, value.NewString(""), err.Error())
@@ -247,7 +264,7 @@ func (vm *VM) defineIOBuiltins() {
 			return result, nil
 		}
 		operationResult, used := resource.use(func(file *os.File) value.Value {
-			content, ok, errorText := readFileContents(file)
+			content, ok, errorText := resource.readAll(file)
 			return newIOReadResult(resultStruct, ok, value.NewBytes(string(content)), errorText)
 		})
 		if !used {
@@ -293,7 +310,7 @@ func (vm *VM) defineIOBuiltins() {
 			return result, nil
 		}
 		operationResult, used := resource.use(func(file *os.File) value.Value {
-			content, ok, errorText := readFileContents(file)
+			content, ok, errorText := resource.readAll(file)
 			var lines []string
 			if ok {
 				if err := requireValidUTF8("io.read_lines", string(content)); err != nil {
@@ -406,16 +423,44 @@ func (vm *VM) defineIOBuiltins() {
 		}
 		return value.NewBool(os.MkdirAll(args[0].String(), 0755) == nil)
 	})
-	vm.DefineNative("input", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("input", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
 		// Repair a raw console mode leaked by a crashed program before a
 		// line-oriented read, which would otherwise block forever.
 		console.EnsureLineInput()
 		if len(args) > 0 {
 			fmt.Print(args[0].String())
 		}
-		reader := bufio.NewReader(os.Stdin)
-		text, _ := reader.ReadString('\n')
-		return value.NewString(strings.TrimRight(text, "\r\n"))
+		// Leitor unico (SharedState): em pipe/arquivo le TODAS as linhas. No
+		// EOF devolve o parcial, ou "" — input() nao sinaliza EOF; para isso
+		// use io.read_line(io.stdin()).
+		text, _ := machine.shared.stdin().ReadString('\n')
+		return value.NewString(strings.TrimRight(text, "\r\n")), nil
+	})
+
+	vm.DefineContextualNative("io_stdin", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 1 {
+			return value.NewNull(), nil
+		}
+		structDef, ok := args[0].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull(), nil
+		}
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		machine.shared.fileMetaMu.Lock()
+		inst.Fields["fd"] = value.NewInt(int64(machine.shared.stdinHandle()))
+		inst.Fields["path"] = value.NewString("<stdin>")
+		inst.Fields["mode"] = value.NewString("r")
+		inst.Fields["open"] = value.NewBool(true)
+		machine.shared.fileMetaMu.Unlock()
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}, nil
 	})
 }
 

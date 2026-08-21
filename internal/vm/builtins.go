@@ -1,6 +1,11 @@
 package vm
 
-import "noxy-vm/internal/value"
+import (
+	"bufio"
+	"os"
+
+	"noxy-vm/internal/value"
+)
 
 func (shared *SharedState) initializeState() {
 	shared.stateOnce.Do(func() {
@@ -12,6 +17,20 @@ func (shared *SharedState) initializeState() {
 		shared.Databases = newHandleRegistry[*DatabaseResource]()
 		shared.Statements = newHandleRegistry[*StatementResource]()
 	})
+}
+
+func (shared *SharedState) stdin() *bufio.Reader {
+	shared.stdinOnce.Do(func() { shared.stdinReader = bufio.NewReader(os.Stdin) })
+	return shared.stdinReader
+}
+
+// stdinHandle registra (uma vez) o FileResource de os.Stdin — mesmo leitor de
+// input(), marcado stdin (close nao fecha, write recusa) — e devolve o fd.
+func (shared *SharedState) stdinHandle() int {
+	shared.stdinHandleOnce.Do(func() {
+		shared.stdinFD = shared.Files.add(&FileResource{file: os.Stdin, reader: shared.stdin(), stdin: true})
+	})
+	return shared.stdinFD
 }
 
 func (vm *VM) defineBuiltins() {

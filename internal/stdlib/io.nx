@@ -47,6 +47,10 @@ func open(path: string, mode: string) -> File
     return io_open(path, mode, File)
 end
 
+func stdin() -> File
+    return io_stdin(File)
+end
+
 func close(file: File) -> void
     io_close(file)
 end

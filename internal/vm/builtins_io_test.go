@@ -530,3 +530,120 @@ test_report(to_str(r.bytes_written) + "|" + hex_encode(data.data))`)
 		t.Fatalf("got %q", got)
 	}
 }
+
+func withStdin(t *testing.T, content string, run func()) {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stdin
+	os.Stdin = reader
+	defer func() {
+		os.Stdin = previous
+		_ = reader.Close()
+	}()
+	go func() {
+		_, _ = writer.WriteString(content)
+		_ = writer.Close()
+	}()
+	run()
+}
+
+func TestInputReadsEveryLineFromRedirectedStdin(t *testing.T) {
+	withStdin(t, "um\ndois\ntres\n", func() {
+		reported := captureVMSource(t, `
+let a: string = input()
+let b: string = input()
+let c: string = input()
+let d: string = input()
+test_report(a + "|" + b + "|" + c + "|" + d)`)
+		if got := reported.Obj.(string); got != "um|dois|tres|" {
+			t.Fatalf("got %q", got)
+		}
+	})
+}
+
+func TestIOStdinReadLineSignalsEOFAndSharesBufferWithInput(t *testing.T) {
+	withStdin(t, "primeira\nsegunda\nterceira", func() {
+		reported := captureVMSource(t, `
+use io
+let first: string = input()
+let stdin_file: io.File = io.stdin()
+let out: string = first
+let r: io.IOResult = io.read_line(stdin_file)
+while r.ok do
+    out = out + "|" + r.data
+    r = io.read_line(stdin_file)
+end
+test_report(out + "|" + r.error + "|" + to_str(stdin_file.open) + "|" + stdin_file.path)`)
+		if got := reported.Obj.(string); got != "primeira|segunda|terceira|EOF|true|<stdin>" {
+			t.Fatalf("got %q", got)
+		}
+	})
+}
+
+func TestIOStdinReadReturnsRemainingAndIsReadOnly(t *testing.T) {
+	withStdin(t, "x\nresto1\nresto2\n", func() {
+		reported := captureVMSource(t, `
+use io
+let skip: string = input()
+let stdin_file: io.File = io.stdin()
+let all: io.IOResult = io.read(stdin_file)
+let w: io.IOWriteResult = io.write_result(stdin_file, "nao")
+let c: io.IOCloseResult = io.close_result(stdin_file)
+test_report(all.data + "|" + to_str(w.success) + "|" + w.error + "|" + to_str(c.success) + "|" + c.error)`)
+		if got := reported.Obj.(string); got != "resto1\nresto2\n|false|stdin is read-only|false|stdin cannot be closed" {
+			t.Fatalf("got %q", got)
+		}
+	})
+}
+
+// Ler o arquivo INTEIRO (io_read/io_read_bytes/io_read_lines) invalida o leitor
+// de linha: o buffer pendente ficaria dessincronizado do offset do SO, que
+// termina em EOF. O proximo read_line abre leitor novo — e ve EOF.
+func TestWholeFileReadDiscardsTheLineReader(t *testing.T) {
+	machine := New()
+	cleanupFileResources(t, machine)
+	path := filepath.Join(t.TempDir(), "mixed.txt")
+	contents := "um\ndois\ntres\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handle := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("r"), testFileDefinition())
+	ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
+
+	first := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
+	assertBuiltinValue(t, first.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, first.Fields["data"], value.NewString("um"))
+
+	whole := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read", handle, ioResult), ioResult)
+	assertBuiltinValue(t, whole.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, whole.Fields["data"], value.NewString(contents))
+
+	eof := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
+	assertBuiltinValue(t, eof.Fields["ok"], value.NewBool(false))
+	assertBuiltinValue(t, eof.Fields["error"], value.NewString("EOF"))
+	callBuiltin(t, machine, "io_close", handle)
+}
+
+func TestIOCloseLeavesStdinRegisteredAndUsable(t *testing.T) {
+	withStdin(t, "linha\n", func() {
+		machine := New()
+		fileDefinition := testFileDefinition()
+		handleValue := callBuiltin(t, machine, "io_stdin", fileDefinition)
+		handle := requireBuiltinInstance(t, handleValue, fileDefinition)
+		fd := int(handle.Fields["fd"].AsInt)
+
+		callBuiltin(t, machine, "io_close", handleValue)
+		if _, ok := machine.shared.Files.get(fd); !ok {
+			t.Fatal("io.close removed the stdin resource from the registry")
+		}
+		assertBuiltinValue(t, handle.Fields["open"], value.NewBool(true))
+
+		ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
+		line := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handleValue, ioResult), ioResult)
+		assertBuiltinValue(t, line.Fields["ok"], value.NewBool(true))
+		assertBuiltinValue(t, line.Fields["data"], value.NewString("linha"))
+	})
+}

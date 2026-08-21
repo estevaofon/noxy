@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"bufio"
 	"fmt"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
@@ -63,6 +64,15 @@ type SharedState struct {
 	Statements   *handleRegistry[*StatementResource]
 	stateOnce    sync.Once
 	builtinsOnce sync.Once
+
+	// stdin e o leitor UNICO de os.Stdin para todos os VMs deste estado:
+	// input() e io.stdin() leem do mesmo buffer (senao a primeira chamada
+	// engoliria ate 4 KB das linhas seguintes). Criado na primeira leitura —
+	// depois de qualquer troca de os.Stdin feita por quem embute a VM.
+	stdinOnce       sync.Once
+	stdinReader     *bufio.Reader
+	stdinHandleOnce sync.Once
+	stdinFD         int
 
 	SignalSubMu      sync.Mutex
 	ActiveSignalChan chan os.Signal
