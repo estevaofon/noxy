@@ -76,3 +76,77 @@ func (vm *VM) setIndexGeneric(c *chunk.Chunk, ip int) error {
 	}
 	return vm.runtimeError(c, ip, "cannot set index on non-array/map")
 }
+
+// getIndexGeneric e o corpo de OP_GET_INDEX: desempilha indice e container,
+// indexa array / map / string / bytes (mesmas mensagens de erro) e empilha o
+// resultado. Virou metodo na indexacao tipada (issue #66, item 1) para ser o
+// funil unico dos fallbacks de OP_GET_INDEX_ARRAY / OP_GET_LOCAL_INDEX_ARRAY /
+// OP_GET_REF_LOCAL_INDEX_ARRAY, que materializam a pilha generica e chamam
+// isto, sem duplicar a logica. (A primeira forma, re-despachar o case
+// generico por `goto` dentro de run(), custou ~10 % no despacho generico:
+// o rotulo/phi e o corpo extra em run() mudaram o codegen do laco.)
+func (vm *VM) getIndexGeneric(c *chunk.Chunk, ip int) error {
+	indexVal := vm.pop()
+	collectionVal := vm.pop()
+
+	if collectionVal.Type == value.VAL_OBJ {
+		if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
+			if indexVal.Type != value.VAL_INT {
+				return vm.runtimeError(c, ip, "array index must be integer")
+			}
+			idx := int(indexVal.Int())
+			if idx < 0 || idx >= len(arr.Elements) {
+				return vm.runtimeError(c, ip, "array index out of bounds")
+			}
+			vm.push(arr.Elements[idx])
+			return nil
+		} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
+			var key interface{}
+			if indexVal.Type == value.VAL_INT {
+				key = indexVal.Int()
+			} else if indexVal.Type == value.VAL_OBJ {
+				if str, ok := indexVal.Obj.(string); ok {
+					key = str
+				} else {
+					return vm.runtimeError(c, ip, "map key must be int or string")
+				}
+			} else {
+				return vm.runtimeError(c, ip, "map key must be int or string")
+			}
+
+			val, ok := mapObj.Get(key)
+			if !ok {
+				vm.push(value.NewNull())
+			} else {
+				vm.push(val)
+			}
+			return nil
+		} else if str, ok := collectionVal.Obj.(string); ok {
+			// String indexing
+			if indexVal.Type != value.VAL_INT {
+				return vm.runtimeError(c, ip, "string index must be integer")
+			}
+			idx := int(indexVal.Int())
+			runes := []rune(str) // Expensive but correct for now
+			if idx < 0 || idx >= len(runes) {
+				return vm.runtimeError(c, ip, "string index out of bounds")
+			}
+			vm.push(value.NewString(string(runes[idx])))
+			return nil
+		}
+	}
+	// Check if it's a bytes value
+	if collectionVal.Type == value.VAL_BYTES {
+		str := collectionVal.Obj.(string)
+		if indexVal.Type != value.VAL_INT {
+			return vm.runtimeError(c, ip, "bytes index must be integer")
+		}
+		idx := int(indexVal.Int())
+		if idx < 0 || idx >= len(str) {
+			return vm.runtimeError(c, ip, "bytes index out of bounds")
+		}
+		vm.push(value.NewInt(int64(str[idx])))
+		return nil
+	}
+	return vm.runtimeError(c, ip, "cannot index non-array/map/bytes")
+}

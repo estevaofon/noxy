@@ -78,12 +78,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		instruction := chunk.OpCode(c.Code[ip])
 		ip++
 
-		// redispatch: os opcodes de indexacao tipada (issue #66) re-entram aqui
-		// com `instruction` trocada pelo generico quando o container nao e o
-		// array que o tipo estatico prometia (null por `any`, ref de outro
-		// tipo) — depois de materializar na pilha exatamente o que a sequencia
-		// generica teria. Zero custo no caminho comum; so os fallbacks saltam.
-	redispatch:
 		switch instruction {
 		case chunk.OP_CONSTANT:
 			// Read constant
@@ -1378,69 +1372,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 		case chunk.OP_GET_INDEX:
-			indexVal := vm.pop()
-			collectionVal := vm.pop()
-
-			if collectionVal.Type == value.VAL_OBJ {
-				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
-					if indexVal.Type != value.VAL_INT {
-						return vm.runtimeError(c, ip, "array index must be integer")
-					}
-					idx := int(indexVal.Int())
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "array index out of bounds")
-					}
-					vm.push(arr.Elements[idx])
-					continue
-				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
-					var key interface{}
-					if indexVal.Type == value.VAL_INT {
-						key = indexVal.Int()
-					} else if indexVal.Type == value.VAL_OBJ {
-						if str, ok := indexVal.Obj.(string); ok {
-							key = str
-						} else {
-							return vm.runtimeError(c, ip, "map key must be int or string")
-						}
-					} else {
-						return vm.runtimeError(c, ip, "map key must be int or string")
-					}
-
-					val, ok := mapObj.Get(key)
-					if !ok {
-						vm.push(value.NewNull())
-					} else {
-						vm.push(val)
-					}
-					continue
-				} else if str, ok := collectionVal.Obj.(string); ok {
-					// String indexing
-					if indexVal.Type != value.VAL_INT {
-						return vm.runtimeError(c, ip, "string index must be integer")
-					}
-					idx := int(indexVal.Int())
-					runes := []rune(str) // Expensive but correct for now
-					if idx < 0 || idx >= len(runes) {
-						return vm.runtimeError(c, ip, "string index out of bounds")
-					}
-					vm.push(value.NewString(string(runes[idx])))
-					continue
-				}
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
 			}
-			// Check if it's a bytes value
-			if collectionVal.Type == value.VAL_BYTES {
-				str := collectionVal.Obj.(string)
-				if indexVal.Type != value.VAL_INT {
-					return vm.runtimeError(c, ip, "bytes index must be integer")
-				}
-				idx := int(indexVal.Int())
-				if idx < 0 || idx >= len(str) {
-					return vm.runtimeError(c, ip, "bytes index out of bounds")
-				}
-				vm.push(value.NewInt(int64(str[idx])))
-				continue
-			}
-			return vm.runtimeError(c, ip, "cannot index non-array/map/bytes")
 
 		case chunk.OP_SET_INDEX:
 			if err := vm.setIndexGeneric(c, ip); err != nil {
@@ -1788,8 +1722,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				vm.stackTop = top - 1
 				continue
 			}
-			instruction = chunk.OP_GET_INDEX
-			goto redispatch
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
+			}
 
 		case chunk.OP_GET_LOCAL_INDEX_ARRAY:
 			slot := c.Code[ip]
@@ -1811,8 +1746,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			indexVal := vm.pop()
 			vm.push(vm.stack[frame.LocalBase+int(slot)])
 			vm.push(indexVal)
-			instruction = chunk.OP_GET_INDEX
-			goto redispatch
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
+			}
 
 		case chunk.OP_GET_REF_LOCAL_INDEX_ARRAY:
 			// O slot guarda o ref de um parametro `ref T[]`. REF_UPVALUE (a
@@ -1853,8 +1789,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			indexVal := vm.pop()
 			vm.push(container)
 			vm.push(indexVal)
-			instruction = chunk.OP_GET_INDEX
-			goto redispatch
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
+			}
 
 		case chunk.OP_SET_INDEX_ARRAY_NORC:
 			// [arr, i, v] -> []. Pula Retain/Release SO se valor novo e velho
