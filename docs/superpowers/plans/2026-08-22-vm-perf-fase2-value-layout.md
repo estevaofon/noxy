@@ -555,6 +555,16 @@ go build -o "$SCRATCH/bench/noxy_s12.exe" ./cmd/noxy
 
 ---
 
+> **Nota de execução (Task 2):** a forma planejada de `ownersOf` (switch no
+> `kind` + type assertion checada por caso + `ownersOfSlow` embutido) custou
+> **73** no inliner e tirou `Retain` (105) e `Release` (119) do orçamento de
+> 80; uma *chamada* ao caminho lento custaria 57, pior. Embarcado: early-exit
+> `kind == objKindNoOwners` + o type switch de sempre (35), com `Release`
+> reescrito para uma comparação única em `uint32` (`Release` = 80 exato;
+> `TestReleaseSingleCompareMatchesRange` trava as bordas). O teste
+> `TestOwnersOfFastAndSlowPathsAgree` virou
+> `TestOwnersOfReachesHeaderWithAndWithoutKindHint`. Detalhes na spec §3.2.
+
 ### Task 3: Extra — `pop()` inlinável dentro de `run()`
 
 **Files:**
@@ -638,6 +648,13 @@ go build -o "$SCRATCH/bench/noxy_s12p.exe" ./cmd/noxy
 ```
 
 ---
+
+> **Nota de execução (Task 3):** `vm.stack[vm.stackTop].Obj = nil` custou
+> **23** (duas indexações) e `slot := &vm.stack[top]; slot.Obj = nil` **26** —
+> nenhuma cabe. O que coube foi a atribuição dupla com resultado nomeado
+> (`val, vm.stack[top] = vm.stack[top], value.Value{}`), **18**, que zera o
+> `Value` inteiro como o original (nenhuma mudança para o GC): 79 sites
+> inlinados em `executor.go`. Spec §3.3 atualizada.
 
 ### Task 4: Verificação completa (suíte, race, corpus, diff de saída)
 

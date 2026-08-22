@@ -1,47 +1,47 @@
 # Cross-runtime: Noxy x CPython x Lua x Go
 
-- noxy: `noxy_0141.exe` (Noxy v0.14.1)
-- noxy_v060: `noxy_060.exe` (Noxy v0.6.0)
+- noxy: `C:\Users\estev\AppData\Local\Temp\claude\D--OneDrive-Documentos-go-projects-noxy\ef3672bf-bc7a-4367-818c-fb10c1f93a42\scratchpad\bench\noxy_s12p.exe` (Noxy v0.14.3)
+- v0142: `C:\Users\estev\AppData\Local\Temp\claude\D--OneDrive-Documentos-go-projects-noxy\ef3672bf-bc7a-4367-818c-fb10c1f93a42\scratchpad\bench\noxy_base.exe` (Noxy v0.14.2)
 - python: Python 3.13.1
 - lua: Lua 5.4.7  Copyright (C) 1994-2024 Lua.org, PUC-Rio
 - go: go version go1.24.11 windows/amd64
-- Data: 2026-08-22T12:40:38
+- Data: 2026-08-22T16:43:10
 - Runs por bench: 9, intercalados; **minimo** reportado
 
 ## Tempo total (ms)
 
-| bench | noxy | noxy_v060 | python | lua | go |
+| bench | noxy | v0142 | python | lua | go |
 |---|---|---|---|---|---|
-| `bubblesort` | 646,2 | 608,0 | 161,1 | - | - |
-| `fib` | 481,6 | 447,9 | 199,2 | 114,3 | 68,4 |
-| `loop_arith` | 385,3 | 390,6 | 343,3 | 99,5 | 72,0 |
-| `mandelbrot` | 305,2 | 301,0 | 168,2 | - | - |
-| `map_churn` | 293,9 | 289,2 | 161,9 | - | - |
-| `startup` | 84,8 | 78,2 | 86,0 | 60,5 | 64,6 |
-| `string_ops` | 243,2 | 234,4 | 120,9 | - | - |
+| `bubblesort` | 514,4 | 716,4 | 165,4 | - | - |
+| `fib` | 387,3 | 511,7 | 191,9 | 114,7 | 75,0 |
+| `loop_arith` | 363,8 | 418,6 | 346,4 | 103,9 | 79,7 |
+| `mandelbrot` | 268,2 | 310,1 | 179,1 | - | - |
+| `map_churn` | 265,0 | 317,6 | 171,2 | - | - |
+| `startup` | 91,3 | 91,0 | 88,5 | 61,9 | 71,4 |
+| `string_ops` | 225,8 | 236,8 | 120,4 | - | - |
 
 ## Tempo de execucao, descontado o piso de `startup` (ms)
 
-| bench | noxy | noxy_v060 | python | lua | go |
+| bench | noxy | v0142 | python | lua | go |
 |---|---|---|---|---|---|
-| `bubblesort` | 561,4 | 529,8 | 75,1 | - | - |
-| `fib` | 396,8 | 369,7 | 113,2 | 53,8 | ~0 |
-| `loop_arith` | 300,5 | 312,4 | 257,3 | 39,0 | 7,4 |
-| `mandelbrot` | 220,4 | 222,8 | 82,2 | - | - |
-| `map_churn` | 209,1 | 211,0 | 75,9 | - | - |
-| `string_ops` | 158,4 | 156,2 | 34,9 | - | - |
+| `bubblesort` | 423,1 | 625,4 | 76,9 | - | - |
+| `fib` | 296,0 | 420,7 | 103,4 | 52,8 | ~0 |
+| `loop_arith` | 272,5 | 327,6 | 257,9 | 42,0 | 8,3 |
+| `mandelbrot` | 176,9 | 219,1 | 90,6 | - | - |
+| `map_churn` | 173,7 | 226,6 | 82,7 | - | - |
+| `string_ops` | 134,5 | 145,8 | 31,9 | - | - |
 
 `~0` = o trabalho cabe dentro do ruido do piso de processo do runtime.
 
 ## Razoes sobre o tempo liquido (noxy / outro)
 
-| bench | / noxy_v060 | / python | / lua | / go |
+| bench | / v0142 | / python | / lua | / go |
 |---|---|---|---|---|
-| `bubblesort` | 1,06x | 7,48x | - | - |
-| `fib` | 1,07x | 3,51x | 7,38x | - |
-| `loop_arith` | 0,96x | 1,17x | 7,71x | 40,61x |
-| `mandelbrot` | 0,99x | 2,68x | - | - |
-| `map_churn` | 0,99x | 2,75x | - | - |
-| `string_ops` | 1,01x | 4,54x | - | - |
+| `bubblesort` | 0,68x | 5,50x | - | - |
+| `fib` | 0,70x | 2,86x | 5,61x | - |
+| `loop_arith` | 0,83x | 1,06x | 6,49x | 32,83x |
+| `mandelbrot` | 0,81x | 1,95x | - | - |
+| `map_churn` | 0,77x | 2,10x | - | - |
+| `string_ops` | 0,92x | 4,22x | - | - |
 
 Menor e melhor. `-` = um dos lados cai dentro do ruido do piso e a razao nao tem significado.

@@ -103,6 +103,30 @@ agora a coluna intercalada, não a coluna histórica.
 
 ## Resultados
 
+### Fase 2 de perf (layout do `Value`, issue #37) × v0.14.2 — 2026-08-22
+
+Rodada de uma suíte (mínimo de 9, intercalado, máquina sem outra carga) com
+o binário da fase 2 (`perf/issue-37-value-layout` @ ba7f85d: `Value` 48 → 32 B,
+header comum nos compostos, `pop` inlinada) e **v0.14.2 medido junto**.
+Números completos em [`results/cross_runtime.md`](results/cross_runtime.md)
+e o contexto por estágio em
+[`../results/2026-08-22-issue-37-value-layout-raw.md`](../results/2026-08-22-issue-37-value-layout-raw.md)
+/ [`../RESULTS.md`](../RESULTS.md).
+
+| bench | fase 2 (líquido) | v0.14.2 (líquido) | fase 2 ÷ v0.14.2 | ÷ python | ÷ lua |
+|---|---|---|---|---|---|
+| `loop_arith` | 272,5 | 327,6 | 0,83x | **1,1x** | 6,5x |
+| `mandelbrot` | 176,9 | 219,1 | 0,81x | **1,9x** | – |
+| `map_churn` | 173,7 | 226,6 | 0,77x | **2,1x** | – |
+| `fib` | 296,0 | 420,7 | **0,70x** | **2,9x** | 5,6x |
+| `string_ops` | 134,5 | 145,8 | 0,92x | **4,2x** | – |
+| `bubblesort` | 423,1 | 625,4 | **0,68x** | **5,5x** | – |
+
+O quadro da seção seguinte (v0.14.1 × v0.6.0) continua valendo como
+histórico; a partir daqui, a referência é esta rodada. A ordem dos piores
+pontos não muda — `bubblesort` (indexação) e `string_ops` seguem os mais
+distantes do CPython — mas todos encurtam.
+
 Noxy v0.14.1 (develop @ 4874048) · **Noxy v0.6.0 (68209be) medido junto** ·
 CPython 3.13.1 · Lua 5.4.7 · Go 1.24.11 · i7-1165G7 (4C/8T) · Windows 11 ·
 **três suítes** de 9 execuções intercaladas cada, mínimo por suíte e mediana

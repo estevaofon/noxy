@@ -3,6 +3,139 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.14.2 (cb8efcb) × fase 2 de perf — layout do `Value` (perf/issue-37-value-layout, ba7f85d)
+
+**Data:** 2026-08-22 · Windows 11 · i7-1165G7 · protocolo intercalado, mediana
+de 9 execuções (mínimo também registrado). Máquina sem `go test` nem
+benchmark concorrente; CPU total entre 1 % e 21 % no início de cada passo
+(Firefox, Slack e o Claude Code abertos, sem Zoom/Chrome). **Os quatro
+binários foram compilados na mesma sessão**, então não há a assimetria de
+piso "build fresco +4–5 ms" da seção anterior — `startup` empata (106–110 ms
+nos quatro). Dados brutos, carga por passo e script em
+[`results/2026-08-22-issue-37-value-layout-raw.md`](results/2026-08-22-issue-37-value-layout-raw.md).
+Spec: `docs/superpowers/specs/2026-08-22-vm-perf-fase2-value-layout-design.md`
+(issue #37, estágios 1 e 2 + "extra barato" do `pop`).
+
+Commits medidos, um binário por estágio: **s1** = `Value` 48 → 32 B
+(`41638e8`); **s1+2** = + `ObjHeader{Owners}` no offset 0 de
+array/map/instância e dica `kind` em `ownersOf` (`e4d5a5f`); **s1+2+pop** =
++ `pop()` inlinada em `run()` (custo 22 → 18, 0 → 79 sites; `ba7f85d`).
+
+**Verificação completa:** `go test ./...` verde (12 pacotes); `go test -race
+./internal/value ./internal/vm` verde (2,0 s / 69,7 s); **corpus 177/177**
+(`run_all_tests_concurrent.nx`); **diff de saída base × head: 146 iguais, 0
+divergentes** (`compare_examples.ps1`); guards de inline verdes (`push` 20,
+`pop` 18, `Retain` 67, `Release` 80).
+
+### Headline — base × s1+2+pop (`interleaved_compare.ps1 -Runs 9`)
+
+| bench | v0142_ms | s12p_ms | delta | veredito |
+|---|---|---|---|---|
+| bench_bubblesort | 4046,3 | 3002,8 | **−25,8 %** | ✅ |
+| bench_call_readonly | 1386,8 | 929,4 | **−33,0 %** | ✅ (a regressão de +10 % da seção anterior fica mais que desfeita) |
+| bench_call_ref | 4160,8 | 3052,1 | **−26,6 %** | ✅ |
+| bench_path_update | 682,4 | 498,2 | **−27,0 %** | ✅ |
+| bench_generic_vs_hand | 904,5 | 732,4 | **−19,0 %** | ✅ |
+| bench_share_mutate | 302,1 | 251,4 | **−16,8 %** | ✅ gate CoW (≤ +5 %) |
+| bench_conway | 2214,9 | 1878,8 | **−15,2 %** | ✅ gate CoW |
+| bench_spawn_sum | 767,1 | 703,7 | −8,3 % | ✅ |
+| bench_map_churn | 479,1 | 442,0 | −7,7 % | ✅ |
+| bench_call_light | 120,3 | 110,7 | −8,0 % | ➖ piso¹ (gate CoW ok) |
+| bench_typed_call_map | 124,5 | 122,9 | −1,3 % | ➖ piso¹ (gate CoW ok) |
+| bench_value_call_mutate | 119,3 | 121,1 | +1,5 % | ➖ piso¹ |
+
+¹ ~100 ms com piso de processo ~84 ms: não decidem nada (seção de 2026-08-22).
+
+### Por estágio — quatro binários na mesma janela (mediana de 9)
+
+"passo" = delta contra o binário imediatamente anterior.
+
+| bench | s1 vs base | s1+2 (passo) | s1+2+pop (passo) | total |
+|---|---|---|---|---|
+| bench_bubblesort | −13,4 % | −2,8 % | −12,8 % | **−26,6 %** |
+| bench_call_ref | −14,3 % | −0,3 % | −13,4 % | **−26,0 %** |
+| bench_call_readonly | −11,7 % | +1,8 % | −19,0 % | **−27,3 %** |
+| bench_path_update | −5,7 % | −1,3 % | −25,5 % | **−30,7 %** |
+| bench_share_mutate | −14,0 % | −4,7 % | +1,5 % | **−16,9 %** |
+| bench_generic_vs_hand | −7,2 % | +1,0 % | −11,0 % | **−16,6 %** |
+| bench_spawn_sum | −7,4 % | +4,1 % | −10,2 % | **−13,5 %** |
+| bench_conway | −1,8 % | −4,0 % | −6,0 % | **−11,4 %** |
+| bench_map_churn | −2,1 % | +1,1 % | −4,2 % | **−5,2 %** |
+| cross `fib` | −10,0 % | −3,2 % | −5,6 % | **−17,7 %** |
+| cross `bubblesort` | −11,5 % | −2,7 % | −11,7 % | **−24,0 %** |
+| cross `loop_arith` | −3,6 % | −3,1 % | −14,6 % | **−20,2 %** |
+| cross `mandelbrot` | −3,3 % | +0,4 % | −12,9 % | **−15,4 %** |
+| cross `string_ops` | −6,5 % | +5,7 % | −10,6 % | **−11,6 %** |
+| cross `map_churn` | +4,1 % | −1,2 % | −9,2 % | **−6,6 %** |
+| cross `startup` | +4,3 % | −0,5 % | −1,2 % | +2,5 % (piso, ruído) |
+
+### Cross-runtime (mínimo de 9, intercalado com CPython 3.13.1 / Lua 5.4.7 / Go 1.24.11)
+
+Tempo líquido (descontado o piso de `startup`, 91 ms nos dois Noxy) e razões;
+tabela completa em [`cross_runtime/results/cross_runtime.md`](cross_runtime/results/cross_runtime.md).
+
+| bench | v0.14.2 | fase 2 | fase 2 ÷ v0.14.2 | ÷ python (antes → agora) | ÷ lua |
+|---|---|---|---|---|---|
+| `fib` | 420,7 | 296,0 | **0,70x** | 4,1x → **2,9x** | 5,6x |
+| `bubblesort` | 625,4 | 423,1 | **0,68x** | 8,1x → **5,5x** | – |
+| `loop_arith` | 327,6 | 272,5 | 0,83x | 1,3x → **1,1x** | 6,5x |
+| `mandelbrot` | 219,1 | 176,9 | 0,81x | 2,4x → **1,9x** | – |
+| `map_churn` | 226,6 | 173,7 | 0,77x | 2,7x → **2,1x** | – |
+| `string_ops` | 145,8 | 134,5 | 0,92x | 4,6x → **4,2x** | – |
+
+### Leitura
+
+**A hipótese da issue ("fib 15–25 % melhor") confirma: −17,7 % na mediana
+intercalada, 0,70x no tempo líquido do cross-runtime.** E o ganho é maior
+onde a linguagem passa o dia — leitura/escrita indexada de array e chamada
+com composto (`bubblesort`, `call_readonly`, `call_ref`, `path_update`: −26 a
+−33 %). A regressão de +10 % em `call_readonly` que a seção anterior apontava
+como "item a investigar" não só some como vira −33 %.
+
+**De onde veio, por estágio:**
+
+- **Estágio 1 (`Value` 32 B): −10 a −14 % em tudo que é chamada/array**
+  (`fib`, `bubblesort`, `call_ref`, `call_readonly`, `share_mutate`), −2 a −7 %
+  no resto. É o efeito previsto: um terço a menos de bytes por `push`/`pop`/
+  cópia de operando e a pilha em 64 KB em vez de 96 KB.
+- **Estágio 2 (header + dica `kind`): −0,3 a −4,7 % nos benches de RC
+  intenso (`share_mutate` −4,7 %, `conway` −4,0 %, `fib` −3,2 %), ruído nos
+  demais (−1 a +6 %).** O microbench Go de `ownersOf` (type switch × dica ×
+  cast `unsafe` do header) dá ~4–5 ns/op para as três formas, indistinguíveis
+  no ruído: no `gc`, o type switch sobre `interface{}` já é "carrega o hash do
+  tipo + ≤ 3 comparações", e o que custa no RC são os atômicos. O estágio 2
+  entrega o header no offset 0 (layout travado por teste) e a saída antecipada
+  de string/struct/RTI; **não vale o `unsafe`** — e a forma "switch no `kind` +
+  assertion por caso" nem cabe no orçamento de inline de `Retain`/`Release`
+  (detalhe na spec §3.2).
+- **`pop()` inlinada: −6 a −25 % por cima dos dois estágios** — o maior item
+  isolado da rodada. Era o achado que a issue não tinha: `pop` custava 22 no
+  inliner e, com `run()` em regime de "big function" (orçamento 20), era
+  chamada real em todos os ~84 sites; o perfil de `fib` a mostrava com **17 %
+  flat** (v0.14.2) contra 3 % depois. O corpo novo faz exatamente o mesmo
+  trabalho (zera o `Value` inteiro) — só a forma muda (atribuição dupla com
+  resultado nomeado, 18 nós). `path_update` (−25,5 % só deste passo) e
+  `call_readonly` (−19 %) são os mais sensíveis porque empilham/desempilham
+  muito por iteração.
+
+**Gates CoW (≤ +5 %):** `typed_call_map` −1,3 %, `share_mutate` −16,8 %,
+`call_light` −8,0 %, `conway` −15,2 % — todos verdes.
+
+**Microbench de chamada** (`BenchmarkNoxyCallOverhead`, `go test -bench`,
+8 repetições por estágio): ver tabela no fim do arquivo bruto; mede o custo
+fixo de uma chamada `leaf(i)` em laço de 1000.
+
+**Sobre o estágio 3 (pré-condição 1 da issue: "1+2 confirmam a tese").**
+Confirmam *pela metade*: a redução de bytes virou tempo (estágio 1), mas
+a parte do `ownersOf` não (estágio 2 é ~ruído). Os 8 bytes restantes
+(`interface{}` → `unsafe.Pointer`) só pagariam pelo mesmo mecanismo do
+estágio 1 (menos bytes copiados, mais `Value` por linha de cache) — o ganho
+marginal de 32 → 24 B é menor que o de 48 → 32 B e vem com 482 type assertions
+a converter e o boxing de string. Com `fib` a 2,9x do CPython e `string_ops`
+a 4,2x, a aposta de melhor relação custo/benefício continua sendo a que a
+própria issue aponta: indexação de array (ainda 5,5x) e o custo de chamada
+(`callPreparedClosure`/`finishFrame` são 26 % do perfil novo de `fib`).
+
 ## v0.6.0 (68209be) × v0.14.1 (4874048) — re-medição com a máquina ociosa
 
 **Data:** 2026-08-22 · Windows 11 · i7-1165G7 · protocolo intercalado. Duas
