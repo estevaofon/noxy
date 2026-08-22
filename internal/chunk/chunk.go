@@ -321,6 +321,16 @@ func (op OpCode) String() string {
 		return "OP_MARK_RUNTIME_VALUE_TYPE"
 	case OP_STORE_VIA_REF:
 		return "OP_STORE_VIA_REF"
+	case OP_STORE_REF:
+		return "OP_STORE_REF"
+	case OP_SET_PROPERTY_DEREF:
+		return "OP_SET_PROPERTY_DEREF"
+	case OP_SWAP:
+		return "OP_SWAP"
+	case OP_COPY:
+		return "OP_COPY"
+	case OP_ADDR:
+		return "OP_ADDR"
 	case OP_DUP:
 		return "OP_DUP"
 	case OP_ARRAY:
@@ -472,6 +482,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.constantLongInstruction("OP_GET_GLOBAL_MUT", offset)
 	case OP_GET_UPVALUE_MUT:
 		return c.byteInstruction("OP_GET_UPVALUE_MUT", offset)
+	case OP_GET_UPVALUE:
+		return c.byteInstruction("OP_GET_UPVALUE", offset)
+	case OP_SET_UPVALUE:
+		return c.byteInstruction("OP_SET_UPVALUE", offset)
 	case OP_GET_INDEX_MUT:
 		return c.simpleInstruction("OP_GET_INDEX_MUT", offset)
 	case OP_GET_PROP_MUT:
