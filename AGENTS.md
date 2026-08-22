@@ -411,6 +411,6 @@ contrato é travado por `internal/vm/inline_guard_test.go` — se você mexer em
 ---
 
 **Última Atualização**: 2026-08-22  
-**Versão**: 1.0 (Noxy VM 0.14.3)
+**Versão**: 1.0 (Noxy VM 0.15.0)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*

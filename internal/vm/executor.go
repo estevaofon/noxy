@@ -1372,131 +1372,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 		case chunk.OP_GET_INDEX:
-			indexVal := vm.pop()
-			collectionVal := vm.pop()
-
-			if collectionVal.Type == value.VAL_OBJ {
-				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
-					if indexVal.Type != value.VAL_INT {
-						return vm.runtimeError(c, ip, "array index must be integer")
-					}
-					idx := int(indexVal.Int())
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "array index out of bounds")
-					}
-					vm.push(arr.Elements[idx])
-					continue
-				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
-					var key interface{}
-					if indexVal.Type == value.VAL_INT {
-						key = indexVal.Int()
-					} else if indexVal.Type == value.VAL_OBJ {
-						if str, ok := indexVal.Obj.(string); ok {
-							key = str
-						} else {
-							return vm.runtimeError(c, ip, "map key must be int or string")
-						}
-					} else {
-						return vm.runtimeError(c, ip, "map key must be int or string")
-					}
-
-					val, ok := mapObj.Get(key)
-					if !ok {
-						vm.push(value.NewNull())
-					} else {
-						vm.push(val)
-					}
-					continue
-				} else if str, ok := collectionVal.Obj.(string); ok {
-					// String indexing
-					if indexVal.Type != value.VAL_INT {
-						return vm.runtimeError(c, ip, "string index must be integer")
-					}
-					idx := int(indexVal.Int())
-					runes := []rune(str) // Expensive but correct for now
-					if idx < 0 || idx >= len(runes) {
-						return vm.runtimeError(c, ip, "string index out of bounds")
-					}
-					vm.push(value.NewString(string(runes[idx])))
-					continue
-				}
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
 			}
-			// Check if it's a bytes value
-			if collectionVal.Type == value.VAL_BYTES {
-				str := collectionVal.Obj.(string)
-				if indexVal.Type != value.VAL_INT {
-					return vm.runtimeError(c, ip, "bytes index must be integer")
-				}
-				idx := int(indexVal.Int())
-				if idx < 0 || idx >= len(str) {
-					return vm.runtimeError(c, ip, "bytes index out of bounds")
-				}
-				vm.push(value.NewInt(int64(str[idx])))
-				continue
-			}
-			return vm.runtimeError(c, ip, "cannot index non-array/map/bytes")
 
 		case chunk.OP_SET_INDEX:
-			val := vm.pop()
-			indexVal := vm.pop()
-			collectionVal := vm.pop() // The array/map itself is on stack (pointer)
-
-			if collectionVal.Type == value.VAL_OBJ {
-				if arr, ok := collectionVal.Obj.(*value.ObjArray); ok {
-					if indexVal.Type != value.VAL_INT {
-						return vm.runtimeError(c, ip, "array index must be integer")
-					}
-					idx := int(indexVal.Int())
-					if idx < 0 || idx >= len(arr.Elements) {
-						return vm.runtimeError(c, ip, "array index out of bounds")
-					}
-					// Guard do slot ref (spec §6.3): elemento `ref T` (tag
-					// RuntimeType) so aceita ref/null; via base tipada o
-					// compilador ja rejeitou. O teste de val.Type vem antes
-					// para o Load() atomico so rodar em escritas nao-ref.
-					if val.Type != value.VAL_REF && val.Type != value.VAL_NULL && arrayElementIsRefSlot(arr) {
-						return vm.runtimeError(c, ip, "%s", refSlotWriteError(arr.RuntimeType.Load().Element.String(), val))
-					}
-					// RC: retain-antes-de-release (elemento e dono duravel)
-					old := arr.Elements[idx]
-					value.Retain(val)
-					arr.Elements[idx] = val
-					value.Release(old)
-					vm.push(val) // Assignment expression result
-					continue
-				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
-					var key interface{}
-					if indexVal.Type == value.VAL_INT {
-						key = indexVal.Int()
-					} else if indexVal.Type == value.VAL_OBJ {
-						if str, ok := indexVal.Obj.(string); ok {
-							key = str
-						} else {
-							return vm.runtimeError(c, ip, "map key must be int or string")
-						}
-					} else {
-						return vm.runtimeError(c, ip, "map key must be int or string")
-					}
-					// Guard do slot ref (spec §6.3): valor `ref T` (tag
-					// RuntimeType) so aceita ref/null.
-					if val.Type != value.VAL_REF && val.Type != value.VAL_NULL && mapValueIsRefSlot(mapObj) {
-						return vm.runtimeError(c, ip, "%s", refSlotWriteError(mapObj.RuntimeType.Load().Value.String(), val))
-					}
-					// RC: so libera o velho se a chave ja existia (dec a
-					// menos e proibido); retain-antes-de-release quando existe.
-					if old, exists := mapObj.Get(key); exists {
-						value.Retain(val)
-						mapObj.Set(key, val)
-						value.Release(old)
-					} else {
-						value.Retain(val)
-						mapObj.Set(key, val)
-					}
-					vm.push(val)
-					continue
-				}
+			if err := vm.setIndexGeneric(c, ip); err != nil {
+				return err
 			}
-			return vm.runtimeError(c, ip, "cannot set index on non-array/map")
 
 		case chunk.OP_GET_PROPERTY:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
@@ -1633,35 +1516,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_GET_LOCAL_MUT:
 			slot := c.Code[ip]
 			ip++
-			idx := frame.LocalBase + int(slot)
-			v := vm.stack[idx]
-			if value.IsShared(v) {
-				old := v
-				v = vm.copyValue(v)
-				vm.stack[idx] = v
-				// RC: usa ownSlot (mantem o slot registrado em frame.Owned)
-				// em vez de Retain cru — mesmo padrao do OP_SET_LOCAL.
-				frame.ownSlot(vm, idx)
-				value.Release(old)
-			}
-			vm.push(v)
+			vm.push(vm.unicizeOwnedSlot(frame, frame.LocalBase+int(slot)))
 
 		case chunk.OP_GET_LOCAL_MUT_BORROW:
 			slot := c.Code[ip]
 			ip++
 			// RC: gemeo de EMPRESTIMO do acima, emitido quando o tipo declarado
-			// do local e `ref T`. O slot nao possui o que guarda: nao pode
-			// reter o clone nem soltar o velho (soltar o que nunca se reteve e
-			// dec a menos, e faria o objeto compartilhado parecer unico). O
-			// clone fica no slot emprestado sem dono — a mutacao adiante vai
-			// para o clone, exatamente como no comportamento pre-RC.
-			idx := frame.LocalBase + int(slot)
-			v := vm.stack[idx]
-			if value.IsShared(v) {
-				v = vm.copyValue(v)
-				vm.stack[idx] = v
-			}
-			vm.push(v)
+			// do local e `ref T` — ver unicizeBorrowedSlot (cow.go).
+			vm.push(vm.unicizeBorrowedSlot(frame.LocalBase + int(slot)))
 
 		case chunk.OP_GET_GLOBAL_MUT:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
@@ -1840,6 +1702,217 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// copiar; unicidade e decidida por Owners (RC), nao por marcacao.
 			val := vm.pop()
 			vm.push(val)
+
+		// perf issue #66 (item 1): indexacao tipada de array. Caminho rapido
+		// grava o resultado NO LUGAR na pilha (sem pop/push); mensagens de erro
+		// identicas as do generico; container inesperado cai no generico.
+		case chunk.OP_GET_INDEX_ARRAY:
+			top := vm.stackTop
+			if arr, ok := vm.stack[top-2].Obj.(*value.ObjArray); ok {
+				indexVal := vm.stack[top-1]
+				if indexVal.Type != value.VAL_INT {
+					return vm.runtimeError(c, ip, "array index must be integer")
+				}
+				idx := int(indexVal.Int())
+				if idx < 0 || idx >= len(arr.Elements) {
+					return vm.runtimeError(c, ip, "array index out of bounds")
+				}
+				vm.stack[top-2] = arr.Elements[idx]
+				vm.stack[top-1] = value.Value{}
+				vm.stackTop = top - 1
+				continue
+			}
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
+			}
+
+		case chunk.OP_GET_LOCAL_INDEX_ARRAY:
+			slot := c.Code[ip]
+			ip++
+			if arr, ok := vm.stack[frame.LocalBase+int(slot)].Obj.(*value.ObjArray); ok {
+				top := vm.stackTop
+				indexVal := vm.stack[top-1]
+				if indexVal.Type != value.VAL_INT {
+					return vm.runtimeError(c, ip, "array index must be integer")
+				}
+				idx := int(indexVal.Int())
+				if idx < 0 || idx >= len(arr.Elements) {
+					return vm.runtimeError(c, ip, "array index out of bounds")
+				}
+				vm.stack[top-1] = arr.Elements[idx]
+				continue
+			}
+			// Fallback: a sequencia generica GET_LOCAL + GET_INDEX.
+			indexVal := vm.pop()
+			vm.push(vm.stack[frame.LocalBase+int(slot)])
+			vm.push(indexVal)
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
+			}
+
+		case chunk.OP_GET_REF_LOCAL_INDEX_ARRAY:
+			// O slot guarda o ref de um parametro `ref T[]`. REF_UPVALUE (a
+			// forma que OP_REF_LOCAL cria para todo ref a local) resolve com
+			// uma Load() da caixa em vez de referenceStorage (defer + closure
+			// do setter + reflect). arr != nil espelha o validateReferencedValue
+			// do caminho generico (typed nil cairia no erro de la).
+			slot := c.Code[ip]
+			ip++
+			refVal := vm.stack[frame.LocalBase+int(slot)]
+			if ref, ok := refVal.Obj.(*value.ObjRef); ok && ref.RefType == value.REF_UPVALUE {
+				if stored, ok := ref.Upvalue.Load(); ok {
+					if arr, ok := stored.Obj.(*value.ObjArray); ok && arr != nil {
+						top := vm.stackTop
+						indexVal := vm.stack[top-1]
+						if indexVal.Type != value.VAL_INT {
+							return vm.runtimeError(c, ip, "array index must be integer")
+						}
+						idx := int(indexVal.Int())
+						if idx < 0 || idx >= len(arr.Elements) {
+							return vm.runtimeError(c, ip, "array index out of bounds")
+						}
+						vm.stack[top-1] = arr.Elements[idx]
+						continue
+					}
+				}
+			}
+			// Fallback: GET_LOCAL + OP_DEREF (null e nao-ref passam; ref
+			// resolve) + GET_INDEX.
+			container := refVal
+			if refVal.Type == value.VAL_REF {
+				resolved, err := vm.resolveReferenceValue(refVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				container = resolved
+			}
+			indexVal := vm.pop()
+			vm.push(container)
+			vm.push(indexVal)
+			if err := vm.getIndexGeneric(c, ip); err != nil {
+				return err
+			}
+
+		case chunk.OP_SET_INDEX_ARRAY_NORC:
+			// [arr, i, v] -> []. Pula Retain/Release SO se valor novo e velho
+			// sao comprovadamente sem contador e o array nao e (ref T)[] —
+			// senao o generico (setIndexGeneric) decide, como OP_SET_INDEX +
+			// OP_POP fariam.
+			top := vm.stackTop
+			if arr, ok := vm.stack[top-3].Obj.(*value.ObjArray); ok {
+				indexVal := vm.stack[top-2]
+				if indexVal.Type != value.VAL_INT {
+					return vm.runtimeError(c, ip, "array index must be integer")
+				}
+				idx := int(indexVal.Int())
+				if idx < 0 || idx >= len(arr.Elements) {
+					return vm.runtimeError(c, ip, "array index out of bounds")
+				}
+				val := vm.stack[top-1]
+				if value.NeverTracked(val) && value.NeverTracked(arr.Elements[idx]) && !arrayTagIsRefSlot(arr.RuntimeType.Load()) {
+					arr.Elements[idx] = val
+					vm.stack[top-1] = value.Value{}
+					vm.stack[top-2] = value.Value{}
+					vm.stack[top-3] = value.Value{}
+					vm.stackTop = top - 3
+					continue
+				}
+			}
+			if err := vm.setIndexGeneric(c, ip); err != nil {
+				return err
+			}
+			vm.LastPopped = vm.pop()
+
+		case chunk.OP_SET_LOCAL_INDEX_ARRAY_NORC:
+			// [i, v] -> []; container no slot do local possuidor. Caminho
+			// rapido = array unico (Owners <= 1 e o teste de IsShared, sem a
+			// chamada) + elemento sem contador; senao a sequencia generica
+			// GET_LOCAL_MUT + SET_INDEX + POP (unicizeOwnedSlot clona e
+			// registra posse exatamente como o case generico).
+			slot := c.Code[ip]
+			ip++
+			localIdx := frame.LocalBase + int(slot)
+			top := vm.stackTop
+			if arr, ok := vm.stack[localIdx].Obj.(*value.ObjArray); ok && arr.Owners.Load() <= 1 {
+				indexVal := vm.stack[top-2]
+				if indexVal.Type != value.VAL_INT {
+					return vm.runtimeError(c, ip, "array index must be integer")
+				}
+				idx := int(indexVal.Int())
+				if idx < 0 || idx >= len(arr.Elements) {
+					return vm.runtimeError(c, ip, "array index out of bounds")
+				}
+				val := vm.stack[top-1]
+				if value.NeverTracked(val) && value.NeverTracked(arr.Elements[idx]) && !arrayTagIsRefSlot(arr.RuntimeType.Load()) {
+					arr.Elements[idx] = val
+					vm.stack[top-1] = value.Value{}
+					vm.stack[top-2] = value.Value{}
+					vm.stackTop = top - 2
+					continue
+				}
+			}
+			val := vm.pop()
+			indexVal := vm.pop()
+			vm.push(vm.unicizeOwnedSlot(frame, localIdx))
+			vm.push(indexVal)
+			vm.push(val)
+			if err := vm.setIndexGeneric(c, ip); err != nil {
+				return err
+			}
+			vm.LastPopped = vm.pop()
+
+		case chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC:
+			// [i, v] -> []; o slot guarda o ref de um parametro `ref T[]`
+			// (slot de emprestimo). Caminho rapido = REF_UPVALUE cujo array e
+			// unico + elemento sem contador; senao GET_LOCAL_MUT_BORROW +
+			// DEREF_MUT (unicizeThroughRefValue clona e grava de volta pelo
+			// setter do ref) + SET_INDEX + POP.
+			slot := c.Code[ip]
+			ip++
+			localIdx := frame.LocalBase + int(slot)
+			refVal := vm.stack[localIdx]
+			top := vm.stackTop
+			if ref, ok := refVal.Obj.(*value.ObjRef); ok && ref.RefType == value.REF_UPVALUE {
+				if stored, ok := ref.Upvalue.Load(); ok {
+					if arr, ok := stored.Obj.(*value.ObjArray); ok && arr != nil && arr.Owners.Load() <= 1 {
+						indexVal := vm.stack[top-2]
+						if indexVal.Type != value.VAL_INT {
+							return vm.runtimeError(c, ip, "array index must be integer")
+						}
+						idx := int(indexVal.Int())
+						if idx < 0 || idx >= len(arr.Elements) {
+							return vm.runtimeError(c, ip, "array index out of bounds")
+						}
+						val := vm.stack[top-1]
+						if value.NeverTracked(val) && value.NeverTracked(arr.Elements[idx]) && !arrayTagIsRefSlot(arr.RuntimeType.Load()) {
+							arr.Elements[idx] = val
+							vm.stack[top-1] = value.Value{}
+							vm.stack[top-2] = value.Value{}
+							vm.stackTop = top - 2
+							continue
+						}
+					}
+				}
+			}
+			val := vm.pop()
+			indexVal := vm.pop()
+			var container value.Value
+			if refVal.Type == value.VAL_REF {
+				uniq, err := vm.unicizeThroughRefValue(refVal)
+				if err != nil {
+					return vm.runtimeError(c, ip, "%s", err)
+				}
+				container = uniq
+			} else {
+				container = vm.unicizeBorrowedSlot(localIdx)
+			}
+			vm.push(container)
+			vm.push(indexVal)
+			vm.push(val)
+			if err := vm.setIndexGeneric(c, ip); err != nil {
+				return err
+			}
+			vm.LastPopped = vm.pop()
 		}
 	}
 }

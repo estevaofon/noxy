@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.15.0] - 2026-08-22
+
+Indexação tipada de array (issue #66, item 1 do roadmap pós-fase 2). Nenhuma
+mudança de sintaxe, semântica, saída ou mensagem de erro — o compilador passa a
+emitir opcodes especializados onde já sabe que a base é `T[]`, e o VM executa
+o mesmo que antes com menos despacho, menos tráfego de pilha e, no caso do
+parâmetro `ref T[]`, sem a maquinaria genérica de resolução de referência.
+Corpus 177/177 e diff de saída base × head sem divergência. Números em
+`benchmarks/RESULTS.md` (seção do topo) e
+`benchmarks/results/2026-08-22-issue-66-typed-arrays-raw.md`.
+
+### Performance
+
+- **Seis opcodes novos, por append ao fim de `internal/chunk/chunk.go`**
+  (módulos cacheados continuam válidos): `OP_GET_INDEX_ARRAY` /
+  `OP_SET_INDEX_ARRAY_NORC` para base estaticamente `T[]` em posição genérica
+  (global, upvalue, nível de dentro de `a[i][j]`, índice com chamada);
+  `OP_GET_LOCAL_INDEX_ARRAY` / `OP_SET_LOCAL_INDEX_ARRAY_NORC` para local `T[]`
+  com índice (e valor) sintaticamente sem efeito colateral — o array vem do
+  slot, sem empilhar o seu `Value`; o for-each sobre array usa a mesma
+  leitura fundida; `OP_GET_REF_LOCAL_INDEX_ARRAY` / `OP_SET_REF_LOCAL_INDEX_ARRAY_NORC`
+  para parâmetro `ref T[]`, que resolvem a caixa do ref com uma
+  `Upvalue.Load()` em vez de `referenceStorage` (um `defer`, uma closure
+  alocada e `reflect` por acesso). `NORC` = elemento `int/float/bool/string/bytes`:
+  pula `Retain`/`Release` só depois de conferir em runtime que o valor novo e o
+  velho não têm contador (`value.NeverTracked`) e que o array não é
+  `(ref T)[]`; composto vindo por `any`, array compartilhado (CoW clona como
+  antes) e qualquer container inesperado caem nos funis genéricos
+  (`getIndexGeneric`/`setIndexGeneric`, os corpos de `OP_GET_INDEX`/`OP_SET_INDEX`
+  extraídos em método) — mesmas mensagens, mesma linha.
+- **Resultado (mediana de 9, intercalado, v0.14.3 × v0.15.0):**
+  `bench_bubblesort` **−64,5 %**, `bench_call_ref` **−43,4 %**,
+  `bench_call_readonly` −12,1 %, `bench_path_update` −9,2 %, `bench_conway`
+  −3,7 %; gates CoW (`share_mutate`, `typed_call_map`, `call_light`,
+  `conway`) dentro de ±2 % em rodada focada; `bench_map_churn` −0,2 % (os
+  funis genéricos como chamada não aparecem). Cross-runtime (mínimo de 9,
+  tempo líquido): `bubblesort` 430,6 → **153,6 ms (0,36x; ÷ CPython 5,5x → 1,8x)**; `fib`/`loop_arith`/`mandelbrot`/
+  `map_churn`/`string_ops` entre 0,96x e 1,05x de v0.14.3 (ruído; A/B focado
+  de `map_churn` dá −6,5 %).
+- **Achado da rodada:** o primeiro desenho do fallback de leitura — re-despachar
+  o `case` genérico por `goto` dentro de `run()` — custou +10–14 % no despacho
+  genérico (`bench_generic_vs_hand`, laço sem indexação nenhuma): o rótulo e
+  o corpo extra mudaram o codegen do laço inteiro. Trocado por chamada a
+  `getIndexGeneric` antes do merge; o bench voltou ao ruído (+0,7 %).
+- **Guards novos** em `internal/vm/inline_guard_test.go`: `value.NeverTracked`
+  ≤ 20 e `arrayTagIsRefSlot` ≤ 20 (custa exatamente 20 — sem folga) inlinados
+  nos sites de `executor.go`; `push`/`pop` seguem ≤ 20 (121/85 sites).
+
+### Follow-ups observados (não entram nesta versão)
+
+- `length(x)` compila como chamada de builtin genérica (`callNative`) — 37 %
+  de `bench_call_readonly` é isso, não indexação; um `OP_LEN` estático quando
+  `length` não está sombreado é o próximo passo natural desse bench.
+- O custo restante do acesso via `ref T[]` é a `Upvalue.Load()` (RWMutex da
+  caixa, partilhada com tasks); `bubblesort` fica em ~1,8x do
+  CPython por causa dela.
+- `a[i][j] = v` mantém `OP_GET_INDEX_MUT` genérico no nível de fora;
+  elemento composto (`nodes[i] = n`) segue `OP_SET_INDEX`.
+
 ## [0.14.3] - 2026-08-22
 
 Fase 2 de performance do VM (issue #37, estágios 1 e 2 mais o "extra barato"
