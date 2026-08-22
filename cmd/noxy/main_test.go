@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
 	"testing"
+
+	"noxy-vm/internal/lineedit"
 )
 
 func captureStdout(t *testing.T, run func()) string {
@@ -61,5 +65,116 @@ func TestLoadScriptMissingFileReportsAndFails(t *testing.T) {
 	}
 	if !strings.Contains(diag.String(), "Error reading file:") {
 		t.Fatalf("diagnostics=%q", diag.String())
+	}
+}
+
+// fakeLine e um passo de entrada do REPL: o texto digitado ou o erro que a
+// fonte devolveria (Ctrl-C, EOF).
+type fakeLine struct {
+	text string
+	err  error
+}
+
+// fakeLines simula a fonte de linhas do REPL e registra os prompts pedidos,
+// para testar o loop sem tty nem editor.
+type fakeLines struct {
+	steps   []fakeLine
+	prompts []string
+}
+
+func (f *fakeLines) ReadLine(prompt string) (string, error) {
+	f.prompts = append(f.prompts, prompt)
+	if len(f.steps) == 0 {
+		return "", io.EOF
+	}
+	step := f.steps[0]
+	f.steps = f.steps[1:]
+	return step.text, step.err
+}
+
+func TestREPLAsksContinuationPromptWhileInputIsIncomplete(t *testing.T) {
+	src := &fakeLines{steps: []fakeLine{{text: "if true then"}, {text: "print(1)"}, {text: "end"}}}
+	stdout := captureStdout(t, func() { runREPL(src, ">>> ", "... ", false) })
+	if !strings.Contains(stdout, "1\n") {
+		t.Fatalf("block did not run; stdout=%q", stdout)
+	}
+	want := []string{">>> ", "... ", "... ", ">>> "}
+	if strings.Join(src.prompts, "|") != strings.Join(want, "|") {
+		t.Fatalf("prompts = %q, want %q", src.prompts, want)
+	}
+}
+
+// Ctrl-C no prompt encerra o REPL, como no Windows (console cooked) e como
+// era no Unix antes do editor de linha (SIGINT matava o processo): o loop
+// para na hora e devolve ErrInterrupt para o chamador sair com 130.
+func TestREPLInterruptStopsTheLoopAndReportsIt(t *testing.T) {
+	src := &fakeLines{steps: []fakeLine{
+		{text: "print(1)"},
+		{err: lineedit.ErrInterrupt},
+		{text: "print(2)"},
+	}}
+	var err error
+	stdout := captureStdout(t, func() { err = runREPL(src, ">>> ", "... ", false) })
+	if !errors.Is(err, lineedit.ErrInterrupt) {
+		t.Fatalf("runREPL err = %v, want ErrInterrupt", err)
+	}
+	if !strings.Contains(stdout, "1\n") || strings.Contains(stdout, "2\n") {
+		t.Fatalf("Ctrl-C must stop the loop; stdout=%q", stdout)
+	}
+	if len(src.prompts) != 2 {
+		t.Fatalf("prompts after interrupt = %q, want exactly 2 reads", src.prompts)
+	}
+}
+
+func TestREPLStopsOnEOFAndOnExit(t *testing.T) {
+	src := &fakeLines{steps: []fakeLine{{text: "print(3)"}, {text: "exit"}, {text: "print(4)"}}}
+	var err error
+	stdout := captureStdout(t, func() { err = runREPL(src, ">>> ", "... ", false) })
+	if err != nil {
+		t.Fatalf("exit: runREPL err = %v, want nil", err)
+	}
+	if !strings.Contains(stdout, "3\n") || strings.Contains(stdout, "4\n") {
+		t.Fatalf("exit must stop the loop; stdout=%q", stdout)
+	}
+	src = &fakeLines{steps: []fakeLine{{text: "print(5)"}, {err: io.EOF}, {text: "print(6)"}}}
+	stdout = captureStdout(t, func() { err = runREPL(src, ">>> ", "... ", false) })
+	if err != nil {
+		t.Fatalf("EOF: runREPL err = %v, want nil", err)
+	}
+	if !strings.Contains(stdout, "5\n") || strings.Contains(stdout, "6\n") {
+		t.Fatalf("EOF must stop the loop; stdout=%q", stdout)
+	}
+}
+
+func TestREPLExitCodeIs130OnInterruptAndZeroOtherwise(t *testing.T) {
+	if got := replExitCode(nil); got != 0 {
+		t.Fatalf("replExitCode(nil) = %d, want 0", got)
+	}
+	if got := replExitCode(lineedit.ErrInterrupt); got != 130 {
+		t.Fatalf("replExitCode(ErrInterrupt) = %d, want 130", got)
+	}
+}
+
+func TestScannerSourceReturnsLinesThenEOF(t *testing.T) {
+	src := &scannerSource{scanner: bufio.NewScanner(strings.NewReader("a\nb\n"))}
+	var lines []string
+	stdout := captureStdout(t, func() {
+		for {
+			line, err := src.ReadLine(">>> ")
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			lines = append(lines, line)
+		}
+	})
+	if strings.Join(lines, "|") != "a|b" {
+		t.Fatalf("lines = %q", lines)
+	}
+	if strings.Count(stdout, ">>> ") != 3 {
+		t.Fatalf("prompt must be printed before every read; stdout=%q", stdout)
 	}
 }
