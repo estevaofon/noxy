@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -103,33 +104,54 @@ func TestREPLAsksContinuationPromptWhileInputIsIncomplete(t *testing.T) {
 	}
 }
 
-func TestREPLInterruptDiscardsIncompleteInput(t *testing.T) {
-	diag := withDiagBuffer(t)
+// Ctrl-C no prompt encerra o REPL, como no Windows (console cooked) e como
+// era no Unix antes do editor de linha (SIGINT matava o processo): o loop
+// para na hora e devolve ErrInterrupt para o chamador sair com 130.
+func TestREPLInterruptStopsTheLoopAndReportsIt(t *testing.T) {
 	src := &fakeLines{steps: []fakeLine{
-		{text: "if true then"},
+		{text: "print(1)"},
 		{err: lineedit.ErrInterrupt},
 		{text: "print(2)"},
 	}}
-	stdout := captureStdout(t, func() { runREPL(src, ">>> ", "... ", false) })
-	if !strings.Contains(stdout, "2\n") {
-		t.Fatalf("line after Ctrl-C did not run on its own; stdout=%q diag=%q", stdout, diag.String())
+	var err error
+	stdout := captureStdout(t, func() { err = runREPL(src, ">>> ", "... ", false) })
+	if !errors.Is(err, lineedit.ErrInterrupt) {
+		t.Fatalf("runREPL err = %v, want ErrInterrupt", err)
 	}
-	// Depois do Ctrl-C o prompt volta ao principal, nao ao de continuacao.
-	if got := src.prompts[2]; got != ">>> " {
-		t.Fatalf("prompt after interrupt = %q, want %q", got, ">>> ")
+	if !strings.Contains(stdout, "1\n") || strings.Contains(stdout, "2\n") {
+		t.Fatalf("Ctrl-C must stop the loop; stdout=%q", stdout)
+	}
+	if len(src.prompts) != 2 {
+		t.Fatalf("prompts after interrupt = %q, want exactly 2 reads", src.prompts)
 	}
 }
 
 func TestREPLStopsOnEOFAndOnExit(t *testing.T) {
 	src := &fakeLines{steps: []fakeLine{{text: "print(3)"}, {text: "exit"}, {text: "print(4)"}}}
-	stdout := captureStdout(t, func() { runREPL(src, ">>> ", "... ", false) })
+	var err error
+	stdout := captureStdout(t, func() { err = runREPL(src, ">>> ", "... ", false) })
+	if err != nil {
+		t.Fatalf("exit: runREPL err = %v, want nil", err)
+	}
 	if !strings.Contains(stdout, "3\n") || strings.Contains(stdout, "4\n") {
 		t.Fatalf("exit must stop the loop; stdout=%q", stdout)
 	}
 	src = &fakeLines{steps: []fakeLine{{text: "print(5)"}, {err: io.EOF}, {text: "print(6)"}}}
-	stdout = captureStdout(t, func() { runREPL(src, ">>> ", "... ", false) })
+	stdout = captureStdout(t, func() { err = runREPL(src, ">>> ", "... ", false) })
+	if err != nil {
+		t.Fatalf("EOF: runREPL err = %v, want nil", err)
+	}
 	if !strings.Contains(stdout, "5\n") || strings.Contains(stdout, "6\n") {
 		t.Fatalf("EOF must stop the loop; stdout=%q", stdout)
+	}
+}
+
+func TestREPLExitCodeIs130OnInterruptAndZeroOtherwise(t *testing.T) {
+	if got := replExitCode(nil); got != 0 {
+		t.Fatalf("replExitCode(nil) = %d, want 0", got)
+	}
+	if got := replExitCode(lineedit.ErrInterrupt); got != 130 {
+		t.Fatalf("replExitCode(ErrInterrupt) = %d, want 130", got)
 	}
 }
 

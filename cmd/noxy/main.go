@@ -82,7 +82,9 @@ func main() {
 	args := flag.Args()
 
 	if len(args) < 1 {
-		startREPL(*showDisassembly)
+		if code := startREPL(*showDisassembly); code != 0 {
+			os.Exit(code)
+		}
 		return
 	}
 
@@ -157,8 +159,10 @@ func getDir(path string) string {
 // lineSource e de onde o REPL le cada linha: o editor de linha (tty POSIX,
 // com setas e historico) ou o bufio.Scanner (pipe, arquivo, Windows — onde o
 // proprio console edita a linha). ReadLine mostra o prompt e devolve a linha
-// sem terminador; io.EOF encerra o REPL e lineedit.ErrInterrupt (Ctrl-C)
-// descarta a entrada em andamento.
+// sem terminador; io.EOF encerra o REPL normalmente e lineedit.ErrInterrupt
+// (Ctrl-C) o encerra como um SIGINT encerraria — no Windows (console cooked)
+// e no Unix antes do editor, Ctrl-C no prompt matava o processo, e o editor
+// preserva esse contrato.
 type lineSource interface {
 	ReadLine(prompt string) (string, error)
 }
@@ -181,7 +185,10 @@ func (s *scannerSource) ReadLine(prompt string) (string, error) {
 	return s.scanner.Text(), nil
 }
 
-func startREPL(showDisasm bool) {
+// startREPL roda o REPL e devolve o codigo de saida do processo: 0 em `exit`
+// ou EOF (Ctrl-D), 130 (128+SIGINT) quando Ctrl-C encerrou — o mesmo que o
+// shell veria se o processo tivesse morrido pelo sinal.
+func startREPL(showDisasm bool) int {
 	fmt.Printf("Noxy REPL %s\n", version.Version)
 	fmt.Println("Type 'exit' to quit.")
 
@@ -203,11 +210,21 @@ func startREPL(showDisasm bool) {
 	} else {
 		src = &scannerSource{scanner: bufio.NewScanner(os.Stdin)}
 	}
-	runREPL(src, prompt, contPrompt, showDisasm)
+	return replExitCode(runREPL(src, prompt, contPrompt, showDisasm))
+}
+
+// replExitCode traduz o fim do loop em codigo de saida: Ctrl-C vira 130,
+// como um processo morto por SIGINT; o resto e saida normal.
+func replExitCode(err error) int {
+	if errors.Is(err, lineedit.ErrInterrupt) {
+		return 130
+	}
+	return 0
 }
 
 // runREPL e o loop ler-compilar-executar sobre a fonte de linhas dada.
-func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) {
+// Devolve lineedit.ErrInterrupt se Ctrl-C o encerrou e nil em `exit`/EOF.
+func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 	// Shared VM for persistence
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
 
@@ -241,10 +258,9 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) {
 		}
 		line, err := src.ReadLine(currentPrompt)
 		if errors.Is(err, lineedit.ErrInterrupt) {
-			// Ctrl-C: abandona o bloco em andamento e volta ao prompt
-			// principal, como no Python.
-			inputBuffer = ""
-			continue
+			// Ctrl-C encerra o REPL (o editor ja restaurou o tty e escreveu
+			// "^C"); o chamador sai com 130.
+			return err
 		}
 		if err != nil {
 			break
@@ -354,6 +370,7 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) {
 
 		inputBuffer = "" // Reset buffer after execution
 	}
+	return nil
 }
 
 func verify() {

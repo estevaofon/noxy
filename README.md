@@ -118,8 +118,8 @@ Multiline support!
 
 On Linux and macOS the REPL edits the line in place: ←/→ move the cursor,
 ↑/↓ walk the session history, Home/End, Ctrl-A/E/K/U/W/L behave as in
-readline, Ctrl-C discards the line (and the block being typed) and Ctrl-D
-exits. On Windows the console provides the same through its own line editing.
+readline; Ctrl-C quits the REPL (as it always did) and so does Ctrl-D or
+`exit`. On Windows the console provides the same through its own line editing.
 
 ## Quick Example
 

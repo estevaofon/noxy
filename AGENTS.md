@@ -298,8 +298,9 @@ fmt.Printf("IP: %d, Opcode: %s\n", frame.ip, opcode)
 ```
 
 Em tty POSIX (Linux/macOS/WSL) o REPL lê cada linha pelo editor de linha de
-`internal/lineedit` (setas, Home/End, histórico da sessão, Ctrl-C descarta a
-linha, Ctrl-D sai); a lógica é testável sem tty (`editor_test.go`) e os
+`internal/lineedit` (setas, Home/End, histórico da sessão; Ctrl-C encerra o
+REPL com 130, como o SIGINT de sempre; Ctrl-D/`exit` saem com 0); a lógica é
+testável sem tty (`editor_test.go`) e os
 testes de termios/pty rodam só no Linux (`terminal_linux_test.go`). Em pipe e
 no Windows (console cooked já edita a linha) o REPL usa `bufio.Scanner`, como
 sempre — o loop em si é `runREPL(src lineSource, ...)` em `cmd/noxy/main.go`.

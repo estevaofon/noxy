@@ -18,9 +18,10 @@ console em modo cooked já edita a linha e guarda histórico, nada muda.
   anterior, Ctrl-L limpa a tela, Tab insere 4 espaços. ↑/↓ (Ctrl-P/Ctrl-N)
   percorrem o histórico da sessão — só em memória; linha vazia e repetição
   imediata não entram — preservando a linha que estava sendo digitada ao
-  voltar. Ctrl-C descarta a linha **e o bloco multilinha em andamento** e
-  volta ao prompt `>>>`, com `^C` na tela, como no Python; Ctrl-D numa linha
-  vazia sai. Texto UTF-8 é editado por rune (uma coluna por rune; sem
+  voltar. Ctrl-C **encerra o REPL** (eco `^C`, código de saída 130 =
+  128+SIGINT), exatamente como o SIGINT encerrava antes e como no Windows —
+  para limpar a linha sem sair use Ctrl-U; Ctrl-D numa linha vazia (ou
+  `exit`) sai com 0. Texto UTF-8 é editado por rune (uma coluna por rune; sem
   tratamento de largura dupla) e linha mais larga que o terminal rola
   horizontalmente em vez de quebrar. O tty só fica em modo raw durante a
   leitura de UMA linha e volta ao modo anterior antes de cada execução —
