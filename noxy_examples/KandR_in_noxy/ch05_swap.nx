@@ -1,7 +1,7 @@
 // swap: troca os valores de duas variáveis do chamador
 func swap(px: ref int, py: ref int)
     let temp: int = px      // lê o valor apontado por px
-    *px = *py               // escreve em *px o valor apontado por py
+    *px = *py               // escreve o valor de *py em *px
     *py = temp
 end
 

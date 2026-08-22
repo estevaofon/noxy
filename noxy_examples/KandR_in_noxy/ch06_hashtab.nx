@@ -36,10 +36,11 @@ func install(name: string, defn: string) -> ref Nlist
     if np == null then              // não encontrado
         let hashval: int = hash(name)
         let novo: Nlist = Nlist(hashtab[hashval], name, defn)
-        hashtab[hashval] = ref novo // a entrada nova vai para a frente da cadeia
+        // a entrada nova vai para a frente da cadeia
+        hashtab[hashval] = ref novo
         return ref novo
     end
-    np.defn = defn                  // já existia: substitui a definição
+    np.defn = defn              // já existia: substitui
     return np
 end
 

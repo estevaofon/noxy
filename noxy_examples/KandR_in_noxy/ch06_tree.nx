@@ -9,16 +9,17 @@ struct Tnode                // o nó da árvore
     right: ref Tnode        // filho direito
 end
 
-// addtree: adiciona um nó com w em p ou abaixo dele; devolve a (sub)árvore
+// addtree: adiciona um nó com w em p ou abaixo dele;
+// devolve a (sub)árvore
 func addtree(p: ref Tnode, w: string) -> ref Tnode
-    if p == null then                   // chegou uma palavra nova
+    if p == null then           // chegou uma palavra nova
         let novo: Tnode = Tnode(w, 1, null, null)
-        return ref novo                 // a variável local vai para a heap
+        return ref novo         // a variável vai para a heap
     elif w == p.word then
-        p.count = p.count + 1           // palavra repetida
-    elif w < p.word then                // menor: vai para a subárvore esquerda
+        p.count = p.count + 1   // palavra repetida
+    elif w < p.word then        // menor: vai para a esquerda
         p.left = addtree(p.left, w)
-    else                                // maior: vai para a direita
+    else                        // maior: vai para a direita
         p.right = addtree(p.right, w)
     end
     return p

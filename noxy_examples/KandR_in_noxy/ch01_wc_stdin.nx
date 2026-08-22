@@ -13,7 +13,8 @@ func main()
     let line: io.IOResult = io.read_line(stdin)
     while line.ok do
         nl = nl + 1
-        nc = nc + length(line.data) + 1   // +1 pelo \n que read_line removeu
+        // +1 pelo \n que read_line removeu
+        nc = nc + length(line.data) + 1
         state = OUT
         for c in line.data do
             if c == " " || c == "\t" then
