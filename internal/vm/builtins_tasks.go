@@ -51,7 +51,7 @@ func (vm *VM) defineTaskBuiltins() {
 			if args[1].Type != value.VAL_INT {
 				return value.NewNull(), fmt.Errorf("task_await timeout must be an integer")
 			}
-			timeoutValue := args[1].AsInt
+			timeoutValue := args[1].Int()
 			timeout = &timeoutValue
 		}
 

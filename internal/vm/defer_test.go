@@ -68,7 +68,7 @@ func TestInvokePreparedCallDoesNotCopyArgumentsAgainAndRestoresStack(t *testing.
 	if received.Obj != prepared.Arguments[0].Obj {
 		t.Fatal("prepared dispatch copied argument a second time")
 	}
-	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
+	if machine.stackTop != base || machine.stack[0].Int() != 42 {
 		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
 	}
 	for i := base; i < base+2; i++ {
@@ -95,7 +95,7 @@ func TestInvokePreparedConstructorClearsAllTemporarySlots(t *testing.T) {
 	if err := machine.invokePreparedCall(prepared); err != nil {
 		t.Fatalf("invoke prepared constructor: %v", err)
 	}
-	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
+	if machine.stackTop != base || machine.stack[0].Int() != 42 {
 		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
 	}
 	for i := base; i < base+3; i++ {
@@ -122,7 +122,7 @@ func TestInvokePreparedClosureClearsAllTemporarySlots(t *testing.T) {
 	if err := machine.invokePreparedCall(prepared); err != nil {
 		t.Fatalf("invoke prepared closure: %v", err)
 	}
-	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
+	if machine.stackTop != base || machine.stack[0].Int() != 42 {
 		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
 	}
 	for i := base; i < base+2; i++ {
@@ -149,7 +149,7 @@ func TestInvokePreparedCallRestoresStackAfterNativeFailure(t *testing.T) {
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("error=%v, want wrapped cleanup failure", err)
 	}
-	if machine.stackTop != base || machine.stack[0].AsInt != 42 {
+	if machine.stackTop != base || machine.stack[0].Int() != 42 {
 		t.Fatalf("stackTop=%d stack[0]=%v, want restored base %d", machine.stackTop, machine.stack[0], base)
 	}
 	for i := base; i < base+2; i++ {

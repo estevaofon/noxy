@@ -24,7 +24,7 @@ func codesOf(t *testing.T, machine *VM, input value.Value) []int64 {
 		if element.Type != value.VAL_INT {
 			t.Fatalf("element %d = %#v, want int", i, element)
 		}
-		out = append(out, element.AsInt)
+		out = append(out, element.Int())
 	}
 	return out
 }
@@ -87,7 +87,7 @@ else
     test_report(same)
 end`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("codes disagrees with char_at/ord: %#v", captured)
 	}
 }

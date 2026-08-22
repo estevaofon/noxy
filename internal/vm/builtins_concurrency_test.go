@@ -260,7 +260,7 @@ func TestSpawnRunsDeferredCleanup(t *testing.T) {
 			machine := New()
 			completed := make(chan int64, 1)
 			machine.DefineNative("spawned_record", func(args []value.Value) value.Value {
-				completed <- args[0].AsInt
+				completed <- args[0].Int()
 				return value.NewNull()
 			})
 

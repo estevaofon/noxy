@@ -16,7 +16,7 @@ func TestModuleCompileWarningsGoToStderr(t *testing.T) {
 	stderr := captureConcurrencyStderr(t, func() {
 		stdout = captureConcurrencyStdout(t, func() {
 			got := captureVMSourceAtRoot(t, root, "use avisos\ntest_report(1)\n")
-			if got.AsInt != 1 {
+			if got.Int() != 1 {
 				t.Errorf("programa nao rodou ate o fim: %v", got)
 			}
 		})

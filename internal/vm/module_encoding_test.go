@@ -59,7 +59,7 @@ func TestModuleSourceWithAccentedCharactersLoadsNormally(t *testing.T) {
 		t.Fatalf("accented module export=%T, want *value.ObjMap", imported.Obj)
 	}
 	answer, ok := exports.Get("answer")
-	if !ok || answer.Type != value.VAL_INT || answer.AsInt != 42 {
+	if !ok || answer.Type != value.VAL_INT || answer.Int() != 42 {
 		t.Fatalf("accented module answer=%v, want int 42", answer)
 	}
 	greeting, ok := exports.Get("greeting")

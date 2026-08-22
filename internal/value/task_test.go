@@ -16,7 +16,7 @@ func TestTaskPublishesFirstOutcomeToEveryWaiter(t *testing.T) {
 	task.Complete(TaskOutcome{Value: NewInt(99)})
 	for range 4 {
 		got := <-seen
-		if got.Type != VAL_INT || got.AsInt != 42 {
+		if got.Type != VAL_INT || got.Int() != 42 {
 			t.Fatalf("outcome = %v, want 42", got)
 		}
 	}

@@ -26,7 +26,7 @@ func TestLinuxNetworkPollDataAndReadHangupCoexistWithoutConsumption(t *testing.T
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 
-	clientHandle := int(builtinMapField(t, client, "fd").AsInt)
+	clientHandle := int(builtinMapField(t, client, "fd").Int())
 	clientResource, exists := machine.shared.Sockets.get(clientHandle)
 	if !exists {
 		t.Fatalf("client descriptor %d is not registered", clientHandle)
@@ -43,7 +43,7 @@ func TestLinuxNetworkPollDataAndReadHangupCoexistWithoutConsumption(t *testing.T
 		t.Fatal(err)
 	}
 
-	serverHandle := int(builtinMapField(t, server, "fd").AsInt)
+	serverHandle := int(builtinMapField(t, server, "fd").Int())
 	serverResource, exists := machine.shared.Sockets.get(serverHandle)
 	if !exists {
 		t.Fatalf("server descriptor %d is not registered", serverHandle)
@@ -97,7 +97,7 @@ func TestNetworkPollIntegrationLinuxResetCopiesTerminalEventAndPreservesPendingE
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 
-	clientHandle := int(builtinMapField(t, client, "fd").AsInt)
+	clientHandle := int(builtinMapField(t, client, "fd").Int())
 	clientResource, exists := machine.shared.Sockets.get(clientHandle)
 	if !exists {
 		t.Fatalf("client descriptor %d is not registered", clientHandle)

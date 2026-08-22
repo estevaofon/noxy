@@ -14,7 +14,7 @@ func captureParserInt(t *testing.T, body string) int64 {
 	if captured.Type != value.VAL_INT {
 		t.Fatalf("test_report value = %#v, want int", captured)
 	}
-	return captured.AsInt
+	return captured.Int()
 }
 
 func captureParserString(t *testing.T, body string) string {
@@ -32,7 +32,7 @@ func captureParserBool(t *testing.T, body string) bool {
 	if captured.Type != value.VAL_BOOL {
 		t.Fatalf("test_report value = %#v, want bool", captured)
 	}
-	return captured.AsBool
+	return captured.Bool()
 }
 
 func TestFindHeaderEndFromResumesScan(t *testing.T) {

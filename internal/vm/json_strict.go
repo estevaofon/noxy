@@ -33,14 +33,14 @@ func (t *strictJSONTraversal) convert(input value.Value) (interface{}, error) {
 	case value.VAL_NULL:
 		return nil, nil
 	case value.VAL_BOOL:
-		return input.AsBool, nil
+		return input.Bool(), nil
 	case value.VAL_INT:
-		return input.AsInt, nil
+		return input.Int(), nil
 	case value.VAL_FLOAT:
-		if math.IsNaN(input.AsFloat) || math.IsInf(input.AsFloat, 0) {
+		if math.IsNaN(input.Float()) || math.IsInf(input.Float(), 0) {
 			return nil, errJSONNonFinite
 		}
-		return input.AsFloat, nil
+		return input.Float(), nil
 	case value.VAL_OBJ:
 		switch object := input.Obj.(type) {
 		case string:

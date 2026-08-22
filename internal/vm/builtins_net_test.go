@@ -91,7 +91,7 @@ func recordDeferredListenerResource(machine *VM, captured **ListenerResource) {
 		if !ok {
 			return value.NewNull()
 		}
-		*captured, _ = machine.shared.Listeners.get(int(handle.AsInt))
+		*captured, _ = machine.shared.Listeners.get(int(handle.Int()))
 		return value.NewNull()
 	})
 }
@@ -117,7 +117,7 @@ func requireDeferredListenerClosed(t *testing.T, machine *VM, resource *Listener
 
 func requireSocketResource(t *testing.T, machine *VM, socket value.Value) (int, *SocketResource) {
 	t.Helper()
-	handle := int(builtinMapField(t, socket, "fd").AsInt)
+	handle := int(builtinMapField(t, socket, "fd").Int())
 	resource, exists := machine.shared.Sockets.get(handle)
 	if !exists {
 		t.Fatalf("socket descriptor %d is not registered", handle)
@@ -265,7 +265,7 @@ func setupAcceptedLoopback(t *testing.T, machine *VM) (value.Value, value.Value,
 	t.Helper()
 	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
 	assertBuiltinValue(t, builtinMapField(t, listener, "open"), value.NewBool(true))
-	listenerFD := int(builtinMapField(t, listener, "fd").AsInt)
+	listenerFD := int(builtinMapField(t, listener, "fd").Int())
 	listenerResource, exists := machine.shared.Listeners.get(listenerFD)
 	if !exists {
 		t.Fatalf("listener descriptor %d is not registered", listenerFD)
@@ -299,7 +299,7 @@ func TestNetListenZeroReturnsAssignedPort(t *testing.T) {
 	cleanupNetworkResources(t, machine)
 	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
 	assertBuiltinValue(t, builtinMapField(t, listener, "open"), value.NewBool(true))
-	assignedPort := builtinMapField(t, listener, "port").AsInt
+	assignedPort := builtinMapField(t, listener, "port").Int()
 	if assignedPort <= 0 {
 		t.Fatalf("net_listen port=%d, want OS-assigned positive port", assignedPort)
 	}
@@ -364,7 +364,7 @@ func TestNetSelectDoesNotAcceptPendingConnection(t *testing.T) {
 	machine := New()
 	cleanupNetworkResources(t, machine)
 	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
-	listenerFD := int(builtinMapField(t, listener, "fd").AsInt)
+	listenerFD := int(builtinMapField(t, listener, "fd").Int())
 	listenerResource, exists := machine.shared.Listeners.get(listenerFD)
 	if !exists {
 		t.Fatalf("listener descriptor %d is not registered", listenerFD)
@@ -446,7 +446,7 @@ func TestNetworkBuiltinsLoopbackLifecycle(t *testing.T) {
 
 	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
 	assertBuiltinValue(t, builtinMapField(t, listener, "open"), value.NewBool(true))
-	listenerFD := int(builtinMapField(t, listener, "fd").AsInt)
+	listenerFD := int(builtinMapField(t, listener, "fd").Int())
 	listenerResource, exists := machine.shared.Listeners.get(listenerFD)
 	if !exists {
 		t.Fatalf("listener descriptor %d is not registered", listenerFD)

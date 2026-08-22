@@ -118,7 +118,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		size := 0
 		if len(args) > 0 {
 			if args[0].Type == value.VAL_INT {
-				size = int(args[0].AsInt)
+				size = int(args[0].Int())
 			}
 		}
 		return value.NewChannel(size)
@@ -202,7 +202,7 @@ func (vm *VM) defineConcurrencyBuiltins() {
 		}
 		delta := int(0)
 		if args[1].Type == value.VAL_INT {
-			delta = int(args[1].AsInt)
+			delta = int(args[1].Int())
 		}
 		if delta == 0 {
 			return value.NewNull()

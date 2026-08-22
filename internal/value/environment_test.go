@@ -6,7 +6,7 @@ func TestGlobalEnvironmentResolvesAndShadowsParent(t *testing.T) {
 	root := NewGlobalEnvironment(nil)
 	root.SetLocal("value", NewInt(1))
 	child := NewGlobalEnvironment(root)
-	if got, _ := child.Resolve("value"); got.AsInt != 1 {
+	if got, _ := child.Resolve("value"); got.Int() != 1 {
 		t.Fatalf("inherited value=%v", got)
 	}
 	owner, ok := child.ResolveOwner("value")
@@ -27,7 +27,7 @@ func TestGlobalEnvironmentExportsAreLiveAndLocalOnly(t *testing.T) {
 	module.SetLocal("answer", NewInt(41))
 	exports := module.ExportMap().Obj.(*ObjMap)
 	module.SetLocal("answer", NewInt(42))
-	if got, _ := exports.Get("answer"); got.AsInt != 42 {
+	if got, _ := exports.Get("answer"); got.Int() != 42 {
 		t.Fatalf("live export=%v", got)
 	}
 	if _, inherited := exports.Get("builtin"); inherited {
@@ -40,7 +40,7 @@ func TestGlobalEnvironmentLocalOperationsAndSnapshots(t *testing.T) {
 		"seed": NewInt(1),
 	}, nil)
 
-	if got, found := environment.GetLocal("seed"); !found || got.AsInt != 1 {
+	if got, found := environment.GetLocal("seed"); !found || got.Int() != 1 {
 		t.Fatalf("seed=(%v,%t)", got, found)
 	}
 	if environment.DefineLocalIfAbsent("seed", NewInt(2)) {
@@ -52,7 +52,7 @@ func TestGlobalEnvironmentLocalOperationsAndSnapshots(t *testing.T) {
 
 	snapshot := environment.LocalSnapshot()
 	snapshot["seed"] = NewInt(0)
-	if got, _ := environment.GetLocal("seed"); got.AsInt != 1 {
+	if got, _ := environment.GetLocal("seed"); got.Int() != 1 {
 		t.Fatal("local snapshot mutated environment")
 	}
 
@@ -60,7 +60,7 @@ func TestGlobalEnvironmentLocalOperationsAndSnapshots(t *testing.T) {
 	if _, found := environment.GetLocal("seed"); found {
 		t.Fatal("replace retained old local binding")
 	}
-	if got, found := environment.GetLocal("replacement"); !found || got.AsInt != 4 {
+	if got, found := environment.GetLocal("replacement"); !found || got.Int() != 4 {
 		t.Fatalf("replacement=(%v,%t)", got, found)
 	}
 }

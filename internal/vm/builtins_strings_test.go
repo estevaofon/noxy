@@ -167,7 +167,7 @@ func TestIndexOfReturnsCharacterIndex(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := callBuiltin(t, machine, "strings_index_of", value.NewString(test.subject), value.NewString(test.needle))
-			if got.Type != value.VAL_INT || got.AsInt != test.want {
+			if got.Type != value.VAL_INT || got.Int() != test.want {
 				t.Fatalf("strings_index_of(%q, %q) = %#v, want %d", test.subject, test.needle, got, test.want)
 			}
 		})
@@ -250,7 +250,7 @@ func TestStringNativesRejectBytes(t *testing.T) {
 func TestStringNativesStillAcceptStrings(t *testing.T) {
 	machine := New()
 	got := callBuiltin(t, machine, "strings_contains", value.NewString("hello"), value.NewString("ell"))
-	if got.Type != value.VAL_BOOL || !got.AsBool {
+	if got.Type != value.VAL_BOOL || !got.Bool() {
 		t.Fatalf("strings_contains = %#v, want true", got)
 	}
 }
@@ -260,7 +260,7 @@ func TestSplitRejectsBytesButAcceptsItsStructArgument(t *testing.T) {
 let parts: SplitResult = split(to_str(b"a,b"), ",")
 test_report(parts.count)`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_INT || captured.AsInt != 2 {
+	if captured.Type != value.VAL_INT || captured.Int() != 2 {
 		t.Fatalf("split after explicit to_str = %#v, want 2", captured)
 	}
 }
@@ -280,7 +280,7 @@ func TestOrdReturnsCodePoint(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := callBuiltin(t, machine, "ord", value.NewString(test.input))
-			if got.Type != value.VAL_INT || got.AsInt != test.want {
+			if got.Type != value.VAL_INT || got.Int() != test.want {
 				t.Fatalf("ord(%q) = %#v, want %d", test.input, got, test.want)
 			}
 		})
@@ -292,7 +292,7 @@ func TestOrdRoundTripsWithFromCharCode(t *testing.T) {
 	for _, code := range []int64{65, 233, 20013, 128512} {
 		character := callBuiltin(t, machine, "strings_from_char_code", value.NewInt(code))
 		back := callBuiltin(t, machine, "ord", character)
-		if back.Type != value.VAL_INT || back.AsInt != code {
+		if back.Type != value.VAL_INT || back.Int() != code {
 			t.Fatalf("ord(from_char_code(%d)) = %#v, want %d", code, back, code)
 		}
 	}
@@ -320,7 +320,7 @@ func TestCharCodeIsExportedByStrings(t *testing.T) {
 	source := `use strings select *
 test_report(char_code("é") == 233 && from_char_code(233) == "é")`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("char_code round trip = %#v, want true", captured)
 	}
 }
@@ -343,7 +343,7 @@ func TestIsValidUTF8(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := callBuiltin(t, machine, "strings_is_valid_utf8", value.NewBytes(test.input))
-			if got.Type != value.VAL_BOOL || got.AsBool != test.want {
+			if got.Type != value.VAL_BOOL || got.Bool() != test.want {
 				t.Fatalf("strings_is_valid_utf8(%q) = %#v, want %v", test.input, got, test.want)
 			}
 		})
@@ -400,7 +400,7 @@ func TestIsValidUTF8AcceptsBytesFromNoxy(t *testing.T) {
 	source := `use strings select *
 test_report(is_valid_utf8(b"café") && !is_valid_utf8(to_bytes([104, 255, 105])))`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("is_valid_utf8 through the module = %#v, want true", captured)
 	}
 }

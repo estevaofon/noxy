@@ -12,7 +12,7 @@ func TestLegacyConstantReaders(t *testing.T) {
 	machine.chunk.Constants = []value.Value{value.NewInt(7), value.NewInt(42)}
 	machine.chunk.Code = []byte{0, 1, 0, 1}
 	machine.ip = 0
-	if got := machine.readConstant(); got.AsInt != 7 {
+	if got := machine.readConstant(); got.Int() != 7 {
 		t.Fatalf("readConstant=%v", got)
 	}
 	machine.ip = 2

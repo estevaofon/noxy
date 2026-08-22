@@ -667,7 +667,7 @@ func TestModuleVariableAssignmentViaNamespaceIsCompileError(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 	reported, err := runModuleProgram(t, root, "use calc\ncalc.push()\ntest_report(calc.sp)\n")
-	if err != nil || reported.AsInt != 1 {
+	if err != nil || reported.Int() != 1 {
 		t.Fatalf("live read via namespace: %v / %v", reported, err)
 	}
 }
@@ -687,7 +687,7 @@ let calc: P = P(1)
 calc.x = 2
 test_report(calc.x)
 `)
-	if err != nil || reported.AsInt != 2 {
+	if err != nil || reported.Int() != 2 {
 		t.Fatalf("global let shadowing namespace: %v / %v", reported, err)
 	}
 }

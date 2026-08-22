@@ -229,7 +229,7 @@ func TestTypedNativeShallowCopiesOrdinaryComposite(t *testing.T) {
 	if !ok {
 		t.Fatal("missing values global")
 	}
-	if got := global.Obj.(*value.ObjArray).Elements[0].AsInt; got != 1 {
+	if got := global.Obj.(*value.ObjArray).Elements[0].Int(); got != 1 {
 		t.Fatalf("caller value=%d, want 1", got)
 	}
 }
@@ -280,12 +280,12 @@ func TestJSONLoadsUsesModuleFrameGlobals(t *testing.T) {
 	}
 	jsonLoads := jsonLoadsValue.Obj.(*value.ObjNative)
 	result, err := jsonLoads.Invoke(machine, []value.Value{value.NewString(`{"answer":42}`), target})
-	if err != nil || result.Type != value.VAL_BOOL || !result.AsBool {
+	if err != nil || result.Type != value.VAL_BOOL || !result.Bool() {
 		t.Fatal("module-frame global target was rejected")
 	}
 	moduleTarget, _ = moduleEnvironment.GetLocal("target")
 	got := requireTestMapValue(t, moduleTarget.Obj.(*value.ObjMap), "answer")
-	if got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("module target=%v, want answer=42", moduleTarget)
 	}
 	if _, leaked := machine.GetGlobal("target"); leaked {
@@ -409,7 +409,7 @@ func TestPopulateTargetSupportsCompatibleAndNullScalarReplacement(t *testing.T) 
 		if !populateTarget(New(), target, float64(42)) {
 			t.Fatal("null target rejected dynamic scalar replacement")
 		}
-		if stored.Type != value.VAL_INT || stored.AsInt != 42 {
+		if stored.Type != value.VAL_INT || stored.Int() != 42 {
 			t.Fatalf("stored=%v, want int 42", stored)
 		}
 	})
@@ -467,7 +467,7 @@ if ok then
 else
     test_report(0)
 end`)
-		if got.Type != value.VAL_INT || got.AsInt != int64(9223372036854775807) {
+		if got.Type != value.VAL_INT || got.Int() != int64(9223372036854775807) {
 			t.Fatalf("got=%v, want MaxInt64", got)
 		}
 	})
@@ -766,11 +766,11 @@ func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {
 		t.Fatal("compatible composite fields were rejected")
 	}
 	items := fields["items"].Obj.(*value.ObjArray)
-	if len(items.Elements) != 1 || items.Elements[0].Type != value.VAL_INT || items.Elements[0].AsInt != 42 {
+	if len(items.Elements) != 1 || items.Elements[0].Type != value.VAL_INT || items.Elements[0].Int() != 42 {
 		t.Fatalf("items=%v, want [42]", fields["items"])
 	}
 	metadata := fields["metadata"].Obj.(*value.ObjMap)
-	if got := requireTestMapValue(t, metadata, "answer"); got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got := requireTestMapValue(t, metadata, "answer"); got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("metadata=%v, want answer=42", fields["metadata"])
 	}
 }
@@ -2315,7 +2315,7 @@ test_report(length(sliced) * 10 + length(generated))`
 	machine := New()
 	results := make([]int64, 0, 2)
 	machine.DefineNative("test_report", func(args []value.Value) value.Value {
-		results = append(results, args[0].AsInt)
+		results = append(results, args[0].Int())
 		return value.NewNull()
 	})
 	for i := 0; i < 2; i++ {

@@ -206,7 +206,7 @@ test_report(r.ok)`, port)
 	if interpretErr != nil {
 		t.Fatal(interpretErr)
 	}
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("client request = %#v, want ok", captured)
 	}
 	if len(printed) != 0 {

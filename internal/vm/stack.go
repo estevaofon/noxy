@@ -11,13 +11,13 @@ func valuesEqual(a, b value.Value) bool {
 	if a.Type == b.Type {
 		switch a.Type {
 		case value.VAL_BOOL:
-			return a.AsBool == b.AsBool
+			return a.Bool() == b.Bool()
 		case value.VAL_NULL:
 			return true
 		case value.VAL_INT:
-			return a.AsInt == b.AsInt
+			return a.Int() == b.Int()
 		case value.VAL_FLOAT:
-			return a.AsFloat == b.AsFloat
+			return a.Float() == b.Float()
 		case value.VAL_OBJ:
 			// CoW: compostos comparam estruturalmente (identidade de ponteiro
 			// ficou instável sob copy-on-write). Demais objetos (strings via
@@ -115,10 +115,10 @@ func valuesEqual(a, b value.Value) bool {
 
 	// Mixed types
 	if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-		return float64(a.AsInt) == b.AsFloat
+		return float64(a.Int()) == b.Float()
 	}
 	if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-		return a.AsFloat == float64(b.AsInt)
+		return a.Float() == float64(b.Int())
 	}
 
 	return false

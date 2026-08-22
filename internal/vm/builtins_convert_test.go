@@ -41,11 +41,11 @@ func TestConvertToIntResultAccepts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ok := convertResultField(t, machine, "convert_to_int_result", test.input, "ok")
-			if ok.Type != value.VAL_BOOL || !ok.AsBool {
+			if ok.Type != value.VAL_BOOL || !ok.Bool() {
 				t.Fatalf("ok = %#v, want true", ok)
 			}
 			got := convertResultField(t, machine, "convert_to_int_result", test.input, "value")
-			if got.Type != value.VAL_INT || got.AsInt != test.want {
+			if got.Type != value.VAL_INT || got.Int() != test.want {
 				t.Fatalf("value = %#v, want %d", got, test.want)
 			}
 			reason := convertResultField(t, machine, "convert_to_int_result", test.input, "error")
@@ -81,11 +81,11 @@ func TestConvertToIntResultRejects(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ok := convertResultField(t, machine, "convert_to_int_result", test.input, "ok")
-			if ok.Type != value.VAL_BOOL || ok.AsBool {
+			if ok.Type != value.VAL_BOOL || ok.Bool() {
 				t.Fatalf("ok = %#v, want false", ok)
 			}
 			got := convertResultField(t, machine, "convert_to_int_result", test.input, "value")
-			if got.Type != value.VAL_INT || got.AsInt != 0 {
+			if got.Type != value.VAL_INT || got.Int() != 0 {
 				t.Fatalf("value = %#v, want 0", got)
 			}
 			reason := convertResultField(t, machine, "convert_to_int_result", test.input, "error")
@@ -116,7 +116,7 @@ func TestConvertToFloatResultAccepts(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ok := convertResultField(t, machine, "convert_to_float_result", test.input, "ok")
-			if ok.Type != value.VAL_BOOL || !ok.AsBool {
+			if ok.Type != value.VAL_BOOL || !ok.Bool() {
 				t.Fatalf("ok = %#v, want true", ok)
 			}
 			got := convertResultField(t, machine, "convert_to_float_result", test.input, "value")
@@ -124,13 +124,13 @@ func TestConvertToFloatResultAccepts(t *testing.T) {
 				t.Fatalf("value = %#v, want float", got)
 			}
 			if math.IsNaN(test.want) {
-				if !math.IsNaN(got.AsFloat) {
-					t.Fatalf("value = %v, want NaN", got.AsFloat)
+				if !math.IsNaN(got.Float()) {
+					t.Fatalf("value = %v, want NaN", got.Float())
 				}
 				return
 			}
-			if got.AsFloat != test.want {
-				t.Fatalf("value = %v, want %v", got.AsFloat, test.want)
+			if got.Float() != test.want {
+				t.Fatalf("value = %v, want %v", got.Float(), test.want)
 			}
 		})
 	}
@@ -141,7 +141,7 @@ func TestConvertToFloatResultAcceptsSpecialStrings(t *testing.T) {
 	for _, literal := range []string{"NaN", "Inf", "+Inf", "-Inf"} {
 		t.Run(literal, func(t *testing.T) {
 			ok := convertResultField(t, machine, "convert_to_float_result", value.NewString(literal), "ok")
-			if ok.Type != value.VAL_BOOL || !ok.AsBool {
+			if ok.Type != value.VAL_BOOL || !ok.Bool() {
 				t.Fatalf("ok = %#v, want true", ok)
 			}
 		})
@@ -163,7 +163,7 @@ func TestConvertToFloatResultRejects(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ok := convertResultField(t, machine, "convert_to_float_result", test.input, "ok")
-			if ok.Type != value.VAL_BOOL || ok.AsBool {
+			if ok.Type != value.VAL_BOOL || ok.Bool() {
 				t.Fatalf("ok = %#v, want false", ok)
 			}
 		})
@@ -192,7 +192,7 @@ func TestConvertResultNeverFailsOnBadArity(t *testing.T) {
 				t.Fatalf("%s returned %#v, want map", native, result)
 			}
 			okField, _ := mapping.Get("ok")
-			if okField.Type != value.VAL_BOOL || okField.AsBool {
+			if okField.Type != value.VAL_BOOL || okField.Bool() {
 				t.Fatalf("ok = %#v, want false", okField)
 			}
 		})
@@ -209,7 +209,7 @@ else
     test_report(false)
 end`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("convert module wrappers = %#v, want true", captured)
 	}
 }
@@ -219,7 +219,7 @@ func TestParseUrlRejectsUnparsablePort(t *testing.T) {
 let u: HttpUrl = parse_url("http://example.com:notaport/path")
 test_report(u.valid)`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_BOOL || captured.AsBool {
+	if captured.Type != value.VAL_BOOL || captured.Bool() {
 		t.Fatalf("parse_url valid = %#v, want false for an unparsable port", captured)
 	}
 }
@@ -233,7 +233,7 @@ else
     test_report(false)
 end`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("parse_url on a valid port = %#v, want true", captured)
 	}
 }
@@ -244,7 +244,7 @@ let raw: bytes = to_bytes("HTTP/1.1 NOPE Weird\r\nHost: a\r\n\r\n")
 let r: HttpResponse = parse_response(raw, length(raw))
 test_report(r.status_code)`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_INT || captured.AsInt != 0 {
+	if captured.Type != value.VAL_INT || captured.Int() != 0 {
 		t.Fatalf("parse_response status_code = %#v, want 0", captured)
 	}
 }
@@ -299,7 +299,7 @@ func TestToIntConvertsAcceptedInput(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := callBuiltin(t, machine, "to_int", test.input)
-			if got.Type != value.VAL_INT || got.AsInt != test.want {
+			if got.Type != value.VAL_INT || got.Int() != test.want {
 				t.Fatalf("to_int = %#v, want %d", got, test.want)
 			}
 		})

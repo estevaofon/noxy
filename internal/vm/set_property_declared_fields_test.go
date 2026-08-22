@@ -32,7 +32,7 @@ func TestSetPropertyThroughAnyRejectsUndeclaredField(t *testing.T) {
 func TestSetPropertyThroughAnyStillWritesDeclaredFields(t *testing.T) {
 	got := captureVMSource(t, dynamicBoundaryPrelude+"let p: any = Point(1, 2)\np.x = 9\nlet q: Point = Point(3, 4)\nlet r: ref Point = ref q\nlet a: any = r\na.y = 8\ntest_report([p.x, a.y])\n")
 	cells := semArray(t, got)
-	if len(cells) != 2 || cells[0].AsInt != 9 || cells[1].AsInt != 8 {
+	if len(cells) != 2 || cells[0].Int() != 9 || cells[1].Int() != 8 {
 		t.Fatalf("campos declarados devem continuar escrevendo: %v", got)
 	}
 }

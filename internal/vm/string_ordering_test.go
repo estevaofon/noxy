@@ -36,8 +36,8 @@ test_report([
 		t.Fatalf("esperava %d resultados, vieram %d", len(want), len(arr.Elements))
 	}
 	for i, expected := range want {
-		if arr.Elements[i].AsBool != expected {
-			t.Errorf("comparacao %d: esperava %v, veio %v", i, expected, arr.Elements[i].AsBool)
+		if arr.Elements[i].Bool() != expected {
+			t.Errorf("comparacao %d: esperava %v, veio %v", i, expected, arr.Elements[i].Bool())
 		}
 	}
 }
@@ -50,7 +50,7 @@ func TestStringOrderingDereferencesRefOperands(t *testing.T) {
 let s: string = "a"
 let r: ref string = ref s
 test_report(r < "b")`)
-	if !got.AsBool {
+	if !got.Bool() {
 		t.Fatal("ref string < string deveria comparar o valor apontado")
 	}
 }
@@ -61,7 +61,7 @@ func TestStringOrderingThroughAnyBoundary(t *testing.T) {
 	got := captureVMSource(t, `
 let a: any = "abc"
 test_report(a < "abd")`)
-	if !got.AsBool {
+	if !got.Bool() {
 		t.Fatal("any carregando string deveria ordenar lexicograficamente")
 	}
 }

@@ -42,7 +42,7 @@ func assertIntRows(t *testing.T, got value.Value, want [][]int64) {
 			t.Fatalf("linha %d: %s, want %v", i, row.String(), want[i])
 		}
 		for j, cell := range cells {
-			if cell.Type != value.VAL_INT || cell.AsInt != want[i][j] {
+			if cell.Type != value.VAL_INT || cell.Int() != want[i][j] {
 				t.Fatalf("linha %d: %s, want %v", i, row.String(), want[i])
 			}
 		}

@@ -29,7 +29,7 @@ func TestIncLocalInt(t *testing.T) {
 		t.Fatalf("vm error: %v", err)
 	}
 	got := machine.stack[1]
-	if got.Type != value.VAL_INT || got.AsInt != 7 {
+	if got.Type != value.VAL_INT || got.Int() != 7 {
 		t.Fatalf("esperado slot=7, obtido %s", got.String())
 	}
 }
@@ -50,7 +50,7 @@ func count() -> int
 end
 test_report(count())
 `)
-	if result.Type != value.VAL_INT || result.AsInt != 10080 {
+	if result.Type != value.VAL_INT || result.Int() != 10080 {
 		t.Fatalf("esperado 10080 (i=10, downs=80), obtido %s", result.String())
 	}
 }
@@ -78,7 +78,7 @@ func make() -> int
 end
 test_report(make())
 `)
-	if result.Type != value.VAL_INT || result.AsInt != 7 {
+	if result.Type != value.VAL_INT || result.Int() != 7 {
 		t.Fatalf("esperado 7 (closure deve ver escrita pos-captura via fusao), obtido %s", result.String())
 	}
 }

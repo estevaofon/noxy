@@ -108,7 +108,7 @@ func TestZerosWithRuntimeSizeBuildsZeroFilledArray(t *testing.T) {
 		t.Fatalf("zeros(3) = %s, want 3 elementos", got.String())
 	}
 	for i, cell := range cells {
-		if cell.Type != value.VAL_INT || cell.AsInt != 0 {
+		if cell.Type != value.VAL_INT || cell.Int() != 0 {
 			t.Fatalf("zeros(3)[%d] = %s, want 0", i, cell.String())
 		}
 	}

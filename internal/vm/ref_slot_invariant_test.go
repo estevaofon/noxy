@@ -39,7 +39,7 @@ func newCorruptingVM(t *testing.T) *VM {
 	})
 	machine.DefineNative("corrupt_ref_index", func(args []value.Value) value.Value {
 		array := args[0].Obj.(*value.ObjArray)
-		array.Elements[int(args[1].AsInt)] = args[2]
+		array.Elements[int(args[1].Int())] = args[2]
 		return value.NewNull()
 	})
 	machine.DefineNative("corrupt_ref_map", func(args []value.Value) value.Value {

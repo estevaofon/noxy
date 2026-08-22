@@ -16,7 +16,7 @@ func (vm *VM) defineCryptoBuiltins() {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
-		n := int(args[0].AsInt)
+		n := int(args[0].Int())
 		if n <= 0 {
 			return value.NewNull()
 		}
@@ -42,8 +42,8 @@ func (vm *VM) defineCryptoBuiltins() {
 		} else {
 			salt = []byte(args[1].String())
 		}
-		iteracoes := int(args[2].AsInt)
-		tamanho := int(args[3].AsInt)
+		iteracoes := int(args[2].Int())
+		tamanho := int(args[3].Int())
 
 		if iteracoes <= 0 || tamanho <= 0 {
 			return value.NewNull()

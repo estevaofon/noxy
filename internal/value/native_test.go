@@ -13,7 +13,7 @@ func TestObjNativeInvokeSupportsLegacyAndContextualHandlers(t *testing.T) {
 	ctx := &testNativeContext{}
 	legacy := NewNative("legacy", func(args []Value) Value { return args[0] })
 	got, err := legacy.Obj.(*ObjNative).Invoke(ctx, []Value{NewInt(7)})
-	if err != nil || got.AsInt != 7 {
+	if err != nil || got.Int() != 7 {
 		t.Fatalf("legacy invoke=(%v, %v), want (7, nil)", got, err)
 	}
 
@@ -24,7 +24,7 @@ func TestObjNativeInvokeSupportsLegacyAndContextualHandlers(t *testing.T) {
 		return args[0], nil
 	})
 	got, err = contextual.Obj.(*ObjNative).Invoke(ctx, []Value{NewInt(9)})
-	if err != nil || got.AsInt != 9 {
+	if err != nil || got.Int() != 9 {
 		t.Fatalf("contextual invoke=(%v, %v), want (9, nil)", got, err)
 	}
 }

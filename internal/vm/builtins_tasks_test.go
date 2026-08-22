@@ -378,7 +378,7 @@ func TestSpawnTaskPublishesResultAfterDeferredCleanup(t *testing.T) {
 	machine := New()
 	cleanup := make(chan int64, 1)
 	machine.DefineNative("task_cleanup", func(args []value.Value) value.Value {
-		cleanup <- args[0].AsInt
+		cleanup <- args[0].Int()
 		return value.NewNull()
 	})
 
