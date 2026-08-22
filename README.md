@@ -1,4 +1,4 @@
-[![noxy 0.14.0](https://img.shields.io/badge/noxy-0.14.0-blue)](CHANGELOG.md)
+[![noxy 0.14.1](https://img.shields.io/badge/noxy-0.14.1-blue)](CHANGELOG.md)
 
 # Noxy VM 🚀
 
@@ -105,7 +105,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.14.0
+Noxy REPL v0.14.1
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
@@ -115,6 +115,11 @@ Type 'exit' to quit.
 ... end
 Multiline support!
 ```
+
+On Linux and macOS the REPL edits the line in place: ←/→ move the cursor,
+↑/↓ walk the session history, Home/End, Ctrl-A/E/K/U/W/L behave as in
+readline, Ctrl-C discards the line (and the block being typed) and Ctrl-D
+exits. On Windows the console provides the same through its own line editing.
 
 ## Quick Example
 

@@ -297,6 +297,13 @@ fmt.Printf("IP: %d, Opcode: %s\n", frame.ip, opcode)
 52
 ```
 
+Em tty POSIX (Linux/macOS/WSL) o REPL lê cada linha pelo editor de linha de
+`internal/lineedit` (setas, Home/End, histórico da sessão, Ctrl-C descarta a
+linha, Ctrl-D sai); a lógica é testável sem tty (`editor_test.go`) e os
+testes de termios/pty rodam só no Linux (`terminal_linux_test.go`). Em pipe e
+no Windows (console cooked já edita a linha) o REPL usa `bufio.Scanner`, como
+sempre — o loop em si é `runREPL(src lineSource, ...)` em `cmd/noxy/main.go`.
+
 ---
 
 ## 📚 Recursos
@@ -399,6 +406,6 @@ contrato é travado por `internal/vm/inline_guard_test.go` — se você mexer em
 ---
 
 **Última Atualização**: 2026-08-22  
-**Versão**: 1.0 (Noxy VM 0.14.0)
+**Versão**: 1.0 (Noxy VM 0.14.1)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*

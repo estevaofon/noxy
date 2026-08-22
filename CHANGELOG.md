@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.14.1] - 2026-08-22
+
+Ergonomia do REPL fora do Windows: no Linux/macOS (WSL incluído) uma seta
+no prompt imprimia `^[[A` em vez de andar pelo histórico, porque o modo
+canônico do tty só entende Backspace/^U/^W e o REPL lia a linha crua. O REPL
+ganha um editor de linha próprio em terminais POSIX; no Windows, onde o
+console em modo cooked já edita a linha e guarda histórico, nada muda.
+
+### Added
+
+- **Edição de linha e histórico no REPL (Linux/macOS).** Quando stdin é um
+  terminal, o REPL lê cada linha com um editor próprio (`internal/lineedit`,
+  no espírito do readline): ←/→ (Ctrl-B/Ctrl-F) movem o cursor, Home/End
+  (Ctrl-A/Ctrl-E) vão às pontas, Backspace/Delete apagam (Ctrl-D com texto =
+  Delete), Ctrl-K/Ctrl-U apagam até o fim/início, Ctrl-W apaga a palavra
+  anterior, Ctrl-L limpa a tela, Tab insere 4 espaços. ↑/↓ (Ctrl-P/Ctrl-N)
+  percorrem o histórico da sessão — só em memória; linha vazia e repetição
+  imediata não entram — preservando a linha que estava sendo digitada ao
+  voltar. Ctrl-C descarta a linha **e o bloco multilinha em andamento** e
+  volta ao prompt `>>>`, com `^C` na tela, como no Python; Ctrl-D numa linha
+  vazia sai. Texto UTF-8 é editado por rune (uma coluna por rune; sem
+  tratamento de largura dupla) e linha mais larga que o terminal rola
+  horizontalmente em vez de quebrar. O tty só fica em modo raw durante a
+  leitura de UMA linha e volta ao modo anterior antes de cada execução —
+  `input()`/`io.read_line` e o shell continuam vendo o modo cooked; `OPOST`
+  fica ligado, então saída de tasks durante a edição não sai "em escada". Em
+  pipe/arquivo (stdin não é tty) e no Windows o REPL lê linhas como antes.
+  Sem dependência nova: termios via `golang.org/x/sys/unix`, já usado.
+
 ## [0.14.0] - 2026-08-22
 
 Dois pedidos pequenos, no espírito do Python: `range` vira builtin do runtime
