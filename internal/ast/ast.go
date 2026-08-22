@@ -87,7 +87,13 @@ func (at *ArrayType) String() string {
 		return "any[]"
 	}
 	element := at.ElementType.String()
-	if _, ok := at.ElementType.(*FunctionType); ok {
+	// Tipos-prefixo (func, chan, ref) capturam o `[]` que vier depois —
+	// `chan int[]` e um canal de int[] — entao o elemento de um array deles
+	// se escreve entre parenteses, `(chan int)[]`, e a string tem de
+	// round-trippar do mesmo jeito (e o que o hint de `let` sem
+	// inicializador mostra ao usuario).
+	switch at.ElementType.(type) {
+	case *FunctionType, *ChanType, *RefType:
 		element = "(" + element + ")"
 	}
 	return element + "[]"

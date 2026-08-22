@@ -124,19 +124,19 @@ test_report(outer())
 	}
 }
 
-// `let p: Point` e `let f: func` sem inicializador começam em null.
-// (`let c: chan int` sem inicializador hoje falha em runtime com "runtime
-// value metadata conflicts with static context" — comportamento não fixado
-// aqui de propósito; ver relatório da rodada.)
-func TestDefaultInitializationOfStructAndFuncIsNull(t *testing.T) {
+// `let p: Point` e `let r: ref int` sem inicializador começam em null — os
+// tipos que o checador aceita como nuláveis. (`let f: func` e `let c: chan
+// int` sem inicializador são erro de compilação desde a issue #61 item 1:
+// esses tipos não têm default; ver internal/compiler/let_default_init_test.go.)
+func TestDefaultInitializationOfStructAndRefIsNull(t *testing.T) {
 	got := captureVMSource(t, `
 struct Point
     x: int
 end
 let p: Point
-let f: func
-let g: func(int) -> int
-test_report([to_str(p), to_str(f), to_str(g)])
+let r: ref int
+let a: any
+test_report([to_str(p), to_str(r), to_str(a)])
 `)
 	for i, cell := range semArray(t, got) {
 		if s, ok := cell.Obj.(string); !ok || s != "null" {

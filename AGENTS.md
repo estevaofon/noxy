@@ -116,7 +116,11 @@ case chunk.OP_NEW_OPCODE:
 6. **Saída: stdout é do programa, stderr é do diagnóstico.** `print`/`iprint`
    escrevem em stdout; `eprint`/`eiprint` em stderr. Nunca use `fmt.Print*` para
    erro, aviso ou trace — escreva em `os.Stderr` (na VM) ou em `diagOut`
-   (`cmd/noxy/main.go`), o único destino dos diagnósticos da CLI.
+   (`cmd/noxy/main.go`), o único destino dos diagnósticos da CLI. No
+   **compilador** não escreva em lugar nenhum: aviso é `c.warn(msg)`
+   (`internal/compiler/warnings.go`), que acumula em `Compiler.Warnings()`;
+   quem chama `Compile` imprime — CLI/REPL em `diagOut`, loader de módulos
+   da VM (`internal/vm/modules.go`) em `os.Stderr`.
 
 ```go
 func (vm *VM) builtinNewFunc(args []value.Value) (value.Value, error) {
@@ -407,6 +411,6 @@ contrato é travado por `internal/vm/inline_guard_test.go` — se você mexer em
 ---
 
 **Última Atualização**: 2026-08-22  
-**Versão**: 1.0 (Noxy VM 0.14.1)
+**Versão**: 1.0 (Noxy VM 0.14.2)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*

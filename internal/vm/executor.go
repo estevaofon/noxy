@@ -1562,6 +1562,19 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "only instances have properties")
 			}
 
+			// Struct e nominal, de campos fixos (spec §5): escrever num nome
+			// fora da declaracao e o mesmo "undefined property" da leitura
+			// (issue #61 item 2 — antes a escrita criava o campo em silencio).
+			// Via base tipada o compilador ja rejeitou (`unknown field`); aqui
+			// so dispara em fronteira dinamica (`any`). O caminho quente e o
+			// lookup em instance.Fields que a troca abaixo ja fazia; a
+			// declaracao so e consultada quando o nome nao esta na instancia
+			// (native que deixou o campo por preencher, ou nome inexistente).
+			old, exists := instance.Fields[name]
+			if !exists && !instance.Struct.HasField(name) {
+				return vm.runtimeError(c, ip, "undefined property '%s'", name)
+			}
+
 			// Guard do slot ref (spec 2026-08-20-ref-slot-invariant §6.3):
 			// via base tipada o compilador ja rejeitou; aqui so dispara em
 			// fronteira dinamica (`any`). Lookup em mapa nil e gratuito.
@@ -1571,7 +1584,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			// RC: retain-antes-de-release (campo e dono duravel); Release
 			// em campo inexistente (Value{} zero) e no-op (nao e VAL_OBJ)
-			old := instance.Fields[name]
 			value.Retain(val)
 			instance.Fields[name] = val
 			value.Release(old)

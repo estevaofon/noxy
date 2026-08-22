@@ -1,5 +1,70 @@
 # Changelog
 
+## [0.14.2] - 2026-08-22
+
+Os quatro achados do perfil de cobertura de v0.14.1 (issue #61): uma brecha
+do `let` sem inicializador, uma brecha do struct na fronteira `any`, um aviso
+do compilador no lugar errado e código morto nos `Format()`. Duas das
+correções fecham comportamento que programas podiam estar usando — as seções
+BREAKING abaixo dizem como migrar.
+
+### Changed (BREAKING)
+
+- **`let nome: chan T` / `let nome: func...` sem `= valor` é erro de
+  compilação.** A forma `let nome: tipo` (sem inicializador) sempre existiu
+  e usava o "default" do tipo — `0`, `0.0`, `false`, `""`, `b""`, `[]`, `{}`
+  e `null` para o resto. Só que `chan` e os tipos função **não são
+  nuláveis** (`let c: chan int = null` já era "type mismatch"), e o `null`
+  fabricado pelo `let` sem valor era a única brecha: em `chan` o marcador de
+  runtime estourava com `runtime value metadata conflicts with static
+  context` (um programa bem-formado falhava em runtime); em `func` passava
+  em silêncio, um `null` num tipo que o checador nunca aceitaria. Agora o
+  compilador diz `variable 'c' needs an initializer: chan int has no default
+  value; hint: write 'let c: chan int = ...'` — também para o elemento de um
+  array dimensionado (`let cs: (chan int)[2]`). Struct, `ref T` e `any`
+  continuam começando em `null`; escalares, arrays dinâmicos e maps, no seu
+  default. Spec §3, "Declaration without an initializer". **Migração**:
+  `let c: chan int` → `let c: chan int = make_chan(n)`; `let f: func` →
+  declare com o valor (ou `let f: any` se precisa de "ainda não tem").
+- **Escrever num campo não declarado através de `any` é erro.** `let d: any
+  = Point(1, 2)` seguido de `d.zzz = 1` criava o campo `zzz` na instância
+  em silêncio (ler `d.zzz` já era `undefined property 'zzz'`, e com base
+  tipada o compilador rejeita com `unknown field`). Struct é nominal, de
+  campos fixos (spec §5): `OP_SET_PROPERTY` passa a devolver o mesmo
+  `undefined property 'zzz'` da leitura quando o nome não está na
+  declaração. Campos declarados que uma native tenha deixado por preencher
+  continuam aceitando escrita. Caminho quente inalterado — a declaração só é
+  consultada quando o nome não está na instância.
+
+### Fixed
+
+- **Aviso `rebinding ref parameter ... has no effect outside function` saía
+  em stdout.** O compilador escrevia com `fmt.Printf`, misturado à saída do
+  programa (contra a regra "stdout é do programa, stderr é do diagnóstico").
+  O compilador agora não escreve em lugar nenhum: acumula `Warning`s
+  estruturados (`Compiler.Warnings()` — mensagem, arquivo, linha) e quem
+  chama decide o destino: `noxy arquivo.nx` e o REPL imprimem em `diagOut`
+  (stderr), um módulo carregado por `use` imprime em stderr pela VM. Mesmo
+  texto de antes (`warning: ...` + `  --> arquivo:linha`), mesmo código de
+  saída (aviso não é erro). Os exemplos `ref_pointer_semantics.nx` e
+  `test_ref_case.nx`, que demonstram o rebind local de propósito, só mudam
+  de canal.
+- **`ArrayType.String()` de array de `chan`/`ref` ganha parênteses.**
+  `(chan int)[]` imprimia `chan int[]`, que re-parseia como canal de `int[]`
+  (o prefixo captura o `[]`); agora imprime `(chan int)[]`, como já fazia
+  para funções — é o que aparece no hint do `let` sem inicializador e em
+  mensagens de tipo.
+
+### Removed
+
+- **`case 'T'` nos `Format()` de `internal/value`** (`ObjArray`, `ObjMap`,
+  `ObjStruct`, `ObjInstance`, `ObjChannel`, `ObjWaitGroup`, `ObjRef`,
+  `BytesWrapper`): código morto — o pacote `fmt` resolve `%T` antes de
+  consultar `Formatter`, e o builtin `fmt` da Noxy troca `%T` por
+  `runtimeTypeName` antes de formatar. Os nomes dos dois lugares já
+  divergiam sem ninguém perceber; agora há uma fonte só
+  (`runtimeTypeName`). Sem mudança visível.
+
 ## [0.14.1] - 2026-08-22
 
 Ergonomia do REPL fora do Windows: no Linux/macOS (WSL incluído) uma seta

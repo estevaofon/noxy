@@ -119,6 +119,12 @@ type Compiler struct {
 	// programLets acumula os `let` top-level da compilacao corrente
 	// (preenchido pelo predeclare) para o REPL ler via ProgramLets.
 	programLets map[string]int
+	// warnings e a lista de avisos COMPARTILHADA pela arvore de compiladores
+	// (raiz + NewChild): ponteiro, como generics/instances, para que o aviso
+	// emitido dentro de um corpo de funcao suba ate o compilador raiz, que e
+	// o que a CLI consulta via Warnings(). O scratch do pass 1 dos genericos
+	// (newPass1Compiler) tem a SUA lista, descartada — o pass 2 reemite.
+	warnings *[]Warning
 }
 
 type callEmission struct {
@@ -161,6 +167,7 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 		FileName:     fileName,
 		moduleRoot:   moduleRoot,
 		moduleName:   "main",
+		warnings:     &[]Warning{},
 	}
 	c.currentChunk.FileName = fileName
 	return c
@@ -180,8 +187,12 @@ func NewChild(parent *Compiler) *Compiler {
 		childNamespaceImports[name] = module
 	}
 	childNamespaceOrder := append([]string(nil), parent.namespaceOrder...)
+	if parent.warnings == nil {
+		parent.warnings = &[]Warning{}
+	}
 	c := &Compiler{
 		enclosing:        parent,
+		warnings:         parent.warnings,
 		currentChunk:     chunk.New(),
 		locals:           []Local{},
 		globals:          childGlobals,
@@ -378,7 +389,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 			valType = t
 		} else {
-			// Default value
+			// Default value — so para tipos que TEM um (issue #61 item 1):
+			// chan e func nao tem, e o null que saia daqui era o unico
+			// caminho para um null num tipo que o checador nao nulifica.
+			if err := c.defaultInitError(n.Name.Value, n.Type); err != nil {
+				return nil, nil, err
+			}
 			if err := c.emitDefaultInit(n.Type); err != nil {
 				return nil, nil, err
 			}
@@ -565,11 +581,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s", c.currentLine, ident.Value, localType.String(), valType.String())
 						}
 
-						// Check if trying to rebind a ref parameter
+						// Check if trying to rebind a ref parameter. Aviso, nao
+						// erro (o rebind local e um padrao legitimo — percorrer
+						// uma lista pelo proprio parametro); vai para a lista de
+						// Warnings, nunca para stdout (issue #61 item 3).
 						local := c.locals[arg]
 						if local.IsParam {
-							fmt.Printf("warning: rebinding ref parameter '%s' has no effect outside function\n", ident.Value)
-							fmt.Printf("  --> %s:%d\n", c.FileName, c.currentLine)
+							c.warn(fmt.Sprintf("rebinding ref parameter '%s' has no effect outside function", ident.Value))
 						}
 						if err := c.emitRuntimeValueType(localType); err != nil {
 							return nil, nil, err
