@@ -269,6 +269,8 @@ git commit -m "feat(chunk): opcodes de indexacao tipada de array — GET/SET_IND
 
 ### Task 3: Handlers no VM, `setIndexGeneric`, `unicizeOwnedSlot`/`unicizeBorrowedSlot`, `goto redispatch`
 
+> **Nota pós-execução (2026-08-22):** a task foi executada como escrita (commit bf4f995), mas a medição por estágio pegou o `goto redispatch` custando +10–14 % no despacho genérico (`bench_generic_vs_hand`, laço sem indexação — relógio interno: base 623 ms, com goto 714, sem goto 631). O commit seguinte trocou os três fallbacks de leitura por uma chamada a `getIndexGeneric(c, ip)` (corpo de `OP_GET_INDEX` extraído em método, como `setIndexGeneric`) e removeu o rótulo; o `case OP_GET_INDEX` genérico passa a chamar o método. Spec §3.2 atualizada. O texto abaixo é o plano original.
+
 **Files:**
 - Create: `internal/vm/index_ops.go` (`setIndexGeneric`)
 - Modify: `internal/vm/cow.go` (`unicizeOwnedSlot`, `unicizeBorrowedSlot`)
@@ -2139,14 +2141,14 @@ git commit -m "docs(bench): indexacao tipada de array medida por estagio contra 
 
 ---
 
-### Task 8: Versão v0.14.4, CHANGELOG, docs
+### Task 8: Versão v0.15.0 (minor, decisão do usuário de 2026-08-22), CHANGELOG, docs
 
 **Files:**
-- Modify: `internal/version/version.go` (`const Version = "v0.14.4"`), `CHANGELOG.md` (nova entrada `## [0.14.4] - 2026-08-22`), `README.md:1` (badge) e `:108` (banner REPL), `AGENTS.md:414`, `docs/NOXY_LANGUAGE_SPEC.md` (linha do `sys.version`), `docs/index.html:58` (hero badge) e `:385` (`print(sys.version)`).
+- Modify: `internal/version/version.go` (`const Version = "v0.15.0"`), `CHANGELOG.md` (nova entrada `## [0.15.0] - 2026-08-22`), `README.md:1` (badge) e `:108` (banner REPL), `AGENTS.md:414`, `docs/NOXY_LANGUAGE_SPEC.md` (linha do `sys.version`), `docs/index.html:58` (hero badge) e `:385` (`print(sys.version)`).
 
 - [ ] **Step 1: Bump nos seis pontos**
 
-`grep -rn "0\.14\.3" README.md AGENTS.md internal/version/version.go docs/index.html docs/NOXY_LANGUAGE_SPEC.md` → trocar cada ocorrência por `0.14.4` (Edit tool, CRLF preservado). Conferir com o mesmo grep que não sobrou nenhuma, e `go test ./internal/vm -run Version`.
+`grep -rn "0\.14\.3" README.md AGENTS.md internal/version/version.go docs/index.html docs/NOXY_LANGUAGE_SPEC.md` → trocar cada ocorrência por `0.15.0` (Edit tool, CRLF preservado). Conferir com o mesmo grep que não sobrou nenhuma, e `go test ./internal/vm -run Version`.
 
 - [ ] **Step 2: CHANGELOG**
 
@@ -2156,7 +2158,7 @@ Entrada no topo, no formato da 0.14.3: parágrafo de contexto (item 1 da #66; ne
 
 ```bash
 git add internal/version/version.go CHANGELOG.md README.md AGENTS.md docs/NOXY_LANGUAGE_SPEC.md docs/index.html
-git commit -m "chore(version): noxy v0.14.4 — CHANGELOG (indexacao tipada de array, issue #66 item 1), README, AGENTS, spec, site, version.go"
+git commit -m "chore(version): noxy v0.15.0 — CHANGELOG (indexacao tipada de array, issue #66 item 1), README, AGENTS, spec, site, version.go"
 ```
 
 ---

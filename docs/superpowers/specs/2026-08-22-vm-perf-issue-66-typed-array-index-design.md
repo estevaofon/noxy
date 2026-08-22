@@ -68,10 +68,18 @@ chamada com o `RWMutex`, em vez de `referenceStorage`. Fallback (container
 não é array, ref de outro tipo, nulo, slot com valor plano pela tolerância
 herdada): materializa a pilha do caminho genérico (`[container, i]`; para o
 ref, com a semântica exata de `OP_DEREF`: nulo e não-ref passam, ref resolve
-por `resolveReferenceValue`) e **re-despacha** `instruction = OP_GET_INDEX`
-com `goto redispatch` (rótulo logo antes do `switch` de `run()`). Zero custo
-no caminho genérico, zero duplicação, mesmas mensagens e mesma linha (`Lines`
-da mesma statement).
+por `resolveReferenceValue`) e chama `vm.getIndexGeneric(c, ip)` — o corpo de
+`OP_GET_INDEX` extraído em método, exatamente como `setIndexGeneric` para as
+escritas; o `case OP_GET_INDEX` genérico passa a chamá-lo. Zero duplicação,
+mesmas mensagens e mesma linha (`Lines` da mesma statement); custo: uma
+chamada a mais por `OP_GET_INDEX` genérico (maps, strings, `any`).
+*Medido e descartado:* a primeira forma — re-despachar o `case` genérico com
+`instruction = OP_GET_INDEX; goto redispatch` (rótulo antes do `switch`),
+"zero custo no genérico" — custou **+10–14 % no despacho genérico**
+(`bench_generic_vs_hand`, laço sem indexação nenhuma, relógio interno: base
+623 ms, com goto 714 ms, com método 631 ms): o rótulo/phi e o corpo extra em
+`run()` mudaram o codegen do laço inteiro. A chamada no fallback não aparece
+no mesmo bench.
 
 **Escritas NORC.** Caminho rápido exige **todas**: container é `*ObjArray`;
 (formas com slot) `arr.Owners.Load() <= 1` — o mesmo teste de `IsShared`, sem
@@ -204,8 +212,9 @@ Binários em disco local (scratchpad): `noxy_base.exe` (7eed082), `noxy_s1.exe`
 |---|---|
 | forma fundida muda ordem de avaliação | só com índice/valor sem efeito colateral (§3.3); teste de closure/`ref` no índice → não fundido |
 | NORC pular RC de um composto vindo por `any` | `NeverTracked(val) && NeverTracked(old)` em runtime; teste com oráculo `OwnersCount` |
-| fallback divergir do genérico | leitura re-despacha o próprio `OP_GET_INDEX`; escrita chama o mesmo `setIndexGeneric`; tabela de erros idênticos |
-| `setIndexGeneric` regredir map | medido em `bench_map_churn`; se > ruído, reverter para duplicação no fallback |
+| fallback divergir do genérico | leitura chama o mesmo `getIndexGeneric` e escrita o mesmo `setIndexGeneric` que os cases genéricos; tabela de erros idênticos |
+| `getIndexGeneric`/`setIndexGeneric` regredirem map | medido em `bench_map_churn`; se > ruído, reverter para duplicação no fallback |
+| mexer em `run()` regredir o despacho genérico | `bench_generic_vs_hand` (laço sem indexação) como sentinela: foi ele que pegou o `goto` (+10–14 %) |
 | ganho não se materializar | hipótese; números publicados como estão |
 
 ## 7. Decisões tomadas sem consulta (para a review)
@@ -218,4 +227,4 @@ Binários em disco local (scratchpad): `noxy_base.exe` (7eed082), `noxy_s1.exe`
 3. Formas fundidas exigem operandos sem efeito colateral (predicado sintático,
    como `tryFuseLocalIntIncrement`), com a exceção teórica da falha dupla.
 4. `length()` → `OP_LEN` fica como follow-up (call_readonly 37 % em `callNative`).
-5. Versão **v0.14.4** (patch: perf interna).
+5. Versão **v0.15.0** — o plano original dizia v0.14.4 (patch: perf interna); o usuário decidiu minor para esta melhoria (2026-08-22).

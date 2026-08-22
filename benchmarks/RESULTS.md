@@ -3,6 +3,141 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.14.3 (7eed082) × indexação tipada de array — v0.15.0 (perf/issue-66-typed-array-index, d870a02)
+
+**Data:** 2026-08-22 · Windows 11 · i7-1165G7 · protocolo intercalado, mediana
+de 9 (headline) e de 5 (por estágio), mínimo de 9 no cross-runtime. Máquina
+sem `go test` nem build durante as medições; CPU 4–11 % no início de cada
+passo. Seis binários compilados na mesma sessão (um por estágio, mais o head
+com e sem o `goto` — ver abaixo). Dados brutos, carga por passo, A/Bs focados,
+perfis e scripts em
+[`results/2026-08-22-issue-66-typed-arrays-raw.md`](results/2026-08-22-issue-66-typed-arrays-raw.md).
+Spec: `docs/superpowers/specs/2026-08-22-vm-perf-issue-66-typed-array-index-design.md`
+(issue #66, item 1). Scripts rodados com `pwsh -NoProfile -File`
+(`interleaved_compare.ps1` não parseia no Windows PowerShell 5.1 — UTF-8 sem BOM).
+
+O que mudou: seis opcodes anexados ao fim de `chunk.go` — `OP_GET_INDEX_ARRAY` /
+`OP_SET_INDEX_ARRAY_NORC` (base estaticamente `T[]` em posição genérica) e as
+formas fundidas por slot `OP_GET_LOCAL_INDEX_ARRAY` / `OP_SET_LOCAL_INDEX_ARRAY_NORC`
+(local `T[]`, inclusive o `$collection` do for-each) e `OP_GET_REF_LOCAL_INDEX_ARRAY` /
+`OP_SET_REF_LOCAL_INDEX_ARRAY_NORC` (parâmetro `ref T[]`, que resolve a caixa
+do ref com uma `Upvalue.Load()` em vez de `referenceStorage`). Caminho rápido
+grava o resultado no lugar na pilha; `NORC` pula `Retain`/`Release` só depois
+de conferir em runtime que valor novo e velho não têm contador
+(`value.NeverTracked`) e que o array não é `(ref T)[]`; container inesperado
+cai nos funis genéricos (`getIndexGeneric`/`setIndexGeneric`, os corpos de
+`OP_GET_INDEX`/`OP_SET_INDEX` extraídos em método). Formas fundidas só com
+índice (e valor) sintaticamente sem efeito colateral.
+
+**Verificação completa:** `go test ./...` verde (12 pacotes); `go test -race
+./internal/value ./internal/vm` verde; **corpus 177/177**
+(`run_all_tests_concurrent.nx`); **diff de saída base × head: 146 iguais, 0
+divergentes** (`compare_examples.ps1`); guards de inline verdes (`push` 20 /
+121 sites, `pop` 18 / 85 sites, `Retain` 67, `Release` 80, `NeverTracked` 10,
+`arrayTagIsRefSlot` 20 — sem folga, travado).
+
+### Headline — base × head (`interleaved_compare.ps1 -Runs 9`)
+
+| bench | v0143_ms | typed_ms | delta | veredito |
+|---|---|---|---|---|
+| bench_bubblesort | 3071,2 | 1089,4 | **−64,5 %** | ✅ (meta ≥ −30 %) |
+| bench_call_ref | 3010,6 | 1702,8 | **−43,4 %** | ✅ |
+| bench_call_readonly | 1018,9 | 895,5 | **−12,1 %** | ➖ meta era ≥ −30 %: 37 % desse bench é `callNative` (`length(data)` no `while`), não indexação |
+| bench_path_update | 495,1 | 449,6 | −9,2 % | ✅ |
+| bench_conway | 1871,3 | 1801,2 | −3,7 % | ✅ gate CoW (≤ +5 %) |
+| bench_map_churn | 408,7 | 408,0 | −0,2 % | ✅ (`setIndexGeneric`/`getIndexGeneric` como chamada: sem custo visível) |
+| bench_generic_vs_hand | 730,7 | 736,0 | +0,7 % | ✅ (era **+12,8 %** com o `goto redispatch`, ver abaixo) |
+| bench_spawn_sum | 668,7 | 677,0 | +1,2 % | ➖ ruído |
+| bench_share_mutate | 218,1 | 236,4 | +8,4 % | ✅ gate CoW: rodada focada de 15 dá **+1,6 %** (233,0 → 236,7; a base oscilou 265 → 218 entre rodadas) |
+| bench_typed_call_map | 151,7 | 149,1 | −1,7 % | ➖ piso¹ (gate CoW ok) |
+| bench_call_light | 130,7 | 128,6 | −1,6 % | ➖ piso¹ (gate CoW ok) |
+| bench_value_call_mutate | 139,6 | 140,9 | +0,9 % | ➖ piso¹ |
+
+¹ ~130 ms com piso de processo ~90 ms: não decidem nada (seção de 2026-08-22).
+
+### Por estágio — seis binários na mesma janela (mediana de 5)
+
+`s0` = só o VM (handlers, funis, rótulo `goto`; nada emitido) · `s1` = +
+formas genéricas tipadas · `s2` = + fundidas de local plano e for-each ·
+`s3goto` = + fundidas de `ref` (head com `goto`) · `s3` = head final (fallback
+de leitura por `getIndexGeneric`, sem rótulo). Delta contra `base`.
+
+| bench | s0 | s1 | s2 | s3goto | **s3** |
+|---|---|---|---|---|---|
+| bench_bubblesort | +2,2 % | −2,2 % | +0,8 % | −62,3 % | **−62,3 %** |
+| bench_call_ref | +0,6 % | −3,2 % | −5,5 % | −43,4 % | **−44,0 %** |
+| bench_call_readonly | +1,3 % | −4,1 % | −4,1 % | −5,0 % | **−12,2 %** |
+| bench_path_update | +6,5 % | −5,3 % | −9,4 % | −7,7 % | **−10,4 %** |
+| bench_conway | +0,8 % | −4,8 % | −1,0 % | −3,1 % | **−3,7 %** |
+| bench_map_churn | −4,1 % | −0,2 % | −3,1 % | +0,2 % | **−6,5 %** |
+| bench_generic_vs_hand | **+14,9 %** | +13,1 % | +12,9 % | +13,7 % | **+5,6 %**² |
+| bench_share_mutate | −4,9 % | −7,4 % | −6,9 % | −7,2 % | **+1,3 %** |
+| bench_spawn_sum | +2,1 % | +2,6 % | −5,1 % | −5,1 % | **+2,4 %** |
+
+² tempo de parede; pelo relógio interno do próprio bench (`GEN_MS+HAND_MS`,
+9 intercaladas) `s3` dá +1,3 % (623 → 631 ms) contra +14,6 % do `s3goto`
+(714 ms).
+
+### Cross-runtime (mínimo de 9, intercalado com CPython 3.13.1 / Lua 5.4.7 / Go 1.24.11)
+
+Tempo líquido (descontado o piso de `startup`, 96 ms nos dois Noxy) e razões;
+tabela completa em [`cross_runtime/results/cross_runtime.md`](cross_runtime/results/cross_runtime.md).
+
+| bench | v0.14.3 | v0.15.0 | v0.15.0 ÷ v0.14.3 | ÷ python (antes → agora) | ÷ lua |
+|---|---|---|---|---|---|
+| `bubblesort` | 430,6 | **153,6** | **0,36x** | 5,5x → **1,8x** | – |
+| `fib` | 322,0 | 309,9 | 0,96x | 2,9x → 2,5x | 5,9x |
+| `loop_arith` | 268,5 | 283,2 | 1,05x³ | 1,1x → 1,0x | 6,8x |
+| `mandelbrot` | 185,1 | 187,3 | 1,01x | 1,9x → 2,3x⁴ | – |
+| `map_churn` | 173,6 | 195,3 | 1,12x³ | 2,1x → 2,4x⁴ | – |
+| `string_ops` | 138,8 | 134,4 | 0,97x | 4,2x → 3,3x⁴ | – |
+
+³ A/B focado de 11 intercaladas (raw §3): `loop_arith` empata (372,6 × 372,0 ms,
+mín. 348,7 × 345,1) e `map_churn` sai −6,5 % (316,4 × 295,7) — os dois
+"aumentos" do mínimo-de-9 são ruído; `map_churn.nx` nem passa pelos opcodes
+novos. ⁴ As razões ÷ python de `mandelbrot`/`map_churn`/`string_ops` mudaram
+porque o CPython desta rodada mediu diferente da rodada da fase 2 (80,5 / 80,4
+/ 40,4 ms líquidos contra 90,6 / 82,7 / 31,9), não o Noxy — a coluna
+"v0.15.0 ÷ v0.14.3" é a comparação válida.
+
+### Leitura
+
+**A hipótese da issue ("bubblesort 5,5x → ~2–2,5x do CPython; bench_bubblesort
+≥ −30 %") confirma com folga: 1,8x e −64,5 %.** O ganho é quase todo do
+estágio 3 — a forma fundida de `ref T[]`: o perfil de base mostrava
+`resolveReferenceValue`/`referenceStorage` (um `defer`, uma closure do setter
+alocada por acesso, `validateReferencedValue` com `reflect`) e
+`unicizeThroughRefValue` como **metade do tempo** do bubblesort, e o bench da
+issue passa por `data: ref int[]` — os anchors da issue descreviam o local
+plano, onde o custo é menor. `bench_call_ref` (mutação via ref) vem junto,
+−43 %.
+
+**A segunda meta da issue ("bench_call_readonly ≥ −30 %") não confirma: −12 %.**
+Não é indexação: 37 % desse bench é `callNative` — o `length(data)` da
+condição do `while` compila como chamada de builtin genérica. Um `OP_LEN`
+estático é follow-up (fora do item 1). Os estágios 1 e 2 (formas genéricas
+tipadas e fundidas de local plano, sem `ref`) valem −4 a −10 % em
+`call_readonly`/`path_update`/`conway` — onde o despacho do índice nunca foi
+o gargalo.
+
+**Achado da rodada (custou um commit a mais):** o primeiro desenho do fallback
+de leitura re-despachava o `case` genérico com `instruction = OP_GET_INDEX;
+goto redispatch` — "zero custo no genérico" no papel. `bench_generic_vs_hand`,
+um laço de `length()` **sem indexação nenhuma**, subiu **+10–14 %** já no
+estágio 0 (que não emite opcode novo): o rótulo (que faz de `instruction` um
+phi) e os fallbacks inline mudaram o codegen do laço de `run()` inteiro. A
+chamada a um método (`getIndexGeneric`) no fallback não aparece no mesmo
+bench. Lição para os próximos itens: qualquer mudança em `run()` passa por
+esse bench como sentinela, não só pelos benches do item.
+
+**Gates CoW (≤ +5 %):** `conway` −3,7 %, `typed_call_map` −1,7 %, `call_light`
+−1,6 %, `share_mutate` +1,6 % na rodada focada — verdes. `map_churn`
+(`setIndexGeneric`/`getIndexGeneric` viraram chamada no genérico): −0,2 %.
+
+**O que resta do acesso via `ref`:** `Upvalue.Load()` e os atômicos do seu
+`RWMutex` (~25 % das amostras do head) — é o que separa `bubblesort` de 1,8x
+do CPython; candidato a item do roadmap se precisar.
+
 ## v0.14.2 (cb8efcb) × fase 2 de perf — layout do `Value` (perf/issue-37-value-layout, ba7f85d)
 
 **Data:** 2026-08-22 · Windows 11 · i7-1165G7 · protocolo intercalado, mediana
