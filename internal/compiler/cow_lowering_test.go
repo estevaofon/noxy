@@ -145,12 +145,32 @@ a[0].x = 9`)
 }
 
 func TestLoweringRefParamIndexAssignment(t *testing.T) {
+	// Indexacao tipada (issue #66): `a[0] = 9` com a parametro `ref int[]` e
+	// operandos puros sai pela forma fundida OP_SET_REF_LOCAL_INDEX_ARRAY_NORC,
+	// que carrega a semantica de GET_LOCAL_MUT_BORROW + DEREF_MUT dentro do
+	// opcode (unicizeThroughRefValue no fallback) — a cadeia explicita nao
+	// aparece.
 	code := compileSource(t, `func f(a: ref int[])
     a[0] = 9
 end`)
 	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC] == 0 {
+		t.Fatal("a[0] = 9 com a ref int[] deve emitir OP_SET_REF_LOCAL_INDEX_ARRAY_NORC")
+	}
+	if ops[chunk.OP_DEREF_MUT] != 0 {
+		t.Fatal("a forma fundida de ref substitui a cadeia OP_DEREF_MUT")
+	}
+	// Com operando impuro (chamada), a cadeia MUT continua unicizando atraves
+	// do ref antes da escrita.
+	code = compileSource(t, `func g() -> int
+    return 9
+end
+func f(a: ref int[])
+    a[0] = g()
+end`)
+	ops = collectOpcodes(t, code)
 	if ops[chunk.OP_DEREF_MUT] == 0 {
-		t.Fatal("a[0] = 9 com a ref deve emitir OP_DEREF_MUT")
+		t.Fatal("a[0] = g() com a ref deve emitir OP_DEREF_MUT")
 	}
 }
 

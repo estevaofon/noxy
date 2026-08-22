@@ -174,3 +174,83 @@ func TestTypedIndexLocalErrorsMatchGenericPath(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedIndexRefBubbleSortMutatesCaller(t *testing.T) {
+	got := captureVMSource(t, `
+func bubble(data: ref int[]) -> void
+    let n: int = length(data)
+    let i: int = 0
+    while i < n do
+        let j: int = 0
+        while j < n - i - 1 do
+            if data[j] > data[j + 1] then
+                let tmp: int = data[j]
+                data[j] = data[j + 1]
+                data[j + 1] = tmp
+            end
+            j = j + 1
+        end
+        i = i + 1
+    end
+end
+func main() -> int[]
+    let data: int[] = [5, 1, 4, 2, 3]
+    bubble(ref data)
+    return data
+end
+test_report(main())
+`)
+	arr := got.Obj.(*value.ObjArray)
+	for k := range 5 {
+		if arr.Elements[k].Int() != int64(k+1) {
+			t.Fatalf("esperado [1..5] no chamador, obtido %s", got.String())
+		}
+	}
+}
+
+// CoW atraves do ref: o array apontado esta compartilhado com `copy`; a
+// escrita fundida clona, grava o clone de volta no slot do chamador (o ref
+// continua valido) e `copy` fica intacta. Exatamente 1 clone.
+func TestTypedIndexRefWriteClonesSharedTarget(t *testing.T) {
+	ResetCloneCount()
+	got := captureVMSource(t, `
+func set0(data: ref int[]) -> void
+    data[0] = 99
+end
+func main() -> int[]
+    let data: int[] = [1, 2]
+    let copy: int[] = data
+    set0(ref data)
+    return [data[0], copy[0]]
+end
+test_report(main())
+`)
+	arr := got.Obj.(*value.ObjArray)
+	if arr.Elements[0].Int() != 99 || arr.Elements[1].Int() != 1 {
+		t.Fatalf("esperado [99, 1], obtido %s", got.String())
+	}
+	if CloneCountValue() != 1 {
+		t.Fatalf("esperava exatamente 1 clone CoW, obtido %d", CloneCountValue())
+	}
+}
+
+func TestTypedIndexRefErrorsMatchGenericPath(t *testing.T) {
+	cases := []struct{ name, typed, dynamic, want string }{
+		{"leitura fora da faixa via ref", "func f(d: ref int[]) -> int\n    let i: int = 5\n    return d[i]\nend\nlet a: int[] = [1]\nprint(f(ref a))\n", "func f(d: any) -> any\n    let i: int = 5\n    return d[i]\nend\nlet a: any = [1]\nprint(f(a))\n", "array index out of bounds"},
+		{"escrita fora da faixa via ref", "func f(d: ref int[]) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: int[] = [1]\nf(ref a)\n", "func f(d: any) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: any = [1]\nf(a)\n", "array index out of bounds"},
+		{"ref null leitura", "func f(d: ref int[]) -> int\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "func f(d: any) -> any\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "cannot index non-array/map/bytes"},
+		{"ref null escrita", "func f(d: ref int[]) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "func f(d: any) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "cannot set index on non-array/map"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			typedErr := interpretVMSource(t, New(), tc.typed)
+			dynErr := interpretVMSource(t, New(), tc.dynamic)
+			if typedErr == nil || !strings.Contains(typedErr.Error(), tc.want) {
+				t.Fatalf("tipado: esperava %q, obtido %v", tc.want, typedErr)
+			}
+			if dynErr == nil || !strings.Contains(dynErr.Error(), tc.want) {
+				t.Fatalf("dinamico: esperava %q, obtido %v", tc.want, dynErr)
+			}
+		})
+	}
+}

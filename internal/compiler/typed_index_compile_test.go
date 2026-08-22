@@ -283,3 +283,66 @@ end
 	assertLacks(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
 	assertHas(t, ops, "OP_SET_INDEX")
 }
+
+// Parametro `ref T[]`: leitura e escrita pela forma fundida de ref — sem
+// OP_DEREF/OP_DEREF_MUT (o opcode resolve a caixa), sem OP_POP.
+func TestRefArrayParameterFusesIndex(t *testing.T) {
+	// (as escritas vem ANTES do `if` de proposito: no fim de um bloco o
+	// compilador emite OP_POP para os locais do bloco, e assertNotFollowedByPop
+	// confundiria esse pop de escopo com o pop da atribuicao.)
+	ops := functionOpcodes(t, `
+func bubble(data: ref int[]) -> void
+    let j: int = 0
+    let tmp: int = data[j]
+    data[j] = data[j + 1]
+    data[j + 1] = tmp
+    if data[j] > data[j + 1] then
+        j = j + 1
+    end
+end
+`, "bubble")
+	assertHas(t, ops, "OP_GET_REF_LOCAL_INDEX_ARRAY")
+	assertHas(t, ops, "OP_SET_REF_LOCAL_INDEX_ARRAY_NORC")
+	assertLacks(t, ops, "OP_DEREF")
+	assertLacks(t, ops, "OP_DEREF_MUT")
+	assertLacks(t, ops, "OP_GET_LOCAL_MUT_BORROW")
+	assertLacks(t, ops, "OP_GET_INDEX")
+	assertLacks(t, ops, "OP_SET_INDEX")
+	assertNotFollowedByPop(t, ops, "OP_SET_REF_LOCAL_INDEX_ARRAY_NORC")
+}
+
+// Com chamada no operando, o ref segue o caminho de hoje (DEREF / DEREF_MUT)
+// com os opcodes tipados genericos.
+func TestRefArrayParameterDoesNotFuseWithCall(t *testing.T) {
+	ops := functionOpcodes(t, `
+func g() -> int
+    return 0
+end
+func f(data: ref int[]) -> int
+    data[g()] = 1
+    return data[g()]
+end
+`, "f")
+	assertLacks(t, ops, "OP_GET_REF_LOCAL_INDEX_ARRAY")
+	assertLacks(t, ops, "OP_SET_REF_LOCAL_INDEX_ARRAY_NORC")
+	assertHas(t, ops, "OP_DEREF")
+	assertHas(t, ops, "OP_DEREF_MUT")
+	assertHas(t, ops, "OP_GET_INDEX_ARRAY")
+	assertHas(t, ops, "OP_SET_INDEX_ARRAY_NORC")
+}
+
+// `ref P[]` (elemento composto): leitura funde, escrita fica no generico.
+func TestRefCompositeArrayFusesReadOnly(t *testing.T) {
+	ops := functionOpcodes(t, `
+struct P
+    x: int
+end
+func f(ps: ref P[]) -> P
+    ps[0] = ps[1]
+    return ps[0]
+end
+`, "f")
+	assertHas(t, ops, "OP_GET_REF_LOCAL_INDEX_ARRAY")
+	assertLacks(t, ops, "OP_SET_REF_LOCAL_INDEX_ARRAY_NORC")
+	assertHas(t, ops, "OP_SET_INDEX")
+}

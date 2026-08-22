@@ -70,8 +70,9 @@ func isSideEffectFree(expr ast.Expression) bool {
 
 // fusedLocalIndexRead decide se `n` (X[i]) pode ser lida pela forma fundida
 // por slot: X e identificador resolvido a local (slot <= 255) de tipo T[]
-// (OP_GET_LOCAL_INDEX_ARRAY) e i e livre de efeito colateral. Devolve o
-// opcode, o slot e o tipo do elemento.
+// (OP_GET_LOCAL_INDEX_ARRAY) ou `ref T[]` (OP_GET_REF_LOCAL_INDEX_ARRAY, que
+// resolve a caixa do ref dentro do opcode — sem OP_DEREF) e i e livre de
+// efeito colateral. Devolve o opcode, o slot e o tipo do elemento.
 func (c *Compiler) fusedLocalIndexRead(n *ast.IndexExpression) (chunk.OpCode, int, ast.NoxyType, bool) {
 	ident, ok := n.Left.(*ast.Identifier)
 	if !ok {
@@ -84,17 +85,25 @@ func (c *Compiler) fusedLocalIndexRead(n *ast.IndexExpression) (chunk.OpCode, in
 	if arr, ok := localType.(*ast.ArrayType); ok {
 		return chunk.OP_GET_LOCAL_INDEX_ARRAY, arg, arr.ElementType, true
 	}
+	if ref, ok := localType.(*ast.RefType); ok {
+		if arr, ok := ref.ElementType.(*ast.ArrayType); ok {
+			return chunk.OP_GET_REF_LOCAL_INDEX_ARRAY, arg, arr.ElementType, true
+		}
+	}
 	return 0, 0, nil, false
 }
 
 // tryFuseLocalIndexAssign funde `x[i] = v` quando x e local T[] POSSUIDOR
-// (OP_SET_LOCAL_INDEX_ARRAY_NORC), T sem contador RC, e i e v sao livres de
+// (OP_SET_LOCAL_INDEX_ARRAY_NORC) ou local `ref T[]` NAO-possuidor
+// (OP_SET_REF_LOCAL_INDEX_ARRAY_NORC — a semantica de GET_LOCAL_MUT_BORROW +
+// DEREF_MUT dentro do opcode), T sem contador RC, e i e v sao livres de
 // efeito colateral. Devolve (true, nil) se emitiu; (true, err) num erro de
 // compilacao — as MESMAS checagens e mensagens do ramo ArrayType do caminho
 // generico, so que sem compileLValueBase antes (para identificador local ele
-// nunca erra: so emitiria o GET_LOCAL_MUT que a forma fundida substitui);
+// nunca erra: so emitiria a cadeia MUT que a forma fundida substitui);
 // (false, nil) para seguir o caminho generico. Owns continua a fonte de
-// verdade (spec CoW-RC §4.2): slot T[] nao-possuidor vai pelo generico.
+// verdade (spec CoW-RC §4.2): slot T[] nao-possuidor ou slot ref possuidor
+// seriam estado inesperado e vao pelo generico.
 func (c *Compiler) tryFuseLocalIndexAssign(target *ast.IndexExpression, valueExpr ast.Expression) (bool, error) {
 	ident, ok := target.Left.(*ast.Identifier)
 	if !ok {
@@ -112,6 +121,14 @@ func (c *Compiler) tryFuseLocalIndexAssign(target *ast.IndexExpression, valueExp
 			return false, nil
 		}
 		op, arrType = chunk.OP_SET_LOCAL_INDEX_ARRAY_NORC, t
+	case *ast.RefType:
+		// Slot `ref T[]` EMPRESTA (spec CoW-RC §4.2): a forma fundida de ref
+		// reproduz GET_LOCAL_MUT_BORROW + DEREF_MUT.
+		inner, isArr := t.ElementType.(*ast.ArrayType)
+		if !isArr || c.localOwns(arg) {
+			return false, nil
+		}
+		op, arrType = chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC, inner
 	default:
 		return false, nil
 	}
