@@ -769,8 +769,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			c.emitByte(byte(chunk.OP_SET_INDEX))
-			c.emitByte(byte(chunk.OP_POP))
+			// perf #66: elemento sem contador RC em base T[] escreve pela forma
+			// NORC, que e statement (nao empilha; sem OP_POP). O VM confere em
+			// runtime antes de pular Retain/Release.
+			if arrType, isArray := leftType.(*ast.ArrayType); isArray && isUntrackedElementType(arrType.ElementType) {
+				c.emitByte(byte(chunk.OP_SET_INDEX_ARRAY_NORC))
+			} else {
+				c.emitByte(byte(chunk.OP_SET_INDEX))
+				c.emitByte(byte(chunk.OP_POP))
+			}
 
 		} else if memberExp, ok := n.Target.(*ast.MemberAccessExpression); ok {
 			// Struct Field Assignment: obj.field = val
@@ -1087,7 +1094,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// return nil, nil, fmt.Errorf("index must be int, got %s", idxType)
 		}
 
-		c.emitByte(byte(chunk.OP_GET_INDEX))
+		// perf #66: base estaticamente T[] (ou ref T[], ja dereferenciada
+		// acima) indexa sem despacho dinamico; o VM cai no OP_GET_INDEX
+		// generico se o container em runtime nao for array.
+		if _, isArray := arrayTypeOf(leftType); isArray {
+			c.emitByte(byte(chunk.OP_GET_INDEX_ARRAY))
+		} else {
+			c.emitByte(byte(chunk.OP_GET_INDEX))
+		}
 
 		// Result Type: Element type of array
 		// Unwrap RefType (getting index from ref array)
