@@ -390,40 +390,8 @@ body {
     line-height: 1.6;
 }
 
-/* What's New Section */
-.whats-new {
-    padding: 80px 0;
-    background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
-}
-
-.section-intro {
-    max-width: 820px;
-    margin: -1.5rem auto 3rem;
-    text-align: center;
-    color: var(--text-secondary);
-    font-size: 1.1rem;
-    line-height: 1.7;
-}
-
-.section-note {
-    margin-top: 2rem;
-    text-align: center;
-    color: var(--text-light);
-    font-size: 0.95rem;
-}
-
-.section-note a {
-    color: var(--primary-color);
-    text-decoration: none;
-}
-
-.section-note a:hover {
-    text-decoration: underline;
-}
-
 /* Inline code inside prose */
 .hero-description code,
-.section-intro code,
 .feature-card p code,
 .example-tab p code {
     padding: 0.1rem 0.4rem;
@@ -433,17 +401,6 @@ body {
     font-family: 'Fira Code', 'Consolas', monospace;
     font-size: 0.875em;
     color: var(--secondary-color);
-}
-
-.feature-tag {
-    margin-left: 0.5rem;
-    padding: 0.1rem 0.5rem;
-    border-radius: 999px;
-    background: var(--primary-color);
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 600;
-    vertical-align: middle;
 }
 
 /* Syntax Section */

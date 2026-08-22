@@ -1,7 +1,7 @@
 {
     "name": "Noxy - Linguagem de Programação",
     "short_name": "Noxy",
-    "description": "Linguagem de programação estaticamente tipada com VM baseada em pilha (Go). Mascote: coruja roxa.",
+    "description": "Statically typed programming language with a stack-based VM written in Go. Mascot: purple owl.",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#000000",
@@ -16,7 +16,7 @@
         }
     ],
     "categories": ["developer", "programming", "education"],
-    "lang": "pt-BR",
+    "lang": "en",
     "dir": "ltr",
     "scope": "/",
     "screenshots": [

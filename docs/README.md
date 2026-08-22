@@ -45,13 +45,14 @@ docs/
 ├── styles.css          # Estilos CSS
 ├── script.js           # JavaScript
 ├── 404.html           # Página de erro
-└── README.md          # Este arquivo
+├── *.md               # Documentação (spec, guias) — renderizada pelo Jekyll
+└── README.md          # Este arquivo (excluído do site)
 ```
 
 ## 📦 Deployment
 
-O site é automaticamente deployado no GitHub Pages através de GitHub Actions sempre que há push na branch main/master.
-Acesse em: [https://estevaofon.github.io/noxy-vm/](https://estevaofon.github.io/noxy-vm/)
+O site é publicado pelo GitHub Pages (branch `main`, pasta `/docs`) a cada push. O Jekyll do GitHub Pages renderiza também os `.md` desta pasta (plugin `jekyll-optional-front-matter`), então todo Markdown passa pelo Liquid: texto com `{{`/`{%` literal (como a seção de f-strings da spec) precisa ficar entre `<!-- {% raw %} -->` e `<!-- {% endraw %} -->`.
+Acesse em: [https://noxylang.com/](https://noxylang.com/)
 
 ## 🤝 Contribuindo
 

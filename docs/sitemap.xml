@@ -2,37 +2,31 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
         <loc>https://noxylang.com/</loc>
-        <lastmod>2026-08-17</lastmod>
+        <lastmod>2026-08-21</lastmod>
         <changefreq>weekly</changefreq>
         <priority>1.0</priority>
     </url>
     <url>
         <loc>https://noxylang.com/#features</loc>
-        <lastmod>2026-08-17</lastmod>
+        <lastmod>2026-08-21</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
     </url>
     <url>
-        <loc>https://noxylang.com/#whats-new</loc>
-        <lastmod>2026-08-17</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.9</priority>
-    </url>
-    <url>
         <loc>https://noxylang.com/#syntax</loc>
-        <lastmod>2026-08-17</lastmod>
+        <lastmod>2026-08-21</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
     </url>
     <url>
         <loc>https://noxylang.com/#examples</loc>
-        <lastmod>2026-08-17</lastmod>
+        <lastmod>2026-08-21</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.9</priority>
     </url>
     <url>
         <loc>https://noxylang.com/#installation</loc>
-        <lastmod>2026-08-17</lastmod>
+        <lastmod>2026-08-21</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.7</priority>
     </url>

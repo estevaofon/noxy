@@ -1,10 +1,13 @@
-# GitHub Pages Configuration for Noxy
+# GitHub Pages configuration for noxylang.com
+# Published from the `main` branch, folder /docs (see docs/README.md).
 
 # Site settings
-title: "Noxy - Linguagem de Programação"
-description: "Linguagem de programação estaticamente tipada com VM baseada em pilha (Go). Mascote: coruja roxa que simboliza sabedoria e elegância."
-url: "https://estevaofon.github.io"
-baseurl: "/noxy-vm"
+title: "Noxy"
+description: "Noxy is a statically typed programming language with a stack-based VM written in Go: value semantics with copy-on-write, explicit sharing with ref, generics, closures, modules and Go-style concurrency."
+url: "https://noxylang.com"
+baseurl: ""
+lang: "en"
+author: "Estêvão Fonseca"
 
 # Build settings
 markdown: kramdown
@@ -13,7 +16,12 @@ plugins:
   - jekyll-sitemap
   - jekyll-feed
 
-# Exclude files
+# Every Markdown file in this folder is rendered as a page by GitHub Pages
+# (jekyll-optional-front-matter is always on), so its text goes through Liquid.
+# Literal `{{` / `{%` — the f-string escape rules in NOXY_LANGUAGE_SPEC.md —
+# must be wrapped in `<!-- {% raw %} -->` … `<!-- {% endraw %} -->` HTML
+# comments (invisible on GitHub, a no-op for kramdown), or the build fails
+# with "Liquid syntax error ... was not properly terminated".
 exclude:
   - README.md
   - SHOWCASE.md
@@ -23,15 +31,11 @@ exclude:
   - vendor
   - superpowers
 
-# SEO settings
-author: "Noxy Team"
-lang: "pt-BR"
-
 # Social media
 social:
   name: "Noxy"
   links:
-    - "https://github.com/seu-usuario/noxy"
+    - "https://github.com/estevaofon/noxy"
 
 # Logo
 logo: "https://github.com/user-attachments/assets/8af825b7-fc42-4e0b-8aab-da9bba99b6e0"

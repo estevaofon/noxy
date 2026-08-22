@@ -1,5 +1,10 @@
 # Noxy Language Specification
 
+<!-- {% raw %} -->
+<!-- The markers above and below are HTML comments (invisible on GitHub): they keep
+     GitHub Pages' Liquid renderer from interpreting the literal {{ and }} in this
+     document (f-string escapes). Do not remove them. -->
+
 ## Overview
 
 Noxy is statically typed, with explicit dynamic boundaries through `any`, bare
@@ -2313,6 +2318,8 @@ exceeds 100000 frames` / `stack overflow: operand stack exceeds 1048576
 slots`), never a Go panic; see §7, *Limites de chamada*.
 
 ---
-*Version: 0.11.0*
+*Version: 0.13.0*
 *Language: Noxy*
 *Implementation: Stack VM (Go)*
+
+<!-- {% endraw %} -->
