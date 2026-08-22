@@ -10,6 +10,7 @@ import (
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/console"
 	"noxy-vm/internal/lexer"
+	"noxy-vm/internal/lineedit"
 	"noxy-vm/internal/parser"
 	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/token"
@@ -153,6 +154,33 @@ func getDir(path string) string {
 	return filepath.Dir(path)
 }
 
+// lineSource e de onde o REPL le cada linha: o editor de linha (tty POSIX,
+// com setas e historico) ou o bufio.Scanner (pipe, arquivo, Windows — onde o
+// proprio console edita a linha). ReadLine mostra o prompt e devolve a linha
+// sem terminador; io.EOF encerra o REPL e lineedit.ErrInterrupt (Ctrl-C)
+// descarta a entrada em andamento.
+type lineSource interface {
+	ReadLine(prompt string) (string, error)
+}
+
+// scannerSource le linhas convencionais de stdin.
+type scannerSource struct {
+	scanner *bufio.Scanner
+}
+
+func (s *scannerSource) ReadLine(prompt string) (string, error) {
+	// A crashed raw-mode program (e.g. a terminal game) leaves the shared
+	// console without line input or echo, which would freeze Scan below.
+	console.EnsureLineInput()
+	// os.Stdout nao tem buffer em Go: o prompt sai direto no write, sem Sync
+	// (FlushFileBuffers num pipe do Windows bloqueia ate alguem ler).
+	fmt.Print(prompt)
+	if !s.scanner.Scan() {
+		return "", io.EOF
+	}
+	return s.scanner.Text(), nil
+}
+
 func startREPL(showDisasm bool) {
 	fmt.Printf("Noxy REPL %s\n", version.Version)
 	fmt.Println("Type 'exit' to quit.")
@@ -166,9 +194,22 @@ func startREPL(showDisasm bool) {
 		contPrompt = "\x1b[1;35m... \x1b[0m"
 	}
 
+	// Num tty POSIX o editor de linha cuida de setas, Home/End e historico
+	// (o modo canonico do tty nao sabe: seta virava "^[[A" na tela). Em pipe
+	// e no Windows (console cooked ja edita) fica o Scanner de sempre.
+	var src lineSource
+	if editor := lineedit.Stdin(); editor != nil {
+		src = editor
+	} else {
+		src = &scannerSource{scanner: bufio.NewScanner(os.Stdin)}
+	}
+	runREPL(src, prompt, contPrompt, showDisasm)
+}
+
+// runREPL e o loop ler-compilar-executar sobre a fonte de linhas dada.
+func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) {
 	// Shared VM for persistence
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
-	scanner := bufio.NewScanner(os.Stdin)
 
 	// Persist globals, struct definitions (comuns e instancias monomorfizadas
 	// de generico) e o registry de templates genericos entre linhas do REPL
@@ -194,21 +235,20 @@ func startREPL(showDisasm bool) {
 	var inputBuffer string
 
 	for {
-		// A crashed raw-mode program (e.g. a terminal game) leaves the shared
-		// console without line input or echo, which would freeze Scan below.
-		console.EnsureLineInput()
-
-		if inputBuffer == "" {
-			fmt.Print(prompt)
-		} else {
-			fmt.Print(contPrompt)
+		currentPrompt := prompt
+		if inputBuffer != "" {
+			currentPrompt = contPrompt
 		}
-		os.Stdout.Sync()
-
-		if !scanner.Scan() {
+		line, err := src.ReadLine(currentPrompt)
+		if errors.Is(err, lineedit.ErrInterrupt) {
+			// Ctrl-C: abandona o bloco em andamento e volta ao prompt
+			// principal, como no Python.
+			inputBuffer = ""
+			continue
+		}
+		if err != nil {
 			break
 		}
-		line := scanner.Text()
 
 		if strings.TrimSpace(line) == "exit" {
 			break
