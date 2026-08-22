@@ -84,13 +84,33 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 }
 
 func TestLoweringLocalIndexAssignment(t *testing.T) {
+	// Indexacao tipada (issue #66): `a[0] = 9` com a local int[] e operandos
+	// puros sai pela forma fundida OP_SET_LOCAL_INDEX_ARRAY_NORC, que carrega
+	// a unicizacao do slot dentro do opcode (unicizeOwnedSlot, a mesma de
+	// OP_GET_LOCAL_MUT) — a cadeia MUT explicita nao aparece.
 	code := compileSource(t, `func f()
     let a: int[] = [1, 2]
     a[0] = 9
 end`)
 	ops := collectOpcodes(t, code)
+	if ops[chunk.OP_SET_LOCAL_INDEX_ARRAY_NORC] == 0 {
+		t.Fatal("a[0] = 9 com a local int[] deve emitir OP_SET_LOCAL_INDEX_ARRAY_NORC")
+	}
+	if ops[chunk.OP_GET_LOCAL_MUT] != 0 {
+		t.Fatal("a forma fundida substitui a cadeia OP_GET_LOCAL_MUT")
+	}
+	// Com operando impuro (chamada), a forma fundida nao sai e a cadeia MUT
+	// continua unicizando o local antes da escrita.
+	code = compileSource(t, `func g() -> int
+    return 9
+end
+func f()
+    let a: int[] = [1, 2]
+    a[0] = g()
+end`)
+	ops = collectOpcodes(t, code)
 	if ops[chunk.OP_GET_LOCAL_MUT] == 0 {
-		t.Fatal("a[0] = 9 com a local deve emitir OP_GET_LOCAL_MUT")
+		t.Fatal("a[0] = g() com a local deve emitir OP_GET_LOCAL_MUT")
 	}
 }
 

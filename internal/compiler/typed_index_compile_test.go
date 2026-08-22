@@ -176,3 +176,110 @@ end
 	assertLacks(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
 	assertLacks(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
 }
+
+// Local plano T[] com indice puro: forma fundida por slot, sem GET_LOCAL do
+// array e sem OP_POP depois da escrita.
+func TestLocalArrayFusesIndexIntoSlotForm(t *testing.T) {
+	ops := functionOpcodes(t, `
+func f() -> int
+    let xs: int[] = [1, 2, 3]
+    let i: int = 1
+    xs[i + 1] = xs[i] + xs[0]
+    return xs[2]
+end
+`, "f")
+	assertHas(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
+	assertHas(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
+	assertLacks(t, ops, "OP_GET_INDEX_ARRAY")
+	assertLacks(t, ops, "OP_SET_INDEX_ARRAY_NORC")
+	assertLacks(t, ops, "OP_GET_LOCAL_MUT")
+	assertNotFollowedByPop(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
+}
+
+// Indice ou valor com chamada: a forma fundida NAO sai (le o slot depois de
+// avaliar os operandos; uma chamada poderia rebindar o local via closure ou
+// ref). Fica a forma generica tipada, com o container avaliado primeiro.
+func TestLocalArrayDoesNotFuseWhenOperandHasCall(t *testing.T) {
+	ops := functionOpcodes(t, `
+func idx() -> int
+    return 0
+end
+func f() -> int
+    let xs: int[] = [1, 2, 3]
+    xs[idx()] = 5
+    xs[0] = idx()
+    return xs[idx()]
+end
+`, "f")
+	assertLacks(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
+	assertLacks(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
+	assertHas(t, ops, "OP_GET_INDEX_ARRAY")
+	assertHas(t, ops, "OP_SET_INDEX_ARRAY_NORC")
+	assertHas(t, ops, "OP_GET_LOCAL_MUT")
+}
+
+// Parametro T[] (sem ref) e local possuidor: funde.
+func TestArrayParameterFusesIndex(t *testing.T) {
+	ops := functionOpcodes(t, `
+func sum(data: int[]) -> int
+    let s: int = 0
+    let i: int = 0
+    while i < 3 do
+        s = s + data[i]
+        i = i + 1
+    end
+    data[0] = s
+    return s
+end
+`, "sum")
+	assertHas(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
+	assertHas(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
+}
+
+// for-each sobre array: o item e lido pela forma fundida no slot $collection.
+func TestForEachOverArrayUsesFusedRead(t *testing.T) {
+	ops := functionOpcodes(t, `
+func f(xs: int[]) -> int
+    let s: int = 0
+    for x in xs do
+        s = s + x
+    end
+    return s
+end
+`, "f")
+	assertHas(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
+	assertLacks(t, ops, "OP_GET_INDEX")
+}
+
+// for-each sobre map continua generico (a colecao iterada e o array de chaves
+// sem tipo estatico).
+func TestForEachOverMapKeepsGenericRead(t *testing.T) {
+	ops := functionOpcodes(t, `
+func f(m: map[string, int]) -> int
+    let n: int = 0
+    for k in m do
+        n = n + 1
+    end
+    return n
+end
+`, "f")
+	assertHas(t, ops, "OP_GET_INDEX")
+	assertLacks(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
+}
+
+// Elemento composto em local: leitura funde (leitura nao tem RC), escrita nao.
+func TestLocalCompositeArrayFusesReadOnly(t *testing.T) {
+	ops := functionOpcodes(t, `
+struct P
+    x: int
+end
+func f() -> P
+    let ps: P[] = [P(1), P(2)]
+    ps[0] = ps[1]
+    return ps[0]
+end
+`, "f")
+	assertHas(t, ops, "OP_GET_LOCAL_INDEX_ARRAY")
+	assertLacks(t, ops, "OP_SET_LOCAL_INDEX_ARRAY_NORC")
+	assertHas(t, ops, "OP_SET_INDEX")
+}

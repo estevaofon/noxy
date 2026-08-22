@@ -690,6 +690,14 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				c.emitByte(byte(chunk.OP_POP))
 			}
 		} else if indexExp, ok := n.Target.(*ast.IndexExpression); ok {
+			// perf #66: `x[i] = v` com x local T[] (ou ref T[]), elemento sem
+			// contador RC e operandos puros — forma fundida por slot, statement.
+			if fused, err := c.tryFuseLocalIndexAssign(indexExp, n.Value); fused {
+				if err != nil {
+					return nil, nil, err
+				}
+				return c.currentChunk, nil, nil
+			}
 			// Array/Map Assignment: arr[i] = val
 			// IndexExpression assignment is REBINDING the slot in the container.
 			// If the container holds References, we are rebinding that slot.
@@ -1058,6 +1066,20 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		return c.currentChunk, &ast.MapType{KeyType: keyType, ValueType: valType}, nil
 
 	case *ast.IndexExpression:
+		// perf #66: local T[] (ou ref T[]) com indice puro le pela forma
+		// fundida por slot — sem empilhar o Value do array.
+		if op, slot, elem, ok := c.fusedLocalIndexRead(n); ok {
+			_, idxType, err := c.Compile(n.Index)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, isRef := idxType.(*ast.RefType); isRef {
+				c.emitByte(byte(chunk.OP_DEREF))
+			}
+			c.emitBytes(byte(op), byte(slot))
+			return c.currentChunk, elem, nil
+		}
+
 		_, leftType, err := c.Compile(n.Left)
 		if err != nil {
 			return nil, nil, err
@@ -1668,9 +1690,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		c.emitByte(byte(chunk.OP_POP)) // Pop condition
 
 		// 8. Get Item -> User Variable
-		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-3)) // $collection
-		c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
-		c.emitByte(byte(chunk.OP_GET_INDEX))
+		if _, isArray := colType.(*ast.ArrayType); isArray {
+			// perf #66: leitura fundida — o indice vai para a pilha e o array
+			// vem do slot $collection, sem empilhar o seu Value.
+			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2))             // $index
+			c.emitBytes(byte(chunk.OP_GET_LOCAL_INDEX_ARRAY), byte(len(c.locals)-3)) // $collection
+		} else {
+			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-3)) // $collection
+			c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(len(c.locals)-2)) // $index
+			c.emitByte(byte(chunk.OP_GET_INDEX))
+		}
 
 		// Body Scope
 		c.beginScope()

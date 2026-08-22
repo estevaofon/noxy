@@ -80,3 +80,97 @@ func TestTypedIndexErrorsMatchGenericPath(t *testing.T) {
 		})
 	}
 }
+
+func TestTypedIndexLocalBubbleSortByValue(t *testing.T) {
+	got := captureVMSource(t, `
+func sorted() -> int[]
+    let data: int[] = [5, 1, 4, 2, 3]
+    let n: int = length(data)
+    let i: int = 0
+    while i < n do
+        let j: int = 0
+        while j < n - i - 1 do
+            if data[j] > data[j + 1] then
+                let tmp: int = data[j]
+                data[j] = data[j + 1]
+                data[j + 1] = tmp
+            end
+            j = j + 1
+        end
+        i = i + 1
+    end
+    return data
+end
+test_report(sorted())
+`)
+	arr := got.Obj.(*value.ObjArray)
+	for k := range 5 {
+		if arr.Elements[k].Int() != int64(k+1) {
+			t.Fatalf("esperado [1..5], obtido %s", got.String())
+		}
+	}
+}
+
+// CoW: escrita fundida num local cujo array esta compartilhado clona — a copia
+// nao ve a mutacao e o clone e exatamente um.
+func TestTypedIndexLocalWriteClonesSharedArray(t *testing.T) {
+	ResetCloneCount()
+	got := captureVMSource(t, `
+func f() -> int[]
+    let a: int[] = [1, 2, 3]
+    let b: int[] = a
+    a[0] = 99
+    return [a[0], b[0]]
+end
+test_report(f())
+`)
+	arr := got.Obj.(*value.ObjArray)
+	if arr.Elements[0].Int() != 99 || arr.Elements[1].Int() != 1 {
+		t.Fatalf("esperado [99, 1] (b intacto), obtido %s", got.String())
+	}
+	if CloneCountValue() != 1 {
+		t.Fatalf("esperava exatamente 1 clone CoW, obtido %d", CloneCountValue())
+	}
+}
+
+// for-each sobre array com mutacao durante a iteracao: o comportamento de hoje
+// (a iteracao continua no mesmo array e ve a escrita) e preservado.
+func TestTypedIndexForEachSeesMutationDuringIteration(t *testing.T) {
+	got := captureVMSource(t, `
+func f() -> int
+    let xs: int[] = [1, 2, 3]
+    let s: int = 0
+    for x in xs do
+        if x == 1 then
+            xs[2] = 30
+        end
+        s = s + x
+    end
+    return s
+end
+test_report(f())
+`)
+	if got.Int() != 33 {
+		t.Fatalf("esperado 33 (1 + 2 + 30), obtido %s", got.String())
+	}
+}
+
+func TestTypedIndexLocalErrorsMatchGenericPath(t *testing.T) {
+	cases := []struct{ name, typed, dynamic, want string }{
+		{"leitura fora da faixa", "func f() -> int\n    let a: int[] = [1]\n    let i: int = 5\n    return a[i]\nend\nprint(f())\n", "func f() -> any\n    let a: any = [1]\n    let i: int = 5\n    return a[i]\nend\nprint(f())\n", "array index out of bounds"},
+		{"escrita fora da faixa", "func f() -> int\n    let a: int[] = [1]\n    let i: int = 5\n    a[i] = 2\n    return a[0]\nend\nprint(f())\n", "func f() -> any\n    let a: any = [1]\n    let i: int = 5\n    a[i] = 2\n    return a[0]\nend\nprint(f())\n", "array index out of bounds"},
+		{"indice nao inteiro via any", "func f() -> int\n    let a: int[] = [1]\n    let i: any = \"x\"\n    return a[i]\nend\nprint(f())\n", "func f() -> any\n    let a: any = [1]\n    let i: any = \"x\"\n    return a[i]\nend\nprint(f())\n", "array index must be integer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			typedErr := interpretVMSource(t, New(), tc.typed)
+			dynErr := interpretVMSource(t, New(), tc.dynamic)
+			if typedErr == nil || !strings.Contains(typedErr.Error(), tc.want) {
+				t.Fatalf("tipado: esperava %q, obtido %v", tc.want, typedErr)
+			}
+			if dynErr == nil || !strings.Contains(dynErr.Error(), tc.want) {
+				t.Fatalf("dinamico: esperava %q, obtido %v", tc.want, dynErr)
+			}
+		})
+	}
+}
