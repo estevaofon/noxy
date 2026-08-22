@@ -45,7 +45,7 @@ func TestEveryOpcodeHasASymbolicNameWithoutGaps(t *testing.T) {
 	}
 	// Sentinela: o último opcode declarado em chunk.go precisa estar nomeado.
 	// Se você acrescentou um opcode depois dele, atualize aqui também.
-	if last := int(chunk.OP_GREATER_FLOAT); firstUnnamed >= 0 && firstUnnamed <= last {
+	if last := int(chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC); firstUnnamed >= 0 && firstUnnamed <= last {
 		t.Fatalf("opcode %d está abaixo do último declarado (%d) e não tem nome em String()", firstUnnamed, last)
 	}
 }
@@ -179,6 +179,12 @@ func muta(valores: ref int[]) -> void
     incr()
     let rl: ref int[] = ref local
     rl[0] = 3
+    // indexacao tipada (issue #66): leitura fundida de local e de ref local,
+    // leitura/escrita tipadas genericas no nivel de dentro de um nested.
+    print(local[0] + rl[0])
+    let g: int[][] = [[1, 2], [3, 4]]
+    g[0][1] = g[1][0]
+    print(g[0][1])
     let pt: Point = Point(1, 2)
     let rp: ref Point = ref pt
     rp.x = 5

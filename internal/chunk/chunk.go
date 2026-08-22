@@ -140,6 +140,21 @@ const (
 	OP_DIV_FLOAT
 	OP_LESS_FLOAT
 	OP_GREATER_FLOAT
+	// perf issue #66 (item 1): indexacao tipada de array. Emitidos so quando o
+	// compilador sabe que a base e T[] (ou que o local e `ref T[]`). Semantica
+	// e mensagens de erro identicas as dos genericos; container que nao e
+	// array em runtime cai no caminho generico (leituras re-despacham
+	// OP_GET_INDEX; escritas chamam setIndexGeneric). NORC = elemento
+	// estaticamente sem contador RC (int/float/bool/string/bytes): o VM confere
+	// em runtime (value.NeverTracked do valor novo e do velho, tag do array nao
+	// e (ref T)[]) antes de pular Retain/Release. Os de escrita NAO empilham
+	// resultado (atribuicao e statement; o compilador nao emite OP_POP depois).
+	OP_GET_INDEX_ARRAY                // pops index, container; push elemento
+	OP_SET_INDEX_ARRAY_NORC           // pops val, index, container
+	OP_GET_LOCAL_INDEX_ARRAY          // [slot]; pops index; container = local T[]
+	OP_SET_LOCAL_INDEX_ARRAY_NORC     // [slot]; pops val, index; local T[] possuidor (Owners<=1, senao uniciza como GET_LOCAL_MUT)
+	OP_GET_REF_LOCAL_INDEX_ARRAY      // [slot]; pops index; local `ref T[]` (REF_UPVALUE resolvido com uma Load(); outros refs pelo caminho de OP_DEREF)
+	OP_SET_REF_LOCAL_INDEX_ARRAY_NORC // [slot]; pops val, index; local `ref T[]` (Owners<=1, senao unicizeThroughRefValue)
 )
 
 func (op OpCode) String() string {
@@ -238,6 +253,18 @@ func (op OpCode) String() string {
 		return "OP_LESS_FLOAT"
 	case OP_GREATER_FLOAT:
 		return "OP_GREATER_FLOAT"
+	case OP_GET_INDEX_ARRAY:
+		return "OP_GET_INDEX_ARRAY"
+	case OP_SET_INDEX_ARRAY_NORC:
+		return "OP_SET_INDEX_ARRAY_NORC"
+	case OP_GET_LOCAL_INDEX_ARRAY:
+		return "OP_GET_LOCAL_INDEX_ARRAY"
+	case OP_SET_LOCAL_INDEX_ARRAY_NORC:
+		return "OP_SET_LOCAL_INDEX_ARRAY_NORC"
+	case OP_GET_REF_LOCAL_INDEX_ARRAY:
+		return "OP_GET_REF_LOCAL_INDEX_ARRAY"
+	case OP_SET_REF_LOCAL_INDEX_ARRAY_NORC:
+		return "OP_SET_REF_LOCAL_INDEX_ARRAY_NORC"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -559,6 +586,18 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_LESS_FLOAT", offset)
 	case OP_GREATER_FLOAT:
 		return c.simpleInstruction("OP_GREATER_FLOAT", offset)
+	case OP_GET_INDEX_ARRAY:
+		return c.simpleInstruction("OP_GET_INDEX_ARRAY", offset)
+	case OP_SET_INDEX_ARRAY_NORC:
+		return c.simpleInstruction("OP_SET_INDEX_ARRAY_NORC", offset)
+	case OP_GET_LOCAL_INDEX_ARRAY:
+		return c.byteInstruction("OP_GET_LOCAL_INDEX_ARRAY", offset)
+	case OP_SET_LOCAL_INDEX_ARRAY_NORC:
+		return c.byteInstruction("OP_SET_LOCAL_INDEX_ARRAY_NORC", offset)
+	case OP_GET_REF_LOCAL_INDEX_ARRAY:
+		return c.byteInstruction("OP_GET_REF_LOCAL_INDEX_ARRAY", offset)
+	case OP_SET_REF_LOCAL_INDEX_ARRAY_NORC:
+		return c.byteInstruction("OP_SET_REF_LOCAL_INDEX_ARRAY_NORC", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
