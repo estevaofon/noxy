@@ -1,12 +1,12 @@
 # Changelog
 
-## [0.15.0] - 2026-08-22
+## [0.14.2] - 2026-08-22
 
 Os quatro achados do perfil de cobertura de v0.14.1 (issue #61): uma brecha
 do `let` sem inicializador, uma brecha do struct na fronteira `any`, um aviso
 do compilador no lugar errado e código morto nos `Format()`. Duas das
-correções fecham comportamento que programas podiam estar usando — daí a
-versão menor.
+correções fecham comportamento que programas podiam estar usando — as seções
+BREAKING abaixo dizem como migrar.
 
 ### Changed (BREAKING)
 
