@@ -3,7 +3,144 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.6.0 (68209be) × v0.14.1 (4874048) — re-medição com a máquina ociosa
+
+**Data:** 2026-08-22 · Windows 11 · i7-1165G7 · protocolo intercalado. Duas
+sessões: mediana de 9 (**a reportada**) e mediana de 5 (corroboração). Máquina
+**ociosa**: CPU total ~4% antes de começar, nenhum processo de fundo acima de
+~7% de um core durante as sessões (Firefox e Slack abertos e parados; sem
+Zoom/Chrome), na tomada. Dados brutos de todas as sessões e sondas em
+`results/2026-08-22-v0141-idle-raw.md`.
+
+Re-medição da seção seguinte (2026-08-21, feita com Zoom/Chrome/Slack
+ativos): mesmo protocolo, mesmos scripts e **mesmo binário v0.6.0 byte a
+byte**; o candidato passou a ser a v0.14.1 (HEAD de `develop`). As versões
+0.14.x não tocam o caminho quente do VM (`range` builtin, `sys.version`,
+editor de linha do REPL), e a sanidade v0.13.0 × v0.14.1 intercalada (n=5)
+confirma: benches longos entre −3,4% e +3,2%, sem padrão — as conclusões
+abaixo valem, portanto, para o par v0.6.0 × v0.13.0 da seção anterior.
+
+**Resumo:** com a máquina ociosa, o saldo das oito versões **não é o da seção
+anterior**. Não há ganho no caminho de chamada tipada — os −15%/−13%/−6% eram
+o piso de processo da v0.6.0 inflado pela carga, não trabalho do VM. O que
+sobra é **uma regressão real de ~10% na leitura O(n) de array com chamada**
+(`call_readonly`), regressões pequenas e de sinal consistente em `call_ref` e
+`conway` (+2–4%), e empate no resto. O ganho grande do intervalo continua
+sendo o de **carga de módulos (2,7x a 10,1x)**, confirmado.
+
+| bench | v060_ms | v0141_ms | delta (n=9) | delta (n=5) | veredito |
+|---|---|---|---|---|---|
+| bench_call_readonly | 1240,0 | 1369,3 | **+10,4%** | +9,3% | ⚠️ regressão confirmada (antes +4,2% / +9,1%) |
+| bench_call_ref | 3711,0 | 3838,7 | **+3,4%** | +1,8% | ⚠️ regressão pequena (antes +1,8% / +2,9%) |
+| bench_conway | 2119,2 | 2168,9 | +2,3% | +3,6% | ⚠️ regressão pequena, sinal agora consistente (antes ruído) |
+| bench_bubblesort | 4137,6 | 4141,8 | +0,1% | +3,9% | ➖ inconclusivo (antes +4,8% / +9,0%) |
+| bench_path_update | 634,3 | 641,9 | +1,2% | −2,5% | ➖ ruído (antes −4,8% / −4,3%, "ganho") |
+| bench_map_churn | 451,4 | 449,0 | −0,5% | −0,1% | ➖ empate |
+| bench_share_mutate | 266,0 | 264,7 | −0,5% | −3,5% | ➖ empate |
+| bench_spawn_sum | 725,6 | 726,8 | +0,2% | −1,7% | ➖ empate |
+| bench_call_light | 114,5 | 113,5 | −0,9% | +0,8% | ➖ no piso¹ (antes −6,1%) |
+| bench_typed_call_map | 109,0 | 121,9 | +11,8% | +5,6% | ➖ no piso¹ (antes **−15,3%**) |
+| bench_value_call_mutate | 120,7 | 115,8 | −4,1% | +21,3% | ➖ no piso¹ (antes **−12,9%**) |
+
+`bench_generic_vs_hand` segue **pulado** (a v0.6.0 não faz parse de `<T>`); na
+sanidade v0.13.0 × v0.14.1 deu −1,2%.
+
+¹ Ver "Três benches estão no piso de processo" abaixo.
+
+### Leitura
+
+**A regressão na leitura de array é real e maior do que a seção anterior
+dizia.** `call_readonly` (+10,4% e +9,3%, duas sessões, bench de 1,2 s) é o
+sinal mais limpo da rodada. O cross-runtime da mesma data concorda: o
+`bubblesort.nx` de lá (indexação pura, sem chamada) dá a v0.14.1 **1,06x–1,10x**
+atrás da v0.6.0 nas três suítes, e `fib` (chamada pura) **1,05x–1,08x** — ver
+[`cross_runtime/README.md`](cross_runtime/README.md). O quadro coerente é:
+**o caminho de leitura indexada e o protocolo de chamada ficaram 5–10% mais
+lentos entre a v0.6.0 e a v0.14.1**, o resto do VM empatou. É o perfil
+esperado dos guards de `Shared`/RC por acesso que as versões de CoW e de slot
+`ref` adicionaram sem fase de perf — continua sendo o item a investigar,
+agora com sinal mais forte. Atribuição por perfil, não por bisect.
+
+`bench_bubblesort.nx` daqui (+0,1% e +3,9%) **não** confirma com clareza o que
+a seção anterior chamava de regressão de +4,8%; fica inconclusivo. É o bench
+mais longo da suíte (~4 s) e o mais exposto à deriva de frequência dentro da
+sessão — o sinal de leitura indexada que vale é o de `call_readonly`.
+
+**Os "ganhos" de chamada tipada da seção anterior não existem.**
+`typed_call_map` (−15,3% → agora +11,8% / +5,6%), `value_call_mutate` (−12,9%
+→ −4,1% / +21,3%) e `call_light` (−6,1% → −0,9% / +0,8%) trocaram de sinal ou
+viraram ruído. A atribuição a `58f2cad` (#55, retain/release a menos por
+chamada que cruza a fronteira) **fica retirada**: o que aquelas medições
+captaram foi o piso de processo da v0.6.0 sob carga (139,7 ms contra 116,3 ms
+da v0.13.0 no cross-runtime de 2026-08-21), e a máquina ociosa desfaz isso —
+hoje os dois binários têm o mesmo piso (ver sondas abaixo).
+
+**Três benches estão no piso de processo.** `call_light`, `typed_call_map` e
+`value_call_mutate` somam 95–125 ms com piso de ~84 ms: medem 10–35 ms de
+trabalho, e um jitter de 5 ms vira ±5% do total. Estão abaixo da resolução do
+protocolo (mediana de 9 entre processos). Medidos à parte em três vias
+(v0.6.0 / v0.13.0 / v0.14.1, 15 execuções intercaladas, mínimo): 92,2 / 93,7
+/ 99,0 · 96,2 / 98,6 / 108,2 · 93,1 / 90,9 / 99,6 ms — v0.6.0 e v0.13.0
+empatam; a v0.14.1 aparece 5–10 ms acima, **o mesmo deslocamento que um build
+fresco do próprio 63ab106 mostra contra o binário da rodada anterior** (89,4
+vs 84,4 ms no piso puro), portanto artefato de arquivo/ruído de piso, não
+código. Para esses três decidirem alguma coisa, a contagem de iterações tem
+de subir até o trabalho ser ≥ 5x o piso — o mesmo follow-up já aberto no
+cross-runtime.
+
+**Ruído, mesmo com a máquina ociosa:** o tempo absoluto derivou ~15% entre
+sessões (`bench_bubblesort` v0.6.0: 4137,6 / 3590,4 / 3721,1 ms em três
+sessões consecutivas, sem carga de fundo), e `value_call_mutate` foi de −4,1%
+a +21,3% só trocando n=9 por n=5. Vale o que já estava escrito: delta abaixo
+de ~3% numa sessão não é conclusivo, e a única coisa comparável é o delta
+dentro da janela intercalada — nunca ms entre sessões ou datas.
+
+### Carga de módulos: o ganho grande confirma
+
+Mesmas sondas, mínimo de 15 execuções intercaladas, fontes copiados para
+disco local:
+
+| sonda | v060_ms | v0141_ms | delta | (2026-08-21, sob carga) |
+|---|---|---|---|---|
+| `startup_use_selectall.nx` (`use http select *`) | 1370,2 | 135,5 | **−90,1%** (10,1x) | −89,8% (9,8x) |
+| `startup_use_namespace.nx` (`use http`) | 346,2 | 129,6 | **−62,6%** (2,7x) | −66,0% (2,9x) |
+| `startup.nx` (nenhum `use`, controle) | 83,3 | 88,1 | +5,8% | −16,1% |
+
+Os dois ganhos de carga de módulos (`19156a7`, memoização de
+`loadModuleDeclarations`) reproduzem dentro de 1–3 pontos. O **−16,1% no piso
+puro não reproduz**: ociosa, a máquina dá o mesmo piso aos dois binários
+antigos (84,1 ms v0.6.0, 84,4 ms v0.13.0, em quatro vias), e os +4–5 ms da
+v0.14.1 são o deslocamento de build fresco citado acima. O "ganho menor e
+separado no piso de processo puro, sem causa atribuída" da seção anterior
+era carga, não código.
+
+### O que muda em relação à seção de 2026-08-21
+
+| afirmação de 2026-08-21 | hoje (máquina ociosa) |
+|---|---|
+| caminho de chamada tipada −6% a −15%, atribuído ao #55 | não existe; era piso sob carga — atribuição retirada |
+| `call_readonly` +4,2% e `bubblesort` +4,8%, regressões | `call_readonly` **+10%** confirmada; `bubblesort` inconclusivo (+0,1% / +3,9%) |
+| startup puro −15% a −16% | empate (piso idêntico nos dois binários) |
+| carga de módulos 2,9x–9,8x | **confirma**: 2,7x–10,1x |
+| `loop_arith` +13% no cross-runtime, "única regressão consistente" | não reproduz (0,95x–1,03x); as regressões consistentes lá são `bubblesort` 1,06x–1,10x e `fib` 1,05x–1,08x |
+| VM "empatado" no saldo | **5–10% mais lento em leitura indexada e chamada**, empate no resto |
+
+Lição de método, além da que a seção anterior já registrou: intercalar
+protege a comparação contra deriva **dentro** da janela, mas não contra um
+efeito que atinge um só lado de forma sistemática. Sob carga, o piso de
+processo inflou de modo diferente para os dois binários (139,7 vs 116,3 ms),
+e isso se disfarça de ganho de VM em qualquer bench curto — bench com trabalho
+abaixo de ~5x o piso não decide nada, com ou sem carga.
+
 ## v0.6.0 (68209be) × v0.13.0 (63ab106) — sete versões de saldo
+
+> **Superada pela re-medição de 2026-08-22 (seção acima).** Esta rodada foi
+> feita com Zoom/Chrome/Slack ativos; com a máquina ociosa, os ganhos de
+> chamada tipada (−15,3% / −12,9% / −6,1%) e o startup −15% **não se
+> reproduziram** (eram piso de processo sob carga), a regressão de
+> `call_readonly` ficou maior (+10%) e a de `bubblesort` inconclusiva; a
+> carga de módulos 2,9x–9,8x confirma. Mantida como registro; a atribuição
+> ao #55 feita abaixo fica retirada.
 
 **Data:** 2026-08-21 · Windows 11 · i7-1165G7 · protocolo intercalado. Duas
 sessões: mediana de 9 (**a reportada**) e mediana de 5 (corroboração). Máquina
@@ -724,7 +861,7 @@ powershell -File benchmarks/run_benchmarks.ps1 -Binary <exe> -Label <label>
 
 # comparação intercalada (grava results/interleaved.md) — preferir esta
 powershell -File benchmarks/interleaved_compare.ps1 -Baseline <exe> -Candidate <exe> `
-           -BaselineLabel v060 -CandidateLabel v0130 -Runs 9
+           -BaselineLabel v060 -CandidateLabel v0141 -Runs 9
 
 # corpus de exemplos baseline × candidato
 powershell -File benchmarks/compare_examples.ps1 -Baseline <exe> -Candidate <exe>
