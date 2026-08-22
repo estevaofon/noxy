@@ -14,6 +14,19 @@ func IsShared(v Value) bool {
 	return owners != nil && owners.Load() > 1
 }
 
+// NeverTracked responde se v CERTAMENTE nao tem contador RC: escalares
+// (Type != VAL_OBJ) e os VAL_OBJ que os construtores carimbaram como sem dono
+// (string, *ObjStruct, *RuntimeTypeInfo). E a conferencia que as escritas NORC
+// da indexacao tipada (issue #66, item 1) fazem antes de pular Retain/Release:
+// se o valor novo ou o velho nao for comprovadamente sem contador (composto,
+// ou VAL_OBJ sem carimbo — kind zero), o chamador cai no caminho generico, que
+// retem. Conservador por construcao: nunca devolve true para um composto.
+// Chamada de dentro de run(): tem de caber em 20 no inliner
+// (inline_guard_test.go).
+func NeverTracked(v Value) bool {
+	return v.Type != VAL_OBJ || v.kind == objKindNoOwners
+}
+
 // ownersSaturation impede overflow do contador; acima disso o valor se
 // comporta como permanentemente compartilhado (equivalente ao sticky).
 const ownersSaturation = math.MaxInt32 / 2

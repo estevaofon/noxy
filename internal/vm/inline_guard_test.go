@@ -135,6 +135,21 @@ func TestRetainReleaseStayInlinable(t *testing.T) {
 			t.Errorf("value.%s tem custo de inline %d, maximo %d — enxugue ownersOf (ver cow.go)", name, cost, inlineNormalMaxCost)
 		}
 	}
+
+	// NeverTracked (cow.go) e chamada de DENTRO de run() pelas escritas NORC da
+	// indexacao tipada (issue #66): orcamento de 20, nao 80.
+	neverTrackedPattern := regexp.MustCompile(`can inline NeverTracked with cost (\d+)`)
+	ntMatch := neverTrackedPattern.FindStringSubmatch(report)
+	if ntMatch == nil {
+		t.Fatalf("o compilador nao inlina value.NeverTracked — procure por 'cannot inline NeverTracked' em `go build -gcflags=-m=2 ./internal/value`")
+	}
+	ntCost, ntErr := strconv.Atoi(ntMatch[1])
+	if ntErr != nil {
+		t.Fatalf("custo ilegivel em %q: %v", ntMatch[0], ntErr)
+	}
+	if ntCost > inlineBigFunctionMaxCost {
+		t.Errorf("value.NeverTracked tem custo de inline %d, maximo %d para ser inlinada dentro de run()", ntCost, inlineBigFunctionMaxCost)
+	}
 }
 
 // inlineBigFunctionMaxCost espelha a constante homonima do compilador
