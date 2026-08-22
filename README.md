@@ -20,6 +20,27 @@ Noxy is statically typed, with explicit dynamic boundaries through `any`, bare
 variables are type-stable: the declared type does not change, while values may
 be mutable.
 
+### The Zen of Noxy
+
+The philosophy that guides the language and its future decisions — short by
+design, in the spirit of the Zen of Python: a compass, not a rulebook. It also
+opens the [language spec](docs/NOXY_LANGUAGE_SPEC.md#the-zen-of-noxy).
+
+```text
+Simplicity is sophistication.
+Typing is safety — and the compiler speaks first.
+Dynamic exists, but it is explicit: any says what it is.
+Variables are copies, unless explicitly stated otherwise.
+Sharing is ref. There is no other way.
+CoW + ref is one heck of a duo!
+An error is a value, not an exception.
+One rule, everywhere: file, module, REPL.
+Consistency comes before performance.
+Performance is measured afterwards — without changing semantics.
+Lean core, vast ecosystem.
+Fixing beats staying compatible, until 1.0 says otherwise.
+```
+
 ### Features
 
 - ✅ Bytecode compiler

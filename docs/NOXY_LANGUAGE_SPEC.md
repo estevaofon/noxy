@@ -13,6 +13,26 @@ educational purposes and practical applications, it supports structs,
 references, arrays, f-strings, and a module system.
 The current implementation is a **Stack-based VM** written in **Go**.
 
+### The Zen of Noxy
+
+The philosophy that guides the language and its future decisions — short by
+design, in the spirit of the Zen of Python: a compass, not a rulebook.
+
+```text
+Simplicity is sophistication.
+Typing is safety — and the compiler speaks first.
+Dynamic exists, but it is explicit: any says what it is.
+Variables are copies, unless explicitly stated otherwise.
+Sharing is ref. There is no other way.
+CoW + ref is one heck of a duo!
+An error is a value, not an exception.
+One rule, everywhere: file, module, REPL.
+Consistency comes before performance.
+Performance is measured afterwards — without changing semantics.
+Lean core, vast ecosystem.
+Fixing beats staying compatible, until 1.0 says otherwise.
+```
+
 ---
 
 ## 1. Lexical Structure
