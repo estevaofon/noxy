@@ -40,8 +40,6 @@ const (
 	OP_GREATER
 	OP_LESS
 	OP_EQUAL
-	OP_AND
-	OP_OR
 	OP_BIT_AND
 	OP_BIT_OR
 	OP_BIT_XOR
@@ -50,9 +48,7 @@ const (
 	OP_SHIFT_RIGHT
 	OP_CALL
 	OP_DEFER
-	OP_INVOKE
 	OP_RETURN
-	OP_PRINT
 	OP_IMPORT
 	OP_IMPORT_FROM_ALL
 	OP_DUP
@@ -83,7 +79,6 @@ const (
 	OP_STORE_VIA_REF
 	OP_STORE_REF
 	OP_SET_PROPERTY_DEREF
-	OP_SWAP
 	OP_COPY
 	OP_ADDR
 	OP_MARK_REF_JSON_DYNAMIC
@@ -263,10 +258,6 @@ func (op OpCode) String() string {
 		return "OP_LESS"
 	case OP_EQUAL:
 		return "OP_EQUAL"
-	case OP_AND:
-		return "OP_AND"
-	case OP_OR:
-		return "OP_OR"
 	case OP_BIT_AND:
 		return "OP_BIT_AND"
 	case OP_BIT_OR:
@@ -283,12 +274,8 @@ func (op OpCode) String() string {
 		return "OP_CALL"
 	case OP_DEFER:
 		return "OP_DEFER"
-	case OP_INVOKE:
-		return "OP_INVOKE"
 	case OP_RETURN:
 		return "OP_RETURN"
-	case OP_PRINT:
-		return "OP_PRINT"
 	case OP_IMPORT:
 		return "OP_IMPORT"
 	case OP_IMPORT_FROM_ALL:
@@ -325,8 +312,6 @@ func (op OpCode) String() string {
 		return "OP_STORE_REF"
 	case OP_SET_PROPERTY_DEREF:
 		return "OP_SET_PROPERTY_DEREF"
-	case OP_SWAP:
-		return "OP_SWAP"
 	case OP_COPY:
 		return "OP_COPY"
 	case OP_ADDR:
@@ -522,10 +507,6 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_DIVIDE", offset)
 	case OP_NOT:
 		return c.simpleInstruction("OP_NOT", offset)
-	case OP_AND:
-		return c.simpleInstruction("OP_AND", offset)
-	case OP_OR:
-		return c.simpleInstruction("OP_OR", offset)
 	case OP_BIT_AND:
 		return c.simpleInstruction("OP_BIT_AND", offset)
 	case OP_BIT_OR:
@@ -540,8 +521,6 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_SHIFT_RIGHT", offset)
 	case OP_NEGATE:
 		return c.simpleInstruction("OP_NEGATE", offset)
-	case OP_PRINT:
-		return c.simpleInstruction("OP_PRINT", offset)
 	case OP_JUMP:
 		return c.shortInstruction("OP_JUMP", offset)
 	case OP_JUMP_IF_FALSE:
@@ -658,8 +637,6 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_STORE_REF", offset)
 	case OP_SET_PROPERTY_DEREF:
 		return c.constantInstruction("OP_SET_PROPERTY_DEREF", offset)
-	case OP_SWAP:
-		return c.simpleInstruction("OP_SWAP", offset)
 	case OP_COPY:
 		return c.simpleInstruction("OP_COPY", offset)
 	case OP_ADDR:

@@ -42,7 +42,7 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 				chunk.OP_CALL_STATIC,
 				chunk.OP_DEFER, chunk.OP_REF_LOCAL, chunk.OP_REF_UPVALUE,
 				chunk.OP_GET_LOCAL_MUT, chunk.OP_GET_UPVALUE_MUT,
-				chunk.OP_SET_PROPERTY_DEREF, chunk.OP_INVOKE,
+				chunk.OP_SET_PROPERTY_DEREF,
 				// RC (Task 7): gemeos de emprestimo e a marca de upvalue —
 				// operando de 1 byte. Sem eles aqui o walker le o operando como
 				// opcode e dessincroniza, perdendo a contagem dos opcodes

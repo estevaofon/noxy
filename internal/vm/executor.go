@@ -677,12 +677,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					vm.push(value.NewString(strA + strB))
 					continue // Added continue for cleaner flow
 				}
-				// VAL_BYTES types are stored internally as strings.
-				if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
-					vm.push(value.NewBytes(a.Obj.(string) + b.Obj.(string)))
-					continue
-				}
-
+				// bytes e VAL_BYTES (nunca VAL_OBJ): o caso bytes+bytes e o
+				// ramo seguinte; aqui so sobra objeto nao-string.
 				return vm.runtimeError(c, ip, "operands must be numbers, strings or bytes")
 			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
 				// Case where types are explicit VAL_BYTES (not VAL_OBJ)
@@ -1019,22 +1015,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			} else {
 				return vm.runtimeError(c, ip, "operand must be boolean")
 			}
-		case chunk.OP_AND:
-			b := vm.pop()
-			a := vm.pop()
-			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
-				vm.push(value.NewBool(a.AsBool && b.AsBool))
-			} else {
-				return vm.runtimeError(c, ip, "operands for & must be boolean")
-			}
-		case chunk.OP_OR:
-			b := vm.pop()
-			a := vm.pop()
-			if a.Type == value.VAL_BOOL && b.Type == value.VAL_BOOL {
-				vm.push(value.NewBool(a.AsBool || b.AsBool))
-			} else {
-				return vm.runtimeError(c, ip, "operands for | must be boolean")
-			}
 		case chunk.OP_ZEROS:
 			countVal := vm.pop()
 			if countVal.Type != value.VAL_INT {
@@ -1141,19 +1121,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			vm.push(value.NewBool(a.AsInt == b.AsInt))
-		case chunk.OP_PRINT:
-			v := vm.pop()
-			if v.Type == value.VAL_REF {
-				ref, err := extractReferenceValue(v)
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				if _, _, _, err := vm.referenceStorage(ref); err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-			}
-			fmt.Println(v)
-
 		case chunk.OP_CALL:
 			argCount := int(c.Code[ip])
 			ip++
@@ -1854,13 +1821,6 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 		// OP_MARK_SHARED morto pos-RC (Task 8): compilador nao emite mais;
 		// case removido do switch (sem default, opcode nao tratado e no-op).
-
-		case chunk.OP_SWAP:
-			// Swap top two stack elements: [a, b] -> [b, a]
-			b := vm.pop()
-			a := vm.pop()
-			vm.push(b)
-			vm.push(a)
 
 		case chunk.OP_COPY:
 			// CoW: deref para contexto de valor passa o valor adiante sem
