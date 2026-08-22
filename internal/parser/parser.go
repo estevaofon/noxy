@@ -206,25 +206,6 @@ func (p *Parser) parseStatement() ast.Statement {
 	}
 }
 
-func (p *Parser) parseAssignStatement() *ast.AssignStmt {
-	stmt := &ast.AssignStmt{Token: p.peekToken} // The '=' token
-
-	// Parse Target (Identifier)
-	stmt.Target = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
-
-	p.nextToken() // Eat Identifier
-	p.nextToken() // Eat '='
-
-	stmt.Value = p.parseExpression(LOWEST)
-
-	// Optional newline
-	if p.peekToken.Type == token.NEWLINE {
-		p.nextToken()
-	}
-
-	return stmt
-}
-
 func (p *Parser) parseIfStatement() *ast.IfStatement {
 	stmt := &ast.IfStatement{Token: p.curToken}
 
@@ -496,40 +477,6 @@ func (p *Parser) parseWhenStatement() *ast.WhenStatement {
 	}
 
 	if p.curTokenIs(token.END) {
-		p.nextToken()
-	}
-
-	return stmt
-}
-
-func (p *Parser) parseCaseBlock() *ast.BlockStatement {
-	block := &ast.BlockStatement{Token: p.curToken}
-	block.Statements = []ast.Statement{}
-
-	if p.curTokenIs(token.NEWLINE) {
-		p.nextToken()
-	}
-
-	for !p.curTokenIs(token.CASE) && !p.curTokenIs(token.DEFAULT) && !p.curTokenIs(token.END) && !p.curTokenIs(token.EOF) {
-		stmt := p.parseStatement()
-		if stmt != nil {
-			block.Statements = append(block.Statements, stmt)
-		}
-		p.nextToken()
-		if p.curTokenIs(token.NEWLINE) {
-			p.nextToken() // skip separators
-		}
-	}
-	return block
-}
-
-func (p *Parser) parseExpressionStatement() *ast.ExpressionStmt {
-	stmt := &ast.ExpressionStmt{Token: p.curToken}
-
-	stmt.Expression = p.parseExpression(LOWEST)
-
-	// Optional newline
-	if p.peekToken.Type == token.NEWLINE {
 		p.nextToken()
 	}
 

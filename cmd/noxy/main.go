@@ -373,34 +373,6 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 	return nil
 }
 
-func verify() {
-	input := `
-	func main()
-		struct Point
-			x: int
-			y: int
-		end
-
-		print(111)
-		let p1: Point = Point(1, 2)
-		print(222)
-		print(p1)
-		
-		print(333)
-		let points: Point[] = [p1, Point(3, 4)]
-		print(444)
-		
-		print(555)
-		print(points)
-		print(666)
-		print(points[0])
-	end
-	main()
-	`
-	fmt.Printf("Verifying with input:\n%s\n", input)
-	runWithConfig("verify.nx", input, ".", true)
-}
-
 // runWithConfig devolve o codigo de saida (0 sucesso, 1 erro) em vez de
 // chamar os.Exit diretamente — quem chama (runFile) precisa da chance de
 // rodar seus proprios defers (parar/gravar profile) antes do processo
