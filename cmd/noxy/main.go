@@ -338,6 +338,11 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 		c.SetSessionLets(replLets)
 		c.SetModuleState(replModules)
 		chunk, _, err := c.Compile(program)
+		// Avisos do compilador sao diagnostico: diagOut, nunca stdout
+		// (issue #61 item 3). Saem mesmo quando a compilacao falha depois.
+		for _, warning := range c.Warnings() {
+			fmt.Fprintln(diagOut, warning)
+		}
 		if err != nil {
 			fmt.Fprintf(diagOut, "Compiler error: %s\n", err)
 			inputBuffer = "" // Reset
@@ -392,6 +397,11 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
 	chunk, _, err := c.Compile(program)
+	// Avisos do compilador sao diagnostico: diagOut, nunca stdout (issue
+	// #61 item 3). Saem mesmo quando a compilacao falha depois.
+	for _, warning := range c.Warnings() {
+		fmt.Fprintln(diagOut, warning)
+	}
 	if err != nil {
 		fmt.Fprintf(diagOut, "Compiler error: %s\n", err)
 		return 1

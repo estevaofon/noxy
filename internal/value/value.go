@@ -378,8 +378,6 @@ func (oa *ObjArray) String() string {
 
 func (oa *ObjArray) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "array")
 	case 's', 'v':
 		fmt.Fprint(f, oa.String())
 	default:
@@ -414,8 +412,6 @@ func (om *ObjMap) String() string {
 
 func (om *ObjMap) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "map")
 	case 's', 'v':
 		fmt.Fprint(f, om.String())
 	default:
@@ -442,14 +438,30 @@ func (os *ObjStruct) FieldIsRef(name string) bool {
 	return os != nil && os.RefFields[name]
 }
 
+// HasField informa se name e um campo DECLARADO do struct (nil-safe). E a
+// fonte de runtime para "este nome existe na declaracao?" — OP_SET_PROPERTY
+// consulta so no caminho frio, quando o nome nao esta em instance.Fields
+// (issue #61 item 2: escrita via `any` num campo inexistente criava a
+// propriedade em silencio). Varredura linear: structs tem poucos campos e o
+// caminho quente (campo presente) nunca chega aqui.
+func (os *ObjStruct) HasField(name string) bool {
+	if os == nil {
+		return false
+	}
+	for _, field := range os.Fields {
+		if field == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (os *ObjStruct) String() string {
 	return fmt.Sprintf("<struct %s>", os.Name)
 }
 
 func (os *ObjStruct) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "struct definition") // Or just "struct"
 	case 's', 'v':
 		fmt.Fprint(f, os.String())
 	default:
@@ -472,8 +484,6 @@ func (oi *ObjInstance) String() string {
 
 func (oi *ObjInstance) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, oi.Struct.Name)
 	case 's', 'v':
 		fmt.Fprint(f, oi.String())
 	default:
@@ -494,8 +504,6 @@ func (oc *ObjChannel) String() string {
 
 func (oc *ObjChannel) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "channel")
 	case 's', 'v':
 		fmt.Fprint(f, oc.String())
 	default:
@@ -513,8 +521,6 @@ func (ow *ObjWaitGroup) String() string {
 
 func (ow *ObjWaitGroup) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "waitgroup")
 	case 's', 'v':
 		fmt.Fprint(f, ow.String())
 	default:
@@ -572,8 +578,6 @@ func (or *ObjRef) String() string {
 
 func (or *ObjRef) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "reference")
 	case 's', 'v':
 		fmt.Fprint(f, or.String())
 	default:
@@ -760,8 +764,6 @@ func NewWaitGroup() Value {
 
 func (bw BytesWrapper) Format(f fmt.State, verb rune) {
 	switch verb {
-	case 'T':
-		fmt.Fprint(f, "bytes")
 	case 's', 'v':
 		fmt.Fprint(f, bw.Str)
 	case 'q':

@@ -513,6 +513,33 @@ let name: type = value
 
 Variables can be reassigned, but the new value **MUST** be of the same type as declared.
 
+### Declaration without an initializer
+
+`let name: type` (no `= value`) is allowed only for types that have a
+**default value**, and the variable starts with it:
+
+| Type | Default |
+|------|---------|
+| `int`, `float`, `bool`, `string`, `bytes` | `0`, `0.0`, `false`, `""`, `b""` |
+| `T[]`, `map[K, V]` | `[]`, `{}` (empty) |
+| `T[N]` | `N` copies of `T`'s default — so `T` must have one |
+| struct, `ref T`, `any` | `null` (the types that accept `null`, §2.3, §5) |
+
+`chan T` and function types (`func`, `func(A) -> R`) have **no default**:
+`null` is not a value of those types (`let c: chan int = null` is a type
+error), so a declaration without an initializer is a compile-time error —
+give the value up front:
+
+```noxy
+let p: Point              // ✓ null
+let r: ref int            // ✓ null
+let n: int                // ✓ 0
+let cs: (chan int)[]      // ✓ [] — the array is empty, no element default needed
+let c: chan int           // ERROR: variable 'c' needs an initializer: chan int has no default value
+let f: func(int) -> int   // ERROR: same rule — func(int) -> int has no default value
+let ch: chan int = make_chan(1)   // ✓
+```
+
 ### Redeclaration vs. reassignment
 
 `let` introduces a new binding; `=` updates an existing one. Declaring a
@@ -660,7 +687,7 @@ Use parentheses for an array whose elements are exact functions. Without parenth
 
 ```noxy
 let transforms: (func(int) -> int)[] = [double, increment]
-let factory: func(int) -> int[]
+let factory: func(int) -> int[] = make_list   // one function returning int[]
 ```
 
 Exact function types may also appear in parameters, returns, struct fields, map values, channels, and references. `any`, native functions, plugins, and untyped module exports remain dynamic boundaries and retain runtime validation; an unknown native value cannot be implicitly narrowed to an exact function type.
@@ -733,6 +760,12 @@ let p: Point = Point(10, 20)
 // Field Access
 p.x = 15
 ```
+
+A struct is **nominal and its fields are fixed** by the declaration. Reading
+or writing a name that is not declared is an error — at compile time on a
+typed base (`unknown field`), and at runtime through a dynamic one
+(`undefined property 'zzz'` for `let d: any = p` followed by `d.zzz` **or**
+`d.zzz = 1`). No path adds a field to an instance.
 
 ### Self-Reference
 Structs can reference themselves using `ref`.
@@ -2071,7 +2104,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.14.1`). It is a module binding, not a
+string `noxy --version` prints (`v0.15.0`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 

@@ -35,6 +35,13 @@ func TestObjectFormatVerbs(t *testing.T) {
 			if got := fmt.Sprintf("%d", tc.obj); got != tc.badFmt {
 				t.Fatalf("%%d = %q, want %q", got, tc.badFmt)
 			}
+			// %T nunca chega a Format: o pacote fmt resolve o verbo antes de
+			// consultar Formatter e imprime o tipo Go — o nome Noxy vem de
+			// runtimeTypeName no builtin `fmt` (issue #61 item 4: os antigos
+			// `case 'T'` eram codigo morto).
+			if got := fmt.Sprintf("%T", tc.obj); !strings.HasPrefix(got, "*value.") && !strings.HasPrefix(got, "value.") {
+				t.Fatalf("%%T = %q, want o tipo Go (Format nao intercepta %%T)", got)
+			}
 		})
 	}
 	if got := fmt.Sprintf("%q|%x", BytesWrapper{Str: "ab"}, BytesWrapper{Str: "ab"}); got != "\"ab\"|6162" {

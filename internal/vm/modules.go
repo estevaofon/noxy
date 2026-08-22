@@ -195,6 +195,11 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 	}
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), compilerPath, vm.Config.RootPath)
 	code, _, err := c.Compile(program)
+	// Aviso do compilador de um modulo carregado em runtime e diagnostico
+	// da VM: os.Stderr (AGENTS.md E.6), nunca stdout (issue #61 item 3).
+	for _, warning := range c.Warnings() {
+		fmt.Fprintln(os.Stderr, warning)
+	}
 	if err != nil {
 		return value.NewNull(), err
 	}
