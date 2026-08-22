@@ -3,6 +3,7 @@ package value
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -630,7 +631,9 @@ func (v Value) String() string {
 	case VAL_NULL:
 		return "null"
 	case VAL_INT:
-		return fmt.Sprintf("%d", v.Int())
+		// Igual a "%d" byte a byte, sem o pp do fmt nem boxing do int —
+		// to_str(int) era o maior termo de string_ops (issue #66, item 2).
+		return strconv.FormatInt(v.Int(), 10)
 	case VAL_FLOAT:
 		return fmt.Sprintf("%f", v.Float())
 	case VAL_OBJ:

@@ -61,6 +61,12 @@ func (vm *VM) defineCoreBuiltins() {
 			}
 			return value.NewString(payload), nil
 		}
+		// Escalares renderizam ASCII por construcao: nada a validar (issue #66,
+		// item 2 — a validacao so fica onde pode haver bytes: containers).
+		switch args[0].Type {
+		case value.VAL_INT, value.VAL_FLOAT, value.VAL_BOOL, value.VAL_NULL:
+			return value.NewString(args[0].String()), nil
+		}
 		// Every other value renders through Value.String(). That rendering is
 		// not automatically valid UTF-8: a container holding a bytes value
 		// emits the raw, unescaped payload, so an array of invalid bytes would
