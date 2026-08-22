@@ -69,7 +69,7 @@ func (environment *GlobalEnvironment) ReplaceLocal(values map[string]Value) {
 }
 
 func (environment *GlobalEnvironment) ExportMap() Value {
-	return Value{Type: VAL_OBJ, Obj: &ObjMap{store: environment.local}}
+	return Value{Type: VAL_OBJ, kind: objKindMap, Obj: &ObjMap{store: environment.local}}
 }
 
 // Generation soma as gerações dos stores da cadeia de ambientes. Qualquer

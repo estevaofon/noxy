@@ -18,8 +18,28 @@ func IsShared(v Value) bool {
 // comporta como permanentemente compartilhado (equivalente ao sticky).
 const ownersSaturation = math.MaxInt32 / 2
 
+// ownersOf devolve o contador de donos do composto (o Owners do ObjHeader
+// embutido em array/map/instancia), ou nil para tudo o que o RC nao rastreia.
+//
+// A dica kind carimbada pelos construtores de internal/value tira do type
+// switch os VAL_OBJ que nunca tem contador (string, *ObjStruct,
+// *RuntimeTypeInfo — objKindNoOwners): uma comparacao de byte. O resto
+// (compostos, escalares com Obj nil, Values montados fora dos construtores
+// com kind zero) segue pelo type switch de sempre — a dica nunca decide
+// sozinha, entao um carimbo ausente nao pode virar under-count
+// (owners_test.go cobre os dois caminhos). Nao ha checagem de Type: o unico
+// dono de *ObjArray/*ObjMap/*ObjInstance em Obj e VAL_OBJ, e Obj nil
+// (escalares) cai no default do switch.
+//
+// ORCAMENTO: Retain e Release embutem este corpo e precisam ficar em <= 80
+// (orcamento normal do inliner; sao inlinados nos sites de internal/vm fora
+// de run()). Qualquer no a mais aqui — uma chamada custa 57, um segundo
+// switch por kind com type assertion por caso custa ~40 — tira Release do
+// inline; foi medido: a versao "switch no kind + assertion checada + caminho
+// lento embutido" custava 73 e levou Retain a 105 e Release a 119.
+// inline_guard_test.go (internal/vm) trava a propriedade.
 func ownersOf(v Value) *atomic.Int32 {
-	if v.Type != VAL_OBJ {
+	if v.kind == objKindNoOwners {
 		return nil
 	}
 	switch obj := v.Obj.(type) {
@@ -55,7 +75,14 @@ func Release(v Value) {
 	}
 	for {
 		current := owners.Load()
-		if current <= 0 || current >= ownersSaturation {
+		// Sai quando current esta fora de (0, ownersSaturation): <= 0 e o
+		// clamp do dec a mais, >= ownersSaturation e o "permanentemente
+		// compartilhado". A comparacao unica em uint32 (current-1 negativo
+		// vira um numero enorme) e equivalente a `current <= 0 || current >=
+		// ownersSaturation` e e a forma que cabe no orcamento de inline de
+		// Release (ver ownersOf): duas comparacoes custam os 3 nos que a
+		// dica kind acrescentou la.
+		if uint32(current-1) >= ownersSaturation-1 {
 			return
 		}
 		if owners.CompareAndSwap(current, current-1) {

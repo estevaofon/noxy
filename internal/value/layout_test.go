@@ -20,6 +20,23 @@ func TestValueIs32Bytes(t *testing.T) {
 	}
 }
 
+// O header comum tem de ser o PRIMEIRO campo dos tres compostos: e o que
+// permite a um eventual estagio 3 (unsafe.Pointer) alcancar Owners sem saber
+// o tipo concreto. Hoje ownersOf usa type assertion checada, mas o layout ja
+// fica travado — invariante implicito em codigo de aparencia inocente e o
+// modo de falha mais provavel.
+func TestObjHeaderIsAtOffsetZero(t *testing.T) {
+	if off := unsafe.Offsetof(ObjArray{}.ObjHeader); off != 0 {
+		t.Fatalf("ObjArray.ObjHeader no offset %d, esperado 0", off)
+	}
+	if off := unsafe.Offsetof(ObjMap{}.ObjHeader); off != 0 {
+		t.Fatalf("ObjMap.ObjHeader no offset %d, esperado 0", off)
+	}
+	if off := unsafe.Offsetof(ObjInstance{}.ObjHeader); off != 0 {
+		t.Fatalf("ObjInstance.ObjHeader no offset %d, esperado 0", off)
+	}
+}
+
 func TestValueAccessorsRoundTrip(t *testing.T) {
 	if got := NewInt(-42).Int(); got != -42 {
 		t.Fatalf("Int(): %d", got)

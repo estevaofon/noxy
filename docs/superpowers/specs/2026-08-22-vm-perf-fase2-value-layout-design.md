@@ -94,29 +94,44 @@ type ObjInstance struct { ObjHeader; Struct *ObjStruct; Fields map[string]Value 
 
 ```go
 func ownersOf(v Value) *atomic.Int32 {
-	switch v.kind {
-	case objKindArray:    return &v.Obj.(*ObjArray).Owners     // 1 cmp de ponteiro de tipo
-	case objKindMap:      return &v.Obj.(*ObjMap).Owners
-	case objKindInstance: return &v.Obj.(*ObjInstance).Owners
-	case objKindNoOwners: return nil
+	if v.kind == objKindNoOwners {   // string, *ObjStruct, *RuntimeTypeInfo: 1 cmp de byte
+		return nil
 	}
-	return ownersOfSlow(v) // o type switch de hoje: Type != VAL_OBJ → nil; array/map/instance
+	switch obj := v.Obj.(type) {     // compostos, escalares (Obj nil) e kind zero
+	case *ObjArray:    return &obj.Owners
+	case *ObjMap:      return &obj.Owners
+	case *ObjInstance: return &obj.Owners
+	}
+	return nil
 }
 ```
 
-- **Correto por construção:** `kind == 0` cai no caminho de hoje. Os ~30
-  sites `value.Value{Type: value.VAL_OBJ, Obj: inst}` (io/sqlite/sys/json,
-  `calls.go:198`) continuam corretos, só não aceleram; o de `calls.go` (clone
-  CoW de instância, semi-quente) passa a usar construtor. Um site novo que
-  esqueça o carimbo **não** produz under-count de RC — só perde a aceleração.
+- **Correto por construção:** a dica só tira do type switch o que *nunca* tem
+  contador; compostos e Values sem carimbo (`kind == 0`: os ~30 sites
+  `value.Value{Type: value.VAL_OBJ, Obj: inst}` em io/sqlite/sys/json) seguem
+  pelo switch de sempre. Um site novo que esqueça o carimbo **não** produz
+  under-count de RC. O de `calls.go:198` (clone CoW de instância) passa a
+  usar `NewInstanceAdopting`. A checagem `Type != VAL_OBJ` sai: o único dono
+  de `*ObjArray/*ObjMap/*ObjInstance` em `Obj` é `VAL_OBJ`, e `Obj == nil`
+  (escalares) cai no `default`.
+- **Achado que mudou o desenho (orçamento de inline).** A forma "switch no
+  `kind` com type assertion checada por caso + caminho lento embutido" custa
+  73 e leva `Retain` a 105 e `Release` a 119 — fora do orçamento de 80 que os
+  mantém inlinados nos 25/13 sites de `internal/vm`; uma *chamada* ao caminho
+  lento custa 57 no inliner, pior ainda. Nenhuma variante com caminho lento
+  separado cabe; a única que cabe é a acima (35, +3 sobre os 32 originais),
+  e mesmo ela empurrava `Release` para 81 — compensado trocando `current <=
+  0 || current >= ownersSaturation` por uma comparação única em `uint32`
+  (semântica idêntica, `owners_test.go` trava as bordas). Resultado: `Retain`
+  67, `Release` **80** (sem folga, como `ensureCallCapacity`).
 - **Sem `unsafe`** no caminho quente. A variante "cast direto para
-  `*ObjHeader` via data word do eface" economizaria uma comparação de
-  ponteiro; é medida em microbench Go (§5) e registrada, não embarcada —
-  critério de confinamento do comentário 2 da issue (unsafe só com ganho
-  mensurável e atrás de asserção executável).
-- `Retain` (custo 64) e `Release` (78) hoje são inlinados em 25/13 sites de
-  `internal/vm` (orçamento 80 fora de `run()`); `ownersOf` novo não pode
-  estourar isso — guard em `inline_guard_test.go`.
+  `*ObjHeader` via data word do eface, sem caminho lento" só cabe no orçamento
+  se o carimbo for *garantido* (kind zero = não rastreado), o que exige guard
+  de grep sobre o repo e transforma um esquecimento em under-count de RC; é
+  medida à parte (§5) e registrada, não embarcada — critério de confinamento
+  do comentário 2 da issue (unsafe só com ganho mensurável e atrás de
+  asserção executável).
+- Guard: `Retain`/`Release` ≤ 80 em `inline_guard_test.go`.
 
 ### 3.3 Extra — `pop()` inlinável
 

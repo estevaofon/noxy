@@ -82,6 +82,35 @@ func TestPushStaysInlinedInsideRun(t *testing.T) {
 	}
 }
 
+// Retain e Release (internal/value/cow.go) embutem ownersOf e sao inlinados
+// nos sites de internal/vm fora de run() (ownSlot, bindOwnedSlot, calls.go…)
+// com o orcamento normal de 80. A fase 2 de perf (issue #37) reescreveu
+// ownersOf com caminho rapido pela dica kind; este teste garante que o corpo
+// novo nao tirou os dois do inline.
+func TestRetainReleaseStayInlinable(t *testing.T) {
+	build := exec.Command("go", "build", "-gcflags=-m=2", "../value")
+	output, err := build.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build -gcflags=-m=2 ../value failed: %v\n%s", err, output)
+	}
+	report := string(output)
+	for _, name := range []string{"Retain", "Release"} {
+		pattern := regexp.MustCompile(`can inline ` + name + ` with cost (\d+)`)
+		match := pattern.FindStringSubmatch(report)
+		if match == nil {
+			t.Errorf("o compilador nao inlina value.%s — procure por 'cannot inline %s' em `go build -gcflags=-m=2 ./internal/value`", name, name)
+			continue
+		}
+		cost, convErr := strconv.Atoi(match[1])
+		if convErr != nil {
+			t.Fatalf("custo ilegivel em %q: %v", match[0], convErr)
+		}
+		if cost > inlineNormalMaxCost {
+			t.Errorf("value.%s tem custo de inline %d, maximo %d — enxugue ownersOf (ver cow.go)", name, cost, inlineNormalMaxCost)
+		}
+	}
+}
+
 // inlineBigFunctionMaxCost espelha a constante homonima do compilador
 // (cmd/compile/internal/inline): o orcamento por callee dentro de uma funcao
 // grande como run().
