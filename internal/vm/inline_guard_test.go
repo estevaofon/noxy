@@ -51,6 +51,32 @@ func TestPushStaysInlinedInsideRun(t *testing.T) {
 		t.Errorf("push foi inlinada em %d call sites de executor.go, esperado >= %d (custo reportado: %d)", inlined, minPushInlineSitesInRun, cost)
 	}
 
+	// pop e a segunda operacao mais quente; na forma de sempre custava 22 e
+	// nao era inlinada em NENHUM dos ~84 sites de run(). A atribuicao dupla
+	// com resultado nomeado (stack.go) faz o mesmo trabalho em 18 nos —
+	// issue #37, "extra barato".
+	popCostPattern := regexp.MustCompile(`can inline \(\*VM\)\.pop with cost (\d+)`)
+	popMatch := popCostPattern.FindStringSubmatch(report)
+	if popMatch == nil {
+		t.Fatalf("o compilador nao inlina (*VM).pop de jeito nenhum — procure por 'cannot inline (*VM).pop' na saida de `go build -gcflags=-m=2 ./internal/vm`")
+	}
+	popCost, popConvErr := strconv.Atoi(popMatch[1])
+	if popConvErr != nil {
+		t.Fatalf("custo de inline ilegivel em %q: %v", popMatch[0], popConvErr)
+	}
+	if popCost > inlineBigFunctionMaxCost {
+		t.Errorf("pop tem custo de inline %d, maximo %d para ser inlinada dentro de run() — tire nos do corpo de pop (ver o comentario em stack.go)", popCost, inlineBigFunctionMaxCost)
+	}
+	popInlined := 0
+	for _, line := range strings.Split(report, "\n") {
+		if strings.Contains(line, "executor.go") && strings.Contains(line, "inlining call to (*VM).pop") {
+			popInlined++
+		}
+	}
+	if popInlined < minPopInlineSitesInRun {
+		t.Errorf("pop foi inlinada em %d call sites de executor.go, esperado >= %d (custo reportado: %d)", popInlined, minPopInlineSitesInRun, popCost)
+	}
+
 	// ensureCallCapacity (calls.go) e chamada em call()/callPreparedClosure, que
 	// NAO sao "big function" (calls.go fica bem abaixo de 5000 nos de AST), entao
 	// o orcamento de inline aqui e o normal (80), nao os 20 de dentro de run().
@@ -125,6 +151,10 @@ const inlineNormalMaxCost = 80
 // e sobre "push continua inlinada dentro de run()", nao sobre a contagem
 // exata, que muda quando opcodes sao acrescentados ou removidos.
 const minPushInlineSitesInRun = 100
+
+// minPopInlineSitesInRun e uma margem sob os ~84 call sites de pop em
+// executor.go (mesma logica de minPushInlineSitesInRun).
+const minPopInlineSitesInRun = 70
 
 // minEnsureCallCapacityInlineSitesInCalls e uma margem sob o unico call site
 // de hoje (call(), calls.go).

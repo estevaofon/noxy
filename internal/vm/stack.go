@@ -233,11 +233,20 @@ func (vm *VM) growFrames() bool {
 	return true
 }
 
-func (vm *VM) pop() value.Value {
+// pop desempilha e zera o slot (solta a referencia para o GC). A FORMA do
+// corpo importa: a versao de sempre (`val := vm.stack[top]; vm.stack[top] =
+// value.Value{}; return val`) custa 22 no inliner e deixava pop fora do
+// inline em TODOS os ~84 sites de run() (orcamento 20 para callee de funcao
+// grande — ver push); a atribuicao dupla com resultado nomeado faz o mesmo
+// trabalho em 18 nos (um statement e uma declaracao a menos) e e inlinada em
+// ~80 sites. Variantes "obvias" sao piores: `slot.Obj = nil` via
+// `&vm.stack[top]` custa 26, limpar so Obj com duas indexacoes custa 23.
+// inline_guard_test.go trava custo e contagem de sites, como faz com push
+// (issue #37, "extra barato").
+func (vm *VM) pop() (val value.Value) {
 	vm.stackTop--
-	val := vm.stack[vm.stackTop]
-	vm.stack[vm.stackTop] = value.Value{} // Clear reference to help GC
-	return val
+	val, vm.stack[vm.stackTop] = vm.stack[vm.stackTop], value.Value{} // Clear reference to help GC
+	return
 }
 
 func (vm *VM) peek(distance int) value.Value {

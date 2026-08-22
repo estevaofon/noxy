@@ -135,11 +135,24 @@ func ownersOf(v Value) *atomic.Int32 {
 
 ### 3.3 Extra — `pop()` inlinável
 
-`vm.stack[vm.stackTop] = value.Value{}` vira `vm.stack[vm.stackTop].Obj = nil`:
-só o ponteiro interessa ao GC; `Type/num/b` mortos acima de `stackTop` são
-inertes (os fused jumps já leem slots acima do topo logo após `stackTop -= 2`,
-sem limpar). Meta: custo ≤ 20 → inlinada nos ~84 sites de `run()`. Guard:
-`inline_guard_test.go` passa a travar `pop` como trava `push`.
+Meta: custo ≤ 20 → inlinada nos ~84 sites de `run()`. O que coube (medido
+com `-gcflags=-m=2`, 1 nó de AST = 1 de custo): **a atribuição dupla com
+resultado nomeado**, que faz exatamente o mesmo trabalho do original (zera o
+`Value` inteiro) em 18 nós:
+
+```go
+func (vm *VM) pop() (val value.Value) {
+	vm.stackTop--
+	val, vm.stack[vm.stackTop] = vm.stack[vm.stackTop], value.Value{}
+	return
+}
+```
+
+Variantes descartadas: limpar só `Obj` com duas indexações (23), `slot :=
+&vm.stack[top]; slot.Obj = nil` (26), `top` em variável local (24). Resultado:
+custo 18, 79 sites inlinados em `executor.go`; nenhuma mudança de semântica
+nem de comportamento do GC. Guard: `inline_guard_test.go` passa a travar
+`pop` (≤ 20, ≥ 70 sites) como trava `push`.
 
 Commit separado e medido à parte — o usuário pediu estágios 1 e 2; este item
 é o "extra barato, independente dos três" da issue, promovido a "primeiro item
