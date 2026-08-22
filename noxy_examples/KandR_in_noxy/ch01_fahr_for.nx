@@ -1,6 +1,4 @@
-use array_utils select range
-
-// a mesma tabela, agora com for-in sobre uma sequência
+// a mesma tabela, agora com for-in sobre uma sequência (range é builtin)
 for fahr in range(0, 301, 20) do
     print(fmt("%3d %6.1f", fahr, (5.0 / 9.0) * to_float(fahr - 32)))
 end

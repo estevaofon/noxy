@@ -1,3 +1,7 @@
+// Versao do runtime que esta executando o programa — a mesma string de
+// `noxy --version` (fonte unica: internal/version). `use sys` + sys.version.
+let version: string = sys_version()
+
 struct SysResult
     exit_code: int,
     output: string,

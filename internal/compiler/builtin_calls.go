@@ -33,7 +33,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 	}
 
 	name := ident.Value
-	if name != "append" && name != "pop" && name != "delete" && name != "json_loads" {
+	if name != "append" && name != "pop" && name != "delete" && name != "json_loads" && name != "range" {
 		return false, nil, nil
 	}
 	if slot, _ := c.resolveLocal(name); slot != -1 {
@@ -45,8 +45,14 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 	if _, declared := c.resolveGlobalType(name); declared {
 		return false, nil, nil
 	}
-	wantArity := map[string]int{"append": 2, "pop": 1, "delete": 2, "json_loads": 2}[name]
-	if len(call.Arguments) != wantArity {
+	if name == "range" {
+		if len(call.Arguments) < 1 || len(call.Arguments) > 3 {
+			return true, nil, fmt.Errorf(
+				"[line %d] range expects 1 to 3 arguments, got %d",
+				c.currentLine, len(call.Arguments),
+			)
+		}
+	} else if wantArity := map[string]int{"append": 2, "pop": 1, "delete": 2, "json_loads": 2}[name]; len(call.Arguments) != wantArity {
 		return true, nil, fmt.Errorf(
 			"[line %d] %s expects %d arguments, got %d",
 			c.currentLine, name, wantArity, len(call.Arguments),
@@ -159,6 +165,25 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		}
 		c.emitCall(2, emission, false)
 		return true, builtinType("bool"), nil
+	case "range":
+		// range(stop) | range(start, stop) | range(start, stop, step) -> int[].
+		// Tipado aqui, e nao como native sem assinatura (retorno desconhecido):
+		// `for i in range(n)` da i: int e aridade/tipo dos argumentos falham na
+		// compilacao. O native revalida em runtime (chamada dinamica, plugin).
+		for i, argument := range call.Arguments {
+			actual, err := c.compileBuiltinValueArgument(argument)
+			if err != nil {
+				return true, nil, err
+			}
+			if !c.areStrictTypesCompatible(builtinType("int"), actual) {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument %d to 'range': expected int, got %s",
+					c.currentLine, i+1, noxyTypeName(actual),
+				)
+			}
+		}
+		c.emitCall(len(call.Arguments), emission, false)
+		return true, &ast.ArrayType{ElementType: builtinType("int")}, nil
 	default:
 		return false, nil, nil
 	}

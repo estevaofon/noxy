@@ -1,5 +1,3 @@
-use array_utils select range
-
 let LOWER: int = 0      // limite inferior da tabela
 let UPPER: int = 300    // limite superior
 let STEP: int = 20      // incremento
