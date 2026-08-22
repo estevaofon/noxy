@@ -1,4 +1,4 @@
-[![noxy 0.13.0](https://img.shields.io/badge/noxy-0.13.0-blue)](CHANGELOG.md)
+[![noxy 0.14.0](https://img.shields.io/badge/noxy-0.14.0-blue)](CHANGELOG.md)
 
 # Noxy VM 🚀
 
@@ -105,7 +105,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.13.0
+Noxy REPL v0.14.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
@@ -298,6 +298,7 @@ print(peek(ints))  // 20
 | `has_key(map, key)` | Checks if key exists in map |
 | `to_bytes(val)` | Converts string/int/array to bytes |
 | `zeros(n)` | Array of n zeros |
+| `range(stop)`, `range(start, stop, step)` | Integer sequence as `int[]` (Python semantics, no import) |
 | `time_now()` | Current timestamp in ms |
 
 ## VM Opcodes

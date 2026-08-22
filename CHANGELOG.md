@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.14.0] - 2026-08-22
+
+Dois pedidos pequenos, no espírito do Python: `range` vira builtin do runtime
+(sem import) e `sys.version` diz qual Noxy está rodando o programa. A mudança
+em `range` quebra quem importava a versão antiga de `array_utils`.
+
+### Added
+
+- **`range` é builtin do runtime.** `range(stop)`, `range(start, stop)` e
+  `range(start, stop, step)` devolvem `int[]` com a semântica do Python:
+  `stop` exclusivo, `step` negativo conta para trás, intervalo vazio dá `[]`
+  (`range(5)` → `[0, 1, 2, 3, 4]`, `range(10, 0, -3)` → `[10, 7, 4, 1]`,
+  `range(3, 0)` → `[]`). Não precisa de `use`. O compilador tipa a chamada
+  (spec §10): aridade fora de 1–3 (`range expects 1 to 3 arguments, got 4`)
+  e argumento que não é `int` (`argument 2 to 'range': expected int, got
+  float`) são erros de compilação, e o retorno é `int[]` — `for i in
+  range(n)` dá `i: int`, como a versão antiga de `array_utils`, em vez de
+  cair na brecha das natives sem assinatura (retorno desconhecido). Em
+  runtime, `step == 0` é erro (`range: step must not be zero`), na linha do
+  `zeros(-5)`; uma sequência com mais de 2³¹−1 elementos também (`range:
+  sequence too large`) — o array é materializado, e o erro é do script em vez
+  de um estouro de memória do lado Go. Uma `func range` do próprio programa
+  continua vencendo o builtin (mesma regra de `append`/`pop`).
+- **`sys.version`.** `use sys` + `print(sys.version)` imprime a mesma string
+  de `noxy --version` (`v0.14.0`, fonte única `internal/version`); também via
+  `use sys select version`, que entra tipado como `string`. Por baixo, o
+  native `sys_version()`; no `sys.nx` é um `let` de topo, como
+  `http_parser.HTTP_200_OK`.
+
+### Changed (BREAKING)
+
+- **`range` saiu de `array_utils`.** `use array_utils select range` passa a
+  falhar (`undefined property 'range' in module/map`). **Migração**: remova
+  o `select range` — o builtin já está no escopo — e, se quiser,
+  `range(a, b, 1)` vira `range(a, b)`. `use array_utils select *` seguido de
+  `range(...)` continua funcionando (resolve no builtin). Diferença de
+  comportamento: `range(a, b, 0)` devolvia `[]` na versão do módulo e agora é
+  erro de runtime. Os exemplos `KandR_in_noxy/ch01_fahr_const.nx`,
+  `ch01_fahr_for.nx`, `ch02_cond.nx` e `test_array_util.nx` foram ajustados;
+  `array_utils.slice` fica onde estava.
+
 ## [0.13.0] - 2026-08-21
 
 Os dois follow-ups da 0.12.0 registrados na issue #58, ambos sobre checagem
