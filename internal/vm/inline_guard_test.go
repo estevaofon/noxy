@@ -77,6 +77,36 @@ func TestPushStaysInlinedInsideRun(t *testing.T) {
 		t.Errorf("pop foi inlinada em %d call sites de executor.go, esperado >= %d (custo reportado: %d)", popInlined, minPopInlineSitesInRun, popCost)
 	}
 
+	// Indexacao tipada (issue #66): value.NeverTracked e arrayTagIsRefSlot
+	// (ref_slots.go) ficam no caminho quente dos tres opcodes NORC; se
+	// sairem do inline, cada escrita tipada paga uma chamada. arrayTagIsRefSlot
+	// custa EXATAMENTE 20 hoje — sem folga.
+	neverTrackedInlined := 0
+	tagInlined := 0
+	for _, line := range strings.Split(report, "\n") {
+		if !strings.Contains(line, "executor.go") {
+			continue
+		}
+		if strings.Contains(line, "inlining call to value.NeverTracked") {
+			neverTrackedInlined++
+		}
+		if strings.Contains(line, "inlining call to arrayTagIsRefSlot") {
+			tagInlined++
+		}
+	}
+	if neverTrackedInlined < 6 {
+		t.Errorf("value.NeverTracked foi inlinada em %d sites de executor.go, esperado >= 6 (dois por opcode NORC)", neverTrackedInlined)
+	}
+	if tagInlined < 3 {
+		t.Errorf("arrayTagIsRefSlot foi inlinada em %d sites de executor.go, esperado >= 3 (um por opcode NORC) — confira o custo em `go build -gcflags=-m=2 ./internal/vm | grep arrayTagIsRefSlot`", tagInlined)
+	}
+	tagCostPattern := regexp.MustCompile(`can inline arrayTagIsRefSlot with cost (\d+)`)
+	if tagMatch := tagCostPattern.FindStringSubmatch(report); tagMatch == nil {
+		t.Errorf("o compilador nao inlina arrayTagIsRefSlot (ref_slots.go)")
+	} else if tagCost, convErr := strconv.Atoi(tagMatch[1]); convErr != nil || tagCost > inlineBigFunctionMaxCost {
+		t.Errorf("arrayTagIsRefSlot tem custo de inline %s, maximo %d para ser inlinada dentro de run()", tagMatch[1], inlineBigFunctionMaxCost)
+	}
+
 	// ensureCallCapacity (calls.go) e chamada em call()/callPreparedClosure, que
 	// NAO sao "big function" (calls.go fica bem abaixo de 5000 nos de AST), entao
 	// o orcamento de inline aqui e o normal (80), nao os 20 de dentro de run().

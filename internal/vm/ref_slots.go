@@ -42,7 +42,14 @@ func arrayElementIsRefSlot(array *value.ObjArray) bool {
 	if array == nil {
 		return false
 	}
-	tag := array.RuntimeType.Load()
+	return arrayTagIsRefSlot(array.RuntimeType.Load())
+}
+
+// arrayTagIsRefSlot e arrayElementIsRefSlot sobre a tag ja carregada — a
+// forma que os opcodes NORC da indexacao tipada (issue #66) usam no caminho
+// quente de run(): uma Load() feita pelo chamador e um corpo que cabe no
+// orcamento de inline de 20.
+func arrayTagIsRefSlot(tag *value.RuntimeTypeInfo) bool {
 	return tag != nil && tag.Kind == value.TYPE_ARRAY && tag.Element != nil && tag.Element.Kind == value.TYPE_REF
 }
 

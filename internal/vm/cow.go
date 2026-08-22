@@ -22,6 +22,41 @@ func (vm *VM) unicize(v value.Value) (value.Value, bool) {
 	return vm.copyValue(v), true
 }
 
+// unicizeOwnedSlot e a semantica de OP_GET_LOCAL_MUT para um slot POSSUIDOR:
+// se o composto no slot esta compartilhado, grava um clone no slot (ownSlot
+// mantem o slot registrado em frame.Owned, como OP_SET_LOCAL) e solta o
+// velho; devolve o ocupante (unico) do slot. Metodo para ser o funil comum do
+// case generico e do fallback de OP_SET_LOCAL_INDEX_ARRAY_NORC (issue #66).
+func (vm *VM) unicizeOwnedSlot(frame *CallFrame, idx int) value.Value {
+	v := vm.stack[idx]
+	if value.IsShared(v) {
+		old := v
+		v = vm.copyValue(v)
+		vm.stack[idx] = v
+		// RC: usa ownSlot (mantem o slot registrado em frame.Owned)
+		// em vez de Retain cru — mesmo padrao do OP_SET_LOCAL.
+		frame.ownSlot(vm, idx)
+		value.Release(old)
+	}
+	return v
+}
+
+// unicizeBorrowedSlot e o gemeo de EMPRESTIMO (OP_GET_LOCAL_MUT_BORROW): slot
+// de tipo `ref T` nao possui o que guarda, entao o clone fica no slot sem
+// retain do novo nem release do velho (soltar o que nunca se reteve e dec a
+// menos, e faria o objeto compartilhado parecer unico). A mutacao adiante
+// vai para o clone, exatamente como no comportamento pre-RC. Tambem e o
+// fallback de OP_SET_REF_LOCAL_INDEX_ARRAY_NORC quando o slot guarda um valor
+// plano (tolerancia herdada do auto-deref antigo).
+func (vm *VM) unicizeBorrowedSlot(idx int) value.Value {
+	v := vm.stack[idx]
+	if value.IsShared(v) {
+		v = vm.copyValue(v)
+		vm.stack[idx] = v
+	}
+	return v
+}
+
 // unicizeThroughRefValue resolve um valor VAL_REF (slot: variável, campo,
 // índice…), garante posse exclusiva do composto armazenado e grava o clone
 // de volta no slot pelo setter quando clona. Devolve o valor único.
