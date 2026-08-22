@@ -14,6 +14,13 @@ print(range(0, 10, 2))
 print("\nRange(10, 0, -1):")
 print(range(10, 0, -1))
 
+// range é builtin do runtime (não vem de array_utils): 1, 2 ou 3 argumentos
+print("\nRange(5):")
+print(range(5))
+
+print("\nRange(2, 5):")
+print(range(2, 5))
+
 for n in range(0, 10, 1) do
     print(n)
 end

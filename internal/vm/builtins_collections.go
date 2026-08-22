@@ -1,12 +1,74 @@
 package vm
 
 import (
+	"fmt"
+	"math"
 	"unicode/utf8"
 
 	"noxy-vm/internal/value"
 )
 
+// maxRangeLength limita o array que range materializa: acima disso o erro e
+// do script ("sequence too large"), e nao um panic de makeslice/OOM do lado
+// Go, que atravessa a VM sem linha e fora do alcance de call_result.
+const maxRangeLength = math.MaxInt32
+
+// rangeLength conta os elementos de range(start, stop, step) sem estourar
+// int64: a diferenca e tomada em uint64 (exata porque o sinal de step ja
+// garante a ordem), e uint64(-step) da a magnitude certa ate para MinInt64.
+func rangeLength(start, stop, step int64) uint64 {
+	if step > 0 {
+		if start >= stop {
+			return 0
+		}
+		return (uint64(stop)-uint64(start)-1)/uint64(step) + 1
+	}
+	if start <= stop {
+		return 0
+	}
+	return (uint64(start)-uint64(stop)-1)/uint64(-step) + 1
+}
+
 func (vm *VM) defineCollectionBuiltins() {
+	// range(stop) | range(start, stop) | range(start, stop, step) -> int[],
+	// semantica do Python (stop exclusivo, step negativo conta para tras,
+	// intervalo vazio da []). Builtin do runtime: nao precisa de import. O
+	// compilador ja checa aridade e tipos (compileBuiltinCall); aqui fica a
+	// revalidacao para chamada dinamica/plugin e os erros de runtime.
+	vm.DefineContextualNative("range", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) < 1 || len(args) > 3 {
+			return value.NewNull(), fmt.Errorf("range: expects 1 to 3 arguments, got %d", len(args))
+		}
+		for i, arg := range args {
+			if arg.Type != value.VAL_INT {
+				return value.NewNull(), fmt.Errorf("range: expects int arguments, argument %d is %s", i+1, runtimeTypeName(arg))
+			}
+		}
+		start, stop, step := int64(0), int64(0), int64(1)
+		switch len(args) {
+		case 1:
+			stop = args[0].AsInt
+		case 2:
+			start, stop = args[0].AsInt, args[1].AsInt
+		case 3:
+			start, stop, step = args[0].AsInt, args[1].AsInt, args[2].AsInt
+		}
+		if step == 0 {
+			return value.NewNull(), fmt.Errorf("range: step must not be zero")
+		}
+		count := rangeLength(start, stop, step)
+		if count > maxRangeLength {
+			return value.NewNull(), fmt.Errorf("range: sequence too large (%d elements, max %d)", count, maxRangeLength)
+		}
+		elements := make([]value.Value, count)
+		current := start
+		for i := range elements {
+			elements[i] = value.NewInt(current)
+			current += step // a soma apos o ultimo elemento pode dar a volta; nunca e lida
+		}
+		return value.NewArray(elements), nil
+	})
+
 	vm.DefineNative("length", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewInt(0)

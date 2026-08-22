@@ -3,26 +3,3 @@ let slice: any = func(native_slice: any) -> func(any, int, int) -> any
         return native_slice(array, start, _end)
     end
 end(slice)
-
-
-func range(start: int, stop: int, step: int) -> int[]
-    let result: int[] = []
-    
-    if step == 0 then
-        return result
-    end
-
-    if step > 0 then
-        while start < stop do
-            append(result, start)
-            start = start + step
-        end
-    else
-        while start > stop do
-            append(result, start)
-            start = start + step
-        end
-    end
-
-    return result
-end

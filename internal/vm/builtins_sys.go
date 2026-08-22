@@ -13,6 +13,7 @@ import (
 
 	"noxy-vm/internal/plugin"
 	"noxy-vm/internal/value"
+	"noxy-vm/internal/version"
 )
 
 func (vm *VM) defineSystemBuiltins() {
@@ -73,6 +74,12 @@ func (vm *VM) defineSystemBuiltins() {
 	// Sys Module
 	vm.DefineNative("sys_os", func(args []value.Value) value.Value {
 		return value.NewString(runtime.GOOS)
+	})
+
+	// sys_version: a string de `noxy --version` (fonte unica: internal/version);
+	// sys.nx a expoe como o binding `sys.version`.
+	vm.DefineNative("sys_version", func(args []value.Value) value.Value {
+		return value.NewString(version.Version)
 	})
 
 	vm.DefineNative("sys_exec", func(args []value.Value) value.Value {

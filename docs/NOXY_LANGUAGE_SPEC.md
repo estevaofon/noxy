@@ -1169,6 +1169,17 @@ for item in array do
 end
 ```
 
+**Counting loops** use the `range` builtin (§10), which returns an `int[]`
+with Python semantics — no import needed:
+```noxy
+for i in range(3) do            // 0 1 2
+    print(i)
+end
+for n in range(10, 0, -3) do    // 10 7 4 1
+    print(n)
+end
+```
+
 **Maps** (Iterates over keys):
 ```noxy
 for key in map do
@@ -1734,6 +1745,17 @@ sem converter. Não existe `is_float`.
 - `keys(map)`: Returns array of keys.
 - `has_key(map, key)`: Returns bool.
 - `delete(map, key)`
+- `range(stop)`, `range(start, stop)`, `range(start, stop, step) -> int[]`:
+  the Python sequence — `stop` is exclusive, a negative `step` counts down,
+  an empty interval is `[]` (`range(5)` → `[0, 1, 2, 3, 4]`,
+  `range(10, 0, -3)` → `[10, 7, 4, 1]`, `range(3, 0)` → `[]`). It is a
+  runtime builtin: no import. Arity (1 to 3) and argument types (`int`) are
+  checked at compile time and the result is typed `int[]`, so
+  `for i in range(n)` gives `i: int`. `step == 0` is a runtime error. The
+  array is materialized, so a sequence of more than 2³¹−1 elements is a
+  runtime error too (`range: sequence too large`), not an out-of-memory
+  crash. A `func range` declared by the program shadows the builtin, like
+  any other builtin name.
 
 ### Utils
 - `addr(ref var)`: Returns the memory address/identity of a variable as a string.
@@ -2047,6 +2069,11 @@ io.close(f)
 ```
 
 ### System (`sys`)
+
+`sys.version` is the version of the Noxy running the program — the same
+string `noxy --version` prints (`v0.14.0`). It is a module binding, not a
+call: `use sys` then `print(sys.version)`, or `use sys select version`, which
+brings it in typed as `string`.
 
 `sys.exec_output(command, ...)` runs the command through the platform shell:
 `sh -c` on Unix and **`cmd /C` on Windows**. The command string is therefore
