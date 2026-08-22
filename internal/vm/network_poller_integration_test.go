@@ -119,7 +119,7 @@ func TestNetworkPollIntegrationRepeatedListenerPollsPreservePendingAccept(t *tes
 	machine := New()
 	cleanupNetworkResources(t, machine)
 	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
-	listenerFD := int(builtinMapField(t, listener, "fd").AsInt)
+	listenerFD := int(builtinMapField(t, listener, "fd").Int())
 	resource, exists := machine.shared.Listeners.get(listenerFD)
 	if !exists {
 		t.Fatalf("listener descriptor %d is not registered", listenerFD)
@@ -153,7 +153,7 @@ func TestNetworkPollIntegrationDuplicateOccurrencesPreserveOrder(t *testing.T) {
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 	callBuiltinWithinBound(t, machine, "net_send", client, value.NewBytes("x"))
-	handle := int(builtinMapField(t, server, "fd").AsInt)
+	handle := int(builtinMapField(t, server, "fd").Int())
 	first := socketValue(handle, "first occurrence", 0, true)
 	second := socketValue(handle, "second occurrence", 0, true)
 
@@ -309,7 +309,7 @@ func TestNetworkPollIntegrationCloseWakesAndOmitsLocalResource(t *testing.T) {
 		machine := New()
 		cleanupNetworkResources(t, machine)
 		listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
-		handle := int(builtinMapField(t, listener, "fd").AsInt)
+		handle := int(builtinMapField(t, listener, "fd").Int())
 		resource, exists := machine.shared.Listeners.get(handle)
 		if !exists {
 			t.Fatalf("listener descriptor %d is not registered", handle)

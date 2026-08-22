@@ -115,11 +115,11 @@ func jsonValToGo(v value.Value) interface{} {
 	case value.VAL_NULL:
 		return nil
 	case value.VAL_BOOL:
-		return v.AsBool
+		return v.Bool()
 	case value.VAL_INT:
-		return v.AsInt
+		return v.Int()
 	case value.VAL_FLOAT:
-		return v.AsFloat
+		return v.Float()
 	case value.VAL_OBJ:
 		switch o := v.Obj.(type) {
 		case string:

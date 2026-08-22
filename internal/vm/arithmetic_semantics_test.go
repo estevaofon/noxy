@@ -75,7 +75,7 @@ test_report([cmp(1.5, 0.5), cmp(0.5, 1.5), cmp(2.0, 2.0)])
 	for i, row := range rows {
 		cells := semArray(t, row)
 		for j, cell := range cells {
-			if cell.Type != value.VAL_BOOL || cell.AsBool != want[i][j] {
+			if cell.Type != value.VAL_BOOL || cell.Bool() != want[i][j] {
 				t.Fatalf("linha %d coluna %d: got %s, want %v", i, j, cell.String(), want[i][j])
 			}
 		}
@@ -93,7 +93,7 @@ test_report(div(7.0, 2.0))
 		t.Fatalf("divisão float/float deveria emitir OP_DIV_FLOAT")
 	}
 	got := captureVMSource(t, source)
-	if got.Type != value.VAL_FLOAT || got.AsFloat != 3.5 {
+	if got.Type != value.VAL_FLOAT || got.Float() != 3.5 {
 		t.Fatalf("7.0 / 2.0 = %s, want 3.500000", got.String())
 	}
 }
@@ -116,7 +116,7 @@ test_report(calc())
 		t.Fatalf("células=%d, want %d", len(cells), len(want))
 	}
 	for i, cell := range cells {
-		if cell.Type != value.VAL_FLOAT || cell.AsFloat != want[i] {
+		if cell.Type != value.VAL_FLOAT || cell.Float() != want[i] {
 			t.Fatalf("célula %d: got %s, want %v", i, cell.String(), want[i])
 		}
 	}
@@ -138,7 +138,7 @@ test_report(cmp())
 		t.Fatalf("células=%d, want %d", len(cells), len(want))
 	}
 	for i, cell := range cells {
-		if cell.Type != value.VAL_BOOL || cell.AsBool != want[i] {
+		if cell.Type != value.VAL_BOOL || cell.Bool() != want[i] {
 			t.Fatalf("célula %d: got %s, want %v", i, cell.String(), want[i])
 		}
 	}
@@ -151,7 +151,7 @@ func TestMixedArithmeticHasStaticTypeFloat(t *testing.T) {
 		t.Fatalf("int = int + float deveria ser erro de tipo (got float), obtido %v", err)
 	}
 	got := captureVMSource(t, "let f: float = 1 + 2.5\ntest_report(f)\n")
-	if got.Type != value.VAL_FLOAT || got.AsFloat != 3.5 {
+	if got.Type != value.VAL_FLOAT || got.Float() != 3.5 {
 		t.Fatalf("float = int + float: got %s, want 3.500000", got.String())
 	}
 }
@@ -173,7 +173,7 @@ test_report(calc())
 	want := []int64{3, -3, 1, -1, 1}
 	cells := semArray(t, got)
 	for i, cell := range cells {
-		if cell.Type != value.VAL_INT || cell.AsInt != want[i] {
+		if cell.Type != value.VAL_INT || cell.Int() != want[i] {
 			t.Fatalf("célula %d: got %s, want %d", i, cell.String(), want[i])
 		}
 	}
@@ -245,7 +245,7 @@ test_report(calc())
 	want := []int64{2, 7, 5, -6, 16, 64, -4}
 	cells := semArray(t, got)
 	for i, cell := range cells {
-		if cell.Type != value.VAL_INT || cell.AsInt != want[i] {
+		if cell.Type != value.VAL_INT || cell.Int() != want[i] {
 			t.Fatalf("célula %d: got %s, want %d", i, cell.String(), want[i])
 		}
 	}
@@ -295,7 +295,7 @@ let less: any = a < b
 test_report([sum == 3.5, cat == "ab", less])
 `)
 	for i, cell := range semArray(t, got) {
-		if cell.Type != value.VAL_BOOL || !cell.AsBool {
+		if cell.Type != value.VAL_BOOL || !cell.Bool() {
 			t.Fatalf("célula %d: got %s, want true", i, cell.String())
 		}
 	}

@@ -33,7 +33,7 @@ end
 let w: Wrapper = mk()
 test_report(w.listener.fd)`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_INT || captured.AsInt != -1 {
+	if captured.Type != value.VAL_INT || captured.Int() != -1 {
 		t.Fatalf("w.listener.fd = %#v, want -1", captured)
 	}
 }
@@ -45,7 +45,7 @@ func TestHttpServerConstructorWorks(t *testing.T) {
 let s: HttpServer = new_server("127.0.0.1", 8080)
 test_report(s.port)`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_INT || captured.AsInt != 8080 {
+	if captured.Type != value.VAL_INT || captured.Int() != 8080 {
 		t.Fatalf("s.port = %#v, want 8080", captured)
 	}
 }
@@ -63,7 +63,7 @@ let sock: Socket = Socket(7, "", 0, true)
 let w: Wrapper = Wrapper(sock)
 test_report(w.listener.fd)`
 	captured := captureVMSource(t, source)
-	if captured.Type != value.VAL_INT || captured.AsInt != 7 {
+	if captured.Type != value.VAL_INT || captured.Int() != 7 {
 		t.Fatalf("w.listener.fd = %#v, want 7", captured)
 	}
 }

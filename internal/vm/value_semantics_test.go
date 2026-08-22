@@ -11,7 +11,7 @@ import (
 
 func expectInt(t *testing.T, got value.Value, want int64, msg string) {
 	t.Helper()
-	if got.Type != value.VAL_INT || got.AsInt != want {
+	if got.Type != value.VAL_INT || got.Int() != want {
 		t.Fatalf("%s: esperado %d, veio %s (%v)", msg, want, got.String(), got.Type)
 	}
 }

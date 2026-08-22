@@ -8,7 +8,7 @@ import (
 
 func assertReportedInt(t *testing.T, got value.Value, want int64) {
 	t.Helper()
-	if got.Type != value.VAL_INT || got.AsInt != want {
+	if got.Type != value.VAL_INT || got.Int() != want {
 		t.Fatalf("reported %#v, want int %d", got, want)
 	}
 }

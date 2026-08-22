@@ -72,7 +72,7 @@ func TestLengthAndKeysBuiltins(t *testing.T) {
 	for _, key := range keys.Elements {
 		switch key.Type {
 		case value.VAL_INT:
-			actualKeys = append(actualKeys, fmt.Sprintf("int:%d", key.AsInt))
+			actualKeys = append(actualKeys, fmt.Sprintf("int:%d", key.Int()))
 		case value.VAL_OBJ:
 			keyString, ok := key.Obj.(string)
 			if !ok {

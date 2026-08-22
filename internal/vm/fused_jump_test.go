@@ -43,15 +43,15 @@ func runFusedJump(t *testing.T, op chunk.OpCode, a, b int64) (jumped bool) {
 	switch machine.stackTop {
 	case 2: // closure + marcador: saltou e pousou exatamente certo
 		top := machine.stack[1]
-		if top.Type != value.VAL_INT || top.AsInt != 888 {
+		if top.Type != value.VAL_INT || top.Int() != 888 {
 			t.Fatalf("pouso do salto incorreto: top=%s", top.String())
 		}
 		return true
 	case 3: // closure + sentinela + marcador: nao saltou
 		sentinelTop := machine.stack[1]
 		markerTop := machine.stack[2]
-		if sentinelTop.Type != value.VAL_INT || sentinelTop.AsInt != 777 ||
-			markerTop.Type != value.VAL_INT || markerTop.AsInt != 888 {
+		if sentinelTop.Type != value.VAL_INT || sentinelTop.Int() != 777 ||
+			markerTop.Type != value.VAL_INT || markerTop.Int() != 888 {
 			t.Fatalf("pilha inesperada (nao saltou): sentinela=%s marcador=%s", sentinelTop.String(), markerTop.String())
 		}
 		return false
@@ -106,7 +106,7 @@ while i < 5 do
 end
 test_report(acc)
 `)
-	if result.Type != value.VAL_INT || result.AsInt != 7 {
+	if result.Type != value.VAL_INT || result.Int() != 7 {
 		t.Fatalf("esperado 7 (fib 0..4 = 0+1+1+2+3), obtido %s", result.String())
 	}
 }
@@ -132,11 +132,11 @@ end
 test_report(f(%d, %d))
 `
 	trueCase := captureVMSource(t, fmt.Sprintf(source, 1, 2))
-	if trueCase.Type != value.VAL_INT || trueCase.AsInt != 10 {
+	if trueCase.Type != value.VAL_INT || trueCase.Int() != 10 {
 		t.Fatalf("esperado 10 (a<b), obtido %s", trueCase.String())
 	}
 	falseCase := captureVMSource(t, fmt.Sprintf(source, 2, 1))
-	if falseCase.Type != value.VAL_INT || falseCase.AsInt != 0 {
+	if falseCase.Type != value.VAL_INT || falseCase.Int() != 0 {
 		t.Fatalf("esperado 0 (a>=b), obtido %s", falseCase.String())
 	}
 }

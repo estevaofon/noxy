@@ -59,7 +59,7 @@ func TestRuntimeConditionOnAnyMustBeBool(t *testing.T) {
 		t.Fatalf("error=%v, want runtime bool check", err)
 	}
 	reported := captureVMSource(t, "let a: any = true\nlet n: int = 0\nif a then n = 1 end\ntest_report(n)\n")
-	if reported.AsInt != 1 {
+	if reported.Int() != 1 {
 		t.Fatalf("any bool condition should be taken, got %v", reported)
 	}
 }
@@ -86,16 +86,16 @@ func testExpectedObject(t *testing.T, expected interface{}, actual value.Value) 
 			t.Errorf("object is not Integer. got=%v (%+v)", actual.Type, actual)
 			return
 		}
-		if int(actual.AsInt) != expectedVal {
-			t.Errorf("object has wrong value. got=%d, want=%d", actual.AsInt, expectedVal)
+		if int(actual.Int()) != expectedVal {
+			t.Errorf("object has wrong value. got=%d, want=%d", actual.Int(), expectedVal)
 		}
 	case bool:
 		if actual.Type != value.VAL_BOOL {
 			t.Errorf("object is not Boolean. got=%v (%+v)", actual.Type, actual)
 			return
 		}
-		if actual.AsBool != expectedVal {
-			t.Errorf("object has wrong value. got=%t, want=%t", actual.AsBool, expectedVal)
+		if actual.Bool() != expectedVal {
+			t.Errorf("object has wrong value. got=%t, want=%t", actual.Bool(), expectedVal)
 		}
 	}
 }

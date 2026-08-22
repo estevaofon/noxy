@@ -111,13 +111,13 @@ func TestGlobalReferenceStorageUsesExplicitOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Type != value.VAL_INT || got.AsInt != 41 {
+	if got.Type != value.VAL_INT || got.Int() != 41 {
 		t.Fatalf("lookup=%v, want 41", got)
 	}
 	if err := machine.storeReferenceValue(value.Value{Type: value.VAL_REF, Obj: ref}, value.NewInt(42)); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := environment.GetLocal("answer"); got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got, _ := environment.GetLocal("answer"); got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("stored value=%v, want 42", got)
 	}
 

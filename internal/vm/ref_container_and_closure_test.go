@@ -33,7 +33,7 @@ end
 main()
 `)
 	cells := semArray(t, got)
-	if len(cells) != 2 || cells[0].AsInt != 9 || cells[1].AsInt != 7 {
+	if len(cells) != 2 || cells[0].Int() != 9 || cells[1].Int() != 7 {
 		t.Fatalf("[p.x, a[1]] = %s, want [9, 7]", got.String())
 	}
 }
@@ -57,7 +57,7 @@ let x: int = 1
 fwd(ref x)
 test_report(x)
 `)
-	if got.Type != value.VAL_INT || got.AsInt != 2 {
+	if got.Type != value.VAL_INT || got.Int() != 2 {
 		t.Fatalf("x = %s, want 2", got.String())
 	}
 }
@@ -119,7 +119,7 @@ func outer() -> int
 end
 test_report(outer())
 `)
-	if got.Type != value.VAL_INT || got.AsInt != 11 {
+	if got.Type != value.VAL_INT || got.Int() != 11 {
 		t.Fatalf("closure aninhada devolveu %s, want 11", got.String())
 	}
 }

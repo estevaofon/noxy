@@ -195,7 +195,7 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 			value.Retain(val) // RC: filho ganha dono duravel no clone
 			newFields[k] = val
 		}
-		return value.Value{Type: value.VAL_OBJ, Obj: &value.ObjInstance{Struct: obj.Struct, Fields: newFields}}
+		return value.NewInstanceAdopting(obj.Struct, newFields) // RC: move — retidos acima
 	default:
 		return v
 	}

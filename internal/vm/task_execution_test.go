@@ -24,7 +24,7 @@ end`); err != nil {
 	}
 	child := NewWithShared(machine.shared, machine.Config)
 	got, err := child.executePreparedTaskCall(call)
-	if err != nil || got.Type != value.VAL_INT || got.AsInt != 42 {
+	if err != nil || got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("result=%v err=%v", got, err)
 	}
 }
@@ -256,7 +256,7 @@ end`), environment); err != nil {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("result = %v, want 42", got)
 	}
 	if observedRoot != "caller-root" {

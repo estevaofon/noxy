@@ -36,7 +36,7 @@ end
 main()
 `)
 	cells := semArray(t, got)
-	if len(cells) != 2 || cells[0].AsInt != 1 || cells[1].AsInt != 2 {
+	if len(cells) != 2 || cells[0].Int() != 1 || cells[1].Int() != 2 {
 		t.Fatalf("[iterações, ramo do if] = %s, want [1, 2]", got.String())
 	}
 }
@@ -84,7 +84,7 @@ end
 main()
 `)
 	cells := semArray(t, got)
-	if len(cells) != 3 || cells[0].AsInt != 3 || cells[1].AsInt != 3 || cells[2].AsInt != 4 {
+	if len(cells) != 3 || cells[0].Int() != 3 || cells[1].Int() != 3 || cells[2].Int() != 4 {
 		t.Fatalf("[x após *rx = ry, x após y = 4, y] = %s, want [3, 3, 4]", got.String())
 	}
 }
@@ -106,7 +106,7 @@ main()
 	cells := semArray(t, got)
 	want := []int64{200, 10, 222, 30}
 	for i, cell := range cells {
-		if cell.Type != value.VAL_INT || cell.AsInt != want[i] {
+		if cell.Type != value.VAL_INT || cell.Int() != want[i] {
 			t.Fatalf("célula %d: got %s, want %d (tudo: %s)", i, cell.String(), want[i], got.String())
 		}
 	}

@@ -145,7 +145,7 @@ func main()
 end
 main()
 `)
-			if got.Type != value.VAL_BOOL || got.AsBool != tc.want {
+			if got.Type != value.VAL_BOOL || got.Bool() != tc.want {
 				t.Fatalf("%s: %s = %v, esperado %v", tc.name, tc.expr, got, tc.want)
 			}
 		})
@@ -182,7 +182,7 @@ func main()
 end
 main()
 `)
-			if got.Type != value.VAL_BOOL || got.AsBool != tc.want {
+			if got.Type != value.VAL_BOOL || got.Bool() != tc.want {
 				t.Fatalf("%s: %s = %v, esperado %v", tc.name, tc.expr, got, tc.want)
 			}
 		})

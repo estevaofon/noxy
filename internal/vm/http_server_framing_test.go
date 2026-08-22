@@ -18,7 +18,7 @@ func captureServerInt(t *testing.T, body string) int64 {
 	if captured.Type != value.VAL_INT {
 		t.Fatalf("test_report value = %#v, want int", captured)
 	}
-	return captured.AsInt
+	return captured.Int()
 }
 
 func captureServerBool(t *testing.T, body string) bool {
@@ -27,7 +27,7 @@ func captureServerBool(t *testing.T, body string) bool {
 	if captured.Type != value.VAL_BOOL {
 		t.Fatalf("test_report value = %#v, want bool", captured)
 	}
-	return captured.AsBool
+	return captured.Bool()
 }
 
 func TestNewServerInstallsDefaults(t *testing.T) {
@@ -180,7 +180,7 @@ test_report(ok)`, port, payloadSize)
 	if interpretErr := interpretVMSourceWithinBound(t, machine, source); interpretErr != nil {
 		t.Fatal(interpretErr)
 	}
-	if captured.Type != value.VAL_BOOL || !captured.AsBool {
+	if captured.Type != value.VAL_BOOL || !captured.Bool() {
 		t.Fatalf("send_all = %#v, want true", captured)
 	}
 
@@ -246,7 +246,7 @@ test_report(ok)`, port)
 		t.Fatal(interpretErr)
 	}
 	<-closed
-	if captured.Type != value.VAL_BOOL || captured.AsBool {
+	if captured.Type != value.VAL_BOOL || captured.Bool() {
 		t.Fatalf("send_all = %#v, want false", captured)
 	}
 }
@@ -282,7 +282,7 @@ func startNoxyHTTPServer(t *testing.T, handlerBody string, config string) *noxyH
 	machine.DefineNative("harness_ready", func(args []value.Value) value.Value {
 		port := 0
 		if len(args) == 1 {
-			port = int(args[0].AsInt)
+			port = int(args[0].Int())
 		}
 		ready <- port
 		return value.NewNull()

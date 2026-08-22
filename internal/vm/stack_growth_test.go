@@ -16,7 +16,7 @@ func depth(n: int) -> int
     return 1 + depth(n - 1)
 end
 test_report(depth(10000))`)
-	if reported.Type != value.VAL_INT || reported.AsInt != 10000 {
+	if reported.Type != value.VAL_INT || reported.Int() != 10000 {
 		t.Fatalf("depth(10000) = %v, want 10000", reported)
 	}
 }
@@ -66,7 +66,7 @@ func run() -> int
     return contador
 end
 test_report(run())`)
-	if reported.Type != value.VAL_INT || reported.AsInt != 2 {
+	if reported.Type != value.VAL_INT || reported.Int() != 2 {
 		t.Fatalf("contador = %v, want 2", reported)
 	}
 }
@@ -96,7 +96,7 @@ end
 test_report(com_defer())`); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 3 {
+	if reported.Type != value.VAL_INT || reported.Int() != 3 {
 		t.Fatalf("reported=%v, want 3", reported)
 	}
 	if machine.frameCount != 0 || machine.currentFrame != nil {
@@ -187,7 +187,7 @@ func TestFunctionWithManyOperandsAndDeferRuns(t *testing.T) {
 	if err := interpretVMSource(t, machine, source); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 400 {
+	if reported.Type != value.VAL_INT || reported.Int() != 400 {
 		t.Fatalf("reported=%v, want 400", reported)
 	}
 	if !limpou {

@@ -305,7 +305,7 @@ func TestNetSelectCloseWakesAndOmitsLocalResource(t *testing.T) {
 		machine := New()
 		cleanupNetworkResources(t, machine)
 		listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
-		handle := int(builtinMapField(t, listener, "fd").AsInt)
+		handle := int(builtinMapField(t, listener, "fd").Int())
 		resource, exists := machine.shared.Listeners.get(handle)
 		if !exists {
 			t.Fatalf("listener descriptor %d is not registered", handle)
@@ -423,7 +423,7 @@ func TestNetSelectRollbackPoisonWakesBeforeResourceClose(t *testing.T) {
 		machine := New()
 		cleanupNetworkResources(t, machine)
 		listenerValue := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
-		handle := int(builtinMapField(t, listenerValue, "fd").AsInt)
+		handle := int(builtinMapField(t, listenerValue, "fd").Int())
 		resource, exists := machine.shared.Listeners.get(handle)
 		if !exists {
 			t.Fatalf("listener descriptor %d is not registered", handle)
@@ -1678,7 +1678,7 @@ func TestAcceptedSocketDoesNotInheritListenerTimeout(t *testing.T) {
 	machine := New()
 	cleanupNetworkResources(t, machine)
 	listener := callBuiltinWithinBound(t, machine, "net_listen", value.NewString("127.0.0.1"), value.NewInt(0))
-	listenerHandle := int(builtinMapField(t, listener, "fd").AsInt)
+	listenerHandle := int(builtinMapField(t, listener, "fd").Int())
 	listenerResource, exists := machine.shared.Listeners.get(listenerHandle)
 	if !exists {
 		t.Fatal("listener not registered")

@@ -396,8 +396,8 @@ func (vm *VM) defineIOBuiltins() {
 		if !ok {
 			return value.NewNull(), nil
 		}
-		offset := args[1].AsInt
-		whence := args[2].AsInt
+		offset := args[1].Int()
+		whence := args[2].Int()
 		result := newIOPositionResult(resultStruct, false, -1, "File not open")
 		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
 		if !exists {
@@ -488,7 +488,7 @@ func (vm *VM) defineIOBuiltins() {
 		if !ok {
 			return value.NewNull(), nil
 		}
-		count := args[1].AsInt
+		count := args[1].Int()
 		result := newIOReadResult(resultStruct, false, value.NewBytes(""), "File not open")
 		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
 		if !exists {
@@ -634,7 +634,7 @@ func (vm *VM) defineIOBuiltins() {
 
 func fileHandle(shared *SharedState, instance *value.ObjInstance) int {
 	shared.fileMetaMu.RLock()
-	handle := int(instance.Fields["fd"].AsInt)
+	handle := int(instance.Fields["fd"].Int())
 	shared.fileMetaMu.RUnlock()
 	return handle
 }

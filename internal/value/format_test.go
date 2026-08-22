@@ -163,14 +163,14 @@ func TestUpvalueNilReceiverAndOpenCellBasics(t *testing.T) {
 	}
 	slot := NewInt(1)
 	open := NewOpenUpvalue(&slot, nil)
-	if !open.PointsTo(&slot) || !open.Store(NewInt(2)) || slot.AsInt != 2 {
+	if !open.PointsTo(&slot) || !open.Store(NewInt(2)) || slot.Int() != 2 {
 		t.Fatal("upvalue aberto deveria apontar e escrever no slot")
 	}
 	if addr, ok := open.LocationAddress(); !ok || !strings.HasPrefix(addr, "0x") {
 		t.Fatalf("LocationAddress aberto: %q %v", addr, ok)
 	}
 	closed := NewClosedUpvalue(NewInt(7))
-	if v, ok := closed.Load(); !ok || v.AsInt != 7 {
+	if v, ok := closed.Load(); !ok || v.Int() != 7 {
 		t.Fatalf("upvalue fechado: %v %v", v, ok)
 	}
 }

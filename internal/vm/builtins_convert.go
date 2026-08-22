@@ -51,12 +51,12 @@ func describeConversionInput(item value.Value) string {
 func convertValueToInt(item value.Value) (int64, error) {
 	switch item.Type {
 	case value.VAL_INT:
-		return item.AsInt, nil
+		return item.Int(), nil
 	case value.VAL_FLOAT:
-		if math.IsNaN(item.AsFloat) || math.IsInf(item.AsFloat, 0) {
+		if math.IsNaN(item.Float()) || math.IsInf(item.Float(), 0) {
 			return 0, fmt.Errorf("cannot convert %s to int", describeConversionInput(item))
 		}
-		truncated := math.Trunc(item.AsFloat)
+		truncated := math.Trunc(item.Float())
 		if truncated < minInt64AsFloat || truncated >= maxInt64ExclusiveFloat {
 			return 0, fmt.Errorf("cannot convert %s to int: out of range", describeConversionInput(item))
 		}
@@ -79,9 +79,9 @@ func convertValueToInt(item value.Value) (int64, error) {
 func convertValueToFloat(item value.Value) (float64, error) {
 	switch item.Type {
 	case value.VAL_FLOAT:
-		return item.AsFloat, nil
+		return item.Float(), nil
 	case value.VAL_INT:
-		return float64(item.AsInt), nil
+		return float64(item.Int()), nil
 	case value.VAL_OBJ:
 		if text, ok := item.Obj.(string); ok {
 			parsed, parseErr := strconv.ParseFloat(text, 64)

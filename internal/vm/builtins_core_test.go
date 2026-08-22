@@ -15,16 +15,16 @@ func assertBuiltinValue(t *testing.T, got, want value.Value) {
 	}
 	switch want.Type {
 	case value.VAL_BOOL:
-		if got.AsBool != want.AsBool {
-			t.Fatalf("bool = %t, want %t", got.AsBool, want.AsBool)
+		if got.Bool() != want.Bool() {
+			t.Fatalf("bool = %t, want %t", got.Bool(), want.Bool())
 		}
 	case value.VAL_INT:
-		if got.AsInt != want.AsInt {
-			t.Fatalf("int = %d, want %d", got.AsInt, want.AsInt)
+		if got.Int() != want.Int() {
+			t.Fatalf("int = %d, want %d", got.Int(), want.Int())
 		}
 	case value.VAL_FLOAT:
-		if got.AsFloat != want.AsFloat {
-			t.Fatalf("float = %v, want %v", got.AsFloat, want.AsFloat)
+		if got.Float() != want.Float() {
+			t.Fatalf("float = %v, want %v", got.Float(), want.Float())
 		}
 	case value.VAL_OBJ, value.VAL_BYTES:
 		gotString, gotOK := got.Obj.(string)

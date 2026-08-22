@@ -14,7 +14,7 @@ func TestNewClosedUpvalueIsDetachedOwnedCell(t *testing.T) {
 		t.Fatal("celula fechada e possuidora, nao emprestada")
 	}
 	got, ok := cell.Load()
-	if !ok || got.Type != VAL_INT || got.AsInt != 42 {
+	if !ok || got.Type != VAL_INT || got.Int() != 42 {
 		t.Fatalf("Load = %#v, %v; esperado 42", got, ok)
 	}
 	var stackSlot Value
@@ -24,7 +24,7 @@ func TestNewClosedUpvalueIsDetachedOwnedCell(t *testing.T) {
 	if !cell.Store(NewInt(7)) {
 		t.Fatal("Store deve funcionar numa celula fechada")
 	}
-	if got, _ := cell.Load(); got.AsInt != 7 {
-		t.Fatalf("Load apos Store = %d, esperado 7", got.AsInt)
+	if got, _ := cell.Load(); got.Int() != 7 {
+		t.Fatalf("Load apos Store = %d, esperado 7", got.Int())
 	}
 }

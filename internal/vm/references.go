@@ -10,7 +10,7 @@ import (
 func referenceMapKey(index value.Value) (interface{}, error) {
 	switch index.Type {
 	case value.VAL_INT:
-		return index.AsInt, nil
+		return index.Int(), nil
 	case value.VAL_OBJ:
 		if key, ok := index.Obj.(string); ok {
 			return key, nil
@@ -109,7 +109,7 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 			if ref.Index.Type != value.VAL_INT {
 				return value.Value{}, false, nil, fmt.Errorf("array reference index must be integer")
 			}
-			index := int(ref.Index.AsInt)
+			index := int(ref.Index.Int())
 			if index < 0 || index >= len(array.Elements) {
 				return value.Value{}, false, nil, fmt.Errorf("Index out of bounds")
 			}

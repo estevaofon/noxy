@@ -359,7 +359,7 @@ func (vm *VM) defineSystemBuiltins() {
 		if len(args) < 1 {
 			return value.NewNull()
 		}
-		ms := args[0].AsInt
+		ms := args[0].Int()
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		return value.NewNull()
 	})
@@ -367,7 +367,7 @@ func (vm *VM) defineSystemBuiltins() {
 	vm.DefineNative("sys_exit", func(args []value.Value) value.Value {
 		code := 0
 		if len(args) > 0 {
-			code = int(args[0].AsInt)
+			code = int(args[0].Int())
 		}
 		os.Exit(code)
 		return value.NewNull()

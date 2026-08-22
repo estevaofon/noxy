@@ -15,7 +15,7 @@ func traceVMSource(t *testing.T, source string) []int64 {
 	trace := []int64{}
 	machine.DefineNative("test_trace", func(args []value.Value) value.Value {
 		if len(args) != 0 {
-			trace = append(trace, args[0].AsInt)
+			trace = append(trace, args[0].Int())
 		}
 		return value.NewNull()
 	})

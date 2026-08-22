@@ -1,17 +1,14 @@
-| bench | v060_ms | v0141_ms | delta |
+| bench | v0142_ms | s12p_ms | delta |
 |---|---|---|---|
-| bench_bubblesort.nx | 4137.6 | 4141.8 | 0.1% |
-| bench_call_light.nx | 114.5 | 113.5 | -0.9% |
-| bench_call_readonly.nx | 1240 | 1369.3 | 10.4% |
-| bench_call_ref.nx | 3711 | 3838.7 | 3.4% |
-| bench_conway.nx | 2119.2 | 2168.9 | 2.3% |
-| bench_map_churn.nx | 451.4 | 449 | -0.5% |
-| bench_path_update.nx | 634.3 | 641.9 | 1.2% |
-| bench_share_mutate.nx | 266 | 264.7 | -0.5% |
-| bench_spawn_sum.nx | 725.6 | 726.8 | 0.2% |
-| bench_typed_call_map.nx | 109 | 121.9 | 11.8% |
-| bench_value_call_mutate.nx | 120.7 | 115.8 | -4.1% |
-
-Pulados (sem equivalencia entre os dois binarios):
-
-- bench_generic_vs_hand.nx — sem CHECKSUM no v060
+| bench_bubblesort.nx | 4046.3 | 3002.8 | -25.8% |
+| bench_call_light.nx | 120.3 | 110.7 | -8% |
+| bench_call_readonly.nx | 1386.8 | 929.4 | -33% |
+| bench_call_ref.nx | 4160.8 | 3052.1 | -26.6% |
+| bench_conway.nx | 2214.9 | 1878.8 | -15.2% |
+| bench_generic_vs_hand.nx | 904.5 | 732.4 | -19% |
+| bench_map_churn.nx | 479.1 | 442 | -7.7% |
+| bench_path_update.nx | 682.4 | 498.2 | -27% |
+| bench_share_mutate.nx | 302.1 | 251.4 | -16.8% |
+| bench_spawn_sum.nx | 767.1 | 703.7 | -8.3% |
+| bench_typed_call_map.nx | 124.5 | 122.9 | -1.3% |
+| bench_value_call_mutate.nx | 119.3 | 121.1 | 1.5% |

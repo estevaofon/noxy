@@ -12,7 +12,7 @@ func TestDeferredCallsRunLIFOOnExplicitReturn(t *testing.T) {
 	machine := New()
 	var order []int64
 	machine.DefineNative("record", func(args []value.Value) value.Value {
-		order = append(order, args[0].AsInt)
+		order = append(order, args[0].Int())
 		return value.NewNull()
 	})
 	captured := value.NewNull()
@@ -51,7 +51,7 @@ record(0)`, []int64{0, 2, 1}},
 		machine := New()
 		var order []int64
 		machine.DefineNative("record", func(args []value.Value) value.Value {
-			order = append(order, args[0].AsInt)
+			order = append(order, args[0].Int())
 			return value.NewNull()
 		})
 		if err := interpretVMSource(t, machine, test.source); err != nil {
@@ -94,7 +94,7 @@ func TestDeferredCallsRunAllAfterFailuresAndPreserveOrder(t *testing.T) {
 	secondFailure := errors.New("cleanup three failed")
 	var order []int64
 	machine.DefineContextualNative("cleanup", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
-		id := args[0].AsInt
+		id := args[0].Int()
 		order = append(order, id)
 		switch id {
 		case 2:
@@ -135,7 +135,7 @@ func TestRuntimeErrorRunsAllDeferredCalls(t *testing.T) {
 	machine := New()
 	var order []int64
 	machine.DefineNative("record", func(args []value.Value) value.Value {
-		order = append(order, args[0].AsInt)
+		order = append(order, args[0].Int())
 		return value.NewNull()
 	})
 

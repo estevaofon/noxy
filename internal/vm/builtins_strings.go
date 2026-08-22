@@ -165,7 +165,7 @@ func (vm *VM) defineStringBuiltins() {
 		if err := requireTextArgument("strings.repeat", args, 0); err != nil {
 			return value.NewNull(), err
 		}
-		return value.NewString(strings.Repeat(args[0].String(), int(args[1].AsInt))), nil
+		return value.NewString(strings.Repeat(args[0].String(), int(args[1].Int()))), nil
 	})
 
 	vm.DefineContextualNative("strings_replace", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
@@ -200,7 +200,7 @@ func (vm *VM) defineStringBuiltins() {
 			}
 		}
 		s := args[0].String()
-		totalLen := int(args[1].AsInt)
+		totalLen := int(args[1].Int())
 		padChar := args[2].String()
 		if len(s) >= totalLen {
 			return value.NewString(s), nil
@@ -245,7 +245,7 @@ func (vm *VM) defineStringBuiltins() {
 		}
 		arrVal := args[0]
 		sep := args[1].String()
-		count := int(args[2].AsInt)
+		count := int(args[2].Int())
 
 		if arrVal.Type == value.VAL_OBJ {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
@@ -287,8 +287,8 @@ func (vm *VM) defineStringBuiltins() {
 		s := args[0].String()
 		runes := []rune(s)
 		n := len(runes)
-		start := int(args[1].AsInt)
-		end := int(args[2].AsInt)
+		start := int(args[1].Int())
+		end := int(args[2].Int())
 
 		// Negative indices count from the end (Python-style)
 		if start < 0 {
@@ -408,7 +408,7 @@ func (vm *VM) defineStringBuiltins() {
 		}
 		s := args[0].String()
 		runes := []rune(s)
-		idx := int(args[1].AsInt)
+		idx := int(args[1].Int())
 		if idx < 0 || idx >= len(runes) {
 			return value.NewString(""), nil
 		}
@@ -436,7 +436,7 @@ func (vm *VM) defineStringBuiltins() {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
-		return value.NewString(string(rune(args[0].AsInt)))
+		return value.NewString(string(rune(args[0].Int())))
 	})
 	// strings_is_valid_utf8 takes bytes, not text, so it must not go through
 	// requireTextArgument: that guard rejects bytes, which is the opposite of

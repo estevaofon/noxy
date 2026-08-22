@@ -196,7 +196,7 @@ func pollSets(read, write, networkErrors []value.Value) [3]*value.ObjArray {
 func resultSet(t *testing.T, result value.Value, name string) []value.Value {
 	t.Helper()
 	mapping := requireBuiltinMap(t, result)
-	count := requireTestMapValue(t, mapping, name+"_count").AsInt
+	count := requireTestMapValue(t, mapping, name+"_count").Int()
 	array := requireTestMapValue(t, mapping, name).Obj.(*value.ObjArray)
 	return array.Elements[:count]
 }
@@ -837,7 +837,7 @@ func requireTestMapFD(t *testing.T, socket value.Value) int64 {
 	t.Helper()
 	mapping := socket.Obj.(*value.ObjMap)
 	fd, _ := mapping.Get("fd")
-	return fd.AsInt
+	return fd.Int()
 }
 
 func TestNetworkPollerWriteOnlyListenerWaitsWithoutNativeDescriptor(t *testing.T) {

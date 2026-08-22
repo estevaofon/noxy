@@ -42,7 +42,7 @@ func TestModuleFrameGlobalReferenceCapturesSharedFallbackOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := moduleGlobals["captured"]
-	if got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("shared fallback=%v, want 42", got)
 	}
 }
@@ -53,7 +53,7 @@ func TestInterpretWithGlobalsUsesNonNilEmptyEnvironment(t *testing.T) {
 	if err := New().InterpretWithGlobals(code, globals); err != nil {
 		t.Fatal(err)
 	}
-	if got := globals["answer"]; got.Type != value.VAL_INT || got.AsInt != 42 {
+	if got := globals["answer"]; got.Type != value.VAL_INT || got.Int() != 42 {
 		t.Fatalf("answer=%v", got)
 	}
 }
@@ -70,7 +70,7 @@ func TestModuleGlobalReferenceRetainsResolvedEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := module.GetLocal("module")
-	if got.AsInt != 3 {
+	if got.Int() != 3 {
 		t.Fatalf("module value=%v", got)
 	}
 }

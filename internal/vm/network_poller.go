@@ -562,7 +562,7 @@ func validateNetworkPollArguments(args []value.Value) ([3]*value.ObjArray, time.
 	if args[3].Type != value.VAL_INT {
 		return sets, 0, fmt.Errorf("network poll timeout must be an int")
 	}
-	milliseconds := args[3].AsInt
+	milliseconds := args[3].Int()
 	if milliseconds < 0 {
 		return sets, 0, fmt.Errorf("network poll timeout must be non-negative")
 	}

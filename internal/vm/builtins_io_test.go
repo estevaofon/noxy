@@ -127,7 +127,7 @@ func TestFileHandleIsUsableAcrossSharedVMs(t *testing.T) {
 	fileType := testFileDefinition()
 	handle := callBuiltin(t, parent, "io_open", value.NewString(path), value.NewString("w"), fileType)
 	defer callBuiltin(t, parent, "io_close", handle)
-	fd := int(requireBuiltinInstance(t, handle, fileType).Fields["fd"].AsInt)
+	fd := int(requireBuiltinInstance(t, handle, fileType).Fields["fd"].Int())
 	if _, ok := parent.shared.Files.get(fd); !ok {
 		t.Fatalf("file handle %d was not published to shared resources", fd)
 	}
@@ -240,7 +240,7 @@ func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
 	assertBuiltinValue(t, success.Fields["bytes_written"], value.NewInt(int64(len([]byte(contents)))))
 	assertBuiltinValue(t, success.Fields["error"], value.NewString(""))
 
-	fd := int(handle.Fields["fd"].AsInt)
+	fd := int(handle.Fields["fd"].Int())
 	resource, ok := machine.shared.Files.get(fd)
 	if !ok {
 		t.Fatalf("open file descriptor %d is absent from shared resources", fd)
@@ -280,7 +280,7 @@ func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
 
 	failedHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("a"), fileDefinition)
 	failedHandle := requireBuiltinInstance(t, failedHandleValue, fileDefinition)
-	failedFD := int(failedHandle.Fields["fd"].AsInt)
+	failedFD := int(failedHandle.Fields["fd"].Int())
 	failedResource, ok := machine.shared.Files.get(failedFD)
 	if !ok {
 		t.Fatalf("open file descriptor %d is absent from shared resources", failedFD)
@@ -314,7 +314,7 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	writeHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("w"), fileDefinition)
 	writeHandle := requireBuiltinInstance(t, writeHandleValue, fileDefinition)
 	assertBuiltinValue(t, writeHandle.Fields["open"], value.NewBool(true))
-	writeFD := int(writeHandle.Fields["fd"].AsInt)
+	writeFD := int(writeHandle.Fields["fd"].Int())
 	if _, ok := machine.shared.Files.get(writeFD); !ok {
 		t.Fatalf("open file descriptor %d is absent from shared resources", writeFD)
 	}
@@ -640,7 +640,7 @@ func TestIOCloseLeavesStdinRegisteredAndUsable(t *testing.T) {
 		fileDefinition := testFileDefinition()
 		handleValue := callBuiltin(t, machine, "io_stdin", fileDefinition)
 		handle := requireBuiltinInstance(t, handleValue, fileDefinition)
-		fd := int(handle.Fields["fd"].AsInt)
+		fd := int(handle.Fields["fd"].Int())
 
 		callBuiltin(t, machine, "io_close", handleValue)
 		if _, ok := machine.shared.Files.get(fd); !ok {
@@ -700,7 +700,7 @@ func TestConcurrentInputAndStdinReadLineShareOneBuffer(t *testing.T) {
 					break
 				}
 				result, ok := got.Obj.(*value.ObjInstance)
-				if !ok || !result.Fields["ok"].AsBool {
+				if !ok || !result.Fields["ok"].Bool() {
 					break
 				}
 				line, _ := result.Fields["data"].Obj.(string)

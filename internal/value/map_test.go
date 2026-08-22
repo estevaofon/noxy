@@ -13,7 +13,7 @@ func TestObjMapZeroValueSupportsPublicOperations(t *testing.T) {
 
 	mapping.Set("answer", NewInt(42))
 	snapshot := mapping.Snapshot()
-	if got, found := snapshot["answer"]; !found || got.AsInt != 42 {
+	if got, found := snapshot["answer"]; !found || got.Int() != 42 {
 		t.Fatalf("snapshot answer=(%v,%t)", got, found)
 	}
 	if got := mapping.String(); got != "{answer: 42}" {
@@ -28,11 +28,11 @@ func TestObjMapPreservesInjectedBindingStore(t *testing.T) {
 	if got := mapping.ensureStore(); got != injected {
 		t.Fatal("ensureStore replaced injected store")
 	}
-	if got, found := mapping.Get("seed"); !found || got.AsInt != 7 {
+	if got, found := mapping.Get("seed"); !found || got.Int() != 7 {
 		t.Fatalf("seed=(%v,%t)", got, found)
 	}
 	mapping.Set("added", NewInt(9))
-	if got, found := injected.get("added"); !found || got.AsInt != 9 {
+	if got, found := injected.get("added"); !found || got.Int() != 9 {
 		t.Fatalf("injected added=(%v,%t)", got, found)
 	}
 }
@@ -40,14 +40,14 @@ func TestObjMapPreservesInjectedBindingStore(t *testing.T) {
 func TestObjMapOperationsUseSnapshots(t *testing.T) {
 	mapping := NewMap().Obj.(*ObjMap)
 	mapping.Set("answer", NewInt(42))
-	if got, ok := mapping.Get("answer"); !ok || got.AsInt != 42 {
+	if got, ok := mapping.Get("answer"); !ok || got.Int() != 42 {
 		t.Fatalf("answer=(%v,%t)", got, ok)
 	}
 
 	snapshot := mapping.Snapshot()
 	snapshot["answer"] = NewInt(0)
 	got, _ := mapping.Get("answer")
-	if got.AsInt != 42 {
+	if got.Int() != 42 {
 		t.Fatal("snapshot mutated live map")
 	}
 
@@ -67,7 +67,7 @@ func TestObjMapReplaceReplacesLiveValues(t *testing.T) {
 	if _, found := mapping.Get("old"); found {
 		t.Fatal("replace did not clear old value")
 	}
-	if got, found := mapping.Get("new"); !found || got.AsInt != 2 {
+	if got, found := mapping.Get("new"); !found || got.Int() != 2 {
 		t.Fatalf("new=(%v,%t)", got, found)
 	}
 }
@@ -78,7 +78,7 @@ func TestObjMapReplaceAcceptsSnapshot(t *testing.T) {
 
 	mapping.Replace(mapping.Snapshot())
 
-	if got, found := mapping.Get("answer"); !found || got.AsInt != 42 {
+	if got, found := mapping.Get("answer"); !found || got.Int() != 42 {
 		t.Fatalf("answer=(%v,%t)", got, found)
 	}
 }

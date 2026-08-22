@@ -78,7 +78,7 @@ func (vm *VM) defineCoreBuiltins() {
 			return value.NewNull()
 		}
 		if args[0].Type == value.VAL_INT {
-			return value.NewString(fmt.Sprintf("0x%x", args[0].AsInt))
+			return value.NewString(fmt.Sprintf("0x%x", args[0].Int()))
 		}
 		if args[0].Type == value.VAL_BYTES {
 			return value.NewString(fmt.Sprintf("%x", args[0].Obj.(string)))
@@ -145,7 +145,7 @@ func (vm *VM) defineCoreBuiltins() {
 		if args[0].Type != value.VAL_INT {
 			return value.NewString("")
 		}
-		num := args[0].AsInt
+		num := args[0].Int()
 		if num == 0 {
 			return value.NewString("0")
 		}
@@ -284,13 +284,13 @@ func (vm *VM) defineCoreBuiltins() {
 			// Consume args for width/prec
 			if widthHasStar {
 				if argIdx < len(argsData) {
-					newArgs = append(newArgs, argsData[argIdx].AsInt) // Assume int for width
+					newArgs = append(newArgs, argsData[argIdx].Int()) // Assume int for width
 					argIdx++
 				}
 			}
 			if precHasStar {
 				if argIdx < len(argsData) {
-					newArgs = append(newArgs, argsData[argIdx].AsInt) // Assume int for prec
+					newArgs = append(newArgs, argsData[argIdx].Int()) // Assume int for prec
 					argIdx++
 				}
 			}
@@ -311,11 +311,11 @@ func (vm *VM) defineCoreBuiltins() {
 					// Add argument, potentially wrapped or raw
 					switch val.Type {
 					case value.VAL_INT:
-						newArgs = append(newArgs, val.AsInt)
+						newArgs = append(newArgs, val.Int())
 					case value.VAL_FLOAT:
-						newArgs = append(newArgs, val.AsFloat)
+						newArgs = append(newArgs, val.Float())
 					case value.VAL_BOOL:
-						newArgs = append(newArgs, val.AsBool)
+						newArgs = append(newArgs, val.Bool())
 					case value.VAL_NULL:
 						newArgs = append(newArgs, nil)
 					case value.VAL_OBJ:

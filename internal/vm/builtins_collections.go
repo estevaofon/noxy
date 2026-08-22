@@ -47,11 +47,11 @@ func (vm *VM) defineCollectionBuiltins() {
 		start, stop, step := int64(0), int64(0), int64(1)
 		switch len(args) {
 		case 1:
-			stop = args[0].AsInt
+			stop = args[0].Int()
 		case 2:
-			start, stop = args[0].AsInt, args[1].AsInt
+			start, stop = args[0].Int(), args[1].Int()
 		case 3:
-			start, stop, step = args[0].AsInt, args[1].AsInt, args[2].AsInt
+			start, stop, step = args[0].Int(), args[1].Int(), args[2].Int()
 		}
 		if step == 0 {
 			return value.NewNull(), fmt.Errorf("range: step must not be zero")
@@ -140,7 +140,7 @@ func (vm *VM) defineCollectionBuiltins() {
 			if m, ok := mapVal.Obj.(*value.ObjMap); ok {
 				var key interface{}
 				if keyVal.Type == value.VAL_INT {
-					key = keyVal.AsInt
+					key = keyVal.Int()
 				} else if keyVal.Type == value.VAL_OBJ {
 					if str, ok := keyVal.Obj.(string); ok {
 						key = str
@@ -229,8 +229,8 @@ func (vm *VM) defineCollectionBuiltins() {
 			return value.NewNull()
 		}
 		seq := args[0]
-		start := int(args[1].AsInt)
-		end := int(args[2].AsInt)
+		start := int(args[1].Int())
+		end := int(args[2].Int())
 
 		// Clamp logic helper
 		clamp := func(idx, length int) int {
@@ -305,7 +305,7 @@ func (vm *VM) defineCollectionBuiltins() {
 			if mapObj, ok := mapVal.Obj.(*value.ObjMap); ok {
 				var key interface{}
 				if keyVal.Type == value.VAL_INT {
-					key = keyVal.AsInt
+					key = keyVal.Int()
 				} else if keyVal.Type == value.VAL_OBJ {
 					if str, ok := keyVal.Obj.(string); ok {
 						key = str
@@ -336,14 +336,14 @@ func (vm *VM) defineCollectionBuiltins() {
 				bs := make([]byte, len(arr.Elements))
 				for i, el := range arr.Elements {
 					if el.Type == value.VAL_INT {
-						bs[i] = byte(el.AsInt)
+						bs[i] = byte(el.Int())
 					}
 				}
 				return value.NewBytes(string(bs))
 			}
 		case value.VAL_INT:
 			// Single int to single byte
-			return value.NewBytes(string([]byte{byte(arg.AsInt)}))
+			return value.NewBytes(string([]byte{byte(arg.Int())}))
 		}
 		return value.NewBytes("")
 	})

@@ -11,13 +11,13 @@ func valuesEqual(a, b value.Value) bool {
 	if a.Type == b.Type {
 		switch a.Type {
 		case value.VAL_BOOL:
-			return a.AsBool == b.AsBool
+			return a.Bool() == b.Bool()
 		case value.VAL_NULL:
 			return true
 		case value.VAL_INT:
-			return a.AsInt == b.AsInt
+			return a.Int() == b.Int()
 		case value.VAL_FLOAT:
-			return a.AsFloat == b.AsFloat
+			return a.Float() == b.Float()
 		case value.VAL_OBJ:
 			// CoW: compostos comparam estruturalmente (identidade de ponteiro
 			// ficou instável sob copy-on-write). Demais objetos (strings via
@@ -115,10 +115,10 @@ func valuesEqual(a, b value.Value) bool {
 
 	// Mixed types
 	if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-		return float64(a.AsInt) == b.AsFloat
+		return float64(a.Int()) == b.Float()
 	}
 	if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-		return a.AsFloat == float64(b.AsInt)
+		return a.Float() == float64(b.Int())
 	}
 
 	return false
@@ -233,11 +233,20 @@ func (vm *VM) growFrames() bool {
 	return true
 }
 
-func (vm *VM) pop() value.Value {
+// pop desempilha e zera o slot (solta a referencia para o GC). A FORMA do
+// corpo importa: a versao de sempre (`val := vm.stack[top]; vm.stack[top] =
+// value.Value{}; return val`) custa 22 no inliner e deixava pop fora do
+// inline em TODOS os ~84 sites de run() (orcamento 20 para callee de funcao
+// grande — ver push); a atribuicao dupla com resultado nomeado faz o mesmo
+// trabalho em 18 nos (um statement e uma declaracao a menos) e e inlinada em
+// ~80 sites. Variantes "obvias" sao piores: `slot.Obj = nil` via
+// `&vm.stack[top]` custa 26, limpar so Obj com duas indexacoes custa 23.
+// inline_guard_test.go trava custo e contagem de sites, como faz com push
+// (issue #37, "extra barato").
+func (vm *VM) pop() (val value.Value) {
 	vm.stackTop--
-	val := vm.stack[vm.stackTop]
-	vm.stack[vm.stackTop] = value.Value{} // Clear reference to help GC
-	return val
+	val, vm.stack[vm.stackTop] = vm.stack[vm.stackTop], value.Value{} // Clear reference to help GC
+	return
 }
 
 func (vm *VM) peek(distance int) value.Value {

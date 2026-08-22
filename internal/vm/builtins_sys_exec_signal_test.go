@@ -66,7 +66,7 @@ test_report([first, again, stopped, stopped_again, rejected])
 		t.Fatalf("células=%d, want %d: %s", len(cells), len(want), got.String())
 	}
 	for i, cell := range cells {
-		if cell.AsBool != want[i] {
+		if cell.Bool() != want[i] {
 			t.Fatalf("célula %d: got %s, want %v (tudo: %s)", i, cell.String(), want[i], got.String())
 		}
 	}

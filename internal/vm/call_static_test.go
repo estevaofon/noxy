@@ -16,7 +16,7 @@ func double(n: int) -> int
 end
 test_report(double(21))
 `)
-	if result.Type != value.VAL_INT || result.AsInt != 42 {
+	if result.Type != value.VAL_INT || result.Int() != 42 {
 		t.Fatalf("esperado 42, obtido %s", result.String())
 	}
 }
@@ -83,7 +83,7 @@ op = dec
 let b: int = op(10)
 test_report(a * 100 + b)
 `)
-	if result.Type != value.VAL_INT || result.AsInt != 1109 {
+	if result.Type != value.VAL_INT || result.Int() != 1109 {
 		t.Fatalf("esperado 1109 (11*100+9), obtido %s", result.String())
 	}
 }

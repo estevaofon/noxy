@@ -52,7 +52,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 			return value.NewNull(), nil
 		}
 
-		resource, exists := machine.shared.Databases.remove(int(databaseInstance.Fields["handle"].AsInt))
+		resource, exists := machine.shared.Databases.remove(int(databaseInstance.Fields["handle"].Int()))
 		if exists {
 			resource.stateMu.Lock()
 			database := resource.database
@@ -176,7 +176,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 		if len(args) < 3 {
 			return value.NewNull(), nil
 		}
-		return bindSQLiteParameter(machine, args, args[2].AsFloat), nil
+		return bindSQLiteParameter(machine, args, args[2].Float()), nil
 	})
 	vm.DefineContextualNative("sqlite_bind_int", func(context value.NativeContext, args []value.Value) (value.Value, error) {
 		machine, err := nativeVM(context)
@@ -186,7 +186,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 		if len(args) < 3 {
 			return value.NewNull(), nil
 		}
-		return bindSQLiteParameter(machine, args, args[2].AsInt), nil
+		return bindSQLiteParameter(machine, args, args[2].Int()), nil
 	})
 
 	vm.DefineContextualNative("sqlite_step_exec", func(context value.NativeContext, args []value.Value) (value.Value, error) {
@@ -206,7 +206,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 			return value.NewNull(), nil
 		}
 
-		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
 		if !exists {
 			return sqliteExecError(resultTemplate.Struct, "invalid statement handle"), nil
 		}
@@ -245,7 +245,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 		if !ok {
 			return value.NewNull(), nil
 		}
-		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
 		if exists {
 			resource.mu.Lock()
 			if !resource.closed && resource.statement != nil {
@@ -268,7 +268,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 		if !ok {
 			return value.NewNull(), nil
 		}
-		resource, exists := machine.shared.Statements.remove(int(statementInstance.Fields["handle"].AsInt))
+		resource, exists := machine.shared.Statements.remove(int(statementInstance.Fields["handle"].Int()))
 		if !exists {
 			return value.NewNull(), nil
 		}
@@ -356,7 +356,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 }
 
 func sqliteDatabase(machine *VM, instance *value.ObjInstance) (*sql.DB, bool) {
-	resource, ok := machine.shared.Databases.get(int(instance.Fields["handle"].AsInt))
+	resource, ok := machine.shared.Databases.get(int(instance.Fields["handle"].Int()))
 	if !ok {
 		return nil, false
 	}
@@ -373,7 +373,7 @@ func bindSQLiteParameter(machine *VM, args []value.Value, parameter interface{})
 	if !ok {
 		return value.NewNull()
 	}
-	resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].AsInt))
+	resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
 	if !exists {
 		return value.NewNull()
 	}
@@ -385,18 +385,18 @@ func bindSQLiteParameter(machine *VM, args []value.Value, parameter interface{})
 	if resource.parameters == nil {
 		resource.parameters = make(map[int]interface{})
 	}
-	resource.parameters[int(args[1].AsInt)] = parameter
+	resource.parameters[int(args[1].Int())] = parameter
 	return value.NewNull()
 }
 
 func sqliteParameter(parameter value.Value) interface{} {
 	switch parameter.Type {
 	case value.VAL_INT:
-		return parameter.AsInt
+		return parameter.Int()
 	case value.VAL_FLOAT:
-		return parameter.AsFloat
+		return parameter.Float()
 	case value.VAL_BOOL:
-		return parameter.AsBool
+		return parameter.Bool()
 	case value.VAL_NULL:
 		return nil
 	case value.VAL_BYTES:

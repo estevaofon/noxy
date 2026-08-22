@@ -59,8 +59,8 @@ func networkSocketDescriptor(socket value.Value) (int, error) {
 	if !exists || descriptor.Type != value.VAL_INT {
 		return 0, fmt.Errorf("invalid socket")
 	}
-	handle := int(descriptor.AsInt)
-	if int64(handle) != descriptor.AsInt {
+	handle := int(descriptor.Int())
+	if int64(handle) != descriptor.Int() {
 		return 0, fmt.Errorf("invalid socket")
 	}
 	return handle, nil
@@ -455,7 +455,7 @@ func (vm *VM) defineNetworkBuiltins() {
 			return value.NewNull(), nil
 		}
 		host := args[0].String()
-		port := int(args[1].AsInt)
+		port := int(args[1].Int())
 		listener, listenErr := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 		if listenErr != nil {
 			return socketValue(-1, host, port, false), nil
@@ -489,7 +489,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		if !exists {
 			return value.NewNull(), nil
 		}
-		resource, exists := machine.shared.Listeners.get(int(fdValue.AsInt))
+		resource, exists := machine.shared.Listeners.get(int(fdValue.Int()))
 		if !exists {
 			return socketValue(-1, "", 0, false), nil
 		}
@@ -510,7 +510,7 @@ func (vm *VM) defineNetworkBuiltins() {
 			return value.NewNull(), nil
 		}
 		host := args[0].String()
-		port := int(args[1].AsInt)
+		port := int(args[1].Int())
 		connection, connectErr := networkDialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 5*time.Second)
 		if connectErr != nil {
 			return socketValue(-1, host, port, false), nil
@@ -536,11 +536,11 @@ func (vm *VM) defineNetworkBuiltins() {
 			return value.NewNull(), nil
 		}
 		fdValue, _ := socket.Get("fd")
-		resource, exists := machine.shared.Sockets.get(int(fdValue.AsInt))
+		resource, exists := machine.shared.Sockets.get(int(fdValue.Int()))
 		if !exists {
 			return netResult(false, "", 0, "invalid socket"), nil
 		}
-		return receiveSocket(resource, int(args[1].AsInt)), nil
+		return receiveSocket(resource, int(args[1].Int())), nil
 	})
 
 	vm.DefineContextualNative("net_send", func(context value.NativeContext, args []value.Value) (value.Value, error) {
@@ -560,7 +560,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		if args[1].Type == value.VAL_BYTES {
 			data = args[1].Obj.(string)
 		}
-		resource, exists := machine.shared.Sockets.get(int(fdValue.AsInt))
+		resource, exists := machine.shared.Sockets.get(int(fdValue.Int()))
 		if !exists {
 			return netResult(false, "", 0, "invalid socket"), nil
 		}
@@ -577,11 +577,11 @@ func (vm *VM) defineNetworkBuiltins() {
 		}
 		fd := 0
 		if args[0].Type == value.VAL_INT {
-			fd = int(args[0].AsInt)
+			fd = int(args[0].Int())
 		} else if args[0].Type == value.VAL_OBJ {
 			if socket, ok := args[0].Obj.(*value.ObjMap); ok {
 				if fdValue, found := socket.Get("fd"); found {
-					fd = int(fdValue.AsInt)
+					fd = int(fdValue.Int())
 				}
 			}
 		} else {
@@ -602,7 +602,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) != 2 || args[1].Type != value.VAL_BOOL || !args[1].AsBool {
+		if len(args) != 2 || args[1].Type != value.VAL_BOOL || !args[1].Bool() {
 			return value.NewNull(), nil
 		}
 		if err := configureNetworkTimeout(machine, args[0], 0); err != nil {
@@ -622,7 +622,7 @@ func (vm *VM) defineNetworkBuiltins() {
 		if args[1].Type != value.VAL_INT {
 			return value.NewNull(), fmt.Errorf("network timeout must be an int")
 		}
-		timeout, err := validateNetworkTimeout(args[1].AsInt)
+		timeout, err := validateNetworkTimeout(args[1].Int())
 		if err != nil {
 			return value.NewNull(), err
 		}

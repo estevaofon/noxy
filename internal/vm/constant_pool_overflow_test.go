@@ -39,8 +39,8 @@ func TestGlobalResolutionSurvivesLargeConstantPool(t *testing.T) {
 	if captured.Type != value.VAL_INT {
 		t.Fatalf("test_report value = %#v, want int", captured)
 	}
-	if captured.AsInt != 111222 {
-		t.Fatalf("first*1000+last = %d, want 111222 (first or last resolved to the wrong global)", captured.AsInt)
+	if captured.Int() != 111222 {
+		t.Fatalf("first*1000+last = %d, want 111222 (first or last resolved to the wrong global)", captured.Int())
 	}
 }
 
@@ -60,7 +60,7 @@ func TestPropertyAccessSurvivesLargeConstantPool(t *testing.T) {
 	body.WriteString("test_report(target.value)\n")
 
 	captured := captureVMSource(t, body.String())
-	if captured.Type != value.VAL_INT || captured.AsInt != 778 {
+	if captured.Type != value.VAL_INT || captured.Int() != 778 {
 		t.Fatalf("target.value = %#v, want 778", captured)
 	}
 }
@@ -81,7 +81,7 @@ func TestFunctionCallSurvivesLargeConstantPool(t *testing.T) {
 	body.WriteString("test_report(first_fn() * 1000 + last_fn())\n")
 
 	captured := captureVMSource(t, body.String())
-	if captured.Type != value.VAL_INT || captured.AsInt != 111222 {
+	if captured.Type != value.VAL_INT || captured.Int() != 111222 {
 		t.Fatalf("first_fn()*1000+last_fn() = %#v, want 111222", captured)
 	}
 }

@@ -377,7 +377,7 @@ func TestNetworkPollIntegrationWSAPollResetCopiesTerminalEventAndPreservesPendin
 	machine := New()
 	_, client, server := setupAcceptedLoopback(t, machine)
 
-	clientHandle := int(builtinMapField(t, client, "fd").AsInt)
+	clientHandle := int(builtinMapField(t, client, "fd").Int())
 	clientResource, exists := machine.shared.Sockets.get(clientHandle)
 	if !exists {
 		t.Fatalf("client descriptor %d is not registered", clientHandle)

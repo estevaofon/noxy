@@ -21,7 +21,7 @@ x = 2
 let second: int = get()
 test_report(first * 10 + second)
 `)
-	if result.Type != value.VAL_INT || result.AsInt != 12 {
+	if result.Type != value.VAL_INT || result.Int() != 12 {
 		t.Fatalf("esperado 12 (first=1, second=2), obtido %s", result.String())
 	}
 }
@@ -45,14 +45,14 @@ func TestGlobalCacheKeyedByEnvironment(t *testing.T) {
 	if err := machine.InterpretWithEnvironment(code, envA); err != nil {
 		t.Fatalf("vm error (envA): %v", err)
 	}
-	if got := machine.stack[1]; got.Type != value.VAL_INT || got.AsInt != 1 {
+	if got := machine.stack[1]; got.Type != value.VAL_INT || got.Int() != 1 {
 		t.Fatalf("envA: esperado 1, obtido %s", got.String())
 	}
 
 	if err := machine.InterpretWithEnvironment(code, envB); err != nil {
 		t.Fatalf("vm error (envB): %v", err)
 	}
-	if got := machine.stack[1]; got.Type != value.VAL_INT || got.AsInt != 2 {
+	if got := machine.stack[1]; got.Type != value.VAL_INT || got.Int() != 2 {
 		t.Fatalf("envB: cache vazou o valor do envA — esperado 2, obtido %s", got.String())
 	}
 }

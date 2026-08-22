@@ -2,13 +2,14 @@ package value
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
 )
 
-type ValueType int
+type ValueType uint8
 
 const (
 	VAL_BOOL ValueType = iota
@@ -25,13 +26,49 @@ const (
 	VAL_TASK
 )
 
+// objKind e a dica que os construtores de internal/value carimbam em Value
+// para ownersOf (cow.go) decidir sem type switch. Zero = "desconhecido":
+// um Value{Type: VAL_OBJ, Obj: x} montado fora dos construtores cai no
+// caminho lento (o type switch de sempre) e continua correto — a dica so
+// acelera, nunca decide sozinha.
+type objKind uint8
+
+const (
+	objKindUnknown  objKind = iota
+	objKindNoOwners         // string, *ObjStruct, *RuntimeTypeInfo: VAL_OBJ sem contador
+	objKindArray
+	objKindMap
+	objKindInstance
+)
+
+// Value e o operando universal da VM: 32 bytes (fase 2 de perf, issue #37;
+// eram 48 com tag int, bool com padding e int64/float64 em campos separados).
+// Type e a tag; num guarda int64 (VAL_INT) ou os bits de um float64
+// (VAL_FLOAT); b guarda VAL_BOOL; Obj, o objeto alocado dos demais tipos.
+// Leia pelos acessores Int()/Float()/Bool() — ler o campo errado para a tag
+// devolve lixo (num e compartilhado entre int e float), nunca zero.
+// layout_test.go trava o tamanho.
 type Value struct {
-	Type    ValueType
-	AsBool  bool
-	AsInt   int64
-	AsFloat float64
-	Obj     interface{} // Heap allocated object
+	Type ValueType
+	kind objKind
+	b    bool
+	num  uint64
+	Obj  interface{} // Heap allocated object
 }
+
+// Int devolve o inteiro de um VAL_INT. Em qualquer outra tag o resultado e
+// indefinido (os bits de num) — o chamador garante a tag.
+func (v Value) Int() int64 { return int64(v.num) }
+
+// Float devolve o float de um VAL_FLOAT (bits em num).
+func (v Value) Float() float64 { return math.Float64frombits(v.num) }
+
+// Bool devolve o valor de um VAL_BOOL.
+func (v Value) Bool() bool { return v.b }
+
+// SetInt grava o inteiro no lugar, sem tocar na tag — e o `AsInt +=` de
+// OP_INC_LOCAL_INT (8 bytes escritos em vez dos 32 de um Value novo).
+func (v *Value) SetInt(n int64) { v.num = uint64(n) }
 
 type ParamInfo struct {
 	IsRef    bool
@@ -345,13 +382,20 @@ func (oc *ObjClosure) Format(f fmt.State, verb rune) {
 	fmt.Fprint(f, oc.String())
 }
 
+// ObjHeader e o prefixo comum dos compostos que o RC rastreia (array, map,
+// instancia). Owners conta referencias duraveis (RC-uniqueness, spec
+// 2026-08-17) e e a unica fonte de unicidade — o antigo bit sticky Shared foi
+// removido na Task 8. TEM de ser o primeiro campo das tres structs (offset 0
+// — layout_test.go trava): e o que um estagio 3 com unsafe.Pointer usaria
+// para alcancar o contador sem o tipo concreto (issue #37).
+type ObjHeader struct {
+	Owners atomic.Int32
+}
+
 type ObjArray struct {
+	ObjHeader
 	Elements    []Value
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
-	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17);
-	// é a única fonte de unicidade — o antigo bit sticky Shared foi
-	// removido na Task 8.
-	Owners atomic.Int32
 }
 
 func (oa *ObjArray) String() string {
@@ -386,13 +430,10 @@ func (oa *ObjArray) Format(f fmt.State, verb rune) {
 }
 
 type ObjMap struct {
+	ObjHeader
 	store       *bindingStore
 	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
-	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17);
-	// é a única fonte de unicidade — o antigo bit sticky Shared foi
-	// removido na Task 8.
-	Owners atomic.Int32
 }
 
 func (om *ObjMap) String() string {
@@ -470,12 +511,9 @@ func (os *ObjStruct) Format(f fmt.State, verb rune) {
 }
 
 type ObjInstance struct {
+	ObjHeader
 	Struct *ObjStruct
 	Fields map[string]Value
-	// Owners conta referências duráveis (RC-uniqueness, spec 2026-08-17);
-	// é a única fonte de unicidade — o antigo bit sticky Shared foi
-	// removido na Task 8.
-	Owners atomic.Int32
 }
 
 func (oi *ObjInstance) String() string {
@@ -564,7 +602,7 @@ func (or *ObjRef) String() string {
 	case REF_INDEX:
 		switch or.Index.Type {
 		case VAL_INT:
-			return fmt.Sprintf("<ref index %d>", or.Index.AsInt)
+			return fmt.Sprintf("<ref index %d>", or.Index.Int())
 		case VAL_OBJ:
 			if key, ok := or.Index.Obj.(string); ok {
 				return fmt.Sprintf("<ref index %s>", key)
@@ -588,13 +626,13 @@ func (or *ObjRef) Format(f fmt.State, verb rune) {
 func (v Value) String() string {
 	switch v.Type {
 	case VAL_BOOL:
-		return fmt.Sprintf("%t", v.AsBool)
+		return fmt.Sprintf("%t", v.Bool())
 	case VAL_NULL:
 		return "null"
 	case VAL_INT:
-		return fmt.Sprintf("%d", v.AsInt)
+		return fmt.Sprintf("%d", v.Int())
 	case VAL_FLOAT:
-		return fmt.Sprintf("%f", v.AsFloat)
+		return fmt.Sprintf("%f", v.Float())
 	case VAL_OBJ:
 		switch o := v.Obj.(type) {
 		case *ObjArray:
@@ -646,27 +684,32 @@ func (v Value) String() string {
 
 // Helper constructors
 func NewInt(v int64) Value {
-	return Value{Type: VAL_INT, AsInt: v}
+	return Value{Type: VAL_INT, num: uint64(v)}
 }
 
 func NewFloat(v float64) Value {
-	return Value{Type: VAL_FLOAT, AsFloat: v}
+	return Value{Type: VAL_FLOAT, num: math.Float64bits(v)}
 }
 
 func NewBool(v bool) Value {
-	return Value{Type: VAL_BOOL, AsBool: v}
+	return Value{Type: VAL_BOOL, b: v}
 }
 
 func NewNull() Value {
 	return Value{Type: VAL_NULL}
 }
 
+// Os construtores abaixo carimbam a dica `kind` que ownersOf (cow.go) usa
+// para achar o contador de donos sem type switch. Fora deste pacote nao ha
+// como carimbar (campo nao exportado): um Value{Type: VAL_OBJ, Obj: x}
+// montado a mao cai no caminho lento de ownersOf, que continua correto.
+
 func NewString(v string) Value {
-	return Value{Type: VAL_OBJ, Obj: v}
+	return Value{Type: VAL_OBJ, kind: objKindNoOwners, Obj: v}
 }
 
 func NewRuntimeTypeInfo(v *RuntimeTypeInfo) Value {
-	return Value{Type: VAL_OBJ, Obj: v}
+	return Value{Type: VAL_OBJ, kind: objKindNoOwners, Obj: v}
 }
 
 // NewArray cria um array que e DONO DURAVEL de cada elemento composto
@@ -676,7 +719,7 @@ func NewArray(elements []Value) Value {
 	for _, element := range elements {
 		Retain(element)
 	}
-	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
+	return Value{Type: VAL_OBJ, kind: objKindArray, Obj: &ObjArray{Elements: elements}}
 }
 
 // NewArrayAdopting cria um array ADOTANDO elementos que o chamador JA reteve
@@ -685,13 +728,13 @@ func NewArray(elements []Value) Value {
 // de causes do call_result (builtins_call_result.go); qualquer outro uso
 // precisa de comentario `// RC: move` explicando quem reteve.
 func NewArrayAdopting(elements []Value) Value {
-	return Value{Type: VAL_OBJ, Obj: &ObjArray{Elements: elements}}
+	return Value{Type: VAL_OBJ, kind: objKindArray, Obj: &ObjArray{Elements: elements}}
 }
 
 func NewMap() Value {
 	mapping := &ObjMap{store: newBindingStore(nil)}
 	mapping.ensureStore()
-	return Value{Type: VAL_OBJ, Obj: mapping}
+	return Value{Type: VAL_OBJ, kind: objKindMap, Obj: mapping}
 }
 
 // NewMapWithData cria um map que e DONO DURAVEL de cada valor composto
@@ -708,14 +751,14 @@ func NewMapWithData(data map[string]Value) Value {
 }
 
 func NewStruct(name string, fields []string) Value {
-	return Value{Type: VAL_OBJ, Obj: &ObjStruct{Name: name, Fields: fields}}
+	return Value{Type: VAL_OBJ, kind: objKindNoOwners, Obj: &ObjStruct{Name: name, Fields: fields}}
 }
 
 // NewInstance cria uma instancia vazia; quem escreve compostos em Fields
 // depois precisa reter a mao (como calls.go:callPreparedValue faz) ou usar
 // NewInstanceWith.
 func NewInstance(def *ObjStruct) Value {
-	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
+	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
 }
 
 // NewInstanceWith cria uma instancia ja com os campos dados, retendo cada
@@ -729,7 +772,16 @@ func NewInstanceWith(def *ObjStruct, fields map[string]Value) Value {
 	for _, field := range fields {
 		Retain(field)
 	}
-	return Value{Type: VAL_OBJ, Obj: &ObjInstance{Struct: def, Fields: fields}}
+	return NewInstanceAdopting(def, fields)
+}
+
+// NewInstanceAdopting cria uma instancia ADOTANDO campos que o chamador JA
+// reteve em nome dela (move): nao retem de novo — o analogo de
+// NewArrayAdopting. Uso restrito aos sites que transferem posse (o clone CoW
+// de instancia em calls.go); qualquer outro uso precisa de comentario
+// `// RC: move` explicando quem reteve.
+func NewInstanceAdopting(def *ObjStruct, fields map[string]Value) Value {
+	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Fields: fields}}
 }
 
 func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, environment *GlobalEnvironment) Value {

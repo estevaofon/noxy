@@ -1157,7 +1157,7 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 200 {
+	if reported.Type != value.VAL_INT || reported.Int() != 200 {
 		t.Fatalf("programa incorreto: %#v", reported)
 	}
 	if n := CloneCountValue(); n > 8 {
@@ -1232,7 +1232,7 @@ main()`
 		t.Fatalf("programa falhou: %v", err)
 	}
 	// 2 nos restantes (0, 20) * 100 + valor removido (30).
-	if reported.Type != value.VAL_INT || reported.AsInt != 230 {
+	if reported.Type != value.VAL_INT || reported.Int() != 230 {
 		t.Fatalf("mutacao atraves do emprestimo ref se perdeu (clone indevido): esperado 230, veio %#v", reported)
 	}
 }
@@ -1302,7 +1302,7 @@ test_report(count(head_a) * 10 + count(head_b))`
 		t.Fatalf("programa falhou: %v", err)
 	}
 	// as duas listas encolhem de 3 para 2 nos: 2*10 + 2 = 22.
-	if reported.Type != value.VAL_INT || reported.AsInt != 22 {
+	if reported.Type != value.VAL_INT || reported.Int() != 22 {
 		t.Fatalf("mutacao atraves de emprestimo ref (global / capturado) se perdeu: esperado 22, veio %#v", reported)
 	}
 }
@@ -1418,7 +1418,7 @@ main()`
 	}
 	// 20 / 77 / 77 — ver o oraculo no comentario do teste (#50: `u` e ref
 	// legitima; `second` e copia independente).
-	if reported.Type != value.VAL_INT || reported.AsInt != 207777 {
+	if reported.Type != value.VAL_INT || reported.Int() != 207777 {
 		t.Fatalf("escrita vazou por dec a menos em slot/caixa emprestada: esperado 207777 (A=20 B=77 C=77), veio %#v", reported)
 	}
 }
@@ -1678,7 +1678,7 @@ main()`
 		t.Fatalf("programa falhou: %v", err)
 	}
 	// 20 / 20 / 77 / 77 — ver o oraculo no comentario do teste (#50).
-	if reported.Type != value.VAL_INT || reported.AsInt != 20207777 {
+	if reported.Type != value.VAL_INT || reported.Int() != 20207777 {
 		t.Fatalf("condicao de emprestimo saiu errada (esperado 20207777 = e/e2 20, f/f2 77), veio %#v", reported)
 	}
 }
@@ -1789,7 +1789,7 @@ main()`
 		}
 	}
 	// 0 + 77 + 30: a escrita via ref alcancou o no da lista.
-	if reported.Type != value.VAL_INT || reported.AsInt != 107 {
+	if reported.Type != value.VAL_INT || reported.Int() != 107 {
 		t.Fatalf("escrita via ref para no de dono unico deveria mutar no lugar (soma 107), veio %#v", reported)
 	}
 }
@@ -2554,7 +2554,7 @@ func defineWaitOwnersProbe(t *testing.T, machine *VM) {
 		if len(args) != 2 || args[1].Type != value.VAL_INT {
 			return value.NewBool(false)
 		}
-		want := int32(args[1].AsInt)
+		want := int32(args[1].Int())
 		const hold = 50 * time.Millisecond
 		deadline := time.Now().Add(statefulBuiltinTimeout)
 		for time.Now().Before(deadline) {
@@ -2654,7 +2654,7 @@ end`); err != nil {
 	}
 	// O MUT clonou (havia mais de um dono): a mutacao nao pode vazar para o
 	// array do chamador.
-	if got := m.Obj.(*value.ObjArray).Elements[0].AsInt; got != 1 {
+	if got := m.Obj.(*value.ObjArray).Elements[0].Int(); got != 1 {
 		t.Fatalf("mutacao dentro da task vazou para o chamador: esperado m[0]=1, veio %d", got)
 	}
 }
@@ -2713,7 +2713,7 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+	if reported.Type != value.VAL_INT || reported.Int() != 1 {
 		t.Fatalf("rebind de parametro em task defer'd roubou dono de gb (-1 = wait_owners nao estabilizou em 2; 99 = mutacao vazou para arr): esperado 1, veio %#v", reported)
 	}
 }
@@ -2767,7 +2767,7 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+	if reported.Type != value.VAL_INT || reported.Int() != 1 {
 		t.Fatalf("clone MUT de parametro em task defer'd roubou dono de gb (-1 = wait_owners nao estabilizou em 2; 99 = mutacao vazou para arr): esperado 1, veio %#v", reported)
 	}
 }
@@ -2812,7 +2812,7 @@ main()`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+	if reported.Type != value.VAL_INT || reported.Int() != 1 {
 		t.Fatalf("controle da rota direta de spawn_task regrediu: esperado 1 (mutacao de gb clona, arr preservado), veio %#v", reported)
 	}
 }
@@ -2886,7 +2886,7 @@ main()`
 	if ownersC != ownersA {
 		t.Fatalf("par send-do-select/chan_recv nao fechou (esperado Owners=%d apos chan_recv, veio %d)", ownersA, ownersC)
 	}
-	if reported.Type != value.VAL_INT || reported.AsInt != 1 {
+	if reported.Type != value.VAL_INT || reported.Int() != 1 {
 		t.Fatalf("send do select sem retain: chan_recv descontou dono alheio e a mutacao vazou para keep: esperado 1, veio %#v", reported)
 	}
 }

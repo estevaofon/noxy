@@ -45,7 +45,7 @@ func TestNewInstanceWithRetainsCompositeFields(t *testing.T) {
 	if object.Struct != definition {
 		t.Fatal("NewInstanceWith deve apontar para a definicao recebida")
 	}
-	if object.Fields["data"].Obj != data.Obj || !object.Fields["ok"].AsBool {
+	if object.Fields["data"].Obj != data.Obj || !object.Fields["ok"].Bool() {
 		t.Fatal("NewInstanceWith deve guardar os campos recebidos")
 	}
 	if got := OwnersCount(instance); got != 0 {

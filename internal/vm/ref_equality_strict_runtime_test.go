@@ -25,8 +25,8 @@ func requireBoolResults(t *testing.T, src string, want []bool) {
 		t.Fatalf("esperava %d resultados, vieram %d", len(want), len(arr.Elements))
 	}
 	for i, expected := range want {
-		if arr.Elements[i].AsBool != expected {
-			t.Errorf("caso %d: esperava %v, veio %v", i, expected, arr.Elements[i].AsBool)
+		if arr.Elements[i].Bool() != expected {
+			t.Errorf("caso %d: esperava %v, veio %v", i, expected, arr.Elements[i].Bool())
 		}
 	}
 }
@@ -65,8 +65,8 @@ while cur != null do
     cur = cur.next
 end
 test_report(soma)`)
-	if got.AsInt != 3 {
-		t.Fatalf("travessia deveria somar 3, veio %d", got.AsInt)
+	if got.Int() != 3 {
+		t.Fatalf("travessia deveria somar 3, veio %d", got.Int())
 	}
 }
 

@@ -27,8 +27,8 @@ test_report(mandel_step(-0.5, 0.25))
 	if result.Type != value.VAL_FLOAT {
 		t.Fatalf("esperado float, obtido %s", result.String())
 	}
-	if math.IsNaN(result.AsFloat) || math.IsInf(result.AsFloat, 0) {
-		t.Fatalf("resultado invalido: %v", result.AsFloat)
+	if math.IsNaN(result.Float()) || math.IsInf(result.Float(), 0) {
+		t.Fatalf("resultado invalido: %v", result.Float())
 	}
 	// Valor exato: 10 iteracoes de z = z^2+c a partir de z=0, c=-0.5+0.25i,
 	// reproduzidas em float64 puro (Python e Go concordam bit a bit — ver
@@ -37,8 +37,8 @@ test_report(mandel_step(-0.5, 0.25))
 	// (ex.: OP_MUL_FLOAT calculando a-b) passaria pela suite sem detectar,
 	// desde que o resultado continuasse sendo um float finito.
 	const want = 0x1.76b0f0f446e8ep-03
-	if result.AsFloat != want {
-		t.Fatalf("resultado incorreto: got %v (%x), want %v (%x)", result.AsFloat, result.AsFloat, want, want)
+	if result.Float() != want {
+		t.Fatalf("resultado incorreto: got %v (%x), want %v (%x)", result.Float(), result.Float(), want, want)
 	}
 }
 

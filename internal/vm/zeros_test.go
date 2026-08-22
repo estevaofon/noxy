@@ -26,11 +26,11 @@ func TestZerosZeroSizeIsEmptyArray(t *testing.T) {
 
 func TestFixedArrayDeclarationDoesNotUseOperandStack(t *testing.T) {
 	reported := captureVMSource(t, "let buf: int[10000]\ntest_report(length(buf))\n")
-	if reported.Type != value.VAL_INT || reported.AsInt != 10000 {
+	if reported.Type != value.VAL_INT || reported.Int() != 10000 {
 		t.Fatalf("length = %v, want 10000", reported)
 	}
 	reported = captureVMSource(t, "let big: int[100000]\ntest_report(big[99999])\n")
-	if reported.Type != value.VAL_INT || reported.AsInt != 0 {
+	if reported.Type != value.VAL_INT || reported.Int() != 0 {
 		t.Fatalf("big[99999] = %v, want 0", reported)
 	}
 }
@@ -55,7 +55,7 @@ test_report(to_str(fs[1]) + "|" + ss[1] + "|" + to_str(bs[1]) + "|" + to_str(ps[
 // NAO pode aparecer em g[1].
 func TestFixedNestedArrayElementsAreIndependentUnderCoW(t *testing.T) {
 	reported := captureVMSource(t, "let g: int[3][3]\ng[0][0] = 1\ntest_report(g[1][0] + g[0][0] * 10)\n")
-	if reported.Type != value.VAL_INT || reported.AsInt != 10 {
+	if reported.Type != value.VAL_INT || reported.Int() != 10 {
 		t.Fatalf("g[1][0] + 10*g[0][0] = %v, want 10", reported)
 	}
 }

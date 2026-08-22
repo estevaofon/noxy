@@ -20,7 +20,7 @@ func (vm *VM) defineTimeBuiltins() {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
-		ms := args[0].AsInt
+		ms := args[0].Int()
 		time.Sleep(time.Duration(ms) * time.Millisecond)
 		return value.NewNull()
 	})
@@ -59,12 +59,12 @@ func (vm *VM) defineTimeBuiltins() {
 
 		// Reconstruct time.Time from fields
 		// Minimal fields: year, month, day, hour, minute, second
-		y := int(inst.Fields["year"].AsInt)
-		m := time.Month(inst.Fields["month"].AsInt)
-		d := int(inst.Fields["day"].AsInt)
-		h := int(inst.Fields["hour"].AsInt)
-		min := int(inst.Fields["minute"].AsInt)
-		s := int(inst.Fields["second"].AsInt)
+		y := int(inst.Fields["year"].Int())
+		m := time.Month(inst.Fields["month"].Int())
+		d := int(inst.Fields["day"].Int())
+		h := int(inst.Fields["hour"].Int())
+		min := int(inst.Fields["minute"].Int())
+		s := int(inst.Fields["second"].Int())
 
 		t := time.Date(y, m, d, h, min, s, 0, time.Local)
 		return value.NewString(t.Format("2006-01-02 15:04:05"))
@@ -77,9 +77,9 @@ func (vm *VM) defineTimeBuiltins() {
 		if !ok {
 			return value.NewString("")
 		}
-		y := int(inst.Fields["year"].AsInt)
-		m := time.Month(inst.Fields["month"].AsInt)
-		d := int(inst.Fields["day"].AsInt)
+		y := int(inst.Fields["year"].Int())
+		m := time.Month(inst.Fields["month"].Int())
+		d := int(inst.Fields["day"].Int())
 		t := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
 		return value.NewString(t.Format("2006-01-02"))
 	})
@@ -91,9 +91,9 @@ func (vm *VM) defineTimeBuiltins() {
 		if !ok {
 			return value.NewString("")
 		}
-		h := int(inst.Fields["hour"].AsInt)
-		min := int(inst.Fields["minute"].AsInt)
-		s := int(inst.Fields["second"].AsInt)
+		h := int(inst.Fields["hour"].Int())
+		min := int(inst.Fields["minute"].Int())
+		s := int(inst.Fields["second"].Int())
 		t := time.Date(0, 1, 1, h, min, s, 0, time.Local)
 		return value.NewString(t.Format("15:04:05"))
 	})
@@ -107,12 +107,12 @@ func (vm *VM) defineTimeBuiltins() {
 			return value.NewNull()
 		}
 
-		y := int(args[1].AsInt)
-		m := time.Month(args[2].AsInt)
-		d := int(args[3].AsInt)
-		h := int(args[4].AsInt)
-		min := int(args[5].AsInt)
-		s := int(args[6].AsInt)
+		y := int(args[1].Int())
+		m := time.Month(args[2].Int())
+		d := int(args[3].Int())
+		h := int(args[4].Int())
+		min := int(args[5].Int())
+		s := int(args[6].Int())
 
 		t := time.Date(y, m, d, h, min, s, 0, time.Local)
 
@@ -148,7 +148,7 @@ func (vm *VM) defineTimeBuiltins() {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
-		ts := args[0].AsInt
+		ts := args[0].Int()
 		structDef, ok := args[1].Obj.(*value.ObjStruct)
 		if !ok {
 			return value.NewNull()
@@ -172,43 +172,43 @@ func (vm *VM) defineTimeBuiltins() {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
-		ts1 := args[0].AsInt
-		ts2 := args[1].AsInt
+		ts1 := args[0].Int()
+		ts2 := args[1].Int()
 		return value.NewInt(ts1 - ts2)
 	})
 	vm.DefineNative("time_add_days", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
-		ts := args[0].AsInt
-		days := args[1].AsInt
+		ts := args[0].Int()
+		days := args[1].Int()
 		return value.NewInt(ts + (days * 86400))
 	})
 	vm.DefineNative("time_before", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
-		return value.NewBool(args[0].AsInt < args[1].AsInt)
+		return value.NewBool(args[0].Int() < args[1].Int())
 	})
 	vm.DefineNative("time_after", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewBool(false)
 		}
-		return value.NewBool(args[0].AsInt > args[1].AsInt)
+		return value.NewBool(args[0].Int() > args[1].Int())
 	})
 	vm.DefineNative("time_is_leap_year", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewBool(false)
 		}
-		year := args[0].AsInt
+		year := args[0].Int()
 		return value.NewBool(year%4 == 0 && (year%100 != 0 || year%400 == 0))
 	})
 	vm.DefineNative("time_days_in_month", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
-		year := int(args[0].AsInt)
-		month := time.Month(args[1].AsInt)
+		year := int(args[0].Int())
+		month := time.Month(args[1].Int())
 		// Trick: go to next month day 0
 		t := time.Date(year, month+1, 0, 0, 0, 0, 0, time.UTC)
 		return value.NewInt(int64(t.Day()))
@@ -217,7 +217,7 @@ func (vm *VM) defineTimeBuiltins() {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
-		wd := time.Weekday(args[0].AsInt)
+		wd := time.Weekday(args[0].Int())
 
 		names := []string{
 			"Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira",
@@ -232,7 +232,7 @@ func (vm *VM) defineTimeBuiltins() {
 		if len(args) < 1 {
 			return value.NewString("")
 		}
-		m := time.Month(args[0].AsInt)
+		m := time.Month(args[0].Int())
 		names := map[time.Month]string{
 			time.January: "Janeiro", time.February: "Fevereiro", time.March: "Março",
 			time.April: "Abril", time.May: "Maio", time.June: "Junho",
@@ -254,12 +254,12 @@ func (vm *VM) defineTimeBuiltins() {
 		}
 		fmtStr := args[1].Obj.(string)
 
-		y := int(inst.Fields["year"].AsInt)
-		m := time.Month(inst.Fields["month"].AsInt)
-		d := int(inst.Fields["day"].AsInt)
-		h := int(inst.Fields["hour"].AsInt)
-		min := int(inst.Fields["minute"].AsInt)
-		s := int(inst.Fields["second"].AsInt)
+		y := int(inst.Fields["year"].Int())
+		m := time.Month(inst.Fields["month"].Int())
+		d := int(inst.Fields["day"].Int())
+		h := int(inst.Fields["hour"].Int())
+		min := int(inst.Fields["minute"].Int())
+		s := int(inst.Fields["second"].Int())
 		// t := time.Date(y, m, d, h, min, s, 0, time.Local) // Unused in this simple implementation
 
 		// Simplified replacement for strftime
@@ -334,16 +334,16 @@ func (vm *VM) defineTimeBuiltins() {
 		if len(args) < 2 {
 			return value.NewInt(0)
 		}
-		ts := args[0].AsInt
-		secs := args[1].AsInt
+		ts := args[0].Int()
+		secs := args[1].Int()
 		return value.NewInt(ts + secs)
 	})
 	vm.DefineNative("time_diff_duration", func(args []value.Value) value.Value {
 		if len(args) < 3 {
 			return value.NewNull()
 		}
-		ts1 := args[0].AsInt
-		ts2 := args[1].AsInt
+		ts1 := args[0].Int()
+		ts2 := args[1].Int()
 		structDef, ok := args[2].Obj.(*value.ObjStruct)
 		if !ok {
 			return value.NewNull()

@@ -139,7 +139,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if condition.Type != value.VAL_BOOL {
 				return vm.runtimeError(c, ip, "condition must be bool, got %s", runtimeTypeName(condition))
 			}
-			if !condition.AsBool {
+			if !condition.Bool() {
 				ip += offset
 			}
 
@@ -150,7 +150,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if condition.Type != value.VAL_BOOL {
 				return vm.runtimeError(c, ip, "condition must be bool, got %s", runtimeTypeName(condition))
 			}
-			if condition.AsBool {
+			if condition.Bool() {
 				ip += offset
 			}
 
@@ -166,7 +166,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			vm.stackTop -= 2
-			if vm.stack[vm.stackTop].AsInt < vm.stack[vm.stackTop+1].AsInt {
+			if vm.stack[vm.stackTop].Int() < vm.stack[vm.stackTop+1].Int() {
 				ip += offset
 			}
 
@@ -174,7 +174,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			vm.stackTop -= 2
-			if vm.stack[vm.stackTop].AsInt <= vm.stack[vm.stackTop+1].AsInt {
+			if vm.stack[vm.stackTop].Int() <= vm.stack[vm.stackTop+1].Int() {
 				ip += offset
 			}
 
@@ -182,7 +182,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			vm.stackTop -= 2
-			if vm.stack[vm.stackTop].AsInt > vm.stack[vm.stackTop+1].AsInt {
+			if vm.stack[vm.stackTop].Int() > vm.stack[vm.stackTop+1].Int() {
 				ip += offset
 			}
 
@@ -190,7 +190,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			vm.stackTop -= 2
-			if vm.stack[vm.stackTop].AsInt >= vm.stack[vm.stackTop+1].AsInt {
+			if vm.stack[vm.stackTop].Int() >= vm.stack[vm.stackTop+1].Int() {
 				ip += offset
 			}
 
@@ -198,7 +198,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			vm.stackTop -= 2
-			if vm.stack[vm.stackTop].AsInt == vm.stack[vm.stackTop+1].AsInt {
+			if vm.stack[vm.stackTop].Int() == vm.stack[vm.stackTop+1].Int() {
 				ip += offset
 			}
 
@@ -206,7 +206,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			offset := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			vm.stackTop -= 2
-			if vm.stack[vm.stackTop].AsInt != vm.stack[vm.stackTop+1].AsInt {
+			if vm.stack[vm.stackTop].Int() != vm.stack[vm.stackTop+1].Int() {
 				ip += offset
 			}
 
@@ -218,7 +218,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slot := c.Code[ip]
 			delta := int8(c.Code[ip+1])
 			ip += 2
-			vm.stack[frame.LocalBase+int(slot)].AsInt += int64(delta)
+			slotValue := &vm.stack[frame.LocalBase+int(slot)]
+			slotValue.SetInt(slotValue.Int() + int64(delta))
 
 		case chunk.OP_TRUE:
 			vm.push(value.NewBool(true))
@@ -471,7 +472,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 						if idx.Type != value.VAL_INT {
 							return vm.runtimeError(c, ip, "array index must be integer")
 						}
-						arrayIndex := int(idx.AsInt)
+						arrayIndex := int(idx.Int())
 						if arrayIndex < 0 || arrayIndex >= len(collection.Elements) {
 							return vm.runtimeError(c, ip, "array index out of bounds")
 						}
@@ -549,7 +550,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				if idx.Type != value.VAL_INT {
 					return vm.runtimeError(c, ip, "array index must be integer")
 				}
-				arrayIndex := int(idx.AsInt)
+				arrayIndex := int(idx.Int())
 				if arrayIndex < 0 || arrayIndex >= len(array.Elements) {
 					return vm.runtimeError(c, ip, "array index out of bounds")
 				}
@@ -661,14 +662,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewInt(a.AsInt + b.AsInt))
+				vm.push(value.NewInt(a.Int() + b.Int()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(a.AsFloat + b.AsFloat))
+				vm.push(value.NewFloat(a.Float() + b.Float()))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(float64(a.AsInt) + b.AsFloat))
+				vm.push(value.NewFloat(float64(a.Int()) + b.Float()))
 
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-				vm.push(value.NewFloat(a.AsFloat + float64(b.AsInt)))
+				vm.push(value.NewFloat(a.Float() + float64(b.Int())))
 			} else if a.Type == value.VAL_OBJ && b.Type == value.VAL_OBJ {
 				// Check if both are strings
 				strA, okA := a.Obj.(string)
@@ -693,99 +694,99 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// result replaces a (at stackTop-2)
 			// b (at stackTop-1) is cleared
 			// stackTop decrements by 1
-			vm.stack[vm.stackTop-2] = value.NewInt(vm.stack[vm.stackTop-2].AsInt + vm.stack[vm.stackTop-1].AsInt)
+			vm.stack[vm.stackTop-2] = value.NewInt(vm.stack[vm.stackTop-2].Int() + vm.stack[vm.stackTop-1].Int())
 			vm.stack[vm.stackTop-1] = value.Value{}
 			vm.stackTop--
 
 		case chunk.OP_ADD_FLOAT:
 			// Espelho float de OP_ADD_INT: sem zerar, escalar nao carrega ponteiro.
-			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat + vm.stack[vm.stackTop-1].AsFloat)
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].Float() + vm.stack[vm.stackTop-1].Float())
 			vm.stackTop--
 
 		case chunk.OP_SUBTRACT:
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewInt(a.AsInt - b.AsInt))
+				vm.push(value.NewInt(a.Int() - b.Int()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(a.AsFloat - b.AsFloat))
+				vm.push(value.NewFloat(a.Float() - b.Float()))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(float64(a.AsInt) - b.AsFloat))
+				vm.push(value.NewFloat(float64(a.Int()) - b.Float()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-				vm.push(value.NewFloat(a.AsFloat - float64(b.AsInt)))
+				vm.push(value.NewFloat(a.Float() - float64(b.Int())))
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_SUB_INT:
 			b := vm.pop()
 			a := vm.pop()
-			vm.push(value.NewInt(a.AsInt - b.AsInt))
+			vm.push(value.NewInt(a.Int() - b.Int()))
 		case chunk.OP_SUB_FLOAT:
 			// Espelho float de OP_SUB_INT.
-			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat - vm.stack[vm.stackTop-1].AsFloat)
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].Float() - vm.stack[vm.stackTop-1].Float())
 			vm.stackTop--
 		case chunk.OP_MULTIPLY:
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewInt(a.AsInt * b.AsInt))
+				vm.push(value.NewInt(a.Int() * b.Int()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(a.AsFloat * b.AsFloat))
+				vm.push(value.NewFloat(a.Float() * b.Float()))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(float64(a.AsInt) * b.AsFloat))
+				vm.push(value.NewFloat(float64(a.Int()) * b.Float()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-				vm.push(value.NewFloat(a.AsFloat * float64(b.AsInt)))
+				vm.push(value.NewFloat(a.Float() * float64(b.Int())))
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_MUL_INT:
 			b := vm.pop()
 			a := vm.pop()
-			vm.push(value.NewInt(a.AsInt * b.AsInt))
+			vm.push(value.NewInt(a.Int() * b.Int()))
 		case chunk.OP_MUL_FLOAT:
 			// Espelho float de OP_MUL_INT.
-			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat * vm.stack[vm.stackTop-1].AsFloat)
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].Float() * vm.stack[vm.stackTop-1].Float())
 			vm.stackTop--
 		case chunk.OP_DIVIDE:
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				if b.AsInt == 0 {
+				if b.Int() == 0 {
 					return vm.runtimeError(c, ip, "division by zero")
 				}
-				vm.push(value.NewInt(a.AsInt / b.AsInt))
+				vm.push(value.NewInt(a.Int() / b.Int()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
-				if b.AsFloat == 0 {
+				if b.Float() == 0 {
 					return vm.runtimeError(c, ip, "division by zero")
 				}
-				vm.push(value.NewFloat(a.AsFloat / b.AsFloat))
+				vm.push(value.NewFloat(a.Float() / b.Float()))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-				if b.AsFloat == 0 {
+				if b.Float() == 0 {
 					return vm.runtimeError(c, ip, "division by zero")
 				}
-				vm.push(value.NewFloat(float64(a.AsInt) / b.AsFloat))
+				vm.push(value.NewFloat(float64(a.Int()) / b.Float()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-				if b.AsInt == 0 {
+				if b.Int() == 0 {
 					return vm.runtimeError(c, ip, "division by zero")
 				}
-				vm.push(value.NewFloat(a.AsFloat / float64(b.AsInt)))
+				vm.push(value.NewFloat(a.Float() / float64(b.Int())))
 			} else {
 				return vm.runtimeError(c, ip, "operands must be numbers")
 			}
 		case chunk.OP_DIV_INT:
 			b := vm.pop()
 			a := vm.pop()
-			if b.AsInt == 0 {
+			if b.Int() == 0 {
 				return vm.runtimeError(c, ip, "division by zero")
 			}
-			vm.push(value.NewInt(a.AsInt / b.AsInt))
+			vm.push(value.NewInt(a.Int() / b.Int()))
 		case chunk.OP_DIV_FLOAT:
 			// Mesma mensagem de erro do ramo float de OP_DIVIDE (generico):
 			// divisor 0.0 e erro de runtime, nao +Inf/NaN.
-			if vm.stack[vm.stackTop-1].AsFloat == 0 {
+			if vm.stack[vm.stackTop-1].Float() == 0 {
 				return vm.runtimeError(c, ip, "division by zero")
 			}
-			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].AsFloat / vm.stack[vm.stackTop-1].AsFloat)
+			vm.stack[vm.stackTop-2] = value.NewFloat(vm.stack[vm.stackTop-2].Float() / vm.stack[vm.stackTop-1].Float())
 			vm.stackTop--
 		case chunk.OP_LEN:
 			val := vm.pop()
@@ -826,7 +827,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Top is CaseN_Mode.
 			// Iterating i from count-1 down to 0:
 			for i := count - 1; i >= 0; i-- {
-				mode := vm.pop().AsInt
+				mode := vm.pop().Int()
 				val := vm.pop()
 				chVal := vm.pop()
 
@@ -883,17 +884,17 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				if b.AsInt == 0 {
+				if b.Int() == 0 {
 					return vm.runtimeError(c, ip, "modulo by zero")
 				}
-				vm.push(value.NewInt(a.AsInt % b.AsInt))
+				vm.push(value.NewInt(a.Int() % b.Int()))
 			} else {
 				return vm.runtimeError(c, ip, "operands for %% must be integers")
 			}
 		case chunk.OP_MOD_INT:
 			// Inline pop/pop/push
-			b := vm.stack[vm.stackTop-1].AsInt
-			a := vm.stack[vm.stackTop-2].AsInt
+			b := vm.stack[vm.stackTop-1].Int()
+			a := vm.stack[vm.stackTop-2].Int()
 			if b == 0 {
 				return vm.runtimeError(c, ip, "modulo by zero")
 			}
@@ -905,7 +906,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewInt(a.AsInt & b.AsInt))
+				vm.push(value.NewInt(a.Int() & b.Int()))
 			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
 				sA := a.Obj.(string)
 				sB := b.Obj.(string)
@@ -925,7 +926,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewInt(a.AsInt | b.AsInt))
+				vm.push(value.NewInt(a.Int() | b.Int()))
 			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
 				sA := a.Obj.(string)
 				sB := b.Obj.(string)
@@ -945,7 +946,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewInt(a.AsInt ^ b.AsInt))
+				vm.push(value.NewInt(a.Int() ^ b.Int()))
 			} else if a.Type == value.VAL_BYTES && b.Type == value.VAL_BYTES {
 				sA := a.Obj.(string)
 				sB := b.Obj.(string)
@@ -964,7 +965,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_BIT_NOT:
 			a := vm.pop()
 			if a.Type == value.VAL_INT {
-				vm.push(value.NewInt(^a.AsInt))
+				vm.push(value.NewInt(^a.Int()))
 			} else if a.Type == value.VAL_BYTES {
 				sA := a.Obj.(string)
 				res := make([]byte, len(sA))
@@ -980,10 +981,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				if b.AsInt < 0 {
+				if b.Int() < 0 {
 					return vm.runtimeError(c, ip, "negative shift count")
 				}
-				vm.push(value.NewInt(a.AsInt << uint64(b.AsInt)))
+				vm.push(value.NewInt(a.Int() << uint64(b.Int())))
 			} else {
 				return vm.runtimeError(c, ip, "operands for << must be integers")
 			}
@@ -992,26 +993,26 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				if b.AsInt < 0 {
+				if b.Int() < 0 {
 					return vm.runtimeError(c, ip, "negative shift count")
 				}
-				vm.push(value.NewInt(a.AsInt >> uint64(b.AsInt)))
+				vm.push(value.NewInt(a.Int() >> uint64(b.Int())))
 			} else {
 				return vm.runtimeError(c, ip, "operands for >> must be integers")
 			}
 		case chunk.OP_NEGATE:
 			v := vm.pop()
 			if v.Type == value.VAL_INT {
-				vm.push(value.NewInt(-v.AsInt))
+				vm.push(value.NewInt(-v.Int()))
 			} else if v.Type == value.VAL_FLOAT {
-				vm.push(value.NewFloat(-v.AsFloat))
+				vm.push(value.NewFloat(-v.Float()))
 			} else {
 				return vm.runtimeError(c, ip, "operand must be number")
 			}
 		case chunk.OP_NOT:
 			v := vm.pop()
 			if v.Type == value.VAL_BOOL {
-				vm.push(value.NewBool(!v.AsBool))
+				vm.push(value.NewBool(!v.Bool()))
 			} else {
 				return vm.runtimeError(c, ip, "operand must be boolean")
 			}
@@ -1020,7 +1021,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if countVal.Type != value.VAL_INT {
 				return vm.runtimeError(c, ip, "zeros size must be integer")
 			}
-			count := int(countVal.AsInt)
+			count := int(countVal.Int())
 			if count < 0 {
 				// Sem o guard, make() panica no lado Go (makeslice: len out
 				// of range) e o panic atravessa a VM — fora do alcance de
@@ -1038,7 +1039,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if countVal.Type != value.VAL_INT {
 				return vm.runtimeError(c, ip, "array size must be integer")
 			}
-			count := int(countVal.AsInt)
+			count := int(countVal.Int())
 			if count < 0 {
 				return vm.runtimeError(c, ip, "array size must be non-negative, got %d", count)
 			}
@@ -1053,13 +1054,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewBool(a.AsInt > b.AsInt))
+				vm.push(value.NewBool(a.Int() > b.Int()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewBool(a.AsFloat > b.AsFloat))
+				vm.push(value.NewBool(a.Float() > b.Float()))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewBool(float64(a.AsInt) > b.AsFloat))
+				vm.push(value.NewBool(float64(a.Int()) > b.Float()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-				vm.push(value.NewBool(a.AsFloat > float64(b.AsInt)))
+				vm.push(value.NewBool(a.Float() > float64(b.Int())))
 			} else if strA, strB, ok := stringOperands(a, b); ok {
 				// Ordenacao lexicografica byte a byte — para UTF-8 valido
 				// (invariante de toda string Noxy) coincide com a ordem por
@@ -1072,22 +1073,22 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_GREATER_INT:
 			b := vm.pop()
 			a := vm.pop()
-			vm.push(value.NewBool(a.AsInt > b.AsInt))
+			vm.push(value.NewBool(a.Int() > b.Int()))
 		case chunk.OP_GREATER_FLOAT:
 			// Espelho float de OP_GREATER_INT.
-			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat > vm.stack[vm.stackTop-1].AsFloat)
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].Float() > vm.stack[vm.stackTop-1].Float())
 			vm.stackTop--
 		case chunk.OP_LESS:
 			b := vm.pop()
 			a := vm.pop()
 			if a.Type == value.VAL_INT && b.Type == value.VAL_INT {
-				vm.push(value.NewBool(a.AsInt < b.AsInt))
+				vm.push(value.NewBool(a.Int() < b.Int()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewBool(a.AsFloat < b.AsFloat))
+				vm.push(value.NewBool(a.Float() < b.Float()))
 			} else if a.Type == value.VAL_INT && b.Type == value.VAL_FLOAT {
-				vm.push(value.NewBool(float64(a.AsInt) < b.AsFloat))
+				vm.push(value.NewBool(float64(a.Int()) < b.Float()))
 			} else if a.Type == value.VAL_FLOAT && b.Type == value.VAL_INT {
-				vm.push(value.NewBool(a.AsFloat < float64(b.AsInt)))
+				vm.push(value.NewBool(a.Float() < float64(b.Int())))
 			} else if strA, strB, ok := stringOperands(a, b); ok {
 				// Mesma ordenacao lexicografica de OP_GREATER; `>=`/`<=`
 				// compilam como NOT(OP_LESS)/NOT(OP_GREATER) e herdam isto.
@@ -1097,12 +1098,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 		case chunk.OP_LESS_INT:
 			// Inline pop/pop/push
-			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsInt < vm.stack[vm.stackTop-1].AsInt)
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].Int() < vm.stack[vm.stackTop-1].Int())
 			vm.stack[vm.stackTop-1] = value.Value{}
 			vm.stackTop--
 		case chunk.OP_LESS_FLOAT:
 			// Espelho float de OP_LESS_INT.
-			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].AsFloat < vm.stack[vm.stackTop-1].AsFloat)
+			vm.stack[vm.stackTop-2] = value.NewBool(vm.stack[vm.stackTop-2].Float() < vm.stack[vm.stackTop-1].Float())
 			vm.stackTop--
 		case chunk.OP_EQUAL:
 			b := vm.pop()
@@ -1120,7 +1121,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_EQUAL_INT:
 			b := vm.pop()
 			a := vm.pop()
-			vm.push(value.NewBool(a.AsInt == b.AsInt))
+			vm.push(value.NewBool(a.Int() == b.Int()))
 		case chunk.OP_CALL:
 			argCount := int(c.Code[ip])
 			ip++
@@ -1318,7 +1319,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 				var key interface{}
 				if keyVal.Type == value.VAL_INT {
-					key = keyVal.AsInt
+					key = keyVal.Int()
 				} else if keyVal.Type == value.VAL_OBJ {
 					if str, ok := keyVal.Obj.(string); ok {
 						key = str
@@ -1379,7 +1380,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if indexVal.Type != value.VAL_INT {
 						return vm.runtimeError(c, ip, "array index must be integer")
 					}
-					idx := int(indexVal.AsInt)
+					idx := int(indexVal.Int())
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
@@ -1388,7 +1389,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
 					var key interface{}
 					if indexVal.Type == value.VAL_INT {
-						key = indexVal.AsInt
+						key = indexVal.Int()
 					} else if indexVal.Type == value.VAL_OBJ {
 						if str, ok := indexVal.Obj.(string); ok {
 							key = str
@@ -1411,7 +1412,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if indexVal.Type != value.VAL_INT {
 						return vm.runtimeError(c, ip, "string index must be integer")
 					}
-					idx := int(indexVal.AsInt)
+					idx := int(indexVal.Int())
 					runes := []rune(str) // Expensive but correct for now
 					if idx < 0 || idx >= len(runes) {
 						return vm.runtimeError(c, ip, "string index out of bounds")
@@ -1426,7 +1427,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				if indexVal.Type != value.VAL_INT {
 					return vm.runtimeError(c, ip, "bytes index must be integer")
 				}
-				idx := int(indexVal.AsInt)
+				idx := int(indexVal.Int())
 				if idx < 0 || idx >= len(str) {
 					return vm.runtimeError(c, ip, "bytes index out of bounds")
 				}
@@ -1445,7 +1446,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if indexVal.Type != value.VAL_INT {
 						return vm.runtimeError(c, ip, "array index must be integer")
 					}
-					idx := int(indexVal.AsInt)
+					idx := int(indexVal.Int())
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
@@ -1466,7 +1467,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				} else if mapObj, ok := collectionVal.Obj.(*value.ObjMap); ok {
 					var key interface{}
 					if indexVal.Type == value.VAL_INT {
-						key = indexVal.AsInt
+						key = indexVal.Int()
 					} else if indexVal.Type == value.VAL_OBJ {
 						if str, ok := indexVal.Obj.(string); ok {
 							key = str
@@ -1730,7 +1731,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					if indexVal.Type != value.VAL_INT {
 						return vm.runtimeError(c, ip, "array index must be integer")
 					}
-					idx := int(indexVal.AsInt)
+					idx := int(indexVal.Int())
 					if idx < 0 || idx >= len(arr.Elements) {
 						return vm.runtimeError(c, ip, "array index out of bounds")
 					}
