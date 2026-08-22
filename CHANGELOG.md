@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.14.3] - 2026-08-22
+
+Fase 2 de performance do VM (issue #37, estágios 1 e 2 mais o "extra barato"
+do `pop`). Nenhuma mudança de sintaxe, semântica, bytecode, saída ou mensagem
+de erro — só o layout interno do operando da VM e o caminho do contador de
+referências. Corpus 177/177 e diff de saída base × head sem divergência.
+Números por estágio em `benchmarks/RESULTS.md`.
+
+### Performance
+
+- **`value.Value` de 48 para 32 bytes.** Tag em `uint8`, um único campo para
+  `int64`/`float64` (bits) e o `bool` no padding; a pilha de operandos cai de
+  96 KB para 64 KB e cada `push`/`pop`/cópia de operando move um terço a
+  menos. Leitura pelos acessores `Int()`/`Float()`/`Bool()` (os campos
+  `AsInt`/`AsFloat`/`AsBool` deixaram de existir — afeta só quem embute a VM
+  em Go; o único escritor in-place, `OP_INC_LOCAL_INT`, usa `SetInt`).
+  Ler o acessor errado para a tag devolve os bits do campo, não zero — só
+  alcançável chamando uma native crua diretamente com tipo errado
+  (`time_sleep(1.5)`), o que o compilador já tolerava; os wrappers da stdlib
+  são tipados. Isolado: −10 a −14 % em `fib`, `bubblesort`, `call_ref`,
+  `call_readonly`, `share_mutate`.
+- **Header comum nos compostos.** `ObjArray`, `ObjMap` e `ObjInstance`
+  embutem `ObjHeader{Owners}` no offset 0 (layout travado por teste), e
+  `ownersOf` — chamado por todo `Retain`/`Release`/`IsShared` — sai em uma
+  comparação de byte para `string`/struct/`RuntimeTypeInfo` pela dica
+  carimbada nos construtores; compostos seguem pelo type switch, que no `gc`
+  já é comparação de ponteiro (microbench: indistinguível de `unsafe`).
+  `Release` reescrito com comparação única para continuar inlinado (custo
+  80 exato). Isolado: −0,3 a −4,7 %, ruído na maior parte dos benches.
+- **`pop()` volta a ser inlinada dentro de `run()`.** Custava 22 no inliner
+  (orçamento 20 para callee de função grande) e era chamada real em todos os
+  ~84 sites do laço de despacho — 17 % do perfil de `fib`. Mesmo trabalho
+  (zera o `Value` inteiro), forma nova (atribuição dupla com resultado
+  nomeado, custo 18, 79 sites inlinados). Isolado: −6 a −25 % por cima dos
+  dois estágios; guardado em `inline_guard_test.go` junto com `push`,
+  `Retain` e `Release`.
+- **Resultado (mediana de 9, intercalado, v0.14.2 × v0.14.3):** `fib`
+  −17,7 % (2,9x do CPython, antes 4,1x), `bubblesort` −24 a −26 %,
+  `call_readonly` −27 a −33 %, `call_ref` −26 %, `path_update` −27 a −31 %,
+  `loop_arith` −20 %, `generic_vs_hand` −19 %, `share_mutate` −17 %,
+  `conway` −15 %, `mandelbrot` −15 %, `string_ops` −12 %, `map_churn` −5 a
+  −8 %, `spawn_sum` −8 a −13 %; startup neutro.
+
 ## [0.14.2] - 2026-08-22
 
 Os quatro achados do perfil de cobertura de v0.14.1 (issue #61): uma brecha
