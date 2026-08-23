@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.15.3] - 2026-08-22
+
+Maps e structs (issue #66, item 4 do roadmap pós-fase 2; #40 item 1). Nenhuma
+mudança de sintaxe, semântica, saída, mensagem ou momento de erro, nem de
+contagem RC; nenhum opcode novo. Corpus 177/177 e diff de saída base × head
+sem divergência. Números em `benchmarks/RESULTS.md` (seção do topo) e
+`benchmarks/results/2026-08-22-issue-66-maps-structs-raw.md`.
+
+### Performance
+
+- **Construtor de struct com schema cacheado** (#40 item 1): `ObjStruct` guarda
+  o resultado de `validStructConstructorType` (schema aceito + `ParamInfo`
+  prontos) num `atomic.Pointer`; cada construção deixa de alocar um map de
+  detecção de ciclo, reandar a árvore de tipos e formatar um nome de tipo por
+  campo. Só o veredito válido é cacheado; o leitor confere que o schema é o
+  `ConstructorType` atual; as checagens por argumento continuam iguais.
+- **`NewInstance` e o clone CoW de instância** pré-dimensionam o map de campos.
+- **Maps:** `m[k] = v` faz leitura do velho + escrita sob um único lock
+  (`ObjMap.Swap`) em vez de `Get` + `Set`; a chave string reaproveita o
+  `interface{}` já boxado no `Value` (zero alocação) em get/set/`has_key`/
+  `delete`/literal/ref; `length(m)` conta sob `RLock` em vez de copiar o map.
+- **Bench novo** `benchmarks/bench_struct_records.nx` (struct de 5 campos
+  construída em laço, por valor — o formato do perfil da #40).
+- **Resultado (v0.15.2 × v0.15.3, mesma máquina, intercalado):**
+  `bench_struct_records` **−47 %** (meta da #40 ≥ −40 %); `bench_map_churn`
+  −9,8 %; cross-runtime `map_churn` **118,0 → 103,6 ms líquidos (0,88x;
+  ÷ CPython 2,0x → 1,78x)**; demais benches ±1 %, gates CoW verdes (≤ +3,2 %),
+  sentinela `bench_generic_vs_hand` −0,6 %. Por estágio: cache + pré-dimensão
+  −48 % em structs; maps −8 % em `map_churn`.
+
 ## [0.15.2] - 2026-08-22
 
 Protocolo de chamada (issue #66, item 3 do roadmap pós-fase 2). Nenhuma
