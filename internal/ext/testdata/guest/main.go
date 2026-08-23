@@ -1,6 +1,8 @@
 // Guest de teste do mecanismo de extensoes: compilado para wasip1/wasm em
 // tempo de teste por exttest.BuildGuest. O fn_index de nx_call despacha:
-// 0 echo, 1 fail, 2 trap (panic), 3 sha256 do payload.
+// 0 echo, 1 fail, 2 trap (panic), 3 sha256 do payload, 4 loop infinito
+// (fixture de timeout), 5 tipo declarado mentiroso (fixture de
+// checkDeclaredReturn).
 package main
 
 import (
@@ -86,6 +88,17 @@ func nxCall(fnIndex, argsPtr, argsLen uint32) uint64 {
 		out = append(out, 0x05)
 		out = binary.LittleEndian.AppendUint32(out, 32)
 		out = append(out, sum[:]...)
+		return retBytes(out)
+	case 4: // loop infinito — fixture do teste de timeout de chamada
+		for {
+		}
+	case 5: // NXB string valida com returns declarado "int" (fixture do
+		// teste de checkDeclaredReturn: extensao mentirosa e pega na fronteira)
+		msg := []byte("oops")
+		out := make([]byte, 0, 5+len(msg))
+		out = append(out, 0x04)
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(msg)))
+		out = append(out, msg...)
 		return retBytes(out)
 	default:
 		return 0
