@@ -1273,6 +1273,24 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.pop()
 
 		case chunk.OP_RETURN:
+			// Fast path (perf issue #66, item 3): frame sem defer, sem vinculo
+			// RC registrado e sem upvalue aberto em lugar nenhum, retornando
+			// para um frame que ainda pertence a este run() — popSimpleFrame
+			// (unwind.go) faz so o teardown terminal, sem a copia dupla de
+			// frameOutcome nem a segunda chamada. Nada de RC: Owned vazio =
+			// nada a soltar; push nao retem. O caso terminal (frameCount-1 <
+			// minFrameCount) e quem devolve terminalResult e fica no caminho
+			// lento.
+			if len(frame.Deferred) == 0 && len(frame.Owned) == 0 && vm.openUpvalues == nil && vm.frameCount-1 >= minFrameCount {
+				result := vm.pop()
+				vm.popSimpleFrame()
+				vm.push(result)
+				frame = vm.currentFrame
+				c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+				gcache = c.GlobalCache()
+				ip = frame.IP
+				continue
+			}
 			result := vm.pop()
 			frame.IP = ip
 			outcome := vm.finishFrame(frameOutcome{Result: result})
