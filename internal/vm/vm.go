@@ -55,18 +55,18 @@ type ownedEntry struct {
 }
 
 type SharedState struct {
-	Root         *value.GlobalEnvironment
-	Modules      *moduleCache
-	Files        *handleRegistry[*FileResource]
-	fileMetaMu   sync.RWMutex
-	Listeners    *handleRegistry[*ListenerResource]
-	Sockets      *handleRegistry[*SocketResource]
-	Databases    *handleRegistry[*DatabaseResource]
-	Statements   *handleRegistry[*StatementResource]
-	Regexes      *handleRegistry[*regexp.Regexp]
+	Root              *value.GlobalEnvironment
+	Modules           *moduleCache
+	Files             *handleRegistry[*FileResource]
+	fileMetaMu        sync.RWMutex
+	Listeners         *handleRegistry[*ListenerResource]
+	Sockets           *handleRegistry[*SocketResource]
+	Databases         *handleRegistry[*DatabaseResource]
+	Statements        *handleRegistry[*StatementResource]
+	Regexes           *handleRegistry[*regexp.Regexp]
 	RegexPatternCache sync.Map // pattern string -> *regexp.Regexp (atalhos regex.matches/search)
-	stateOnce    sync.Once
-	builtinsOnce sync.Once
+	stateOnce         sync.Once
+	builtinsOnce      sync.Once
 
 	// stdin e o leitor UNICO de os.Stdin para todos os VMs deste estado:
 	// input() e io.stdin() leem do mesmo buffer (senao a primeira chamada
