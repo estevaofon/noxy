@@ -1688,8 +1688,10 @@ Ordering (`>`, `<`, `>=`, `<=`) is defined for **numbers** (with the usual
 int/float promotion) and for **strings**. String ordering is lexicographic
 and byte-exact — for valid UTF-8, which every Noxy string is by invariant,
 this is identical to code-point order, mirroring Python. Ordering any other
-operand pair, including `bytes`, is a runtime error (`operands must be
-numbers or strings`); bridge bytes through `to_str` first. Equality
+operand pair, including `bytes`, is an error (`operands must be numbers or
+strings` — at compile time when both static types are known, see *Static
+operand checks* below; at runtime otherwise); bridge bytes through `to_str`
+first. Equality
 (`==`, `!=`) is structural for every type (§2.2, rule 7).
 
 ### Logical
@@ -1717,6 +1719,37 @@ The bitwise operators are strictly bitwise: they are never a substitute for
 inverted). Wrong static types are compile-time errors with the same text as
 the runtime check (`[line N] operands for & must be integers or bytes, got int
 and bool`, `operand of '~' must be int or bytes, got bool`).
+
+### Static operand checks
+
+The arithmetic and ordering operators are checked the same way as the bitwise
+ones. When both operands have a known static type (anything but `any` or an untyped dynamic
+value), the compiler applies the runtime rules up front and rejects a
+mismatch with the runtime message plus the two types:
+
+| Operator | Accepts | Compile-time error text |
+|----------|---------|-------------------------|
+| `+` | `int`/`float` (mixed promotes), `string + string`, `bytes + bytes` | `operands must be numbers or strings or bytes, got int and string` |
+| `-`, `*`, `/` | `int`/`float` | `operands must be numbers, got bool and int` |
+| `%` | `int % int` | `operands for % must be integers, got float and int` |
+| `<`, `>`, `<=`, `>=` | `int`/`float`, or `string` with `string` | `operands must be numbers or strings, got bytes and bytes` |
+
+`==`/`!=` keep their own rules (§2.3). A `ref T` operand is read as `T`
+(auto-dereference). `any` and untyped values stay on the generic opcode and are
+checked at runtime, so the dynamic boundary is unchanged; the bytecode of a
+valid program is identical with or without the check. Inside a generic
+function the check runs per instance, so `soma(true, false)` on
+`func soma<T>(a: T, b: T)` reports `em soma<bool> (instanciado na linha N):
+operands must be numbers or strings or bytes, got bool and bool`. Like every
+static check, it also rejects a mismatch in code that would never run
+(`if false then print(1 + "a") end`).
+
+```noxy
+let x: int = 10
+print(x + "ola")    // ERROR: [line 2] operands must be numbers or strings or bytes, got int and string
+let v: any = 10
+print(v + "ola")    // compiles; fails at runtime with the same message
+```
 
 Unary `*` is the dereference operator and applies only to a `ref`. With a known
 non-`ref` static type it is a compile-time error, so `2 ** 3` (there is no
@@ -2173,7 +2206,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.17.0`). It is a module binding, not a
+string `noxy --version` prints (`v0.17.1`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 

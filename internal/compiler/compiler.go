@@ -1332,6 +1332,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if err := c.checkBitwiseOperands(n.Operator, leftType, rightType); err != nil {
 			return nil, nil, err
 		}
+		// Issue #75: int + string, bool * int, bytes < bytes... sao erro de
+		// compilacao com o texto do runtime (arith_operand_checks.go).
+		if err := checkArithmeticOperands(n.Operator, leftType, rightType); err != nil {
+			return nil, nil, fmt.Errorf("[line %d] %v", n.Token.Line, err)
+		}
 
 		switch n.Operator {
 		case "+":

@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.17.1] - 2026-08-23
+
+Patch de checagem estática (issue #75, PR #76): operandos aritméticos e de
+comparação de tipo incompatível viram erro de compilação, não de runtime.
+Nenhuma sintaxe nova, nenhum opcode novo, bytecode de programa válido
+idêntico ao de 0.17.0 (só programas que já falhariam em runtime deixam de
+compilar). Corpus 179/179.
+
+### Fixed
+
+- **Checagem estática de operandos aritméticos e de comparação** (issue
+  #75): `int + string`, `bool * int`, `string - string`, `float % int`,
+  `bytes < bytes`, `string < int`... passam a ser erro de **compilação**,
+  com o texto do runtime mais os dois tipos (`[line N] operands must be
+  numbers or strings or bytes, got int and string`; `operands must be
+  numbers, got bool and int`; `operands for % must be integers, got float
+  and int`; `operands must be numbers or strings, got bytes and bytes`) —
+  mesmo padrão do #56 para `!`, `~` e bitwise. Antes o compilador emitia o
+  opcode genérico e só a VM reclamava; valia para anotado (`let x: int`) e
+  inferido (`let x = 10`, #41). `any`/tipo desconhecido continuam no caminho
+  genérico com checagem em runtime; `ref T` é lido como `T`; `==`/`!=` têm
+  regra própria e não mudam. Zero custo em runtime: a checagem lê os tipos
+  que o compilador já calcula para escolher `OP_ADD_INT`/`OP_ADD_FLOAT` —
+  bytecode de programa válido idêntico (hash dos chunks de 354 arquivos do
+  corpus antes × depois sem diferença; o único que muda é
+  `noxy_examples/error_type.nx`, erro intencional que agora falha em
+  compile-time). Como toda checagem estática, também rejeita código morto
+  (`if false then print(1 + "a") end`). Spec §8 ganha a subseção *Static
+  operand checks*.
+
 ## [0.17.0] - 2026-08-23
 
 Inferência local de tipo em `let` (issue #41, PR #73): `let x = expr` sem
