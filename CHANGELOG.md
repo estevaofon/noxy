@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.16.0] - 2026-08-22
+
+Versão de marco: nenhuma mudança de código, sintaxe, semântica, saída ou
+mensagem de erro em relação a 0.15.2 — quem está em 0.15.2 não precisa migrar
+nada. O minor fecha o ciclo de performance pós-fase 2 (issue #66, itens 1–3,
+entregues como 0.15.0–0.15.2: indexação tipada de array, fast path ASCII de
+strings e protocolo de chamada) e marca o quanto a linguagem acumulou desde
+0.7.0: genéricos por monomorfização, `call_result`, `type` e target typing em
+`return`, `let` sem redeclaração, invariante do slot `ref T` com contêineres
+donos dos filhos, os 16 achados do K&R em Noxy, `io` com cursor e campo
+`m.T`, checagem estática de membro de `m.T` e de tipo desconhecido, `range`
+builtin e `sys.version`, REPL com editor de linha em tty POSIX, layout de
+`Value` em 32 B. Cross-runtime ao fim do ciclo (tempo líquido ÷ CPython, cada
+par medido intercalado na própria rodada): `bubblesort` 5,5x → 1,8x (0.15.0),
+`string_ops` 3,1x → 2,4x e `map_churn` 2,3x → 2,0x (0.15.1), `fib` 2,0x →
+1,16x (0.15.2). O detalhe de cada entrega está nas seções abaixo; números em
+`benchmarks/RESULTS.md`.
+
 ## [0.15.2] - 2026-08-22
 
 Protocolo de chamada (issue #66, item 3 do roadmap pós-fase 2). Nenhuma
