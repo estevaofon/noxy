@@ -131,6 +131,15 @@ func (vm *VM) loadResolvedModule(source resolvedModule) (value.Value, error) {
 	case resolvedEmbeddedModule:
 		return vm.compileAndRunModule(source, source.Content)
 	case resolvedFileModule:
+		// Deteccao de extensao: se o pacote do modulo tem noxy_ext.toml ao
+		// lado, carrega o WASM e registra os exports como natives ANTES de
+		// compilar o wrapper .nx (que referencia esses natives).
+		manifestPath := filepath.Join(filepath.Dir(source.Path), "noxy_ext.toml")
+		if _, statErr := os.Stat(manifestPath); statErr == nil {
+			if err := vm.ensureExtensionLoaded(filepath.Dir(source.Path)); err != nil {
+				return value.NewNull(), fmt.Errorf("failed to load extension for module %s: %w", source.Name, err)
+			}
+		}
 		content, err := os.ReadFile(source.Path)
 		if err != nil {
 			return value.NewNull(), err
