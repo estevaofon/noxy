@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -16,6 +17,25 @@ var (
 	mu    sync.Mutex
 	cache = map[string][]byte{}
 )
+
+// unsupportedToolchainMarkers sao trechos de saida do "go build" que indicam
+// que o toolchain local nao suporta wasip1/wasmexport, em vez de um erro no
+// guest em si. Mantido estreito de proposito: qualquer outra falha continua
+// derrubando o teste com tb.Fatalf.
+var unsupportedToolchainMarkers = []string{
+	"unsupported GOOS/GOARCH",
+	"invalid buildmode",
+	"//go:wasmexport",
+}
+
+func isUnsupportedToolchainOutput(output string) bool {
+	for _, marker := range unsupportedToolchainMarkers {
+		if strings.Contains(output, marker) {
+			return true
+		}
+	}
+	return false
+}
 
 func repoRoot(tb testing.TB) string {
 	_, self, _, ok := runtime.Caller(0)
@@ -51,6 +71,9 @@ func BuildGuest(tb testing.TB, ldflags string) []byte {
 	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm", "CGO_ENABLED=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if isUnsupportedToolchainOutput(string(output)) {
+			tb.Skipf("exttest: toolchain local sem suporte a wasip1/wasmexport: %v\n%s", err, output)
+		}
 		tb.Fatalf("exttest: go build guest: %v\n%s", err, output)
 	}
 	data, err := os.ReadFile(out)

@@ -54,6 +54,13 @@ func region(ptr, size uint32) []byte {
 }
 
 func retBytes(data []byte) uint64 {
+	if len(data) == 0 {
+		// 0 e o sentinela de falha do ABI (nx_call devolve (ptr<<32)|len);
+		// um payload vazio precisa de ptr != 0 para nao ser confundido
+		// com falha, entao alocamos 1 byte mesmo sem dado a copiar.
+		ptr := nxAlloc(1)
+		return uint64(ptr) << 32
+	}
 	ptr := nxAlloc(uint32(len(data)))
 	copy(region(ptr, uint32(len(data))), data)
 	return uint64(ptr)<<32 | uint64(len(data))
