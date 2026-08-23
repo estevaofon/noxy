@@ -45,6 +45,16 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 	if other, exists := shared.ExtNames[manifest.Name]; exists && other != dir {
 		return fmt.Errorf("extension name %q already loaded from %s", manifest.Name, other)
 	}
+	// Pre-checagem de TODOS os exports antes de registrar qualquer um:
+	// DefineContextualNativeWithSignature usa DefineLocalIfAbsent (o primeiro
+	// a escrever vence), entao um export cujo nome ja esteja ligado no Root
+	// (native de stdlib ou export de outra extensao) perderia silenciosamente
+	// sem essa checagem — falha atomica em vez de sombra silenciosa.
+	for _, exp := range manifest.Exports {
+		if _, exists := vm.GetGlobal(exp.Name); exists {
+			return fmt.Errorf("extension %q: export %q collides with an existing global", manifest.Name, exp.Name)
+		}
+	}
 	wasmPath := filepath.Join(dir, manifest.Wasm)
 	wasmBytes, err := os.ReadFile(wasmPath)
 	if err != nil {
