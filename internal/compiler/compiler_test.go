@@ -66,11 +66,20 @@ func TestAssignmentTypeErrorReportsAssignmentLine(t *testing.T) {
 	}
 }
 
+// `~` aceita bytes alem de int (a VM sempre aceitou: OP_BIT_NOT inverte cada
+// byte); o checador estatico so rejeitava porque nenhum valor de tipo
+// estatico bytes chegava nele — hex_decode/to_bytes ganharam tipo na #41.
+func TestBitNotAcceptsBytesStatically(t *testing.T) {
+	if _, _, err := New().Compile(parse("let b: bytes = hex_decode(\"00ff\")\nlet n: bytes = ~b\nlet m: bytes = ~hex_decode(\"00\")\n")); err != nil {
+		t.Fatalf("~ em bytes deveria compilar: %v", err)
+	}
+}
+
 func TestStaticOperandChecksForUnaryAndBitwise(t *testing.T) {
 	cases := []struct{ source, want string }{
 		{"print(2 ** 3)\n", "cannot dereference non-reference value of type int"},
 		{"print(!0)\n", "operand of '!' must be bool, got int"},
-		{"print(~true)\n", "operand of '~' must be int, got bool"},
+		{"print(~true)\n", "operand of '~' must be int or bytes, got bool"},
 		{"print(1 & 3 == 1)\n", "operands for & must be integers or bytes, got int and bool"},
 		{"print(\"a\" << 1)\n", "operands for << must be integers, got string and int"},
 	}

@@ -275,11 +275,22 @@ func (p *Parser) parseLetStatement() *ast.LetStmt {
 
 	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 
-	// Specific check for missing type: let x = ...
+	// Inferencia local (issue #41, spec §3): `let x = expr` sem anotacao —
+	// Type fica nil e o compilador binda o tipo estatico do RHS. `let` ja
+	// marca declaracao, entao nao ha ambiguidade com atribuicao.
 	if p.peekTokenIs(token.ASSIGN) {
-		msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation for '%s'\n  hint: use 'let %s: <type> = ...'",
+		p.nextToken() // Eat ASSIGN
+		p.nextToken() // Start expression
+		stmt.Value = p.parseExpression(LOWEST)
+		return stmt
+	}
+
+	// `let x` sozinho: sem tipo nem valor, nao ha o que inferir. (`let x int`
+	// cai no "expected ':'" generico, que aponta o que falta.)
+	if p.peekTokenIs(token.NEWLINE) || p.peekTokenIs(token.EOF) {
+		msg := fmt.Sprintf("[%d:%d] SyntaxError: missing type annotation or initializer for '%s'\n  hint: use 'let %s: <type>' or 'let %s = <value>'",
 			p.peekToken.Line, p.peekToken.Column,
-			stmt.Name.Value, stmt.Name.Value)
+			stmt.Name.Value, stmt.Name.Value, stmt.Name.Value)
 		p.errors = append(p.errors, msg)
 
 		// Advance to avoid subsequent errors

@@ -1,5 +1,52 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Inferência local de tipo em `let`** (issue #41): `let x = expr` sem
+  anotação é aceito, com o tipo declarado **inferido do tipo estático do
+  lado direito** — a variável continua type-stable (`let x = 10` seguido de
+  `x = "a"` é erro de compilação), exatamente como se o tipo tivesse sido
+  escrito. Inferência unidirecional (RHS → binding) e só em `let`: nada de
+  Hindley-Milner, parâmetros, retornos e campos de struct continuam
+  anotados. Superset puro — todo código anotado segue válido e idêntico.
+  - O tipo inferido é o do binding, não o do literal: `[1, 2, 3]` infere
+    `int[]` (dinâmico), não `int[3]`; `ref n` infere `ref int` (empréstimo,
+    como com anotação); chamada genérica infere a instância primeiro
+    (`let y = id(5)` → `int`).
+  - Continuam exigindo anotação, com erro `cannot infer type for 'x' from
+    its initializer: ...` + hint da forma anotada: literal vazio (`[]`, `{}`,
+    também aninhado), `null`, expressão de tipo `any` no topo (fronteira
+    dinâmica explícita; `any` aninhado como `map[string, any]` é inferido
+    fielmente) e nome cujo tipo ainda não é conhecido (`let a = b` com `b`
+    declarado depois).
+  - `let x` sem tipo nem valor vira `SyntaxError: missing type annotation or
+    initializer for 'x'` (hint: `let x: <type>` ou `let x = <value>`);
+    `let x int = 1` mantém o `expected ':'` genérico.
+  - **Builtins centrais com tipo de retorno estático** (`length`, `to_str`,
+    `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`, `hex`,
+    `hex_encode`, `hex_decode`, `ord`, `contains`, `has_key`, `json_dumps`,
+    `keys(map[K, V]) -> K[]`, `slice`): antes compilavam como global
+    desconhecido (tipo nil, só o runtime conferia); agora `let n =
+    length(xs)` infere `int` e a checagem vale em toda posição — `let s:
+    string = length(xs)` passa a ser erro de compilação, não de runtime.
+    `func length(...)` declarado pelo programa continua sombreando o
+    builtin. Membro de namespace (`m.x`, `m.f()`) e builtins de fronteira
+    dinâmica (`json_parse`, `task_await`, ...) continuam sem tipo estático:
+    `let` sobre eles pede anotação (ou `use m select f`).
+  - Consequência: `~` em `bytes` passa no checador estático (`operand of
+    '~' must be int or bytes, got bool`) — a VM sempre aceitou (`~` inverte
+    cada byte, `test_bytes_full.nx`), mas nenhum valor de tipo estático
+    `bytes` chegava ao check antes de `hex_decode`/`to_bytes` terem tipo.
+    Spec §8 corrigida.
+  - Globais de topo inferidos entram na pré-declaração (corpo de função
+    declarado antes do `let` já enxerga o tipo certo), módulos exportam o
+    tipo inferido e o REPL infere linha a linha.
+  - Spec §3 (nova subseção *Local type inference*) e §6.2, README, exemplo
+    `noxy_examples/let_inference.nx` no runner; `test_let_error.nx` passa a
+    demonstrar o `let x` nu.
+
 ## [0.16.0] - 2026-08-22
 
 Versão de marco: nenhuma mudança de código, sintaxe, semântica, saída ou

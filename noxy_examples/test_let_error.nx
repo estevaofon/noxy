@@ -1,6 +1,8 @@
+// Erro intencional (excluido do runner): `let` sem tipo NEM valor nao tem o
+// que inferir. `let a = 10` (sem anotacao) e valido desde a inferencia local
+// da issue #41 — ver let_inference.nx.
 func main()
-    let a = 10
-    let b = 20
-    print(a + b)
+    let a
+    print(a)
 end
 main()

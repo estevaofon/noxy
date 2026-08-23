@@ -34,6 +34,8 @@ Noxy é **estaticamente tipada** - nunca quebre a verificação de tipos:
 let x: int = 42
 x = 100       // ✓ OK
 x = 3.14      // ✗ ERRO
+let y = 42    // tipo inferido do RHS (int) — igualmente estável (spec §3, issue #41)
+y = "a"       // ✗ ERRO
 ```
 
 ### 2. Pipeline de Compilação

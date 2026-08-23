@@ -332,7 +332,10 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 			c.globals[declaration.Name] = newStructFunctionType(declaration.Name, params)
 		}
 	}
-	return nil
+	// Segunda varredura: `let` de topo SEM anotacao (issue #41) — infere o
+	// tipo do RHS agora que funcoes, structs e lets anotados ja estao em
+	// c.globals (ver let_inference.go).
+	return c.inferGlobalLetTypes(statements)
 }
 
 func newStructFunctionType(name string, params []ast.NoxyType) *ast.FunctionType {

@@ -668,9 +668,12 @@ func (c *Compiler) compileInstanceBody(instance *ast.FunctionStatement) error {
 // compilada FORA DE ORDEM (antes do callee) e o caminho normal a compila de
 // novo logo depois.
 //
-// Como isso so roda no pass 1, cujo bytecode inteiro e descartado, eventuais
-// efeitos colaterais no compilador (constantes orfas, upvalues abertos duas
-// vezes — addUpvalue deduplica) nao alcancam o bytecode final do pass 2.
+// Nasceu para o pass 1 (bytecode inteiro descartado); desde a inferencia de
+// `let` (issue #41, inferGlobalLetTypes) roda tambem no compilador real, em
+// qualquer passe. O invariante que sustenta os dois usos: a emissao vai
+// INTEIRA para o chunk descartavel (constantes inclusive), addUpvalue
+// deduplica, c.warn deduplica — nenhum efeito colateral alcanca o bytecode
+// final (guardado por TestInferredLetEmitsSameBytecodeAsAnnotated).
 func (c *Compiler) typeOfDiscardedExpression(expr ast.Expression) (ast.NoxyType, error) {
 	savedChunk := c.currentChunk
 	savedLine := c.currentLine

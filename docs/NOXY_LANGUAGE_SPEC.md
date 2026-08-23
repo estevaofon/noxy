@@ -509,9 +509,65 @@ end
 
 ```noxy
 let name: type = value
+let name = value          // type inferred from the initializer
 ```
 
 Variables can be reassigned, but the new value **MUST** be of the same type as declared.
+
+### Local type inference
+
+When the annotation is omitted, the variable's declared type is the **static
+type of the initializer**, fixed at the declaration exactly as if it had been
+written. Inference is local and one-directional — from the right-hand side to
+the binding, only in `let` — and it does not make the variable dynamic: the
+type-stability rules of §2.0 apply unchanged.
+
+```noxy
+let n = 42                 // n: int
+let name = "Noxy"          // name: string
+let xs = [1, 2, 3]         // xs: int[]   (a dynamic array, not int[3])
+let m = {"a": 1}           // m: map[string, int]
+let p = Point(1, 2)        // p: Point
+let r = ref n              // r: ref int (a borrow, like `let r: ref int = ref n`)
+let y = id(5)              // y: int — the generic instance is inferred first (§6.2)
+
+n = "text"                 // ERROR: type mismatch — n is int
+```
+
+Annotations stay mandatory where they are contract documentation — function
+parameters and return types, struct fields — and where the initializer does
+not have a single type of its own. Each of these is a compile-time error
+(`cannot infer type for 'x' from its initializer: ...`) with a hint showing the
+annotated form:
+
+| Initializer | Why | Write instead |
+|-------------|-----|---------------|
+| `[]`, `{}` (also nested: `[[]]`, `{"a": []}`) | empty literal, no element/key/value type | `let xs: int[] = []`, `let m: map[string, int] = {}` |
+| `null` (also `[null]`) | `null` is a value of the nullable types, not a type | `let p: Point = null` |
+| a call to a `void` function | there is no value to bind | return a value, or annotate |
+| an expression of type `any` | the dynamic boundary must be spelled out (`any` *nested* in a type, such as `map[string, any]`, is an ordinary type and is inferred faithfully) | `let v: any = parse(s)` |
+| a name whose type is not known yet (`let a = b` with `b` declared later; also a later un-annotated global read inside the body of a generic function that a top-level `let y = id(...)` instantiates) | no static type at that point — top-level inferred `let`s are typed in file order | annotate, or reorder |
+| a namespace member — `m.x`, `m.f(...)` after `use m` | member access through a namespace carries no static type today | `use m select f` (imported names keep their declared type), or annotate |
+| a builtin outside the typed core set (§10) — `json_parse`, `task_await`, `make_chan`, ... | its result is `any` or has no static type | annotate (`let v: any = json_parse(s)`) |
+
+The core builtins whose result type never varies — `length`, `to_str`,
+`to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`, `hex`,
+`hex_encode`, `hex_decode`, `ord`, `contains`, `has_key`, `json_dumps`,
+plus `keys(map[K, V]) -> K[]` and `slice` (same type as its first argument)
+— have a static return type (§10), so `let n = length(xs)` binds `n: int`.
+That type is checked in every position, not only in `let`: `let s: string =
+length(xs)` is a compile-time error.
+
+A `ref` initializer binds a **borrow**, exactly as the annotated form does:
+`let v = r` with `r: ref T` gives `v: ref T` (the same slot, no copy). To copy
+the value out of a reference, annotate — `let v: T = r` auto-dereferences.
+
+`let x` with neither annotation nor initializer is a syntax error (there is
+nothing to infer); `let x: T` without an initializer keeps the default-value
+rule below. Inferred declarations are ordinary declarations in every other
+respect: a top-level `let x = 10` is visible, typed `int`, to every function in
+the file (including ones declared before it), is exported by the module with
+that type, and the REPL infers line by line (`>>> let x = 10`).
 
 ### Declaration without an initializer
 
@@ -863,9 +919,11 @@ push(ref ints, 20)
 print(peek(ints)) // 20
 ```
 
-This works because every `let` in Noxy already requires a type annotation —
-the language already forces the caller to write the information inference
-needs.
+This is the one place where an annotated `let` carries information the
+arguments do not: with an inferred `let` (§3, `let ints = Stack([])`) there
+is nothing to unify `T` against, and the call is rejected with the usual
+"could not infer T — annotate the type" error. Once the arguments pin `T`
+(`let ints = Stack([1, 2])`), the inferred `let` works like any other.
 
 The declared return type of the enclosing function is the same kind of
 anchor: a generic call in `return` position unifies its return type against
@@ -1655,10 +1713,10 @@ boolean operands, got int and bool`); an `any` operand is checked at runtime.
 
 The bitwise operators are strictly bitwise: they are never a substitute for
 `&&`/`||`. `&`, `|` and `^` accept two `int` or two `bytes` of the same length;
-`<<` and `>>` accept `int` only; `~` accepts `int` only. Wrong static types are
-compile-time errors with the same text as the runtime check
-(`[line N] operands for & must be integers or bytes, got int and bool`,
-`operand of '~' must be int, got bool`).
+`<<` and `>>` accept `int` only; `~` accepts `int` or `bytes` (every byte is
+inverted). Wrong static types are compile-time errors with the same text as
+the runtime check (`[line N] operands for & must be integers or bytes, got int
+and bool`, `operand of '~' must be int or bytes, got bool`).
 
 Unary `*` is the dereference operator and applies only to a `ref`. With a known
 non-`ref` static type it is a compile-time error, so `2 ** 3` (there is no
@@ -1771,8 +1829,19 @@ Validar antes de converter não é uma alternativa correta: `is_digit` aceita
 `"9999999999999999999"`, que estoura `int64`, e não há como checar o intervalo
 sem converter. Não existe `is_float`.
 
+The core builtins have static return types where the result never varies —
+`length`, `to_str`, `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`,
+`hex`, `hex_encode`, `hex_decode`, `ord`, `contains`, `has_key`, `json_dumps`,
+`keys(map[K, V]) -> K[]`, `slice` (same type as its first argument) — so a
+value of theirs is checked like any other expression (`let s: string =
+length(xs)` is a compile error) and can initialize an inferred `let` (§3).
+The others (`json_parse`, `task_await`, `call_result`, `make_chan`, ...) are
+dynamic-boundary builtins: their result is `any` or untyped and needs an
+annotation. A function the program declares with a builtin's name shadows the
+builtin, static type included.
+
 ### Collections
-- `length(arr_or_map)`
+- `length(arr_or_map) -> int`
 - `append(arr, val)`
 - `pop(arr)`
 - `keys(map)`: Returns array of keys.

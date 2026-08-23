@@ -82,6 +82,9 @@ nothing at runtime.
 let n: int = 42
 n = "text"                    // compile error: expected int, got string
 
+let m = 42                    // same thing, type inferred from the value: m is int
+m = "text"                    // compile error — inference is local, not dynamic
+
 let loose: any = 42           // the dynamic hole is spelled out...
 loose = "now a string"        // ...and only there does the type move
 
@@ -137,6 +140,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 - ✅ Bytecode compiler
 - ✅ High-performance stack-based VM
 - ✅ Primitive types: `int`, `float`, `string`, `bool`, `bytes`
+- ✅ Local type inference in `let` (`let x = 10` binds `x: int`; annotations stay mandatory in signatures and struct fields)
 - ✅ Structs with typed fields (global and local scope)
 - ✅ Dynamic arrays with `append`, `pop`, `contains`
 - ✅ Maps (hashmaps) with literals `{key: value}`
@@ -323,6 +327,11 @@ let pi: float = 3.14159
 let name: string = "Noxy"
 let active: bool = true
 let data: bytes = b"hello"
+
+// The annotation can be omitted when the initializer has a single static
+// type — the variable is still type-stable (x is int, for good):
+let total = x + 8          // total: int
+let label = "v" + name     // label: string
 ```
 
 ### Dynamic Arrays
