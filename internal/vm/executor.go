@@ -1141,6 +1141,42 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			argCount := int(c.Code[ip])
 			ip++
 
+			// Fast path (perf issue #66, item 3): callee e closure com
+			// ParamsUntracked (nenhum parametro pode carregar contador RC —
+			// o laco ownSlot de callPreparedClosure so faria Retain no-op) e
+			// aridade certa. E callPreparedClosure escrito aqui, menos o
+			// laco: a condicao de capacidade e a de ensureCallCapacity (que
+			// custa 80 e nao cabe no orcamento de 20 de run()), com
+			// growForCall continuando o unico dono das mensagens de overflow.
+			// Qualquer outra coisa (aridade errada, native, struct, any,
+			// parametro composto) segue por callValueStatic, mesmas mensagens.
+			if callee := vm.stack[vm.stackTop-argCount-1]; callee.Type == value.VAL_FUNCTION {
+				if closure, ok := callee.Obj.(*value.ObjClosure); ok && closure.Function.ParamsUntracked && argCount == closure.Function.Arity {
+					if vm.frameCount == len(vm.frames) || len(vm.stack)-vm.stackTop < stackReserve {
+						frame.IP = ip
+						if err := vm.growForCall(c, ip); err != nil {
+							return err
+						}
+					}
+					frame.IP = ip
+					callFrame := &vm.frames[vm.frameCount]
+					callFrame.Closure = closure
+					callFrame.IP = 0
+					callFrame.StackBase = vm.stackTop - argCount - 1
+					callFrame.LocalBase = callFrame.StackBase
+					callFrame.Environment = closure.Environment
+					callFrame.Deferred = callFrame.Deferred[:0]
+					callFrame.Owned = callFrame.Owned[:0]
+					vm.frameCount++
+					vm.currentFrame = callFrame
+					frame = callFrame
+					c = closure.Function.Chunk.(*chunk.Chunk)
+					gcache = c.GlobalCache()
+					ip = 0
+					continue
+				}
+			}
+
 			frame.IP = ip // Save current instruction pointer to the frame before call
 
 			if ok, err := vm.callValueStatic(vm.peek(argCount), argCount, c, ip); !ok {
