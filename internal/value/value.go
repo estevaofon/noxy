@@ -799,7 +799,10 @@ func NewStruct(name string, fields []string) Value {
 // depois precisa reter a mao (como calls.go:callPreparedValue faz) ou usar
 // NewInstanceWith.
 func NewInstance(def *ObjStruct) Value {
-	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
+	// Pre-dimensionado: o construtor grava len(def.Fields) campos logo em
+	// seguida; sem o tamanho o map Go cresce (growToSmall/newTable) em toda
+	// construcao (issue #66, item 4).
+	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value, len(def.Fields))}}
 }
 
 // NewInstanceWith cria uma instancia ja com os campos dados, retendo cada

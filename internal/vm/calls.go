@@ -190,7 +190,7 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		return copied
 	case *value.ObjInstance:
 		cloneCount.Add(1)
-		newFields := make(map[string]value.Value)
+		newFields := make(map[string]value.Value, len(obj.Fields))
 		for k, val := range obj.Fields {
 			value.Retain(val) // RC: filho ganha dono duravel no clone
 			newFields[k] = val
