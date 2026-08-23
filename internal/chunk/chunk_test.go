@@ -159,7 +159,8 @@ let fdiv: float = fa / fb
 let fless: bool = fa < fb
 let cmp: bool = sa > "b" || sa < "c" || sa == "a" || fa >= fb || fa <= fb || !ok || false
 let bits: int = (6 & 3) | (6 ^ 3) | (~5) | (1 << 2) | (8 >> 1) | (7 % 3) | -(2)
-let fm: float = fa % fb
+let va: any = 7
+let fm: any = va % 3    // OP_MODULO generico: float % float e erro de compilacao (#75)
 let ge: bool = 1 >= 2
 if 1 == 1 then print("eq") end
 if 1 > 0 then print("gt") end

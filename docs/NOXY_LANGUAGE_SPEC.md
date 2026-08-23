@@ -1718,6 +1718,30 @@ inverted). Wrong static types are compile-time errors with the same text as
 the runtime check (`[line N] operands for & must be integers or bytes, got int
 and bool`, `operand of '~' must be int or bytes, got bool`).
 
+The arithmetic and ordering operators are checked the same way. When both
+operands have a known static type (anything but `any` or an untyped dynamic
+value), the compiler applies the runtime rules up front and rejects a
+mismatch with the runtime message plus the two types:
+
+| Operator | Accepts | Compile-time error text |
+|----------|---------|-------------------------|
+| `+` | `int`/`float` (mixed promotes), `string + string`, `bytes + bytes` | `operands must be numbers or strings or bytes, got int and string` |
+| `-`, `*`, `/` | `int`/`float` | `operands must be numbers, got bool and int` |
+| `%` | `int % int` | `operands for % must be integers, got float and int` |
+| `<`, `>`, `<=`, `>=` | `int`/`float`, or `string` with `string` | `operands must be numbers or strings, got bytes and bytes` |
+
+`==`/`!=` keep their own rules (§2.3). A `ref T` operand is read as `T`
+(auto-dereference). `any` and untyped values stay on the generic opcode and are
+checked at runtime, so the dynamic boundary is unchanged; the bytecode of a
+valid program is identical with or without the check.
+
+```noxy
+let x: int = 10
+print(x + "ola")    // ERROR: [line 2] operands must be numbers or strings or bytes, got int and string
+let v: any = 10
+print(v + "ola")    // compiles; fails at runtime with the same message
+```
+
 Unary `*` is the dereference operator and applies only to a `ref`. With a known
 non-`ref` static type it is a compile-time error, so `2 ** 3` (there is no
 exponentiation operator in Noxy) reports
