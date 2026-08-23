@@ -1,6 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.17.1] - 2026-08-23
+
+Patch de checagem estática (issue #75, PR #76): operandos aritméticos e de
+comparação de tipo incompatível viram erro de compilação, não de runtime.
+Nenhuma sintaxe nova, nenhum opcode novo, bytecode de programa válido
+idêntico ao de 0.17.0 (só programas que já falhariam em runtime deixam de
+compilar). Corpus 179/179.
 
 ### Fixed
 
