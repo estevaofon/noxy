@@ -14,6 +14,47 @@ func regexFromInstance(machine *VM, instance *value.ObjInstance) (*regexp.Regexp
 	return machine.shared.Regexes.get(int(instance.Fields["handle"].Int()))
 }
 
+// buildMatchInstance monta uma instância Match a partir dos pares de offset
+// em BYTES do regexp (FindStringSubmatchIndex): groups[0] é o match inteiro;
+// grupo que não participou (offset -1) vira "" com índices -1. Todos os
+// offsets válidos são convertidos para índices de RUNA pelo converter.
+func buildMatchInstance(matchStruct *value.ObjStruct, s string, pairs []int, converter *runeConverter) value.Value {
+	total := len(pairs) / 2
+	groups := make([]value.Value, total)
+	starts := make([]value.Value, total)
+	ends := make([]value.Value, total)
+	for index := 0; index < total; index++ {
+		lo, hi := pairs[2*index], pairs[2*index+1]
+		if lo < 0 {
+			groups[index] = value.NewString("")
+			starts[index] = value.NewInt(-1)
+			ends[index] = value.NewInt(-1)
+			continue
+		}
+		groups[index] = value.NewString(s[lo:hi])
+		starts[index] = value.NewInt(int64(converter.index(lo)))
+		ends[index] = value.NewInt(int64(converter.index(hi)))
+	}
+	// RC: NewInstanceWith retém os arrays compostos; escalares são no-op.
+	return value.NewInstanceWith(matchStruct, map[string]value.Value{
+		"text":         groups[0],
+		"start":        starts[0],
+		"end_idx":      ends[0],
+		"groups":       value.NewArray(groups),
+		"group_starts": value.NewArray(starts),
+		"group_ends":   value.NewArray(ends),
+	})
+}
+
+// missedMatchResult devolve MatchResult{ok:false} reaproveitando a instância
+// Match vazia do template (campo match tipado exige uma instância).
+func missedMatchResult(resultTemplate *value.ObjInstance) value.Value {
+	return value.NewInstanceWith(resultTemplate.Struct, map[string]value.Value{
+		"ok":    value.NewBool(false),
+		"match": resultTemplate.Fields["match"],
+	})
+}
+
 func (vm *VM) defineRegexBuiltins() {
 	vm.DefineContextualNative("regex_compile", func(context value.NativeContext, args []value.Value) (value.Value, error) {
 		machine, err := nativeVM(context)
@@ -71,5 +112,60 @@ func (vm *VM) defineRegexBuiltins() {
 		}
 		_, removed := machine.shared.Regexes.remove(int(instance.Fields["handle"].Int()))
 		return value.NewBool(removed), nil
+	})
+
+	vm.DefineContextualNative("regex_is_match", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) != 2 {
+			return value.NewBool(false), fmt.Errorf("regex.is_match: expects 2 arguments, got %d", len(args))
+		}
+		instance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewBool(false), fmt.Errorf("regex.is_match: first argument must be a Regex")
+		}
+		compiled, valid := regexFromInstance(machine, instance)
+		if !valid {
+			return value.NewBool(false), fmt.Errorf("regex.is_match: invalid regex handle %d", instance.Fields["handle"].Int())
+		}
+		return value.NewBool(compiled.MatchString(args[1].String())), nil
+	})
+
+	vm.DefineContextualNative("regex_find", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) != 3 {
+			return value.NewNull(), fmt.Errorf("regex.find: expects 3 arguments, got %d", len(args))
+		}
+		instance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.find: first argument must be a Regex")
+		}
+		resultTemplate, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.find: invalid result template")
+		}
+		matchTemplate, ok := resultTemplate.Fields["match"].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.find: result template missing match instance")
+		}
+		compiled, valid := regexFromInstance(machine, instance)
+		if !valid {
+			return value.NewNull(), fmt.Errorf("regex.find: invalid regex handle %d", instance.Fields["handle"].Int())
+		}
+		subject := args[1].String()
+		pairs := compiled.FindStringSubmatchIndex(subject)
+		if pairs == nil {
+			return missedMatchResult(resultTemplate), nil
+		}
+		converter := newRuneConverter(subject)
+		return value.NewInstanceWith(resultTemplate.Struct, map[string]value.Value{
+			"ok":    value.NewBool(true),
+			"match": buildMatchInstance(matchTemplate.Struct, subject, pairs, converter),
+		}), nil
 	})
 }
