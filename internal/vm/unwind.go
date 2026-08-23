@@ -11,6 +11,27 @@ func (vm *VM) finishFrame(outcome frameOutcome) frameOutcome {
 	return vm.finalizeCurrentFrame(outcome)
 }
 
+// popSimpleFrame e o caminho RAPIDO de OP_RETURN (perf issue #66, item 3). So
+// e chamado quando o frame corrente nao tem Deferred, nao tem Owned, nao ha
+// upvalue aberto em lugar nenhum e o frame de baixo ainda pertence ao run()
+// corrente — exatamente o subconjunto de finalizeCurrentFrame cujos tres
+// lacos sao vazios ou pulados. Faz o MESMO teardown terminal (zerar slots a
+// partir de StackBase, soltar Closure/Environment, frameCount--, stackTop =
+// StackBase, currentFrame), sem frameOutcome na ida e na volta. Mora aqui, e
+// nao inline no handler, por causa do guard de arquitetura: teardown terminal
+// de frame so existe em unwind.go.
+func (vm *VM) popSimpleFrame() {
+	frame := &vm.frames[vm.frameCount-1]
+	for i := frame.StackBase; i < vm.stackTop; i++ {
+		vm.stack[i] = value.Value{}
+	}
+	frame.Closure = nil
+	frame.Environment = nil
+	vm.frameCount--
+	vm.stackTop = frame.StackBase
+	vm.currentFrame = &vm.frames[vm.frameCount-1]
+}
+
 func (vm *VM) unwindTo(targetFrameCount int, outcome frameOutcome) frameOutcome {
 	for vm.frameCount > targetFrameCount {
 		outcome = vm.finalizeCurrentFrame(outcome)

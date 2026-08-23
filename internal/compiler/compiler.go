@@ -1232,30 +1232,43 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// seguem dereferenciando neste ponto.
 		identityComparison := n.Operator == "==" || n.Operator == "!="
 
-		_, leftType, err := c.Compile(n.Left)
-		if err != nil {
-			return nil, nil, err
+		// Superinstrucoes (issue #66, item 3): `local ± K` (resultado int,
+		// nada mais a checar: int com int) e `local OP local` (os dois
+		// operandos num despacho; o resto do case segue com os tipos que
+		// resolveLocal da, sem OP_DEREF porque ref nunca funde).
+		if c.tryEmitLocalAddImm(n) {
+			return c.currentChunk, &ast.PrimitiveType{Name: "int"}, nil
 		}
-
-		if _, ok := leftType.(*ast.RefType); ok && !identityComparison {
-			// Always deref ref types before comparison (including null comparison)
-			// This ensures 'ref Node == null' compares the pointed-to value, not the ref itself
-			c.emitByte(byte(chunk.OP_DEREF))
-			if ref, ok := leftType.(*ast.RefType); ok {
-				leftType = ref.ElementType
+		var leftType, rightType ast.NoxyType
+		if pairLeft, pairRight, fused := c.tryEmitLocalPair(n.Left, n.Right); fused {
+			leftType, rightType = pairLeft, pairRight
+		} else {
+			var err error
+			_, leftType, err = c.Compile(n.Left)
+			if err != nil {
+				return nil, nil, err
 			}
-		}
 
-		_, rightType, err := c.Compile(n.Right)
-		if err != nil {
-			return nil, nil, err
-		}
+			if _, ok := leftType.(*ast.RefType); ok && !identityComparison {
+				// Always deref ref types before comparison (including null comparison)
+				// This ensures 'ref Node == null' compares the pointed-to value, not the ref itself
+				c.emitByte(byte(chunk.OP_DEREF))
+				if ref, ok := leftType.(*ast.RefType); ok {
+					leftType = ref.ElementType
+				}
+			}
 
-		if _, ok := rightType.(*ast.RefType); ok && !identityComparison {
-			// Always deref ref types before comparison (including null comparison)
-			c.emitByte(byte(chunk.OP_DEREF))
-			if ref, ok := rightType.(*ast.RefType); ok {
-				rightType = ref.ElementType
+			_, rightType, err = c.Compile(n.Right)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			if _, ok := rightType.(*ast.RefType); ok && !identityComparison {
+				// Always deref ref types before comparison (including null comparison)
+				c.emitByte(byte(chunk.OP_DEREF))
+				if ref, ok := rightType.(*ast.RefType); ok {
+					rightType = ref.ElementType
+				}
 			}
 		}
 
@@ -2722,6 +2735,15 @@ func (c *Compiler) tryCompileFusedCondition(cond ast.Expression) (chunk.OpCode, 
 		return 0, false, nil
 	}
 	checkpoint := len(c.currentChunk.Code)
+	// Superinstrucao (issue #66, item 3): `i < n` com dois locais int vira
+	// OP_GET_LOCAL_2 + salto fundido. Par de locais que nao sao ambos int e
+	// desfeito como qualquer outra especulacao daqui.
+	if pairLeft, pairRight, fused := c.tryEmitLocalPair(infix.Left, infix.Right); fused {
+		if pairLeft.String() == "int" && pairRight.String() == "int" {
+			return jumpOp, true, nil
+		}
+		c.currentChunk.TruncateTo(checkpoint)
+	}
 	_, leftType, err := c.Compile(infix.Left)
 	if err != nil {
 		// Sem TruncateTo aqui: um erro aborta a compilacao inteira (o
@@ -2855,6 +2877,72 @@ func (c *Compiler) localOwns(index int) bool {
 		return false
 	}
 	return c.locals[index].Owns
+}
+
+// tryEmitLocalAddImm funde a EXPRESSAO `local ± K` (local PLANO de tipo int —
+// resolveLocal, nunca upvalue/global/ref; K literal int com o sinal aplicado em
+// [-128,127]) em OP_GET_LOCAL_ADD_IMM_INT (issue #66, item 3). Devolve true se
+// emitiu; o resultado e int. Irmao de expressao do tryFuseLocalIntIncrement.
+func (c *Compiler) tryEmitLocalAddImm(infix *ast.InfixExpression) bool {
+	if infix.Operator != "+" && infix.Operator != "-" {
+		return false
+	}
+	ident, ok := infix.Left.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+	lit, ok := infix.Right.(*ast.IntegerLiteral)
+	if !ok {
+		return false
+	}
+	slot, localType := c.resolveLocal(ident.Value)
+	if slot == -1 || slot > 255 {
+		return false
+	}
+	prim, ok := localType.(*ast.PrimitiveType)
+	if !ok || prim.Name != "int" {
+		return false
+	}
+	imm := lit.Value
+	if infix.Operator == "-" {
+		imm = -imm
+	}
+	if imm < -128 || imm > 127 {
+		return false
+	}
+	c.emitBytes(byte(chunk.OP_GET_LOCAL_ADD_IMM_INT), byte(slot))
+	c.emitByte(byte(int8(imm)))
+	return true
+}
+
+// tryEmitLocalPair funde dois operandos que sao locais PLANOS de tipo
+// primitivo em OP_GET_LOCAL_2 (issue #66, item 3). Sem ref: o site do infix
+// emite OP_DEREF para RefType e isso tem de continuar acontecendo pelo caminho
+// normal. Devolve os tipos como resolveLocal os da, para o chamador seguir
+// exatamente como se tivesse compilado os dois operandos.
+func (c *Compiler) tryEmitLocalPair(left, right ast.Expression) (ast.NoxyType, ast.NoxyType, bool) {
+	leftIdent, ok := left.(*ast.Identifier)
+	if !ok {
+		return nil, nil, false
+	}
+	rightIdent, ok := right.(*ast.Identifier)
+	if !ok {
+		return nil, nil, false
+	}
+	leftSlot, leftType := c.resolveLocal(leftIdent.Value)
+	rightSlot, rightType := c.resolveLocal(rightIdent.Value)
+	if leftSlot == -1 || rightSlot == -1 || leftSlot > 255 || rightSlot > 255 {
+		return nil, nil, false
+	}
+	if _, ok := leftType.(*ast.PrimitiveType); !ok {
+		return nil, nil, false
+	}
+	if _, ok := rightType.(*ast.PrimitiveType); !ok {
+		return nil, nil, false
+	}
+	c.emitBytes(byte(chunk.OP_GET_LOCAL_2), byte(leftSlot))
+	c.emitByte(byte(rightSlot))
+	return leftType, rightType, true
 }
 
 // tryFuseLocalIntIncrement funde `i = i + K` / `i = i - K` (i local int
@@ -3335,6 +3423,26 @@ func (c *Compiler) emitClosureUpvalues(fnCompiler *Compiler) {
 	}
 }
 
+// paramsUntracked diz se NENHUM parametro pode carregar contador RC: todos sem
+// `ref` e de tipo primitivo escalar/string/bytes (value.Retain e no-op para
+// eles). Com isso o fast path de OP_CALL_STATIC pula o laco ownSlot (issue
+// #66, item 3). Conservador: qualquer outra coisa (any, T[], struct, func,
+// ref, generico) devolve false e a chamada segue por callPreparedClosure.
+func paramsUntracked(params []*ast.Parameter) bool {
+	for _, param := range params {
+		prim, ok := param.Type.(*ast.PrimitiveType)
+		if !ok {
+			return false
+		}
+		switch prim.Name {
+		case "int", "float", "bool", "string", "bytes":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {
 	restoreBindings := c.applyProgramBindings()
 	defer restoreBindings()
@@ -3385,6 +3493,7 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 	upvalueCount := len(fnCompiler.upvalues)
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
 	fnObj.Obj.(*value.ObjFunction).RuntimeType = c.runtimeTypeInfo(newFunctionType(params, declaredReturn))
+	fnObj.Obj.(*value.ObjFunction).ParamsUntracked = paramsUntracked(params)
 
 	return fnObj, fnCompiler, nil
 }

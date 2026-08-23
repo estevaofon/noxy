@@ -179,6 +179,11 @@ type ObjFunction struct {
 	Chunk        interface{}
 	Environment  *GlobalEnvironment
 	RuntimeType  *RuntimeTypeInfo
+	// ParamsUntracked: nenhum parametro pode carregar contador RC (todos sem
+	// `ref` e de tipo int/float/bool/string/bytes — Retain e no-op para eles).
+	// Calculado pelo compilador; autoriza o fast path de OP_CALL_STATIC a
+	// montar o frame sem o laco ownSlot (perf issue #66, item 3).
+	ParamsUntracked bool
 }
 
 type ObjUpvalue struct {

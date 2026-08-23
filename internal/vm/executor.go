@@ -90,13 +90,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				fn := constant.Obj.(*value.ObjFunction)
 				// Clone so compiler constants remain unbound and reusable.
 				boundFn := &value.ObjFunction{
-					Name:         fn.Name,
-					Arity:        fn.Arity,
-					UpvalueCount: fn.UpvalueCount,
-					Params:       fn.Params,
-					Chunk:        fn.Chunk,
-					Environment:  frame.Environment,
-					RuntimeType:  fn.RuntimeType,
+					Name:            fn.Name,
+					Arity:           fn.Arity,
+					UpvalueCount:    fn.UpvalueCount,
+					Params:          fn.Params,
+					Chunk:           fn.Chunk,
+					Environment:     frame.Environment,
+					RuntimeType:     fn.RuntimeType,
+					ParamsUntracked: fn.ParamsUntracked, // issue #66 item 3: sem isto o fast path de OP_CALL_STATIC nunca dispara
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -111,13 +112,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if constant.Type == value.VAL_FUNCTION {
 				fn := constant.Obj.(*value.ObjFunction)
 				boundFn := &value.ObjFunction{
-					Name:         fn.Name,
-					Arity:        fn.Arity,
-					UpvalueCount: fn.UpvalueCount,
-					Params:       fn.Params,
-					Chunk:        fn.Chunk,
-					Environment:  frame.Environment,
-					RuntimeType:  fn.RuntimeType,
+					Name:            fn.Name,
+					Arity:           fn.Arity,
+					UpvalueCount:    fn.UpvalueCount,
+					Params:          fn.Params,
+					Chunk:           fn.Chunk,
+					Environment:     frame.Environment,
+					RuntimeType:     fn.RuntimeType,
+					ParamsUntracked: fn.ParamsUntracked, // issue #66 item 3: sem isto o fast path de OP_CALL_STATIC nunca dispara
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -220,6 +222,22 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip += 2
 			slotValue := &vm.stack[frame.LocalBase+int(slot)]
 			slotValue.SetInt(slotValue.Int() + int64(delta))
+
+		case chunk.OP_GET_LOCAL_ADD_IMM_INT:
+			// perf issue #66 (item 3): GET_LOCAL + CONSTANT + ADD_INT/SUB_INT
+			// num despacho so; o compilador garante local int e imediato i8.
+			slot := c.Code[ip]
+			imm := int8(c.Code[ip+1])
+			ip += 2
+			vm.push(value.NewInt(vm.stack[frame.LocalBase+int(slot)].Int() + int64(imm)))
+
+		case chunk.OP_GET_LOCAL_2:
+			// perf issue #66 (item 3): dois GET_LOCAL num despacho so.
+			slotA := c.Code[ip]
+			slotB := c.Code[ip+1]
+			ip += 2
+			vm.push(vm.stack[frame.LocalBase+int(slotA)])
+			vm.push(vm.stack[frame.LocalBase+int(slotB)])
 
 		case chunk.OP_TRUE:
 			vm.push(value.NewBool(true))
@@ -1141,6 +1159,42 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			argCount := int(c.Code[ip])
 			ip++
 
+			// Fast path (perf issue #66, item 3): callee e closure com
+			// ParamsUntracked (nenhum parametro pode carregar contador RC —
+			// o laco ownSlot de callPreparedClosure so faria Retain no-op) e
+			// aridade certa. E callPreparedClosure escrito aqui, menos o
+			// laco: a condicao de capacidade e a de ensureCallCapacity (que
+			// custa 80 e nao cabe no orcamento de 20 de run()), com
+			// growForCall continuando o unico dono das mensagens de overflow.
+			// Qualquer outra coisa (aridade errada, native, struct, any,
+			// parametro composto) segue por callValueStatic, mesmas mensagens.
+			if callee := vm.stack[vm.stackTop-argCount-1]; callee.Type == value.VAL_FUNCTION {
+				if closure, ok := callee.Obj.(*value.ObjClosure); ok && closure.Function.ParamsUntracked && argCount == closure.Function.Arity {
+					if vm.frameCount == len(vm.frames) || len(vm.stack)-vm.stackTop < stackReserve {
+						frame.IP = ip
+						if err := vm.growForCall(c, ip); err != nil {
+							return err
+						}
+					}
+					frame.IP = ip
+					callFrame := &vm.frames[vm.frameCount]
+					callFrame.Closure = closure
+					callFrame.IP = 0
+					callFrame.StackBase = vm.stackTop - argCount - 1
+					callFrame.LocalBase = callFrame.StackBase
+					callFrame.Environment = closure.Environment
+					callFrame.Deferred = callFrame.Deferred[:0]
+					callFrame.Owned = callFrame.Owned[:0]
+					vm.frameCount++
+					vm.currentFrame = callFrame
+					frame = callFrame
+					c = closure.Function.Chunk.(*chunk.Chunk)
+					gcache = c.GlobalCache()
+					ip = 0
+					continue
+				}
+			}
+
 			frame.IP = ip // Save current instruction pointer to the frame before call
 
 			if ok, err := vm.callValueStatic(vm.peek(argCount), argCount, c, ip); !ok {
@@ -1183,13 +1237,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			fnVal := c.Constants[idx]
 			fn := fnVal.Obj.(*value.ObjFunction)
 			boundFn := &value.ObjFunction{
-				Name:         fn.Name,
-				Arity:        fn.Arity,
-				UpvalueCount: fn.UpvalueCount,
-				Params:       fn.Params,
-				Chunk:        fn.Chunk,
-				Environment:  frame.Environment,
-				RuntimeType:  fn.RuntimeType,
+				Name:            fn.Name,
+				Arity:           fn.Arity,
+				UpvalueCount:    fn.UpvalueCount,
+				Params:          fn.Params,
+				Chunk:           fn.Chunk,
+				Environment:     frame.Environment,
+				RuntimeType:     fn.RuntimeType,
+				ParamsUntracked: fn.ParamsUntracked, // issue #66 item 3: sem isto o fast path de OP_CALL_STATIC nunca dispara
 			}
 
 			closure := &value.ObjClosure{
@@ -1273,6 +1328,24 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.pop()
 
 		case chunk.OP_RETURN:
+			// Fast path (perf issue #66, item 3): frame sem defer, sem vinculo
+			// RC registrado e sem upvalue aberto em lugar nenhum, retornando
+			// para um frame que ainda pertence a este run() — popSimpleFrame
+			// (unwind.go) faz so o teardown terminal, sem a copia dupla de
+			// frameOutcome nem a segunda chamada. Nada de RC: Owned vazio =
+			// nada a soltar; push nao retem. O caso terminal (frameCount-1 <
+			// minFrameCount) e quem devolve terminalResult e fica no caminho
+			// lento.
+			if len(frame.Deferred) == 0 && len(frame.Owned) == 0 && vm.openUpvalues == nil && vm.frameCount-1 >= minFrameCount {
+				result := vm.pop()
+				vm.popSimpleFrame()
+				vm.push(result)
+				frame = vm.currentFrame
+				c = frame.Closure.Function.Chunk.(*chunk.Chunk)
+				gcache = c.GlobalCache()
+				ip = frame.IP
+				continue
+			}
 			result := vm.pop()
 			frame.IP = ip
 			outcome := vm.finishFrame(frameOutcome{Result: result})
