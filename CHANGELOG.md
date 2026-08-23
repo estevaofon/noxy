@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [0.17.0] - 2026-08-23
+
+Inferência local de tipo em `let` (issue #41, PR #73): `let x = expr` sem
+anotação, com o tipo do binding inferido do tipo estático do RHS — type-stable
+como sempre. Minor porque é sintaxe nova aceita; superset puro de 0.16.0 (todo
+código anotado continua válido, com o mesmo bytecode). Junto, os builtins
+centrais ganharam tipo de retorno estático e `~` passou a aceitar `bytes` no
+checador (a VM já aceitava). Corpus 178/178.
 
 ### Added
 
