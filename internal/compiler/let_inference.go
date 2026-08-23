@@ -28,7 +28,10 @@ func inferLetType(name string, valType ast.NoxyType, line int) (ast.NoxyType, er
 			line, name, reason, name, hint)
 	}
 	if valType == nil {
-		return nil, fail("its type is not known here", "<type> = ...")
+		// Fontes usuais de tipo desconhecido: global declarado mais adiante,
+		// membro acessado por namespace (`m.x`, `m.f()`), builtin sem tipo
+		// de retorno estatico (ver builtin_return_types.go).
+		return nil, fail("its type is not known here (a global declared later, a namespace member 'm.x', or a builtin without a static return type)", "<type> = ...")
 	}
 	if isNullType(valType) {
 		return nil, fail("'null' has no type of its own", "<type> = null")
@@ -50,7 +53,14 @@ func inferLetType(name string, valType ast.NoxyType, line int) (ast.NoxyType, er
 		}
 	}
 	if reason := incompleteTypeReason(valType); reason != "" {
-		return nil, fail(reason, "<type> = ...")
+		hint := "<type> = ..."
+		switch valType.(type) {
+		case *ast.ArrayType:
+			hint = "<type>[] = ..."
+		case *ast.MapType:
+			hint = "map[<key>, <value>] = ..."
+		}
+		return nil, fail(reason, hint)
 	}
 	return normalizeInferredType(valType), nil
 }
@@ -135,7 +145,7 @@ func (c *Compiler) inferGlobalLetTypes(statements []ast.Statement) error {
 			continue
 		}
 		c.setLine(declaration.Token.Line)
-		valType, err := c.typeOfDiscardedExpression(declaration.Value)
+		valType, err := c.typeOfGlobalInitializer(declaration.Value)
 		if err != nil {
 			return err
 		}
@@ -147,4 +157,21 @@ func (c *Compiler) inferGlobalLetTypes(statements []ast.Statement) error {
 		c.globals[declaration.Name.Value] = inferred
 	}
 	return nil
+}
+
+// typeOfGlobalInitializer e o leitor de tipo da varredura de globais. Um
+// literal de funcao tem o tipo escrito na propria assinatura: le-la direto
+// (resolvendo anotacoes de struct generico, como o compile faria) evita
+// compilar o CORPO fora de ordem — o corpo pode ler um global inferido
+// declarado DEPOIS (`let f = func() ... counter ... end` / `let counter =
+// 10`), que nesta altura ainda nao tem tipo. Qualquer outra expressao passa
+// por typeOfDiscardedExpression.
+func (c *Compiler) typeOfGlobalInitializer(expr ast.Expression) (ast.NoxyType, error) {
+	if literal, ok := expr.(*ast.FunctionLiteral); ok {
+		if err := c.resolveSignatureAnnotations(literal.Parameters, &literal.ReturnType, literal.Token.Line); err != nil {
+			return nil, err
+		}
+		return newFunctionType(literal.Parameters, literal.ReturnType), nil
+	}
+	return c.typeOfDiscardedExpression(expr)
 }

@@ -1499,8 +1499,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			c.emitByte(byte(chunk.OP_NOT))
 			return c.currentChunk, &ast.PrimitiveType{Name: "bool"}, nil
 		} else if n.Operator == "~" {
-			if rightType != nil && !isAny(rightType) && rightType.String() != "int" {
-				return nil, nil, fmt.Errorf("[line %d] operand of '~' must be int, got %s", c.currentLine, rightType.String())
+			// A VM aceita int e bytes em OP_BIT_NOT (inverte cada byte);
+			// o checador tem de aceitar os mesmos dois.
+			if rightType != nil && !isAny(rightType) && rightType.String() != "int" && rightType.String() != "bytes" {
+				return nil, nil, fmt.Errorf("[line %d] operand of '~' must be int or bytes, got %s", c.currentLine, rightType.String())
 			}
 			c.emitByte(byte(chunk.OP_BIT_NOT))
 			return c.currentChunk, rightType, nil
@@ -2443,6 +2445,9 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	// OP_CALL_STATIC; nesse caso caímos para OP_CALL, que ainda roda
 	// validateParameterModes em tempo de execução.
 	modesProven := isExact
+	// Tipos dos argumentos, para o tipo de retorno dos builtins centrais
+	// cujo retorno depende do argumento (keys, slice — builtin_return_types.go).
+	argTypes := make([]ast.NoxyType, 0, len(call.Arguments))
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
@@ -2497,6 +2502,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			c.emitByte(byte(chunk.OP_DEREF))
 			argType = ref.ElementType
 		}
+		argTypes = append(argTypes, argType)
 		if isExact {
 			if _, stillRef := argType.(*ast.RefType); stillRef {
 				if _, expectedIsRef := funcType.Params[i].(*ast.RefType); !expectedIsRef {
@@ -2523,6 +2529,14 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		return c.currentChunk, funcType.Return, nil
 	}
 	if fnType == nil {
+		// Builtin central (length, to_str, type...): nao e global declarado
+		// nem local/upvalue — e o nome que a VM resolve em runtime. O tipo de
+		// retorno estatico vem da tabela (issue #41); nil para os demais.
+		if ident, ok := call.Function.(*ast.Identifier); ok && !c.isShadowedByLocal(ident.Value) {
+			if _, declared := c.globals[ident.Value]; !declared {
+				return c.currentChunk, builtinReturnType(ident.Value, argTypes), nil
+			}
+		}
 		return c.currentChunk, nil, nil
 	}
 	return c.currentChunk, &ast.PrimitiveType{Name: "any"}, nil

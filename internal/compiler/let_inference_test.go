@@ -7,6 +7,7 @@ package compiler
 // topo (fronteira dinamica pede anotacao explicita).
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,4 +199,117 @@ func TestLetInferenceRejectsVoidCall(t *testing.T) {
 end
 let v = f()
 `, cannotInferText+" 'v'", "does not return a value")
+}
+
+// Builtins centrais (sem `use`) nao tem assinatura estatica no compilador —
+// eram compilados como global desconhecido (tipo nil). Para a inferencia ser
+// util no codigo de todo dia (`let n = length(xs)`), os de tipo de retorno
+// INVARIANTE ganham tipo estatico (builtin_return_types.go); a checagem vale
+// em toda posicao, nao so no `let`.
+func TestLetInfersCoreBuiltinReturnTypes(t *testing.T) {
+	src := `let xs: int[] = [1, 2]
+let m: map[string, int] = {"a": 1}
+let n = length(xs)
+let s = to_str(5)
+let i = to_int("5")
+let fl = to_float(1)
+let by = to_bytes("a")
+let ty = type(xs)
+let f = fmt("%d", 1)
+let c = contains(xs, 1)
+let h = has_key(m, "a")
+let ks = keys(m)
+let sl = slice(xs, 0, 1)
+let sub = slice("abc", 0, 1)
+let he = hex_encode(by)
+let hd = hex_decode(he)
+let o = ord("a")
+let js = json_dumps(m)
+`
+	for name, want := range map[string]string{
+		"n": "int", "s": "string", "i": "int", "fl": "float", "by": "bytes",
+		"ty": "string", "f": "string", "c": "bool", "h": "bool", "ks": "string[]",
+		"sl": "int[]", "sub": "string", "he": "string", "hd": "bytes", "o": "int",
+		"js": "string",
+	} {
+		if got := inferredLetType(t, src, name); got != want {
+			t.Errorf("let %s: want %s, got %s", name, want, got)
+		}
+	}
+}
+
+func TestCoreBuiltinReturnTypeIsCheckedStatically(t *testing.T) {
+	requireCompileError(t, "let xs: int[] = [1]\nlet s: string = length(xs)\n",
+		"type mismatch in 's' declaration: expected string, got int")
+}
+
+func TestUserFunctionShadowsBuiltinReturnType(t *testing.T) {
+	if got := inferredLetType(t, `func length(x: int) -> string
+    return "n"
+end
+let v = length(1)
+`, "v"); got != "string" {
+		t.Errorf("v: want string (funcao do usuario), got %s", got)
+	}
+}
+
+func TestTopLevelFunctionLiteralInfersFromSignatureWithoutCompilingBody(t *testing.T) {
+	// O corpo le um global inferido declarado DEPOIS: a pre-declaracao nao
+	// pode compilar o corpo para descobrir o tipo — a assinatura ja o diz.
+	src := `let f = func() -> int
+    let total = counter + 1
+    return total
+end
+let counter = 10
+`
+	if got := inferredLetType(t, src, "f"); got != "func() -> int" {
+		t.Errorf("f: want func() -> int, got %s", got)
+	}
+}
+
+func TestInferredLetEmitsSameBytecodeAsAnnotated(t *testing.T) {
+	// Guarda do design de dupla compilacao do RHS na pre-declaracao: o chunk
+	// final tem de ser identico ao do programa anotado.
+	inferred, _, err := New().Compile(parse("let xs = [1, 2]\nlet f = func(a: int) -> int\n    return a + length(xs)\nend\nprint(f(1))\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotated, _, err := New().Compile(parse("let xs: int[] = [1, 2]\nlet f: func(int) -> int = func(a: int) -> int\n    return a + length(xs)\nend\nprint(f(1))\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(inferred.Code, annotated.Code) {
+		t.Fatalf("bytecode diverge:\ninferido:  %v\nanotado:   %v", inferred.Code, annotated.Code)
+	}
+	if len(inferred.Constants) != len(annotated.Constants) {
+		t.Fatalf("pool de constantes diverge: %d vs %d", len(inferred.Constants), len(annotated.Constants))
+	}
+}
+
+func TestLetInferenceNestedEmptyLiteralHintKeepsShape(t *testing.T) {
+	requireCompileError(t, "let xs = [[]]\n", cannotInferText+" 'xs'", "hint: use 'let xs: <type>[] = ...'")
+	requireCompileError(t, "let m = {\"a\": []}\n", cannotInferText+" 'm'", "hint: use 'let m: map[<key>, <value>] = ...'")
+}
+
+func TestInferredLetInsideGenericTemplateBodyInstantiatedTwice(t *testing.T) {
+	// O corpo do template e clonado por instancia; o tipo inferido gravado
+	// in-place no pass 1 tem de valer para cada clone (int e string) e o
+	// pass 2 tem de aceita-lo como anotacao ja resolvida.
+	requireCompiles(t, `func first<T>(xs: T[]) -> T
+    let head = xs[0]
+    let copy = head
+    return copy
+end
+let a = first([1, 2])
+let b = first(["x", "y"])
+print(a + 1)
+print(b + "!")
+`)
+	requireCompileError(t, `func first<T>(xs: T[]) -> T
+    let head = xs[0]
+    head = "s"
+    return head
+end
+let a = first([1, 2])
+`, "type mismatch in assignment to 'head'")
 }

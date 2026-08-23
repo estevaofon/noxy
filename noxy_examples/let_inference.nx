@@ -20,15 +20,20 @@ func id<T>(v: T) -> T
     return v
 end
 
+// Funcao declarada ANTES do global inferido que ela usa: a pre-declaracao
+// ja conhece o tipo de `counter` (int).
+func bump() -> void
+    counter = counter + 1
+end
+
 // Globais inferidos (visiveis em funcoes declaradas antes ou depois)
 let counter = 0
 let greeting = "hello"
 let ratio = 2.5
 let flags = [true, false]
 let scores = {"ana": 10, "bia": 20}
-
-func bump() -> void
-    counter = counter + 1
+let handler = func(n: int) -> int
+    return n + counter
 end
 
 func main()
@@ -52,7 +57,11 @@ func main()
     // Array literal infere T[] dinamico (nao int[3]): push e reatribuir
     let xs = [1, 2, 3]
     append(xs, 4)
-    assert(length(xs) == 4, "append em array inferido")
+    let n_items = length(xs)          // builtin central: int
+    let label = to_str(n_items)       // builtin central: string
+    assert(n_items == 4 && label == "4", "append em array inferido + builtins tipados")
+    let ks = keys(scores)             // keys(map[string, int]) -> string[]
+    assert(length(ks) == 2, "keys inferido")
     xs = [9]
     assert(length(xs) == 1, "reatribuicao com outro tamanho")
 
@@ -77,6 +86,7 @@ func main()
     bump()
     bump()
     assert(counter == 2, "global inferido atualizado por funcao")
+    assert(handler(40) == 42, "function literal global inferido pela assinatura")
     assert(greeting == "hello" && ratio == 2.5, "globais inferidos")
     assert(length(flags) == 2 && scores["bia"] == 20, "globais compostos")
 

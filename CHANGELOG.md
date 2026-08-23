@@ -24,6 +24,22 @@
   - `let x` sem tipo nem valor vira `SyntaxError: missing type annotation or
     initializer for 'x'` (hint: `let x: <type>` ou `let x = <value>`);
     `let x int = 1` mantém o `expected ':'` genérico.
+  - **Builtins centrais com tipo de retorno estático** (`length`, `to_str`,
+    `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`, `hex`,
+    `hex_encode`, `hex_decode`, `ord`, `contains`, `has_key`, `json_dumps`,
+    `keys(map[K, V]) -> K[]`, `slice`): antes compilavam como global
+    desconhecido (tipo nil, só o runtime conferia); agora `let n =
+    length(xs)` infere `int` e a checagem vale em toda posição — `let s:
+    string = length(xs)` passa a ser erro de compilação, não de runtime.
+    `func length(...)` declarado pelo programa continua sombreando o
+    builtin. Membro de namespace (`m.x`, `m.f()`) e builtins de fronteira
+    dinâmica (`json_parse`, `task_await`, ...) continuam sem tipo estático:
+    `let` sobre eles pede anotação (ou `use m select f`).
+  - Consequência: `~` em `bytes` passa no checador estático (`operand of
+    '~' must be int or bytes, got bool`) — a VM sempre aceitou (`~` inverte
+    cada byte, `test_bytes_full.nx`), mas nenhum valor de tipo estático
+    `bytes` chegava ao check antes de `hex_decode`/`to_bytes` terem tipo.
+    Spec §8 corrigida.
   - Globais de topo inferidos entram na pré-declaração (corpo de função
     declarado antes do `let` já enxerga o tipo certo), módulos exportam o
     tipo inferido e o REPL infere linha a linha.
