@@ -134,26 +134,27 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 
 ### Features
 
-**Language**
-
-- Primitive types `int`, `float`, `string`, `bool`, `bytes`; structs with typed fields
-- Dynamic arrays and maps with literals (`[1, 2]`, `{key: value}`)
-- Value semantics with copy-on-write; `ref` as the only sharing mechanism
-- First-class functions, closures, recursion
-- Generics with zero runtime cost (monomorphization, always inferred from usage)
-- F-strings, `defer`, `call_result` error boundary
-- Concurrency: routines, channels, supervised tasks ([docs/CONCURRENCY.md](docs/CONCURRENCY.md))
-
-**Runtime**
-
-- Bytecode compiler and stack-based VM with garbage collection
-- REPL with the same rules as files and modules
-- Diagnostics to stderr with line tracking and hints
-
-**Ecosystem**
-
-- Built-in modules: io, net, http, sqlite (thread-safe), json, strings, crypto, time, errors
-- Package manager ([docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))
+- ✅ Bytecode compiler
+- ✅ High-performance stack-based VM
+- ✅ Primitive types: `int`, `float`, `string`, `bool`, `bytes`
+- ✅ Structs with typed fields (global and local scope)
+- ✅ Dynamic arrays with `append`, `pop`, `contains`
+- ✅ Maps (hashmaps) with literals `{key: value}`
+- ✅ Functions with recursion
+- ✅ Reference system (`ref`)
+- ✅ F-strings with interpolation
+- ✅ Single and double quote support
+- ✅ Line tracking for debugging
+- ✅ SQLite database support (Thread-safe)
+- ✅ HTTP server support
+- ✅ Value semantics with copy-on-write (composites are independent values; `ref` is the only sharing mechanism)
+- ✅ First-class functions
+- ✅ Closures
+- ✅ Generics with zero runtime cost (monomorphization: `func first<T>(arr: T[]) -> T`, `struct Stack<T>`, always inferred from usage)
+- ✅ Concurrency (noxy routines) [docs/CONCURRENCY.md](docs/CONCURRENCY.md)
+- ✅ Garbage collection
+- ✅ Built-in modules (io, net, http, sqlite)
+- ✅ Package manager (see [docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))
 
 ## Installation
 
