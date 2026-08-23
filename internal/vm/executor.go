@@ -221,6 +221,22 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slotValue := &vm.stack[frame.LocalBase+int(slot)]
 			slotValue.SetInt(slotValue.Int() + int64(delta))
 
+		case chunk.OP_GET_LOCAL_ADD_IMM_INT:
+			// perf issue #66 (item 3): GET_LOCAL + CONSTANT + ADD_INT/SUB_INT
+			// num despacho so; o compilador garante local int e imediato i8.
+			slot := c.Code[ip]
+			imm := int8(c.Code[ip+1])
+			ip += 2
+			vm.push(value.NewInt(vm.stack[frame.LocalBase+int(slot)].Int() + int64(imm)))
+
+		case chunk.OP_GET_LOCAL_2:
+			// perf issue #66 (item 3): dois GET_LOCAL num despacho so.
+			slotA := c.Code[ip]
+			slotB := c.Code[ip+1]
+			ip += 2
+			vm.push(vm.stack[frame.LocalBase+int(slotA)])
+			vm.push(vm.stack[frame.LocalBase+int(slotB)])
+
 		case chunk.OP_TRUE:
 			vm.push(value.NewBool(true))
 		case chunk.OP_FALSE:

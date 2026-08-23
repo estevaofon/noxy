@@ -155,6 +155,11 @@ const (
 	OP_SET_LOCAL_INDEX_ARRAY_NORC     // [slot]; pops val, index; local T[] possuidor (Owners<=1, senao uniciza como GET_LOCAL_MUT)
 	OP_GET_REF_LOCAL_INDEX_ARRAY      // [slot]; pops index; local `ref T[]` (REF_UPVALUE resolvido com uma Load(); outros refs pelo caminho de OP_DEREF)
 	OP_SET_REF_LOCAL_INDEX_ARRAY_NORC // [slot]; pops val, index; local `ref T[]` (Owners<=1, senao unicizeThroughRefValue)
+	// perf issue #66 (item 3): superinstrucoes emitidas em nivel de AST (sem
+	// peephole — nao existe alvo de salto no meio de uma expressao). Sao so
+	// GET_LOCAL(+CONSTANT+ADD_INT) fundidos; semantica identica.
+	OP_GET_LOCAL_ADD_IMM_INT // [slot u8][imm i8]; push local(int)+imm (wrappa como OP_ADD_INT)
+	OP_GET_LOCAL_2           // [a u8][b u8]; push local a, push local b
 )
 
 func (op OpCode) String() string {
@@ -265,6 +270,10 @@ func (op OpCode) String() string {
 		return "OP_GET_REF_LOCAL_INDEX_ARRAY"
 	case OP_SET_REF_LOCAL_INDEX_ARRAY_NORC:
 		return "OP_SET_REF_LOCAL_INDEX_ARRAY_NORC"
+	case OP_GET_LOCAL_ADD_IMM_INT:
+		return "OP_GET_LOCAL_ADD_IMM_INT"
+	case OP_GET_LOCAL_2:
+		return "OP_GET_LOCAL_2"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -598,6 +607,10 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.byteInstruction("OP_GET_REF_LOCAL_INDEX_ARRAY", offset)
 	case OP_SET_REF_LOCAL_INDEX_ARRAY_NORC:
 		return c.byteInstruction("OP_SET_REF_LOCAL_INDEX_ARRAY_NORC", offset)
+	case OP_GET_LOCAL_ADD_IMM_INT:
+		return c.slotDeltaInstruction("OP_GET_LOCAL_ADD_IMM_INT", offset)
+	case OP_GET_LOCAL_2:
+		return c.twoSlotInstruction("OP_GET_LOCAL_2", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
@@ -713,6 +726,14 @@ func (c *Chunk) slotDeltaInstruction(name string, offset int) int {
 	slot := c.Code[offset+1]
 	delta := int8(c.Code[offset+2])
 	fmt.Printf("%-16s %4d %4d\n", name, slot, delta)
+	return offset + 3
+}
+
+// twoSlotInstruction imprime os dois slots (u8) de OP_GET_LOCAL_2.
+func (c *Chunk) twoSlotInstruction(name string, offset int) int {
+	a := c.Code[offset+1]
+	b := c.Code[offset+2]
+	fmt.Printf("%-16s %4d %4d\n", name, a, b)
 	return offset + 3
 }
 
