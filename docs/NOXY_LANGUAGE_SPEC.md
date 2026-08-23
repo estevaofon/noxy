@@ -1688,8 +1688,10 @@ Ordering (`>`, `<`, `>=`, `<=`) is defined for **numbers** (with the usual
 int/float promotion) and for **strings**. String ordering is lexicographic
 and byte-exact — for valid UTF-8, which every Noxy string is by invariant,
 this is identical to code-point order, mirroring Python. Ordering any other
-operand pair, including `bytes`, is a runtime error (`operands must be
-numbers or strings`); bridge bytes through `to_str` first. Equality
+operand pair, including `bytes`, is an error (`operands must be numbers or
+strings` — at compile time when both static types are known, see *Static
+operand checks* below; at runtime otherwise); bridge bytes through `to_str`
+first. Equality
 (`==`, `!=`) is structural for every type (§2.2, rule 7).
 
 ### Logical
@@ -1718,8 +1720,10 @@ inverted). Wrong static types are compile-time errors with the same text as
 the runtime check (`[line N] operands for & must be integers or bytes, got int
 and bool`, `operand of '~' must be int or bytes, got bool`).
 
-The arithmetic and ordering operators are checked the same way. When both
-operands have a known static type (anything but `any` or an untyped dynamic
+### Static operand checks
+
+The arithmetic and ordering operators are checked the same way as the bitwise
+ones. When both operands have a known static type (anything but `any` or an untyped dynamic
 value), the compiler applies the runtime rules up front and rejects a
 mismatch with the runtime message plus the two types:
 
@@ -1733,7 +1737,12 @@ mismatch with the runtime message plus the two types:
 `==`/`!=` keep their own rules (§2.3). A `ref T` operand is read as `T`
 (auto-dereference). `any` and untyped values stay on the generic opcode and are
 checked at runtime, so the dynamic boundary is unchanged; the bytecode of a
-valid program is identical with or without the check.
+valid program is identical with or without the check. Inside a generic
+function the check runs per instance, so `soma(true, false)` on
+`func soma<T>(a: T, b: T)` reports `em soma<bool> (instanciado na linha N):
+operands must be numbers or strings or bytes, got bool and bool`. Like every
+static check, it also rejects a mismatch in code that would never run
+(`if false then print(1 + "a") end`).
 
 ```noxy
 let x: int = 10

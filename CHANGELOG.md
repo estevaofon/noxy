@@ -20,7 +20,9 @@
   bytecode de programa válido idêntico (hash dos chunks de 354 arquivos do
   corpus antes × depois sem diferença; o único que muda é
   `noxy_examples/error_type.nx`, erro intencional que agora falha em
-  compile-time). Spec §8 ganha a tabela.
+  compile-time). Como toda checagem estática, também rejeita código morto
+  (`if false then print(1 + "a") end`). Spec §8 ganha a subseção *Static
+  operand checks*.
 
 ## [0.17.0] - 2026-08-23
 

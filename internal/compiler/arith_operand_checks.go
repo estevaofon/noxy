@@ -17,6 +17,9 @@ import (
 // runtime, como em checkBitwiseOperands. `ref T` ja chega aqui desembrulhado
 // (auto-deref do caminho infixo). `==`/`!=` tem regra propria (§2.3) e nao
 // entram. Struct como operando e recusado antes, por structOperandName.
+// (Unica variante textual do runtime nao reproduzida: OP_ADD com dois
+// objetos nao-string — array+array, map+map — diz "numbers, strings or
+// bytes" com virgula; aqui sai sempre a forma com "or".)
 //
 // Regras (as do runtime): `+` aceita numeros (int/float, misto promove),
 // string+string e bytes+bytes; `-`, `*`, `/` aceitam numeros; `%` aceita
