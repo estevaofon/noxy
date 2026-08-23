@@ -1,0 +1,40 @@
+// noxy_examples/test_regex.nx
+use regex
+use strings
+
+print("Testes do módulo regex...")
+
+// Compilação explícita com grupos
+let comp: regex.CompileResult = regex.compile("([0-9]{4})-([0-9]{2})-([0-9]{2})")
+if !comp.ok then
+    eprint("compile falhou: " + comp.error)
+end
+let re: regex.Regex = comp.regex
+
+let texto: string = "aniversário: 1990-05-17, festa: 2026-08-23"
+let m: regex.MatchResult = regex.find(re, texto)
+if m.ok then
+    print("primeira data: " + m.match.text)
+    print("ano: " + m.match.groups[1])
+    // Índices em runas: compõem com strings.substring mesmo com acento antes
+    print("recorte: " + strings.substring(texto, m.match.start, m.match.end_idx))
+end
+
+let todas: regex.MatchesResult = regex.find_all(re, texto)
+print("datas encontradas: " + to_str(length(todas.matches)))
+
+print("iso->br: " + regex.replace(re, texto, "$3/$2/$1"))
+
+let csv: regex.Regex = regex.compile(", *").regex
+for parte in regex.split(csv, "um,  dois, três") do
+    print("parte: " + parte)
+end
+
+// Atalhos
+if regex.matches("^ani", texto) then
+    print("começa com 'ani'")
+end
+
+regex.free(re)
+regex.free(csv)
+print("Testes finalizados.")

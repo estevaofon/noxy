@@ -2356,6 +2356,48 @@ em Python — tanto a igualdade quanto a ordenação (`<`, `>`, `<=`, `>=`), que
 ordena strings lexicograficamente por byte; dentro do invariante UTF-8 isso
 é idêntico à ordem por code point.
 
+### Regex (`regex`)
+
+RE2 engine (Go `regexp`): guaranteed linear time, **no**
+lookahead/lookbehind/backreferences. All indices exposed to Noxy —
+`start`, `end_idx`, `group_starts`, `group_ends` — are **rune indices**,
+end-exclusive, so `strings.substring(s, m.start, m.end_idx) == m.text`
+holds for any valid UTF-8 subject (same contract as `substring` and
+`index_of`; see *Indexação de strings*).
+
+| Struct | Fields |
+|---|---|
+| `Regex` | `handle: int`, `pattern: string` |
+| `CompileResult` | `ok: bool`, `regex: Regex`, `error: string` |
+| `Match` | `text: string`, `start: int`, `end_idx: int`, `groups: string[]`, `group_starts: int[]`, `group_ends: int[]` |
+| `MatchResult` | `ok: bool`, `match: Match` |
+| `MatchesResult` | `ok: bool`, `matches: Match[]` |
+
+`groups[0]` is the whole match (`== text`); a capture group that did not
+participate yields `""` with `-1`/`-1` indices. A failed match is **not**
+an error: `find` returns `ok=false` with an empty `match`.
+
+| Function | Contract |
+|---|---|
+| `compile(pattern) -> CompileResult` | `ok=false` + RE2 message on invalid pattern (`regex.handle == 0`) |
+| `free(re) -> void` | Releases the compiled regex; using a freed handle is a runtime error |
+| `is_match(re, s) -> bool` | Whether `s` contains a match |
+| `find(re, s) -> MatchResult` | First match with groups |
+| `find_all(re, s) -> MatchesResult` | Every non-overlapping match, left to right |
+| `replace(re, s, replacement) -> string` | Replaces every match; `$1`, `$2`, `${name}` expand (Go `ReplaceAllString`) |
+| `split(re, s) -> string[]` | Splits `s` around every match |
+| `matches(pattern, s) -> bool` | Shortcut: compiles with an internal cache; invalid pattern is a runtime error |
+| `search(pattern, s) -> MatchResult` | Shortcut form of `find` |
+
+```noxy
+use regex
+let re: regex.Regex = regex.compile("([0-9]+)-([0-9]+)").regex
+let m: regex.MatchResult = regex.find(re, "aé🙂 12-34")
+m.match.start                    // 4  (rune index, not byte offset)
+m.match.groups[2]                // "34"
+regex.replace(re, "12-34", "$2/$1")   // "34/12"
+```
+
 ### Network sockets
 
 `net.listen(host, 0)` asks the operating system to choose an available port.

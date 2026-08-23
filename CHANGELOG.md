@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.0] - 2026-08-23
+
+Módulo `regex` na stdlib: motor RE2 do Go (tempo linear, sem
+lookahead/backreferences), índices em runas compondo com
+`strings.substring`. Nenhuma dependência nova; nenhum opcode novo.
+
+### Added
+
+- **Módulo `regex`** — `compile`/`free`, `is_match`, `find`, `find_all`,
+  `replace` (`$1`/`${name}`), `split` e os atalhos `matches`/`search` com
+  cache interno de padrão. Todos os índices de `Match` (`start`,
+  `end_idx`, `group_starts`, `group_ends`) são em **runas**, exclusivos no
+  fim — `strings.substring(s, m.start, m.end_idx) == m.text` para qualquer
+  UTF-8 válido, mesmo contrato de `substring`/`index_of`. Conversão
+  byte→runa com fast path ASCII e checkpoints amortizados (issue #66,
+  item 2). Padrão inválido em `compile` é resultado (`ok=false` + mensagem
+  RE2); handle liberado ou padrão inválido nos atalhos é erro de runtime
+  (capturável com `call_result`). Semântica RE2: sem
+  lookahead/lookbehind/backreferences. Spec §12 (Regex), exemplo em
+  `noxy_examples/test_regex.nx`.
+
 ## [0.17.1] - 2026-08-23
 
 Patch de checagem estática (issue #75, PR #76): operandos aritméticos e de
