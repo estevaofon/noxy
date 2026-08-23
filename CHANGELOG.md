@@ -1,5 +1,36 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Inferência local de tipo em `let`** (issue #41): `let x = expr` sem
+  anotação é aceito, com o tipo declarado **inferido do tipo estático do
+  lado direito** — a variável continua type-stable (`let x = 10` seguido de
+  `x = "a"` é erro de compilação), exatamente como se o tipo tivesse sido
+  escrito. Inferência unidirecional (RHS → binding) e só em `let`: nada de
+  Hindley-Milner, parâmetros, retornos e campos de struct continuam
+  anotados. Superset puro — todo código anotado segue válido e idêntico.
+  - O tipo inferido é o do binding, não o do literal: `[1, 2, 3]` infere
+    `int[]` (dinâmico), não `int[3]`; `ref n` infere `ref int` (empréstimo,
+    como com anotação); chamada genérica infere a instância primeiro
+    (`let y = id(5)` → `int`).
+  - Continuam exigindo anotação, com erro `cannot infer type for 'x' from
+    its initializer: ...` + hint da forma anotada: literal vazio (`[]`, `{}`,
+    também aninhado), `null`, expressão de tipo `any` no topo (fronteira
+    dinâmica explícita; `any` aninhado como `map[string, any]` é inferido
+    fielmente) e nome cujo tipo ainda não é conhecido (`let a = b` com `b`
+    declarado depois).
+  - `let x` sem tipo nem valor vira `SyntaxError: missing type annotation or
+    initializer for 'x'` (hint: `let x: <type>` ou `let x = <value>`);
+    `let x int = 1` mantém o `expected ':'` genérico.
+  - Globais de topo inferidos entram na pré-declaração (corpo de função
+    declarado antes do `let` já enxerga o tipo certo), módulos exportam o
+    tipo inferido e o REPL infere linha a linha.
+  - Spec §3 (nova subseção *Local type inference*) e §6.2, README, exemplo
+    `noxy_examples/let_inference.nx` no runner; `test_let_error.nx` passa a
+    demonstrar o `let x` nu.
+
 ## [0.16.0] - 2026-08-22
 
 Versão de marco: nenhuma mudança de código, sintaxe, semântica, saída ou

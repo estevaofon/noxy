@@ -1,0 +1,93 @@
+// Inferencia local de tipo em `let` (issue #41, spec §3):
+// `let x = expr` binda o tipo estatico do RHS — a variavel continua
+// type-stable, como se o tipo tivesse sido escrito.
+
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("let inference: FAIL - " + message)
+        exit(1)
+    end
+end
+
+struct Point
+    x: int
+    y: int
+end
+
+func id<T>(v: T) -> T
+    return v
+end
+
+// Globais inferidos (visiveis em funcoes declaradas antes ou depois)
+let counter = 0
+let greeting = "hello"
+let ratio = 2.5
+let flags = [true, false]
+let scores = {"ana": 10, "bia": 20}
+
+func bump() -> void
+    counter = counter + 1
+end
+
+func main()
+    // Primitivos
+    let i = 10
+    let f = 1.5
+    let s = "a" + "b"
+    let b = i < 20
+    assert(i == 10, "int inferido")
+    assert(f == 1.5, "float inferido")
+    assert(s == "ab", "string inferida")
+    assert(b, "bool inferido")
+    assert(type(i) == "int", "type int")
+    assert(type(s) == "string", "type string")
+
+    // Reatribuicao compativel continua OK (type-stable)
+    i = 20
+    s = "c"
+    assert(i == 20 && s == "c", "reatribuicao")
+
+    // Array literal infere T[] dinamico (nao int[3]): push e reatribuir
+    let xs = [1, 2, 3]
+    append(xs, 4)
+    assert(length(xs) == 4, "append em array inferido")
+    xs = [9]
+    assert(length(xs) == 1, "reatribuicao com outro tamanho")
+
+    // Map, struct, funcao, ref, generico
+    let m = {"k": 1}
+    m["z"] = 2
+    assert(length(m) == 2, "map inferido")
+    let p = Point(1, 2)
+    assert(p.x + p.y == 3, "struct inferido")
+    let double = func(n: int) -> int
+        return n * 2
+    end
+    assert(double(21) == 42, "funcao inferida")
+    let n = 5
+    let r = ref n
+    *r = 6
+    assert(n == 6, "ref inferido escreve no alvo")
+    let g = id(7)
+    assert(g + 1 == 8, "generico inferido")
+
+    // Globais
+    bump()
+    bump()
+    assert(counter == 2, "global inferido atualizado por funcao")
+    assert(greeting == "hello" && ratio == 2.5, "globais inferidos")
+    assert(length(flags) == 2 && scores["bia"] == 20, "globais compostos")
+
+    // Escopo interno sombreando com tipo diferente, como antes
+    if i > 0 then
+        let i = "inner"
+        assert(i == "inner", "shadow")
+    end
+    assert(i == 20, "outer intacto")
+
+    print("OK let inference")
+end
+
+main()

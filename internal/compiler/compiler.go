@@ -388,6 +388,18 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 			valType = t
+			// Inferencia local (issue #41, spec §3): sem anotacao, o tipo
+			// estatico do RHS vira o tipo declarado — gravado in-place, entao
+			// daqui em diante o caminho e o mesmo de um `let` anotado
+			// (globais de topo ja chegam aqui inferidos por
+			// inferGlobalLetTypes; este ramo cobre os locais e e idempotente).
+			if n.Type == nil {
+				inferred, err := inferLetType(n.Name.Value, valType, n.Token.Line)
+				if err != nil {
+					return nil, nil, err
+				}
+				n.Type = inferred
+			}
 		} else {
 			// Default value — so para tipos que TEM um (issue #61 item 1):
 			// chan e func nao tem, e o null que saia daqui era o unico

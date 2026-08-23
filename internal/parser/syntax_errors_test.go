@@ -24,9 +24,9 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			want:   []string{"SyntaxError: missing 'let' keyword for variable declaration", "hint: use 'let x: ...'"},
 		},
 		{
-			name:   "missing type annotation in let",
-			source: "let x = 5\n",
-			want:   []string{"SyntaxError: missing type annotation for 'x'", "hint: use 'let x: <type> = ...'"},
+			name:   "let without type or initializer",
+			source: "let x\n",
+			want:   []string{"SyntaxError: missing type annotation or initializer for 'x'", "hint: use 'let x: <type>' or 'let x = <value>'"},
 		},
 		{
 			name:   "if without end",
@@ -109,7 +109,7 @@ func TestSyntaxErrorMessages(t *testing.T) {
 // Cada diagnóstico carrega a posição [linha:coluna] do ponto do erro — é o
 // que o usuário usa para achar a linha; garante que a linha não é sempre 1.
 func TestSyntaxErrorsCarryLineAndColumn(t *testing.T) {
-	p := New(lexer.New("let a: int = 1\nlet b: int = 2\nlet x = 5\n"))
+	p := New(lexer.New("let a: int = 1\nlet b: int = 2\nlet x\n"))
 	_ = p.ParseProgram()
 	joined := strings.Join(p.Errors(), "\n")
 	if !strings.HasPrefix(joined, "[3:") {

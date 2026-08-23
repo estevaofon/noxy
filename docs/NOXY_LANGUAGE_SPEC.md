@@ -509,9 +509,51 @@ end
 
 ```noxy
 let name: type = value
+let name = value          // type inferred from the initializer
 ```
 
 Variables can be reassigned, but the new value **MUST** be of the same type as declared.
+
+### Local type inference
+
+When the annotation is omitted, the variable's declared type is the **static
+type of the initializer**, fixed at the declaration exactly as if it had been
+written. Inference is local and one-directional — from the right-hand side to
+the binding, only in `let` — and it does not make the variable dynamic: the
+type-stability rules of §2.0 apply unchanged.
+
+```noxy
+let n = 42                 // n: int
+let name = "Noxy"          // name: string
+let xs = [1, 2, 3]         // xs: int[]   (a dynamic array, not int[3])
+let m = {"a": 1}           // m: map[string, int]
+let p = Point(1, 2)        // p: Point
+let r = ref n              // r: ref int (a borrow, like `let r: ref int = ref n`)
+let y = id(5)              // y: int — the generic instance is inferred first (§6.2)
+
+n = "text"                 // ERROR: type mismatch — n is int
+```
+
+Annotations stay mandatory where they are contract documentation — function
+parameters and return types, struct fields — and where the initializer does
+not have a single type of its own. Each of these is a compile-time error
+(`cannot infer type for 'x' from its initializer: ...`) with a hint showing the
+annotated form:
+
+| Initializer | Why | Write instead |
+|-------------|-----|---------------|
+| `[]`, `{}` (also nested: `[[]]`, `{"a": []}`) | empty literal, no element/key/value type | `let xs: int[] = []`, `let m: map[string, int] = {}` |
+| `null` (also `[null]`) | `null` is a value of the nullable types, not a type | `let p: Point = null` |
+| a call to a `void` function | there is no value to bind | return a value, or annotate |
+| an expression of type `any` | the dynamic boundary must be spelled out (`any` *nested* in a type, such as `map[string, any]`, is an ordinary type and is inferred faithfully) | `let v: any = parse(s)` |
+| a name whose type is not known yet (`let a = b` with `b` declared later) | no static type at that point | annotate, or reorder |
+
+`let x` with neither annotation nor initializer is a syntax error (there is
+nothing to infer); `let x: T` without an initializer keeps the default-value
+rule below. Inferred declarations are ordinary declarations in every other
+respect: a top-level `let x = 10` is visible, typed `int`, to every function in
+the file (including ones declared before it), is exported by the module with
+that type, and the REPL infers line by line (`>>> let x = 10`).
 
 ### Declaration without an initializer
 
@@ -863,9 +905,11 @@ push(ref ints, 20)
 print(peek(ints)) // 20
 ```
 
-This works because every `let` in Noxy already requires a type annotation —
-the language already forces the caller to write the information inference
-needs.
+This is the one place where an annotated `let` carries information the
+arguments do not: with an inferred `let` (§3, `let ints = Stack([])`) there
+is nothing to unify `T` against, and the call is rejected with the usual
+"could not infer T — annotate the type" error. Once the arguments pin `T`
+(`let ints = Stack([1, 2])`), the inferred `let` works like any other.
 
 The declared return type of the enclosing function is the same kind of
 anchor: a generic call in `return` position unifies its return type against
