@@ -295,3 +295,42 @@ func TestRegexSplit(t *testing.T) {
 		t.Fatalf("split = %v, want [a b c]", items)
 	}
 }
+
+func TestRegexQuickIsMatchAndCache(t *testing.T) {
+	machine := New()
+	if !callBuiltin(t, machine, "regex_quick_is_match", value.NewString("[0-9]+"), value.NewString("x1")).Bool() {
+		t.Fatal("quick_is_match = false, want true")
+	}
+	// Segunda chamada com o mesmo padrão usa o cache (mesma instância).
+	first, _ := machine.shared.RegexPatternCache.Load("[0-9]+")
+	callBuiltin(t, machine, "regex_quick_is_match", value.NewString("[0-9]+"), value.NewString("y"))
+	second, _ := machine.shared.RegexPatternCache.Load("[0-9]+")
+	if first == nil || first != second {
+		t.Fatal("padrão não foi cacheado entre chamadas")
+	}
+}
+
+func TestRegexQuickInvalidPatternRaises(t *testing.T) {
+	machine := New()
+	_, err := requireBuiltin(t, machine, "regex_quick_is_match").Invoke(machine,
+		[]value.Value{value.NewString("(unclosed"), value.NewString("x")})
+	if err == nil || !strings.Contains(err.Error(), "missing closing") {
+		t.Fatalf("padrão inválido: err = %v, want mensagem RE2", err)
+	}
+}
+
+func TestRegexQuickFind(t *testing.T) {
+	machine := New()
+	definitions := newRegexTestDefinitions()
+	result := requireBuiltinInstance(t,
+		callBuiltin(t, machine, "regex_quick_find", value.NewString("[0-9]+"),
+			value.NewString("é12"), matchResultTemplate(definitions)),
+		definitions.matchResult)
+	if !result.Fields["ok"].Bool() {
+		t.Fatal("quick_find não casou")
+	}
+	matchInstance := result.Fields["match"].Obj.(*value.ObjInstance)
+	if start := matchInstance.Fields["start"].Int(); start != 1 {
+		t.Fatalf("start = %d, want 1 (runa, não byte)", start)
+	}
+}

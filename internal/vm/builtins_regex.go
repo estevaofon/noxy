@@ -55,6 +55,21 @@ func missedMatchResult(resultTemplate *value.ObjInstance) value.Value {
 	})
 }
 
+// cachedRegex compila e cacheia padrões dos atalhos (regex.matches/search).
+// Regex compilada é imutável e segura entre goroutines, então o cache é
+// global e nunca expira.
+func cachedRegex(machine *VM, pattern string) (*regexp.Regexp, error) {
+	if cached, ok := machine.shared.RegexPatternCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := machine.shared.RegexPatternCache.LoadOrStore(pattern, compiled)
+	return actual.(*regexp.Regexp), nil
+}
+
 func (vm *VM) defineRegexBuiltins() {
 	vm.DefineContextualNative("regex_compile", func(context value.NativeContext, args []value.Value) (value.Value, error) {
 		machine, err := nativeVM(context)
@@ -247,5 +262,52 @@ func (vm *VM) defineRegexBuiltins() {
 			items[index] = value.NewString(part)
 		}
 		return value.NewArray(items), nil
+	})
+
+	vm.DefineContextualNative("regex_quick_is_match", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewBool(false), err
+		}
+		if len(args) != 2 {
+			return value.NewBool(false), fmt.Errorf("regex.matches: expects 2 arguments, got %d", len(args))
+		}
+		compiled, compileErr := cachedRegex(machine, args[0].String())
+		if compileErr != nil {
+			return value.NewBool(false), fmt.Errorf("regex.matches: %s", compileErr.Error())
+		}
+		return value.NewBool(compiled.MatchString(args[1].String())), nil
+	})
+
+	vm.DefineContextualNative("regex_quick_find", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) != 3 {
+			return value.NewNull(), fmt.Errorf("regex.search: expects 3 arguments, got %d", len(args))
+		}
+		resultTemplate, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.search: invalid result template")
+		}
+		matchTemplate, ok := resultTemplate.Fields["match"].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.search: result template missing match instance")
+		}
+		compiled, compileErr := cachedRegex(machine, args[0].String())
+		if compileErr != nil {
+			return value.NewNull(), fmt.Errorf("regex.search: %s", compileErr.Error())
+		}
+		subject := args[1].String()
+		pairs := compiled.FindStringSubmatchIndex(subject)
+		if pairs == nil {
+			return missedMatchResult(resultTemplate), nil
+		}
+		converter := newRuneConverter(subject)
+		return value.NewInstanceWith(resultTemplate.Struct, map[string]value.Value{
+			"ok":    value.NewBool(true),
+			"match": buildMatchInstance(matchTemplate.Struct, subject, pairs, converter),
+		}), nil
 	})
 }

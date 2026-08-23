@@ -64,6 +64,7 @@ type SharedState struct {
 	Databases    *handleRegistry[*DatabaseResource]
 	Statements   *handleRegistry[*StatementResource]
 	Regexes      *handleRegistry[*regexp.Regexp]
+	RegexPatternCache sync.Map // pattern string -> *regexp.Regexp (atalhos regex.matches/search)
 	stateOnce    sync.Once
 	builtinsOnce sync.Once
 
