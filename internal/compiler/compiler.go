@@ -3335,6 +3335,26 @@ func (c *Compiler) emitClosureUpvalues(fnCompiler *Compiler) {
 	}
 }
 
+// paramsUntracked diz se NENHUM parametro pode carregar contador RC: todos sem
+// `ref` e de tipo primitivo escalar/string/bytes (value.Retain e no-op para
+// eles). Com isso o fast path de OP_CALL_STATIC pula o laco ownSlot (issue
+// #66, item 3). Conservador: qualquer outra coisa (any, T[], struct, func,
+// ref, generico) devolve false e a chamada segue por callPreparedClosure.
+func paramsUntracked(params []*ast.Parameter) bool {
+	for _, param := range params {
+		prim, ok := param.Type.(*ast.PrimitiveType)
+		if !ok {
+			return false
+		}
+		switch prim.Name {
+		case "int", "float", "bool", "string", "bytes":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *ast.BlockStatement, returnType ast.NoxyType) (value.Value, *Compiler, error) {
 	restoreBindings := c.applyProgramBindings()
 	defer restoreBindings()
@@ -3385,6 +3405,7 @@ func (c *Compiler) compileFunction(name string, params []*ast.Parameter, body *a
 	upvalueCount := len(fnCompiler.upvalues)
 	fnObj := value.NewFunction(name, len(params), upvalueCount, paramsInfo, fnCompiler.currentChunk, nil)
 	fnObj.Obj.(*value.ObjFunction).RuntimeType = c.runtimeTypeInfo(newFunctionType(params, declaredReturn))
+	fnObj.Obj.(*value.ObjFunction).ParamsUntracked = paramsUntracked(params)
 
 	return fnObj, fnCompiler, nil
 }
