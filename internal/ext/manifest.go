@@ -102,6 +102,9 @@ func ParseManifest(data []byte) (*Manifest, error) {
 		if !strings.HasPrefix(exp.Name, prefix) {
 			return nil, fmt.Errorf("noxy_ext.toml: export %q must start with %q", exp.Name, prefix)
 		}
+		if !manifestNameRE.MatchString(exp.Name) {
+			return nil, fmt.Errorf("noxy_ext.toml: invalid export name %q", exp.Name)
+		}
 		if seen[exp.Name] {
 			return nil, fmt.Errorf("noxy_ext.toml: duplicate export %q", exp.Name)
 		}

@@ -47,6 +47,7 @@ func TestManifestRejects(t *testing.T) {
 	mustFail(t, strings.Replace(validManifest, `"stateless"`, `"parallel"`, 1), "concurrency")
 	mustFail(t, strings.Replace(validManifest, `["bytes", "int"]`, `["ref int"]`, 1), "type")
 	mustFail(t, strings.Replace(validManifest, `name = "zstd"`, `name = "Zstd!"`, 1), "name")
+	mustFail(t, strings.Replace(validManifest, `"zstd_compress"`, `"zstd_Foo-Bar"`, 1), "export")
 	// stateless nao pode declarar export stateful (spec §5)
 	mustFail(t, validManifest+"\n[[export]]\nname = \"zstd_new\"\nparams = [\"int\"]\nreturns = \"int\"\nstateful = true\n", "stateful")
 }
