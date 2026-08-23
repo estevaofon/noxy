@@ -3,6 +3,7 @@ package vm
 import (
 	"bufio"
 	"os"
+	"regexp"
 
 	"noxy-vm/internal/value"
 )
@@ -16,6 +17,7 @@ func (shared *SharedState) initializeState() {
 		shared.Sockets = newSequencedHandleRegistry[*SocketResource](2, 2)
 		shared.Databases = newHandleRegistry[*DatabaseResource]()
 		shared.Statements = newHandleRegistry[*StatementResource]()
+		shared.Regexes = newHandleRegistry[*regexp.Regexp]()
 	})
 }
 
@@ -46,4 +48,5 @@ func (vm *VM) defineBuiltins() {
 	vm.defineNetworkBuiltins()
 	vm.defineSQLiteBuiltins()
 	vm.defineJSONBuiltins()
+	vm.defineRegexBuiltins()
 }

@@ -6,6 +6,7 @@ import (
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/value"
 	"os"
+	"regexp"
 	"sync"
 )
 
@@ -62,6 +63,7 @@ type SharedState struct {
 	Sockets      *handleRegistry[*SocketResource]
 	Databases    *handleRegistry[*DatabaseResource]
 	Statements   *handleRegistry[*StatementResource]
+	Regexes      *handleRegistry[*regexp.Regexp]
 	stateOnce    sync.Once
 	builtinsOnce sync.Once
 

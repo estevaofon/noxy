@@ -71,6 +71,7 @@ func TestBuiltinSourceLayout(t *testing.T) {
 		"builtins_net.go":         {"defineNetworkBuiltins"},
 		"builtins_sqlite.go":      {"defineSQLiteBuiltins"},
 		"builtins_json.go":        {"defineJSONBuiltins"},
+		"builtins_regex.go":       {"defineRegexBuiltins"},
 	}
 	for filename, names := range expected {
 		requireSourceFunctions(t, filename, names...)
