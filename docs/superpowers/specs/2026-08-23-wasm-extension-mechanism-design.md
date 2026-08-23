@@ -159,6 +159,11 @@ byte, little-endian fixed-width scalars, length-prefixed variable data:
 0x08 struct    + string name + u32 count + (field name, value) pairs
 ```
 
+Tag `0x09` is **reserved** for homogeneous packed arrays — `int[]`/`float[]`
+as one contiguous little-endian block with no per-element tag, so a 1M-element
+`int[]` costs one header instead of a tag per element. It is a planned
+additive extension, not part of v1; do not repurpose the tag.
+
 NXB is host-internal vocabulary shared with guest SDKs; it is not exposed to
 Noxy code. Functions, closures, natives, channels, waitgroups, tasks, and
 `ref` values have no encoding and are rejected at the boundary (§3). Nesting
@@ -269,10 +274,11 @@ native: through `callValue` on their own VM, against the shared root
 environment.
 
 **Runaway guests.** Instantiation uses
-`wazero.WithCloseOnContextDone(true)`; each `nx_call` runs under a context
-cancelled on VM teardown, so an infinite loop in a guest cannot outlive the
-program or block exit. No per-call timeout in v1 (a compute call may
-legitimately be slow); a manifest-declared soft deadline is follow-up.
+`wazero.WithCloseOnContextDone(true)`, and each `nx_call` runs under a
+host-side timeout (default 30 s, host-configurable): expiry cancels the
+guest via the context, surfaces as a trap, and poisons the instance — an
+infinite loop in a guest costs one bounded call, not the process. A
+manifest-declared soft deadline (per-extension tuning) remains follow-up.
 
 **Memory bound.** Each instance's linear memory is capped
 (`WithMemoryLimitPages`; host default 64 MB, manifest may request up to a
@@ -501,9 +507,10 @@ Named in the RFC, owned here:
   want pipelining — a `nx_call`-level convention, additive to the ABI.
 - **Soft deadlines per call** (manifest-declared), riding the existing
   context plumbing.
-- **Instance prewarming** — instantiation cost at first `use` (wazero
-  compile-on-load) may be user-visible for large modules; measure in M1,
-  consider compile caching (wazero supports a compilation cache directory).
+- **Instance prewarming** — M1 enables wazero's persistent compilation
+  cache (user cache dir) so repeat runs skip recompilation, and measures
+  cold vs. warm load; remaining instantiation cost at first `use` of a
+  large module is still worth measuring per-extension.
 - **Tier B formalization** — versioned handshake for `sys_load_plugin`,
   msgpack framing, platform-artifact selection in the package manager; its
   own spec, sharing the manifest and `noxy.sum` machinery where possible.

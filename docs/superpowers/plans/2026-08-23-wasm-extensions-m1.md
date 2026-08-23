@@ -689,6 +689,8 @@ func TestManifestRejects(t *testing.T) {
 	mustFail(t, strings.Replace(validManifest, `name = "zstd"`, `name = "Zstd!"`, 1), "name")
 	// stateless nao pode declarar export stateful (spec §5)
 	mustFail(t, validManifest+"\n[[export]]\nname = \"zstd_new\"\nparams = [\"int\"]\nreturns = \"int\"\nstateful = true\n", "stateful")
+	// M1: capabilities declaradas sao rejeitadas (host nao implementa nenhuma)
+	mustFail(t, strings.Replace(validManifest, `abi = 1`, "abi = 1\ncapabilities = [\"net\"]", 1), "capabilities")
 }
 
 func TestManifestTypeVocabulary(t *testing.T) {
@@ -819,6 +821,11 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	}
 	if len(m.Exports) == 0 {
 		return nil, fmt.Errorf("noxy_ext.toml: at least one [[export]] is required")
+	}
+	// M1 nao implementa capability nenhuma: aceitar a declaracao seria
+	// prometer o que o host ignora (revisao do plano, item 6).
+	if len(m.Capabilities) != 0 {
+		return nil, fmt.Errorf("noxy_ext.toml: capabilities are not supported in this phase (M1)")
 	}
 	prefix := m.Name + "_"
 	seen := map[string]bool{}
@@ -1110,8 +1117,9 @@ git commit -m "feat(ext): guest de teste wasip1 e helper de build (issue #78)"
 **Interfaces:**
 - Consumes: `Manifest` (Task 2), `exttest.BuildGuest` (Task 3).
 - Produces (used by Tasks 5–6):
-  - `type LoaderConfig struct { PermittedImports []string }` — extra import module names allowed beyond `"noxy:host/v1"`. Production passes nil (M1: no capabilities). Tests pass `[]string{"wasi_snapshot_preview1"}` for the Go guest; when that name is permitted the loader also instantiates wazero's bundled WASI host module.
-  - `type Module struct` with fields `Manifest *Manifest` (exported) and unexported `runtime`, `compiled`, `mu`, `single`, `pool chan *instance`, `created int`, `maxInstances int`, `failed bool`, `nextID atomic.Uint64`, `limits Limits`.
+  - `type LoaderConfig struct { PermittedImports []string; CallTimeout time.Duration; MaxInstances int }` — extra import module names allowed beyond `"noxy:host/v1"` (production passes nil in M1; tests pass `[]string{"wasi_snapshot_preview1"}` for the Go guest, and when that name is permitted the loader also instantiates wazero's bundled WASI host module); `CallTimeout` bounds each `nx_call` (0 → 30s default); `MaxInstances` bounds the stateless pool (0 → `runtime.NumCPU()`).
+  - `type Module struct` with fields `Manifest *Manifest` (exported) and unexported `runtime`, `compiled`, `mu`, `single`, `pool chan *instance`, `slots chan struct{}` (capacity semaphore, prefilled — see Task 5), `failed bool`, `nextID atomic.Uint64`, `limits Limits`, `callTimeout time.Duration`.
+  - LoadModule also enables wazero's persistent compilation cache (`os.UserCacheDir()/noxy/wazero`), best-effort: without it every `noxy script.nx` recompiles the wasm from scratch.
   - `func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg LoaderConfig) (*Module, error)`
   - `func (m *Module) Close(ctx context.Context) error`
   - unexported `func (m *Module) newInstance(ctx context.Context) (*instance, error)` — instantiate + `_initialize` (if exported) + `nx_abi_version` handshake; `type instance struct { mod api.Module; alloc, free, call api.Function; }`.
@@ -1160,6 +1168,16 @@ returns = "any"
 name = "guest_sha256"
 params = ["bytes"]
 returns = "bytes"
+
+[[export]]
+name = "guest_loop"
+params = []
+returns = "any"
+
+[[export]]
+name = "guest_badtype"
+params = []
+returns = "int"
 `))
 	if err != nil {
 		t.Fatalf("manifest: %v", err)
@@ -1193,6 +1211,20 @@ func TestLoadModuleRejectsWrongABIVersion(t *testing.T) {
 		t.Fatalf("handshake must report both versions, got %v", err)
 	}
 }
+
+// Gate positivo: um modulo sem import NENHUM (o modulo wasm vazio de 8
+// bytes) passa pelo gate e falha adiante, na checagem de exports — prova
+// que o gate nao exige WASI nem host module para um guest limpo.
+func TestLoadModuleImportGatePassesCleanModule(t *testing.T) {
+	emptyWasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+	_, err := LoadModule(context.Background(), emptyWasm, testManifest(t, "single"), LoaderConfig{})
+	if err == nil || strings.Contains(err.Error(), "ungranted") {
+		t.Fatalf("clean module must pass the import gate, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "nx_abi_version") {
+		t.Fatalf("expected missing-export error, got %v", err)
+	}
+}
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**
@@ -1208,9 +1240,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
@@ -1219,8 +1253,16 @@ import (
 
 const hostModuleName = "noxy:host/v1"
 
+const defaultCallTimeout = 30 * time.Second
+
 type LoaderConfig struct {
 	PermittedImports []string
+	// CallTimeout limita cada nx_call (0 → defaultCallTimeout). Um guest em
+	// loop infinito vira trap por cancelamento de contexto, nao um processo
+	// travado sem saida.
+	CallTimeout time.Duration
+	// MaxInstances limita o pool do modo stateless (0 → runtime.NumCPU()).
+	MaxInstances int
 }
 
 type callState struct {
@@ -1240,16 +1282,20 @@ type instance struct {
 type Module struct {
 	Manifest *Manifest
 
-	runtime      wazero.Runtime
-	compiled     wazero.CompiledModule
-	limits       Limits
-	mu           sync.Mutex
-	single       *instance
-	failed       bool
-	pool         chan *instance
-	created      int
-	maxInstances int
-	nextID       atomic.Uint64
+	runtime     wazero.Runtime
+	compiled    wazero.CompiledModule
+	limits      Limits
+	callTimeout time.Duration
+	mu          sync.Mutex
+	single      *instance
+	failed      bool
+	pool        chan *instance
+	// slots e um semaforo de capacidade (buffered, pre-preenchido no load):
+	// release devolve a vaga SEMPRE, inclusive para instancia envenenada —
+	// sem isso, traps com o pool esgotado deixariam goroutinas bloqueadas
+	// para sempre em <-pool (lost wakeup).
+	slots  chan struct{}
+	nextID atomic.Uint64
 }
 
 func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg LoaderConfig) (*Module, error) {
@@ -1257,6 +1303,15 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 	runtimeConfig := wazero.NewRuntimeConfig().
 		WithCloseOnContextDone(true).
 		WithMemoryLimitPages(pages)
+	// Cache de compilacao persistente: sem ele, todo `noxy script.nx`
+	// recompila o .wasm do zero a cada execucao. Falhar ao criar o cache
+	// nao e fatal — o load segue sem cache.
+	if userCache, cacheErr := os.UserCacheDir(); cacheErr == nil {
+		dir := filepath.Join(userCache, "noxy", "wazero")
+		if cache, dirErr := wazero.NewCompilationCacheWithDir(dir); dirErr == nil {
+			runtimeConfig = runtimeConfig.WithCompilationCache(cache)
+		}
+	}
 	r := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
 
 	hostBuilder := r.NewHostModuleBuilder(hostModuleName)
@@ -1312,15 +1367,27 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 		}
 	}
 
+	callTimeout := cfg.CallTimeout
+	if callTimeout == 0 {
+		callTimeout = defaultCallTimeout
+	}
+	maxInstances := cfg.MaxInstances
+	if maxInstances == 0 {
+		maxInstances = runtime.NumCPU()
+	}
 	m := &Module{
-		Manifest:     manifest,
-		runtime:      r,
-		compiled:     compiled,
-		limits:       DefaultLimits(),
-		maxInstances: runtime.NumCPU(),
+		Manifest:    manifest,
+		runtime:     r,
+		compiled:    compiled,
+		limits:      DefaultLimits(),
+		callTimeout: callTimeout,
 	}
 	if manifest.Concurrency == "stateless" {
-		m.pool = make(chan *instance, m.maxInstances)
+		m.pool = make(chan *instance, maxInstances)
+		m.slots = make(chan struct{}, maxInstances)
+		for i := 0; i < maxInstances; i++ {
+			m.slots <- struct{}{}
+		}
 	}
 	// Instancia ansiosa: erros de _initialize/handshake aparecem no load,
 	// nao na primeira chamada.
@@ -1331,7 +1398,6 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 	}
 	if m.pool != nil {
 		m.pool <- first
-		m.created = 1
 	} else {
 		m.single = first
 	}
@@ -1394,12 +1460,15 @@ git commit -m "feat(ext): loader wazero com gate de imports e handshake de ABI (
 
 **Files:**
 - Create: `internal/ext/call.go`
+- Modify: `internal/ext/testdata/guest/main.go` (add fn_index 4 = infinite loop, fn_index 5 = declared-type liar)
 - Test: `internal/ext/call_test.go`
 
 **Interfaces:**
-- Consumes: everything from Tasks 1–4.
+- Consumes: everything from Tasks 1–4 (including `Module.slots`/`Module.callTimeout` from Task 4's LoadModule).
 - Produces (used by Task 6):
-  - `func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (value.Value, error)` — full boundary: acquire instance → encode → alloc/write → `nx_call` → read/decode → declared-return check → release instance. Error strings match spec §6: `extension '<name>' failed: <msg>`, `extension '<name>' trapped: <err>`, `extension '<name>' is poisoned by an earlier trap`, protocol violations name the extension.
+  - `func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (value.Value, error)` — full boundary: acquire instance → encode → alloc/write → `nx_call` under a `context.WithTimeout(ctx, m.callTimeout)` → read/decode → declared-return check → release instance. Error strings match spec §6: `extension '<name>' failed: <msg>`, `extension '<name>' trapped: <err>`, `extension '<name>' is poisoned by an earlier trap`, protocol violations name the extension. A timeout cancels the guest via the context (wazero `WithCloseOnContextDone`) and surfaces as a trap.
+  - Stateless acquire/release uses the `slots` capacity semaphore: acquire takes a slot, then reuses a pooled instance or creates one; release ALWAYS returns the slot, and only non-poisoned instances return to the pool. No `created` counter, no mutex on this path — this is the fix for the lost-wakeup deadlock found in plan review.
+  - Guest fixture gains: fn_index 4 (`guest_loop`: `for {}`, fixture for the timeout test) and fn_index 5 (`guest_badtype`: declared `returns = "int"` in the test manifest but returns a valid NXB string — fixture for the declared-type check).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1411,6 +1480,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/ext/exttest"
 	"noxy-vm/internal/value"
@@ -1498,14 +1568,70 @@ func TestCallStatelessConcurrent(t *testing.T) {
 	}
 }
 
-func TestCallReturnTypeMismatch(t *testing.T) {
+func TestCallProtocolViolation(t *testing.T) {
 	m := loadTestModule(t, "single")
-	// guest_sha256 (fnIndex 3) declara returns = "bytes" e devolve bytes —
-	// ja coberto. guest_echo (fnIndex 0) declara "any" e devolve payload
-	// cru que nao e um valor NXB: vira violacao de protocolo.
+	// guest_echo (fnIndex 0) declara "any" e devolve o payload de args cru,
+	// que nao e um valor NXB unico: violacao de protocolo (o decode falha),
+	// nomeando a extensao. (A checagem de tipo declarado tem teste proprio
+	// abaixo — aqui returns = "any" a pula.)
 	_, err := m.Call(context.Background(), 0, []value.Value{value.NewInt(1)})
 	if err == nil || !strings.Contains(err.Error(), "guest") {
 		t.Fatalf("protocol violation must name the extension, got %v", err)
+	}
+}
+
+func TestCallDeclaredTypeMismatch(t *testing.T) {
+	m := loadTestModule(t, "single")
+	// guest_badtype (fnIndex 5) declara returns = "int" no manifesto mas
+	// devolve uma string NXB valida: checkDeclaredReturn TEM de recusar.
+	_, err := m.Call(context.Background(), 5, nil)
+	if err == nil || !strings.Contains(err.Error(), `declared return type "int"`) {
+		t.Fatalf("declared-type mismatch must be enforced, got %v", err)
+	}
+}
+
+func TestCallTimeoutBecomesTrap(t *testing.T) {
+	m, err := LoadModule(context.Background(), exttest.BuildGuest(t, ""), testManifest(t, "single"),
+		LoaderConfig{PermittedImports: []string{"wasi_snapshot_preview1"}, CallTimeout: 300 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	t.Cleanup(func() { m.Close(context.Background()) })
+	start := time.Now()
+	_, err = m.Call(context.Background(), 4, nil) // guest_loop: for {}
+	if err == nil || !strings.Contains(err.Error(), "trapped") {
+		t.Fatalf("infinite loop must become a trap via context cancellation, got %v", err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatal("timeout did not bound the call")
+	}
+}
+
+func TestCallStatelessTrapDoesNotDeadlock(t *testing.T) {
+	// MaxInstances = 1: o trap fecha a instancia SEM devolve-la ao pool; a
+	// chamada seguinte so avanca se a VAGA (slot) for liberada. Regressao
+	// do lost-wakeup apontado na revisao do plano. Rodar com -race.
+	m, err := LoadModule(context.Background(), exttest.BuildGuest(t, ""), testManifest(t, "stateless"),
+		LoaderConfig{PermittedImports: []string{"wasi_snapshot_preview1"}, MaxInstances: 1})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	t.Cleanup(func() { m.Close(context.Background()) })
+	if _, err := m.Call(context.Background(), 2, nil); err == nil {
+		t.Fatal("trap must error")
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, callErr := m.Call(context.Background(), 3, []value.Value{value.NewBytes("x")})
+		done <- callErr
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("call after trap: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("deadlock: slot was not released after poisoned instance")
 	}
 }
 ```
@@ -1528,8 +1654,10 @@ import (
 )
 
 // acquire devolve uma instancia pronta e a funcao de release. No modo
-// single, serializa por mutex; no stateless, usa o pool (cria ate
-// maxInstances; alem disso bloqueia esperando uma livre).
+// single, serializa por mutex; no stateless, um semaforo de vagas (slots)
+// governa a capacidade: a vaga volta SEMPRE no release — inclusive quando a
+// instancia foi envenenada e fechada — senao um trap com o pool esgotado
+// deixaria goroutinas bloqueadas para sempre (lost wakeup; revisao do plano).
 func (m *Module) acquire(ctx context.Context) (*instance, func(poisoned bool), error) {
 	if m.pool == nil {
 		m.mu.Lock()
@@ -1549,36 +1677,25 @@ func (m *Module) acquire(ctx context.Context) (*instance, func(poisoned bool), e
 		return inst, release, nil
 	}
 
+	<-m.slots // vaga de capacidade; devolvida incondicionalmente no release
 	var inst *instance
 	select {
 	case inst = <-m.pool:
 	default:
-		m.mu.Lock()
-		if m.created < m.maxInstances {
-			m.created++
-			m.mu.Unlock()
-			created, err := m.newInstance(ctx)
-			if err != nil {
-				m.mu.Lock()
-				m.created--
-				m.mu.Unlock()
-				return nil, nil, err
-			}
-			inst = created
-		} else {
-			m.mu.Unlock()
-			inst = <-m.pool
+		created, err := m.newInstance(ctx)
+		if err != nil {
+			m.slots <- struct{}{}
+			return nil, nil, err
 		}
+		inst = created
 	}
 	release := func(poisoned bool) {
 		if poisoned {
 			inst.mod.Close(context.Background())
-			m.mu.Lock()
-			m.created--
-			m.mu.Unlock()
-			return
+		} else {
+			m.pool <- inst
 		}
-		m.pool <- inst
+		m.slots <- struct{}{}
 	}
 	return inst, release, nil
 }
@@ -1597,7 +1714,11 @@ func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (val
 	defer func() { release(poisoned) }()
 
 	state := &callState{}
-	callCtx := context.WithValue(ctx, callStateKey{}, state)
+	// Timeout por chamada: com WithCloseOnContextDone(true) no runtime, o
+	// cancelamento derruba o guest em execucao — um loop infinito vira trap.
+	timedCtx, cancel := context.WithTimeout(ctx, m.callTimeout)
+	defer cancel()
+	callCtx := context.WithValue(timedCtx, callStateKey{}, state)
 
 	argsPtr := uint64(0)
 	if len(encoded) != 0 {
@@ -1617,12 +1738,18 @@ func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (val
 		poisoned = true
 		return value.NewNull(), fmt.Errorf("extension '%s' trapped: %v", name, err)
 	}
-	if len(encoded) != 0 {
-		inst.free.Call(callCtx, argsPtr, uint64(len(encoded)))
+	// Os args so sao liberados DEPOIS de copiar o retorno: liberar antes
+	// funcionaria hoje (o guest nao roda com o host no controle), mas e
+	// fragilidade gratuita — revisao do plano.
+	freeArgs := func() {
+		if len(encoded) != 0 {
+			inst.free.Call(callCtx, argsPtr, uint64(len(encoded)))
+		}
 	}
 
 	packed := results[0]
 	if packed == 0 {
+		freeArgs()
 		if state.failed {
 			return value.NewNull(), fmt.Errorf("extension '%s' failed: %s", name, state.failMsg)
 		}
@@ -1632,12 +1759,14 @@ func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (val
 	retLen := uint32(packed & 0xffffffff)
 	data, ok := inst.mod.Memory().Read(retPtr, retLen)
 	if !ok {
+		freeArgs()
 		return value.NewNull(), fmt.Errorf("extension '%s': result region out of guest memory", name)
 	}
 	// Copia antes do free: data aponta para a memoria linear do guest.
 	owned := make([]byte, len(data))
 	copy(owned, data)
 	inst.free.Call(callCtx, uint64(retPtr), uint64(retLen))
+	freeArgs()
 
 	result, err := DecodeValue(owned, m.limits)
 	if err != nil {
@@ -1711,9 +1840,25 @@ func typeMismatch(declared string) error {
 }
 ```
 
+Also extend the guest fixture — add these cases to the `switch fnIndex` in `internal/ext/testdata/guest/main.go`:
+
+```go
+	case 4: // loop infinito — fixture do teste de timeout de chamada
+		for {
+		}
+	case 5: // NXB string valida com returns declarado "int" (fixture do
+		// teste de checkDeclaredReturn: extensao mentirosa e pega na fronteira)
+		msg := []byte("oops")
+		out := make([]byte, 0, 5+len(msg))
+		out = append(out, 0x04)
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(msg)))
+		out = append(out, msg...)
+		return retBytes(out)
+```
+
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `go test ./internal/ext/ -v` → PASS (including `-race`: `go test ./internal/ext/ -race -run TestCallStatelessConcurrent`). Then `go test ./internal/... -count=1`.
+Run: `go test ./internal/ext/ -v -timeout 120s` → PASS (including `-race`: `go test ./internal/ext/ -race -run 'TestCallStateless' -timeout 120s`). Then `go test ./internal/... -count=1`.
 
 - [ ] **Step 5: Commit**
 
@@ -1998,7 +2143,9 @@ git commit -m "feat(vm): carga de extensões WASM no resolveModule e registro co
   - `type SumFile struct { Entries map[string]string }` — key `"<pkgpath> <filename>"` (pkgpath = `noxy_libs`-relative with forward slashes, e.g. `github_com/acme/zstd`), value `"sha256:<hex>"`.
   - `func ParseSumFile(path string) (*SumFile, error)` (missing file → empty SumFile, no error)
   - `func (s *SumFile) Set(pkg, file, hexDigest string)`, `func (s *SumFile) Lookup(pkg, file string) (string, bool)`, `func (s *SumFile) Save(path string) error` (sorted lines: `<pkg> <file> sha256:<hex>`)
-  - In `manager.go`: after `.git` removal, if `noxy_ext.toml` exists in `targetDir`, hash it and the manifest's wasm file into `noxy.sum` in the cwd.
+  - `func SumFilePath(root string) string` — THE single resolver for where `noxy.sum` lives (`filepath.Join(root, "noxy.sum")`). Writer (pkgmanager) and reader (VM) both go through it; plan review found they resolved different paths (cwd vs RootPath), which made verification silently fall into the no-entry path.
+  - `func RecordExtensionSums(root, targetDir, localPath string) error` — exported so the VM-side integration test can exercise the exact writer the `--get` path uses and prove the keys match.
+  - In `manager.go`: after `.git` removal, call `RecordExtensionSums(".", targetDir, localPath)` — `--get` runs at the project root, the same convention `noxy.mod` already relies on.
   - In `extensions.go`: `verifyExtensionSum` finds `noxy.sum` under `vm.Config.RootPath`; if the file exists **and** has an entry for this package's wasm, compare sha256 and refuse mismatch (`extension artifact mismatch for <pkg>/<file>: noxy.sum has <a>, disk has <b>`); no file or no entry → allow (M1 trust-on-first-use; full policy is the `noxy.sum` spec, spec §15). The package key is `source dir` relative to `<RootPath>/noxy_libs` with forward slashes; a dir outside `noxy_libs` (e.g. stdlib dev layout) skips verification.
 
 - [ ] **Step 1: Write the failing tests**
@@ -2061,7 +2208,34 @@ func TestExtensionSumMismatchRefusesLoad(t *testing.T) {
 		t.Fatalf("sum mismatch must refuse load, got %v", err)
 	}
 }
+
+// Ida-e-volta escritor→leitor: grava via o MESMO RecordExtensionSums do
+// --get, adultera o artefato, e exige que a carga acuse mismatch. So passa
+// se caminho do noxy.sum E formato da chave coincidirem entre pkgmanager e
+// vm (revisao do plano: divergencia cwd/RootPath falhava em silencio).
+func TestExtensionSumRoundTripViaPkgmanager(t *testing.T) {
+	root := t.TempDir()
+	writeExtensionPackage(t, root)
+	pkgDir := filepath.Join(root, "noxy_libs", "guest")
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "ext.wasm"), []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extensionLoaderPermits = []string{"wasi_snapshot_preview1"}
+	t.Cleanup(func() { extensionLoaderPermits = nil })
+
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	code := compileVMSourceAtRoot(t, root, "use guest as g\n")
+	err := machine.Interpret(code)
+	if err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("writer/reader must agree on noxy.sum path and key, got %v", err)
+	}
+}
 ```
+
+(the test file imports `noxy-vm/internal/pkgmanager`.)
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -2130,14 +2304,24 @@ func (s *SumFile) Save(path string) error {
 	sort.Strings(lines)
 	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 }
+
+// SumFilePath e o UNICO resolvedor do caminho do noxy.sum: escrita
+// (pkgmanager) e leitura (vm) passam por aqui — caminhos divergentes fariam
+// a verificacao cair em silencio no ramo "sem entrada" (revisao do plano).
+func SumFilePath(root string) string {
+	return filepath.Join(root, "noxy.sum")
+}
 ```
+
+(add `path/filepath` to sumfile.go imports.)
 
 In `manager.go`, after the `.git` removal block (line ~81), add:
 
 ```go
 	// Artefatos executaveis (extensoes WASM) entram no noxy.sum ao serem
 	// baixados — sem integridade nao ha distribuicao de binarios (spec §8).
-	if err := recordExtensionSums(targetDir, localPath); err != nil {
+	// "--get" roda na raiz do projeto (mesma convencao do noxy.mod).
+	if err := RecordExtensionSums(".", targetDir, localPath); err != nil {
 		fmt.Printf("Warning: failed to record noxy.sum entries: %s\n", err)
 	}
 ```
@@ -2145,7 +2329,7 @@ In `manager.go`, after the `.git` removal block (line ~81), add:
 with:
 
 ```go
-func recordExtensionSums(targetDir, localPath string) error {
+func RecordExtensionSums(root, targetDir, localPath string) error {
 	manifestPath := filepath.Join(targetDir, "noxy_ext.toml")
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -2156,14 +2340,14 @@ func recordExtensionSums(targetDir, localPath string) error {
 	}
 	wasmName := "ext.wasm"
 	for _, line := range strings.Split(string(manifestData), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "wasm") {
-			if _, after, found := strings.Cut(trimmed, "="); found {
-				wasmName = strings.Trim(strings.TrimSpace(after), `"`)
-			}
+		// So a chave exata "wasm" — um prefixo pegaria "wasm_qualquer_coisa"
+		// (revisao do plano).
+		key, after, found := strings.Cut(line, "=")
+		if found && strings.TrimSpace(key) == "wasm" {
+			wasmName = strings.Trim(strings.TrimSpace(after), `"`)
 		}
 	}
-	sums, err := ParseSumFile("noxy.sum")
+	sums, err := ParseSumFile(SumFilePath(root))
 	if err != nil {
 		return err
 	}
@@ -2174,7 +2358,7 @@ func recordExtensionSums(targetDir, localPath string) error {
 		return err
 	}
 	sums.Set(pkg, wasmName, sha256Hex(wasmData))
-	return sums.Save("noxy.sum")
+	return sums.Save(SumFilePath(root))
 }
 
 func sha256Hex(data []byte) string {
@@ -2202,7 +2386,7 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, wasmBytes [
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return nil // fora de noxy_libs (layout de desenvolvimento): sem verificacao
 	}
-	sums, err := pkgmanager.ParseSumFile(filepath.Join(rootAbs, "noxy.sum"))
+	sums, err := pkgmanager.ParseSumFile(pkgmanager.SumFilePath(rootAbs))
 	if err != nil {
 		return err
 	}
@@ -2330,12 +2514,33 @@ func BenchmarkNativeSHA256_1MB(b *testing.B) {
 		sha256.Sum256(payload)
 	}
 }
+
+// Custo de LoadModule com o cache de compilacao persistente quente
+// (revisao do plano: sem cache, todo `noxy script.nx` recompila o wasm —
+// para CLI isso pode dominar scripts curtos). Registre no PR tambem o
+// tempo FRIO: apague o diretorio de cache (os.UserCacheDir()/noxy/wazero),
+// rode uma iteracao, e compare.
+func BenchmarkLoadModuleWarm(b *testing.B) {
+	wasm := exttest.BuildGuest(b, "")
+	manifest := testManifest(b, "single")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		m, err := LoadModule(context.Background(), wasm, manifest,
+			LoaderConfig{PermittedImports: []string{"wasi_snapshot_preview1"}})
+		if err != nil {
+			b.Fatal(err)
+		}
+		m.Close(context.Background())
+	}
+}
 ```
+
+For `testManifest(b, ...)` to work from a benchmark, change its signature (Task 4's test file) from `t *testing.T` to `tb testing.TB` — pre-authorized by the controller's scan ruling; `benchModule` may then also reuse it instead of duplicating the manifest literal.
 
 - [ ] **Step 2: Run and record**
 
 Run: `go test ./internal/ext/ -bench . -benchtime=2s -run XXX`
-Record all three numbers. Compare against the §11 gates. Note: `BenchmarkExtSHA256_1MB` includes NXB copies of the 1 MB payload — that is the honest boundary cost and is what the 3× budget covers. If a gate fails on the dev machine, still record — the gates bind on the CI amd64 runner; flag the numbers in the PR for a decision, do not silently proceed.
+Record all four numbers (round-trip, guest sha256, native sha256, warm load), plus the cold-load time with the wazero cache directory removed. Compare against the §11 gates. Note: `BenchmarkExtSHA256_1MB` includes NXB copies of the 1 MB payload — that is the honest boundary cost and is what the 3× budget covers. If a gate fails on the dev machine, still record — the gates bind on the CI amd64 runner; flag the numbers in the PR for a decision, do not silently proceed.
 
 - [ ] **Step 3: Cross-build check**
 
