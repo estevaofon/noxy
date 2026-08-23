@@ -1,24 +1,115 @@
 [![noxy 0.16.0](https://img.shields.io/badge/noxy-0.16.0-blue)](CHANGELOG.md)
 
-# Noxy VM 🚀
+# Noxy
 
-A complete bytecode virtual machine for the **Noxy** programming language, written in Go. [Official Website.](https://noxylang.com/)
-
-For a complete guide, consult the [NOXY_LANGUAGE_SPEC.md](docs/NOXY_LANGUAGE_SPEC.md).
-For real projects built with the language, see the [Showcase](docs/SHOWCASE.md).
+**A statically typed scripting language where values are copies, sharing is
+explicit, and errors are data.**
 
 <p align="center">
 <img width="200" height="200" alt="noxy" src="https://github.com/user-attachments/assets/acfc226e-f129-43ed-97df-25dda7c97fcf" />
 </p>
 
-## What is Noxy VM?
+Most scripting languages make you guess: did that function mutate my list?
+Is this variable a copy or an alias? Can this call throw? Noxy answers all
+three at the type level — and the compiler speaks first.
 
-Noxy VM is a bytecode compiler and virtual machine for the Noxy language created by Estêvão Fonseca. This implementation compiles source code into bytecode and executes it on a stack-based VM, offering high performance.
+```noxy
+struct Cart
+    items: string[]
+end
 
-Noxy is statically typed, with explicit dynamic boundaries through `any`, bare
-`func`, untyped native primitives, and plugins without signatures. Its
-variables are type-stable: the declared type does not change, while values may
-be mutable.
+func add_free_gift(c: Cart) -> Cart      // c is a copy: the caller's cart is safe
+    append(c.items, "gift")
+    return c
+end
+
+func checkout(c: ref Cart) -> void       // ref: the ONLY way to mutate the caller's value
+    append(c.items, "receipt")
+end
+
+let mine: Cart = Cart(["book"])
+let yours: Cart = mine                   // a copy, not an alias
+append(yours.items, "pen")
+
+let promo: Cart = add_free_gift(mine)    // mine untouched
+checkout(mine)                           // mine changes — and the signature says so
+
+print(mine.items)    // [book, receipt]
+print(yours.items)   // [book, pen]
+print(promo.items)   // [book, gift]
+```
+
+No hidden aliasing, no defensive `.copy()`, no action at a distance. Copies
+are cheap: composites are copy-on-write, so a "copy" costs nothing until
+someone actually writes to it.
+
+[Language spec](docs/NOXY_LANGUAGE_SPEC.md) ·
+[Showcase](docs/SHOWCASE.md) ·
+[Website](https://noxylang.com/)
+
+## Three rules
+
+**1. Variables are values.** Assigning, passing, or returning a struct, array
+or map gives you an independent value — at any depth. `ref` is the single,
+visible mechanism for sharing, and it is part of the type.
+
+```noxy
+func push(xs: int[])       // cannot touch the caller's array
+func push(xs: ref int[])   // can — and the signature says so
+```
+
+**2. Errors are values, not exceptions.** A failure that indicates a bug
+raises and stops the program. A failure that is *expected* — bad input, wire
+data — is data you branch on. Nothing flies past you silently.
+
+```noxy
+use errors select *
+
+let r: CallResult = call_result(to_int, input)
+if r.ok then
+    print(r.value)
+else
+    print("bad input: " + r.failure.message)
+end
+```
+
+**3. Dynamic is explicit.** Static typing everywhere; when you need a dynamic
+hole — `any`, a bare `func`, a plugin — you write it down. Generics are
+monomorphized at compile time and always inferred, so the type system costs
+nothing at runtime.
+
+```noxy
+let n: int = 42
+n = "text"                    // compile error: expected int, got string
+
+let loose: any = 42           // the dynamic hole is spelled out...
+loose = "now a string"        // ...and only there does the type move
+
+func first<T>(arr: T[]) -> T
+    return arr[0]
+end
+print(first([3, 1, 2]))       // first<int>, resolved at compile time
+print(first(["b", "a"]))      // first<string> — no runtime dispatch
+```
+
+## What this buys you
+
+- **Concurrency without data races by construction** — data handed to a
+  routine by argument or channel is an independent value. Only `ref` and
+  globals need coordination, and both are visible in the code.
+  ([docs/CONCURRENCY.md](docs/CONCURRENCY.md))
+- **Refactoring you can trust** — a function's signature tells you exactly
+  what it can mutate and how it can fail.
+- **One rule, everywhere** — file, module, and REPL behave the same.
+
+Noxy compiles to bytecode and runs on a stack-based VM written in Go. The
+core is deliberately small — structs, arrays, maps, closures, generics,
+routines and channels, `defer` — and the standard library covers the usual
+scripting ground (io, net, http, sqlite, json, strings, crypto, time) plus a
+[package manager](docs/PACKAGE_MANAGER.md). Performance today sits around
+CPython for call-heavy code and is
+[measured against every release](benchmarks/RESULTS.md) — without changing
+semantics.
 
 ### The Zen of Noxy
 
@@ -341,10 +432,11 @@ The compiler generates bytecode that can be visualized:
 
 ## Performance
 
-The bytecode VM offers high performance, especially for:
-- Intensive loops
-- Recursive function calls
-- Operations with large arrays
+Measured, not promised: every release is benchmarked against the previous
+one and against CPython, Lua and Go on the same machine, with an interleaved
+protocol — see [benchmarks/RESULTS.md](benchmarks/RESULTS.md). As of 0.16.0,
+call-heavy code (`fib`) runs at about 1.2x CPython and arithmetic loops at
+about 1.06x; performance work never changes language semantics.
 
 ## License
 
@@ -352,4 +444,4 @@ MIT License
 
 ---
 
-*Bytecode implementation of the Noxy language in Go.*
+*Noxy — values are copies, sharing is `ref`, errors are data. Implemented in Go.*
