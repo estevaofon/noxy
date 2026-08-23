@@ -84,6 +84,12 @@ func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (val
 		}
 		argsPtr = results[0]
 		if !inst.mod.Memory().Write(uint32(argsPtr), encoded) {
+			// nx_alloc devolveu um ponteiro que a propria memoria do guest nao
+			// sustenta: o alocador esta mentindo, o que e equivalente a um trap.
+			// Envenena para nao devolver ao pool uma instancia com estado de
+			// alocador inconsistente (a entrada de argsPtr fica orfa, mas isso
+			// deixa de importar — a instancia nunca mais e reusada).
+			poisoned = true
 			return value.NewNull(), fmt.Errorf("extension '%s': nx_alloc returned an out-of-memory region", name)
 		}
 	}
