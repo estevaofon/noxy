@@ -3,6 +3,125 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.15.1 (c1cc12a) × protocolo de chamada — v0.15.2 (perf/issue-66-call-protocol, 868d435)
+
+**Data:** 2026-08-22 · Windows 11 · Intel Core 7 150U (mesma máquina do item
+2; só o delta intra-sessão é comparável com as seções de item 1/fase 2) ·
+Python 3.14.7 · Lua 5.4.6 · Go 1.26.6 · pwsh 7.6.5 · protocolo intercalado,
+mediana de 9 (headline), mediana de 11 (A/B por estágio, quatro binários na
+mesma janela), mínimo de 9 no cross-runtime, `-count 8` no bench Go. Máquina
+sem `go test` nem build durante as medições; CPU 0–21 % no início de cada
+passo. Dados brutos, perfis e carga por passo em
+[`results/2026-08-22-issue-66-call-protocol-raw.md`](results/2026-08-22-issue-66-call-protocol-raw.md).
+Spec: `docs/superpowers/specs/2026-08-22-vm-perf-issue-66-call-protocol-design.md`
+(issue #66, item 3).
+
+O que mudou: **(d)** `OP_RETURN` com fast path quando o frame não tem `defer`,
+não tem vínculo RC (`Owned` vazio), não há upvalue aberto e o frame de baixo
+ainda pertence ao `run()` corrente — `popSimpleFrame` em `unwind.go` (o guard
+de arquitetura exige teardown terminal só lá) faz o mesmo teardown sem a
+cópia dupla de `frameOutcome` nem a segunda chamada; **(a)+(b)** `OP_CALL_STATIC`
+com fast path inline quando o callee é closure com `ParamsUntracked` (flag nova
+do `ObjFunction`, calculada pelo compilador: todo parâmetro sem `ref` e de tipo
+`int/float/bool/string/bytes`) e aridade certa — capacidade conferida à mão
+(`ensureCallCapacity` custa 80 e não cabe em `run()`), frame montado sem o
+laço `ownSlot`; **(c)** duas superinstruções por append em `chunk.go`,
+emitidas em nível de AST: `OP_GET_LOCAL_ADD_IMM_INT [slot][imm i8]` (`n - 1`,
+`i + 2` como expressão) e `OP_GET_LOCAL_2 [a][b]` (`a + b`, `i < n` — também
+na condição fundida de `while`). O "(a) literal" da issue (pular o lookup de
+global do callee com operando de constante) ficou de fora: era 1,6 % do perfil
+de base. Caminhos lentos, `OP_CALL`, RC e mensagens de erro intocados.
+
+**Verificação completa:** `go test ./...` verde (12 pacotes); `go test -race
+./internal/value ./internal/vm` verde; **corpus 177/177**; **diff de saída
+base × head: 146 iguais, 0 divergentes**; guards de inline inalterados
+(`popSimpleFrame` custa 60 — uma chamada real, de propósito); guard de
+arquitetura de teardown verde.
+
+### Achado da rodada (custou um commit a mais)
+
+A primeira medição por estágio deu **s1 ≈ s0** apesar de o perfil atribuir
+12 % ao lado da chamada: `OP_CLOSURE`/`OP_CONSTANT`/`OP_CONSTANT_LONG` copiam o
+`ObjFunction` campo a campo e **perderam `ParamsUntracked`** — o fast path
+nunca disparava, e nenhum teste funcional pega isso (o caminho lento é
+correto). Fix em 868d435 com `TestClosureKeepsParamsUntracked`, que pergunta
+ao valor da closure. Lição: flag novo em `ObjFunction` precisa de teste pelo
+**valor em runtime**, não pelo constant do chunk.
+
+### Headline — base × head (`interleaved_compare.ps1 -Runs 9`)
+
+| bench | v0151_ms | call_ms | delta | veredito |
+|---|---|---|---|---|
+| bench_bubblesort | 776,9 | 694,1 | **−10,7 %** | ✅ `OP_GET_LOCAL_2` em `j < n - i - 1`/`a[j] > a[j+1]` |
+| bench_spawn_sum | 398,8 | 369,8 | **−7,3 %** | ✅ chamadas com parâmetro `int` |
+| bench_generic_vs_hand | 456,6 | 448,7 | −1,7 % | ✅ sentinela de `run()`: sem regressão de codegen |
+| bench_call_light | 19,9 | 19,7 | −1,0 % | ➖ piso¹ (gate CoW ok) |
+| bench_typed_call_map | 22,3 | 22,5 | +0,9 % | ➖ piso¹ (gate CoW ok) |
+| bench_path_update | 229,8 | 231,8 | +0,9 % | ➖ ruído |
+| bench_call_readonly | 531,3 | 537,4 | +1,1 % | ➖ parâmetro `int[]` → caminho lento, como desenhado |
+| bench_call_ref | 1137,1 | 1149,9 | +1,1 % | ➖ idem (`ref int[]`) |
+| bench_conway | 1253,2 | 1275,3 | +1,8 % | ✅ gate CoW (≤ +5 %) |
+| bench_share_mutate | 100,6 | 103,3 | +2,7 % | ✅ gate CoW |
+| bench_map_churn | 194,3 | 200,1 | +3,0 % | ➖ ruído (cross `map_churn` +5 %, ver abaixo) |
+| bench_value_call_mutate | 21,1 | 21,2 | +0,5 % | ➖ piso¹ |
+
+¹ ~20 ms com piso de processo ~10 ms: não decidem nada.
+
+### A/B por estágio — quatro binários intercalados (mediana de 11, parede; piso 10 ms)
+
+`s0` = (d) retorno · `s1` = + (a/b) chamada (com o fix do flag) · `call` =
+head (+ (c) superinstruções).
+
+| bench | base | s0 | s1 | head | s0 vs base | s1 vs s0 | head vs s1 | **head vs base** |
+|---|---|---|---|---|---|---|---|---|
+| `cross_runtime/fib` | 203,4 | 161,1 | 149,5 | **122,0** | −20,8 % | −7,2 % | −18,4 % | **−40,0 %** (líquido −42 %) |
+| `cross_runtime/bubblesort` | 133,3 | 132,7 | 133,8 | **118,9** | −0,5 % | +0,8 % | −11,1 % | **−10,8 %** |
+| `cross_runtime/loop_arith` | 213,3 | 214,5 | 220,5 | 216,2 | +0,6 % | +2,8 % | −2,0 % | +1,4 % (ruído) |
+
+### Cross-runtime (mínimo de 9, intercalado com CPython 3.14.7 / Lua 5.4.6 / Go 1.26.6)
+
+Tempo líquido (descontado o piso de `startup`, ~9,5 ms nos dois Noxy); tabela
+completa em [`cross_runtime/results/cross_runtime.md`](cross_runtime/results/cross_runtime.md).
+
+| bench | v0.15.1 | v0.15.2 | v0.15.2 ÷ v0.15.1 | ÷ python (antes → agora, esta máquina) | ÷ lua |
+|---|---|---|---|---|---|
+| `fib` | 185,1 | **105,4** | **0,57x** | 2,0x → **1,16x** | 4,4x → **2,5x** |
+| `bubblesort` | 117,1 | **106,8** | **0,91x** | 1,7x → **1,55x** | – |
+| `string_ops` | 73,7 | 69,0 | 0,94x | 2,3x → 2,2x | – |
+| `loop_arith` | 193,7 | 194,7 | 1,01x | 1,06x → 1,06x | 5,0x |
+| `mandelbrot` | 132,9 | 133,5 | 1,00x | 1,8x → 1,8x | – |
+| `map_churn` | 112,3 | 117,5 | 1,05x | 2,0x → 2,1x | – |
+
+**`BenchmarkNoxyCallOverhead`** (`-count 8`, mediana): 73 762 → **53 076 ns/op
+(−28,0 %)**, 560 B/op e 10 allocs/op nos dois — meta da issue (≥ −25 %) ✅.
+
+### Leitura
+
+**A meta da issue ("`fib` 2,9x → ~2x do CPython; `BenchmarkNoxyCallOverhead`
+≥ −25 %") confirma com folga: `fib` 0,57x de v0.15.1 (−42 % líquido), 1,16x do
+CPython nesta máquina; bench Go −28 %.** A decomposição por estágio diz onde
+estava o custo: o **retorno** (s0: −21 %) era o maior item — `finishFrame` +
+`finalizeCurrentFrame` eram 24 % do perfil por causa da cópia dupla de
+`frameOutcome` e das duas chamadas, não dos laços (vazios em `fib`); a
+**chamada** (s1: −7 %) pagava `callValueStatic` → `callPreparedClosure` →
+`ownSlot` por parâmetro; as **superinstruções** (−18 % sobre s1) tiram 4 dos
+15 despachos por chamada não-folha de `fib` e são o que move `bubblesort`
+(−11 %, `j < n - i - 1`). `loop_arith` não mexe: o laço compara `i < 5000000`
+(literal, sem par de locais) e o corpo já usa `OP_INC_LOCAL_INT`.
+
+**O que resta em `fib` (perfil do head):** despacho puro (`run` 60 % flat,
+11 opcodes por chamada não-folha), `push`/`pop` 17 %, `popSimpleFrame` 6 % e —
+agora visível — o lookup cacheado do callee em `OP_GET_GLOBAL` (`Generation()`
+atômico + compare de entrada, ~12 %). Esse último é exatamente o "(a) literal"
+da issue que ficou de fora por ser 1,6 % na base; com o protocolo cortado
+virou o próximo candidato (callee in-module resolvido em compilação, ou
+`GET_GLOBAL + CALL_STATIC` fundido).
+
+**Gates CoW (≤ +5 %):** `conway` +1,8 %, `share_mutate` +2,7 %,
+`typed_call_map` +0,9 %, `call_light` −1,0 % — verdes. Sentinela
+`bench_generic_vs_hand` −1,7 %: os dois blocos inline novos em `run()` não
+pioraram o codegen do laço (o risco real desta rodada, lição do item 1).
+
 ## v0.15.0 (73cf11a) × strings: fast path ASCII + `to_str(int)` — v0.15.1 (perf/issue-66-string-ascii-fastpath, 0bc9e5d)
 
 **Data:** 2026-08-22 · Windows 11 · **Intel Core 7 150U** (máquina diferente das
