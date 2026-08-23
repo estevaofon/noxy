@@ -268,7 +268,10 @@ func TestRegexFindAllEmpty(t *testing.T) {
 	if !result.Fields["ok"].Bool() {
 		t.Fatal("find_all sem matches deve devolver ok=true com array vazio")
 	}
-	matches := result.Fields["matches"].Obj.(*value.ObjArray)
+	matches, ok := result.Fields["matches"].Obj.(*value.ObjArray)
+	if !ok {
+		t.Fatalf("matches should be ObjArray: %#v", result.Fields["matches"])
+	}
 	if len(matches.Elements) != 0 {
 		t.Fatalf("matches = %d itens, want 0", len(matches.Elements))
 	}
@@ -357,6 +360,8 @@ test_report([
     length(parts),
     quick,
     bad.ok,
+    regex.is_match(re, "12-34"),
+    regex.search("[0-9]+", "é12").ok,
     regex.free(re) == null
 ])`)
 	array, ok := captured.Obj.(*value.ObjArray)
@@ -381,6 +386,8 @@ test_report([
 		{8, func(v value.Value) bool { return v.Int() == 3 }, "split count"},
 		{9, func(v value.Value) bool { return v.Bool() }, "matches atalho"},
 		{10, func(v value.Value) bool { return !v.Bool() }, "compile inválido ok=false"},
+		{11, func(v value.Value) bool { return v.Bool() }, "is_match wrapper"},
+		{12, func(v value.Value) bool { return v.Bool() }, "search wrapper"},
 	}
 	for _, want := range wants {
 		if !want.check(array.Elements[want.index]) {

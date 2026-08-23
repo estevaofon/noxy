@@ -2386,7 +2386,7 @@ an error: `find` returns `ok=false` with an empty `match`.
 | `find_all(re, s) -> MatchesResult` | Every non-overlapping match, left to right |
 | `replace(re, s, replacement) -> string` | Replaces every match; `$1`, `$2`, `${name}` expand (Go `ReplaceAllString`) |
 | `split(re, s) -> string[]` | Splits `s` around every match |
-| `matches(pattern, s) -> bool` | Shortcut: compiles with an internal cache; invalid pattern is a runtime error |
+| `matches(pattern, s) -> bool` | Shortcut: compiles with an internal per-process cache that is never evicted — prefer `compile` for dynamically built patterns; invalid pattern is a runtime error |
 | `search(pattern, s) -> MatchResult` | Shortcut form of `find` |
 
 ```noxy
