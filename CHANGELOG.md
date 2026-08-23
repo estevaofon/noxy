@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.15.2] - 2026-08-22
+
+Protocolo de chamada (issue #66, item 3 do roadmap pós-fase 2). Nenhuma
+mudança de sintaxe, semântica, saída, mensagem de erro ou contagem RC; dois
+opcodes novos por append ao fim de `internal/chunk/chunk.go`. Corpus 177/177 e
+diff de saída base × head sem divergência. Números em `benchmarks/RESULTS.md`
+(seção do topo) e `benchmarks/results/2026-08-22-issue-66-call-protocol-raw.md`.
+
+### Performance
+
+- **Retorno com fast path** (`OP_RETURN`): frame sem `defer`, sem vínculo RC
+  registrado, sem upvalue aberto e acima do `minFrameCount` do `run()` corrente
+  passa por `popSimpleFrame` (`unwind.go`) — o mesmo teardown terminal, sem a
+  cópia dupla de `frameOutcome` nem a segunda chamada. Era o maior termo do
+  perfil de `fib` (24 %).
+- **Chamada com fast path** (`OP_CALL_STATIC`): callee closure com
+  `ParamsUntracked` (flag nova em `ObjFunction`, calculada pelo compilador —
+  todo parâmetro sem `ref` e de tipo `int/float/bool/string/bytes`) e aridade
+  certa monta o frame inline, sem `callValueStatic`/`callPreparedClosure` nem o
+  laço `ownSlot`; capacidade conferida à mão, `growForCall` continua o único
+  dono das mensagens de overflow. Qualquer outro callee segue o caminho atual.
+- **Superinstruções** emitidas em nível de AST: `OP_GET_LOCAL_ADD_IMM_INT
+  [slot][imm i8]` para `local ± K` como expressão (`fib(n - 1)`) e
+  `OP_GET_LOCAL_2 [a][b]` para `local OP local` (`a + b`, `i < n`, inclusive
+  na condição fundida de `while`); só local plano de tipo primitivo, nunca
+  `ref`/upvalue/global.
+- **Resultado (v0.15.1 × v0.15.2, mesma máquina, intercalado):** cross-runtime
+  `fib` **185,1 → 105,4 ms líquidos (0,57x; ÷ CPython 2,0x → 1,16x; ÷ Lua
+  4,4x → 2,5x)**, `bubblesort` 0,91x (1,7x → 1,55x); `bench_bubblesort` −10,7 %,
+  `bench_spawn_sum` −7,3 %; `BenchmarkNoxyCallOverhead` **−28 %** (meta ≥ −25 %);
+  demais benches ±3 %, gates CoW verdes, sentinela `bench_generic_vs_hand`
+  −1,7 %. Por estágio em `fib`: retorno −21 %, chamada −7 %, superinstruções
+  −18 %.
+
+### Corrigido
+
+- `OP_CLOSURE`/`OP_CONSTANT`/`OP_CONSTANT_LONG` copiam o `ObjFunction` ao
+  vincular ao ambiente e perdiam o flag novo — o fast path de chamada nunca
+  disparava (sem efeito funcional); `TestClosureKeepsParamsUntracked` trava
+  pelo valor da closure.
+
 ## [0.15.1] - 2026-08-22
 
 Strings: fast path ASCII e `to_str(int)` sem `fmt` (issue #66, item 2 do
