@@ -334,3 +334,57 @@ func TestRegexQuickFind(t *testing.T) {
 		t.Fatalf("start = %d, want 1 (runa, não byte)", start)
 	}
 }
+
+func TestRegexModuleIntegration(t *testing.T) {
+	captured := captureVMSource(t, `use regex
+
+let comp: regex.CompileResult = regex.compile("([0-9]+)-([0-9]+)")
+let ok1: bool = comp.ok
+let re: regex.Regex = comp.regex
+
+let m: regex.MatchResult = regex.find(re, "aé🙂 12-34")
+let all: regex.MatchesResult = regex.find_all(re, "1-2 e 3-4")
+let swapped: string = regex.replace(re, "12-34", "$2/$1")
+let parts: string[] = regex.split(regex.compile(", *").regex, "a, b,  c")
+let quick: bool = regex.matches("^a", "abc")
+let bad: regex.CompileResult = regex.compile("(unclosed")
+
+test_report([
+    ok1,
+    m.ok, m.match.text, m.match.start, m.match.end_idx, m.match.groups[1],
+    length(all.matches),
+    swapped,
+    length(parts),
+    quick,
+    bad.ok,
+    regex.free(re) == null
+])`)
+	array, ok := captured.Obj.(*value.ObjArray)
+	if !ok {
+		t.Fatalf("test_report não recebeu array: %#v", captured)
+	}
+	// Nota: regex.free devolve void; `== null` só força o uso — o item 11
+	// existe para o wrapper ser exercitado, o valor não é verificado.
+	wants := []struct {
+		index int
+		check func(value.Value) bool
+		label string
+	}{
+		{0, func(v value.Value) bool { return v.Bool() }, "compile.ok"},
+		{1, func(v value.Value) bool { return v.Bool() }, "find.ok"},
+		{2, func(v value.Value) bool { return v.String() == "12-34" }, "match.text"},
+		{3, func(v value.Value) bool { return v.Int() == 4 }, "match.start em runas"},
+		{4, func(v value.Value) bool { return v.Int() == 9 }, "match.end_idx em runas"},
+		{5, func(v value.Value) bool { return v.String() == "12" }, "groups[1]"},
+		{6, func(v value.Value) bool { return v.Int() == 2 }, "find_all count"},
+		{7, func(v value.Value) bool { return v.String() == "34/12" }, "replace"},
+		{8, func(v value.Value) bool { return v.Int() == 3 }, "split count"},
+		{9, func(v value.Value) bool { return v.Bool() }, "matches atalho"},
+		{10, func(v value.Value) bool { return !v.Bool() }, "compile inválido ok=false"},
+	}
+	for _, want := range wants {
+		if !want.check(array.Elements[want.index]) {
+			t.Fatalf("%s: item %d = %#v", want.label, want.index, array.Elements[want.index])
+		}
+	}
+}

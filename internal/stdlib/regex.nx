@@ -1,0 +1,84 @@
+// internal/stdlib/regex.nx
+// Módulo regex para Noxy — motor RE2 (Go regexp): tempo linear garantido,
+// sem lookahead/lookbehind/backreferences.
+// TODOS os índices (start, end_idx, group_starts, group_ends) são em RUNAS,
+// exclusivos no fim — compõem com strings.substring e length (spec §12).
+
+struct Regex
+    handle: int
+    pattern: string
+end
+
+struct CompileResult
+    ok: bool
+    regex: Regex
+    error: string
+end
+
+// Um match: groups[0] é o match inteiro; grupo que não participou vem ""
+// com group_starts/group_ends -1.
+struct Match
+    text: string
+    start: int
+    end_idx: int
+    groups: string[]
+    group_starts: int[]
+    group_ends: int[]
+end
+
+// "Não casou" não é erro: ok=false e match vazio.
+struct MatchResult
+    ok: bool
+    match: Match
+end
+
+struct MatchesResult
+    ok: bool
+    matches: Match[]
+end
+
+// --- Compilação explícita (recomendada em loops) ---
+
+func compile(pattern: string) -> CompileResult
+    return regex_compile(pattern, CompileResult(false, Regex(0, ""), ""))
+end
+
+func free(re: Regex) -> void
+    regex_free(re)
+end
+
+// --- Operações sobre Regex compilada ---
+// Handle inválido/liberado é bug do programa: erro de runtime (capturável
+// com call_result), não resultado.
+
+func is_match(re: Regex, s: string) -> bool
+    return regex_is_match(re, s)
+end
+
+func find(re: Regex, s: string) -> MatchResult
+    return regex_find(re, s, MatchResult(false, Match("", -1, -1, [], [], [])))
+end
+
+func find_all(re: Regex, s: string) -> MatchesResult
+    return regex_find_all(re, s, MatchesResult(false, []), Match("", -1, -1, [], [], []))
+end
+
+// replacement suporta $1, $2, ${name} (sintaxe ReplaceAllString do Go).
+func replace(re: Regex, s: string, replacement: string) -> string
+    return regex_replace(re, s, replacement)
+end
+
+func split(re: Regex, s: string) -> string[]
+    return regex_split(re, s)
+end
+
+// --- Atalhos com padrão em string (cache interno; padrão inválido é
+// erro de runtime com a mensagem do RE2) ---
+
+func matches(pattern: string, s: string) -> bool
+    return regex_quick_is_match(pattern, s)
+end
+
+func search(pattern: string, s: string) -> MatchResult
+    return regex_quick_find(pattern, s, MatchResult(false, Match("", -1, -1, [], [], [])))
+end
