@@ -273,3 +273,25 @@ func TestRegexFindAllEmpty(t *testing.T) {
 		t.Fatalf("matches = %d itens, want 0", len(matches.Elements))
 	}
 }
+
+func TestRegexReplace(t *testing.T) {
+	machine := New()
+	definitions := newRegexTestDefinitions()
+	regexInstance := compileRegexForTest(t, machine, definitions, "([0-9]+)-([0-9]+)")
+	got := callBuiltin(t, machine, "regex_replace", regexValueFor(regexInstance),
+		value.NewString("a 12-34 b 5-6"), value.NewString("$2/$1"))
+	if got.String() != "a 34/12 b 6/5" {
+		t.Fatalf("replace = %q, want \"a 34/12 b 6/5\"", got.String())
+	}
+}
+
+func TestRegexSplit(t *testing.T) {
+	machine := New()
+	definitions := newRegexTestDefinitions()
+	regexInstance := compileRegexForTest(t, machine, definitions, ", *")
+	got := callBuiltin(t, machine, "regex_split", regexValueFor(regexInstance),
+		value.NewString("a,  b, c"))
+	if items := stringArrayFields(t, got); len(items) != 3 || items[0] != "a" || items[1] != "b" || items[2] != "c" {
+		t.Fatalf("split = %v, want [a b c]", items)
+	}
+}

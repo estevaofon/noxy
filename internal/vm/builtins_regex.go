@@ -205,4 +205,47 @@ func (vm *VM) defineRegexBuiltins() {
 			"matches": value.NewArray(matchValues),
 		}), nil
 	})
+
+	vm.DefineContextualNative("regex_replace", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) != 3 {
+			return value.NewNull(), fmt.Errorf("regex.replace: expects 3 arguments, got %d", len(args))
+		}
+		instance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.replace: first argument must be a Regex")
+		}
+		compiled, valid := regexFromInstance(machine, instance)
+		if !valid {
+			return value.NewNull(), fmt.Errorf("regex.replace: invalid regex handle %d", instance.Fields["handle"].Int())
+		}
+		return value.NewString(compiled.ReplaceAllString(args[1].String(), args[2].String())), nil
+	})
+
+	vm.DefineContextualNative("regex_split", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) != 2 {
+			return value.NewNull(), fmt.Errorf("regex.split: expects 2 arguments, got %d", len(args))
+		}
+		instance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.split: first argument must be a Regex")
+		}
+		compiled, valid := regexFromInstance(machine, instance)
+		if !valid {
+			return value.NewNull(), fmt.Errorf("regex.split: invalid regex handle %d", instance.Fields["handle"].Int())
+		}
+		parts := compiled.Split(args[1].String(), -1)
+		items := make([]value.Value, len(parts))
+		for index, part := range parts {
+			items[index] = value.NewString(part)
+		}
+		return value.NewArray(items), nil
+	})
 }
