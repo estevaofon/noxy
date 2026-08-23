@@ -1,0 +1,168 @@
+// Inferencia local de tipo em `let` - exemplo completo (noxy >= 0.17.0, spec secao 3)
+//
+// `let x = expr` sem anotacao binda x com o TIPO ESTATICO do lado direito.
+// A variavel continua type-stable: e exatamente como se o tipo tivesse sido
+// escrito. Inferencia e local e unidirecional (RHS -> binding), so em `let`:
+// parametros, retornos e campos de struct seguem anotados - sao contrato.
+//
+// O programa abaixo e um pequeno relatorio de estoque escrito quase sem
+// anotacoes; os comentarios dizem o tipo que o compilador inferiu.
+
+use strings select repeat, pad_left
+
+struct Produto
+    nome: string
+    preco: float
+    qtd: int
+end
+
+// ---------------------------------------------------------------------------
+// 1. Globais inferidos - visiveis, com o tipo certo, em qualquer funcao do
+//    arquivo (inclusive nas declaradas ANTES do `let`, via pre-declaracao).
+// ---------------------------------------------------------------------------
+
+func registrar_venda(nome: string, qtd: int) -> void
+    // `vendas` e declarado mais abaixo, mas aqui ja e map[string, int]
+    if has_key(vendas, nome) then
+        vendas[nome] = vendas[nome] + qtd
+    else
+        vendas[nome] = qtd
+    end
+    total_vendido = total_vendido + qtd
+end
+
+let loja = "Mercadinho Noxy"                  // string
+let taxa = 0.08                               // float
+let total_vendido = 0                         // int
+let vendas = {"cafe": 2}                      // map[string, int]
+let estoque = [                               // Produto[] (array dinamico)
+    Produto("cafe", 18.5, 10),
+    Produto("leite", 5.25, 0),
+    Produto("pao", 0.75, 40),
+    Produto("queijo", 32.0, 3)
+]
+
+// ---------------------------------------------------------------------------
+// 2. Funcoes: assinaturas anotadas (contrato), corpo inferido
+// ---------------------------------------------------------------------------
+
+func primeiro<T>(xs: T[]) -> T
+    return xs[0]
+end
+
+func valor_em_estoque(ps: Produto[]) -> float
+    let soma = 0.0                            // float
+    for p in ps do                            // p: Produto (ja era assim)
+        soma = soma + p.preco * to_float(p.qtd)
+    end
+    return soma
+end
+
+func em_falta(ps: Produto[]) -> string[]
+    let nomes: string[] = []                  // literal vazio: anotacao obrigatoria
+    for p in ps do
+        if p.qtd == 0 then
+            append(nomes, p.nome)
+        end
+    end
+    return nomes
+end
+
+func linha(nome: string, preco: float, qtd: int) -> string
+    let preco_fmt = fmt("%.2f", preco)        // fmt e builtin central: string
+    let qtd_fmt = pad_left(to_str(qtd), 3, " ")   // `use m select f` mantem o tipo: string
+    return fmt("  %-8s R$ %7s  x %s", nome, preco_fmt, qtd_fmt)
+end
+
+func main()
+    // --- primitivos ---------------------------------------------------------
+    let titulo = "Relatorio - " + loja        // string
+    let largura = length(titulo) + 4          // length e builtin central: int
+    let barra = repeat("=", largura)          // string
+    let aberto = total_vendido >= 0           // bool
+
+    print(barra)
+    print("  " + titulo)
+    print(barra)
+
+    // --- composicao: arrays, structs, builtins tipados ---------------------
+    let itens = length(estoque)               // int
+    let destaque = primeiro(estoque)          // generico: primeiro<Produto> -> Produto
+    let faltando = em_falta(estoque)          // string[]
+    let valor = valor_em_estoque(estoque)     // float
+
+    print(f"Itens cadastrados: {itens}")
+    print(f"Primeiro item: {destaque.nome}")
+    for p in estoque do
+        print(linha(p.nome, p.preco, p.qtd))
+    end
+    print(f"Valor em estoque: R$ {fmt('%.2f', valor)}")
+    print(f"Em falta: {faltando}  (tem leite? {contains(faltando, 'leite')})")
+
+    // --- reatribuicao e checada: a variavel NAO virou dinamica --------------
+    let bruto = 100.0                         // float
+    bruto = bruto * (1.0 + taxa)              // ok: float
+    // bruto = "cem"                          // ERRO de compilacao: bruto e float
+    // largura = 3.5                          // ERRO de compilacao: largura e int
+    print(f"Com imposto: {fmt('%.2f', bruto)}")
+
+    // --- maps e keys(map[K, V]) -> K[] --------------------------------------
+    registrar_venda("pao", 5)
+    registrar_venda("cafe", 1)
+    let produtos_vendidos = keys(vendas)      // string[]
+    let quantos = length(produtos_vendidos)   // int
+    print(f"Produtos com venda: {quantos}, unidades: {total_vendido}")
+    for nome in ["cafe", "pao", "queijo"] do  // nome: string
+        if has_key(vendas, nome) then
+            print(f"  {nome}: {vendas[nome]}")
+        else
+            print(f"  {nome}: (sem venda)")
+        end
+    end
+
+    // --- slice mantem o tipo do primeiro argumento --------------------------
+    let baratos = slice(estoque, 1, 3)        // Produto[]
+    print(f"slice(1, 3): {primeiro(baratos).nome}, {length(baratos)} itens")
+
+    // --- funcoes como valores: a assinatura do literal vira o tipo ----------
+    let com_desconto = func(preco: float, pct: float) -> float   // func(float, float) -> float
+        return preco * (1.0 - pct)
+    end
+    let arredondar = func(v: float) -> string  // func(float) -> string
+        return fmt("%.2f", v)
+    end
+    print(f"Queijo com 10%: R$ {arredondar(com_desconto(32.0, 0.10))}")
+
+    // --- ref: `let r = ref x` e um emprestimo, como `let r: ref int = ref x`
+    let contador = 0                          // int
+    let r = ref contador                      // ref int
+    *r = *r + 10
+    print(f"contador via ref: {contador}")    // 10-escreveu no alvo
+
+    // --- json_dumps e tipado (string); json_parse NAO (any): anotar ---------
+    let json = json_dumps(vendas)             // string
+    let de_volta: any = json_parse(json)      // fronteira dinamica explicita
+    print(f"json: {json} -> type {type(de_volta)}")
+
+    // --- shadow em escopo interno com outro tipo, como sempre ---------------
+    if aberto then
+        let itens = "interno"                 // string, so neste bloco
+        print(f"shadow: {itens}")
+    end
+    print(f"externo intacto: {itens}")
+
+    // ------------------------------------------------------------------------
+    // 3. O que CONTINUA pedindo anotacao (cada linha comentada e um
+    //    `cannot infer type for 'x' from its initializer: ...`):
+    //
+    //    let vazio = []                 -> let vazio: int[] = []
+    //    let tabela = {}                -> let tabela: map[string, int] = {}
+    //    let nada = null                -> let nada: Produto = null
+    //    let dados = json_parse(json)   -> let dados: any = json_parse(json)
+    //    let x = y   (y declarado depois) -> anotar ou reordenar
+    //    let x                          -> SyntaxError: sem tipo nem valor
+    // ------------------------------------------------------------------------
+    print(barra)
+end
+
+main()
