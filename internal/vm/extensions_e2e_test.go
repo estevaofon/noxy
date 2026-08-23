@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"noxy-vm/internal/ext/exttest"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/value"
 )
 
@@ -138,5 +139,50 @@ use time as tm
 	err := machine.Interpret(code)
 	if err == nil || !strings.Contains(err.Error(), "time_now") || !strings.Contains(err.Error(), "collides") {
 		t.Fatalf("expected a collision error mentioning time_now, got %v", err)
+	}
+}
+
+func TestExtensionSumMismatchRefusesLoad(t *testing.T) {
+	root := t.TempDir()
+	writeExtensionPackage(t, root)
+	// A E2E instala em noxy_libs/guest; um noxy.sum com hash errado para o
+	// ext.wasm deve recusar a carga (spec §8).
+	sum := "guest ext.wasm sha256:0000000000000000000000000000000000000000000000000000000000000000\n"
+	if err := os.WriteFile(filepath.Join(root, "noxy.sum"), []byte(sum), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extensionLoaderPermits = []string{"wasi_snapshot_preview1"}
+	t.Cleanup(func() { extensionLoaderPermits = nil })
+
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	code := compileVMSourceAtRoot(t, root, "use guest as g\n")
+	err := machine.Interpret(code)
+	if err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("sum mismatch must refuse load, got %v", err)
+	}
+}
+
+// Ida-e-volta escritor→leitor: grava via o MESMO RecordExtensionSums do
+// --get, adultera o artefato, e exige que a carga acuse mismatch. So passa
+// se caminho do noxy.sum E formato da chave coincidirem entre pkgmanager e
+// vm (revisao do plano: divergencia cwd/RootPath falhava em silencio).
+func TestExtensionSumRoundTripViaPkgmanager(t *testing.T) {
+	root := t.TempDir()
+	writeExtensionPackage(t, root)
+	pkgDir := filepath.Join(root, "noxy_libs", "guest")
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "ext.wasm"), []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extensionLoaderPermits = []string{"wasi_snapshot_preview1"}
+	t.Cleanup(func() { extensionLoaderPermits = nil })
+
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	code := compileVMSourceAtRoot(t, root, "use guest as g\n")
+	err := machine.Interpret(code)
+	if err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("writer/reader must agree on noxy.sum path and key, got %v", err)
 	}
 }

@@ -2,11 +2,15 @@ package vm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"noxy-vm/internal/ext"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/value"
 	"noxy-vm/internal/version"
 )
@@ -102,7 +106,38 @@ func signatureTypeName(declared string) string {
 	}
 }
 
-// verifyExtensionSum e preenchido na tarefa de noxy.sum; ate la, aceita.
+// verifyExtensionSum confere o hash do artefato wasm carregado contra o
+// noxy.sum do projeto (M1 trust-on-first-use: spec §15, noxy.sum spec
+// pendente). So se aplica a pacotes sob <RootPath>/noxy_libs — layouts de
+// desenvolvimento fora dali nao tem entrada e a checagem e ignorada.
 func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, wasmBytes []byte) error {
+	rootAbs, err := filepath.Abs(vm.Config.RootPath)
+	if err != nil {
+		return nil
+	}
+	libs := filepath.Join(rootAbs, "noxy_libs")
+	dirAbs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(libs, dirAbs)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return nil // fora de noxy_libs (layout de desenvolvimento): sem verificacao
+	}
+	sums, err := pkgmanager.ParseSumFile(pkgmanager.SumFilePath(rootAbs))
+	if err != nil {
+		return err
+	}
+	pkg := filepath.ToSlash(rel)
+	want, ok := sums.Lookup(pkg, manifest.Wasm)
+	if !ok {
+		return nil // sem entrada: TOFU do M1 (spec §15, noxy.sum spec pendente)
+	}
+	sum := sha256.Sum256(wasmBytes)
+	got := hex.EncodeToString(sum[:])
+	if got != want {
+		return fmt.Errorf("extension artifact mismatch for %s/%s: noxy.sum has sha256:%s, disk has sha256:%s",
+			pkg, manifest.Wasm, want, got)
+	}
 	return nil
 }

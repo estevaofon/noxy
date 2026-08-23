@@ -1,6 +1,8 @@
 package pkgmanager
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"noxy-vm/internal/version"
 	"os"
@@ -80,6 +82,13 @@ func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error 
 	// 4. Remove .git directory to avoid nested repo issues
 	if err := os.RemoveAll(filepath.Join(targetDir, ".git")); err != nil {
 		fmt.Printf("Warning: failed to remove .git directory: %s\n", err)
+	}
+
+	// Artefatos executaveis (extensoes WASM) entram no noxy.sum ao serem
+	// baixados — sem integridade nao ha distribuicao de binarios (spec §8).
+	// "--get" roda na raiz do projeto (mesma convencao do noxy.mod).
+	if err := RecordExtensionSums(".", targetDir, localPath); err != nil {
+		fmt.Printf("Warning: failed to record noxy.sum entries: %s\n", err)
 	}
 
 	// 5. Update noxy.mod (ONLY if ROOT)
@@ -165,4 +174,50 @@ func updateModFile(pkg, pkgVersion string) error {
 	config.NoxyVersion = version.Version
 	config.Require[pkg] = pkgVersion
 	return config.Save(modPath)
+}
+
+// RecordExtensionSums grava no noxy.sum (sob root) os hashes do manifesto e
+// do wasm de uma extensao recem-baixada em targetDir, sob a chave localPath
+// (caminho relativo a noxy_libs, com "/"). Exportada para o teste de
+// integracao do VM exercitar o mesmo escritor usado por "--get" e provar que
+// caminho e chave batem com o leitor (vm.verifyExtensionSum).
+//
+// O parse do manifesto aqui e uma varredura de linha crua (nao
+// noxy_ext.toml/internal/ext) para evitar que pkgmanager importe internal/ext
+// — aceitavel para M1.
+func RecordExtensionSums(root, targetDir, localPath string) error {
+	manifestPath := filepath.Join(targetDir, "noxy_ext.toml")
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	wasmName := "ext.wasm"
+	for _, line := range strings.Split(string(manifestData), "\n") {
+		// So a chave exata "wasm" — um prefixo pegaria "wasm_qualquer_coisa"
+		// (revisao do plano).
+		key, after, found := strings.Cut(line, "=")
+		if found && strings.TrimSpace(key) == "wasm" {
+			wasmName = strings.Trim(strings.TrimSpace(after), `"`)
+		}
+	}
+	sums, err := ParseSumFile(SumFilePath(root))
+	if err != nil {
+		return err
+	}
+	pkg := strings.ReplaceAll(localPath, "\\", "/")
+	sums.Set(pkg, "noxy_ext.toml", sha256Hex(manifestData))
+	wasmData, err := os.ReadFile(filepath.Join(targetDir, wasmName))
+	if err != nil {
+		return err
+	}
+	sums.Set(pkg, wasmName, sha256Hex(wasmData))
+	return sums.Save(SumFilePath(root))
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
