@@ -1,16 +1,15 @@
 module noxy-vm
 
-go 1.24.0
-
-toolchain go1.24.11
+go 1.25.0
 
 require (
-	golang.org/x/sys v0.40.0
+	github.com/BurntSushi/toml v1.6.0
+	github.com/tetratelabs/wazero v1.12.0
+	golang.org/x/sys v0.44.0
 	modernc.org/sqlite v1.42.1
 )
 
 require (
-	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
