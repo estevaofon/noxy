@@ -58,18 +58,15 @@ func markReferenceTargetType(ref *value.ObjRef, targetType *value.RuntimeTypeInf
 }
 
 func (vm *VM) validateStructConstructorArguments(definition *value.ObjStruct, args []value.Value) error {
-	schema, valid := validStructConstructorType(definition)
+	cached, valid := validatedStructConstructor(definition)
 	if !valid {
 		return fmt.Errorf("struct constructor has incomplete runtime type metadata")
 	}
+	schema := cached.Schema
 	if len(schema.Params) != len(args) {
 		return fmt.Errorf("struct '%s' constructor has invalid runtime type metadata", definition.Name)
 	}
-	params := make([]value.ParamInfo, len(schema.Params))
-	for i, expected := range schema.Params {
-		params[i] = value.ParamInfo{IsRef: schema.ParamIsRef[i], TypeName: expected.String()}
-	}
-	if err := validateParameterModes(definition.Name, params, args); err != nil {
+	if err := validateParameterModes(definition.Name, cached.Params, args); err != nil {
 		return err
 	}
 	for i, expected := range schema.Params {
@@ -81,8 +78,26 @@ func (vm *VM) validateStructConstructorArguments(definition *value.ObjStruct, ar
 }
 
 func validStructConstructorType(definition *value.ObjStruct) (*value.RuntimeTypeInfo, bool) {
+	cached, valid := validatedStructConstructor(definition)
+	if !valid {
+		return nil, false
+	}
+	return cached.Schema, true
+}
+
+// validatedStructConstructor e validStructConstructorType com cache no proprio
+// ObjStruct (issue #40 item 1): ConstructorType e imutavel depois da
+// compilacao, entao o walk de runtimeTypeComplete (que aloca um map por
+// chamada), as checagens estruturais e os ParamInfo sao calculados UMA vez por
+// struct. So veredito valido e guardado — o invalido e caminho de erro e
+// recalcula; o leitor (CtorCache) confere que o schema cacheado ainda e o
+// ConstructorType atual.
+func validatedStructConstructor(definition *value.ObjStruct) (*value.ValidatedCtor, bool) {
 	if definition == nil {
 		return nil, false
+	}
+	if cached := definition.CtorCache(); cached != nil {
+		return cached, true
 	}
 	schema := definition.ConstructorType
 	if !runtimeTypeComplete(schema, make(map[*value.RuntimeTypeInfo]bool)) || schema.Kind != value.TYPE_CALLABLE || schema.CallableBare ||
@@ -90,7 +105,13 @@ func validStructConstructorType(definition *value.ObjStruct) (*value.RuntimeType
 		schema.Return.Kind != value.TYPE_STRUCT || schema.Return.Name != definition.Name {
 		return nil, false
 	}
-	return schema, true
+	params := make([]value.ParamInfo, len(schema.Params))
+	for i, expected := range schema.Params {
+		params[i] = value.ParamInfo{IsRef: schema.ParamIsRef[i], TypeName: expected.String()}
+	}
+	cached := &value.ValidatedCtor{Schema: schema, Params: params}
+	definition.StoreCtorCache(cached)
+	return cached, true
 }
 
 

@@ -478,6 +478,39 @@ type ObjStruct struct {
 	// nil e valido e barato).
 	RefFields       map[string]bool
 	ConstructorType *RuntimeTypeInfo
+	// ctorCache: resultado de validStructConstructorType (vm) para este
+	// struct — funcao pura de ConstructorType, que e imutavel depois da
+	// compilacao. Sem o cache, CADA construcao alocava um map para detectar
+	// ciclo, reandava a arvore de tipos e formatava um TypeName por campo
+	// (~35 % do tempo de codigo com structs; issue #40 item 1 / #66 item 4).
+	// atomic.Pointer: structs sao lidos por tasks paralelas. So veredito
+	// VALIDO e cacheado; o leitor confere Schema == ConstructorType.
+	ctorCache atomic.Pointer[ValidatedCtor]
+}
+
+// ValidatedCtor e o schema aceito do construtor e os ParamInfo (IsRef,
+// TypeName) ja prontos para validateParameterModes.
+type ValidatedCtor struct {
+	Schema *RuntimeTypeInfo
+	Params []ParamInfo
+}
+
+// CtorCache devolve o cache do construtor se existir E ainda corresponder ao
+// ConstructorType atual (nil-safe); senao nil.
+func (os *ObjStruct) CtorCache() *ValidatedCtor {
+	if os == nil {
+		return nil
+	}
+	cached := os.ctorCache.Load()
+	if cached == nil || cached.Schema != os.ConstructorType {
+		return nil
+	}
+	return cached
+}
+
+// StoreCtorCache grava o veredito valido do construtor.
+func (os *ObjStruct) StoreCtorCache(cached *ValidatedCtor) {
+	os.ctorCache.Store(cached)
 }
 
 // FieldIsRef informa se o campo foi declarado `ref T` (nil-safe).
