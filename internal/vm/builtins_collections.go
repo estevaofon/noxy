@@ -315,8 +315,8 @@ func (vm *VM) defineCollectionBuiltins() {
 				if keyVal.Type == value.VAL_INT {
 					key = keyVal.Int()
 				} else if keyVal.Type == value.VAL_OBJ {
-					if str, ok := keyVal.Obj.(string); ok {
-						key = str
+					if _, ok := keyVal.Obj.(string); ok {
+						key = keyVal.Obj // ja boxado: sem convTstring (issue #66, item 4)
 					} else {
 						return value.NewBool(false)
 					}

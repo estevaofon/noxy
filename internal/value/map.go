@@ -38,6 +38,28 @@ func (store *bindingStore) set(key interface{}, item Value) {
 	store.gen.Add(1)
 }
 
+// swap grava item em key e devolve o ocupante anterior, tudo numa secao
+// critica — e o `m[k] = v` do VM (setIndexGeneric), que antes fazia get + set
+// (dois ciclos de lock, dois hashes) so para saber se havia velho a liberar
+// (issue #66, item 4). Mesma regra do gen: bump DEPOIS da escrita.
+func (store *bindingStore) swap(key interface{}, item Value) (old Value, existed bool) {
+	store.mu.Lock()
+	old, existed = store.values[key]
+	store.values[key] = item
+	store.mu.Unlock()
+	store.gen.Add(1)
+	return old, existed
+}
+
+// count e len(values) sob RLock — Len() fazia len(snapshot()), copiando o map
+// inteiro para contar (issue #66, item 4).
+func (store *bindingStore) count() int {
+	store.mu.RLock()
+	n := len(store.values)
+	store.mu.RUnlock()
+	return n
+}
+
 func (store *bindingStore) defineIfAbsent(key interface{}, item Value) bool {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -108,8 +130,14 @@ func (mapping *ObjMap) Delete(key interface{}) bool {
 	return mapping.ensureStore().delete(key)
 }
 
+// Swap grava item em key e devolve o ocupante anterior (e se existia) numa
+// unica secao critica — ver bindingStore.swap.
+func (mapping *ObjMap) Swap(key interface{}, item Value) (Value, bool) {
+	return mapping.ensureStore().swap(key, item)
+}
+
 func (mapping *ObjMap) Len() int {
-	return len(mapping.Snapshot())
+	return mapping.ensureStore().count()
 }
 
 func (mapping *ObjMap) Snapshot() map[interface{}]Value {

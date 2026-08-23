@@ -12,8 +12,8 @@ func referenceMapKey(index value.Value) (interface{}, error) {
 	case value.VAL_INT:
 		return index.Int(), nil
 	case value.VAL_OBJ:
-		if key, ok := index.Obj.(string); ok {
-			return key, nil
+		if _, ok := index.Obj.(string); ok {
+			return index.Obj, nil // ja boxado: sem convTstring (issue #66, item 4)
 		}
 		return nil, fmt.Errorf("map reference key must be int or string")
 	default:

@@ -47,8 +47,8 @@ func (vm *VM) setIndexGeneric(c *chunk.Chunk, ip int) error {
 			if indexVal.Type == value.VAL_INT {
 				key = indexVal.Int()
 			} else if indexVal.Type == value.VAL_OBJ {
-				if str, ok := indexVal.Obj.(string); ok {
-					key = str
+				if _, ok := indexVal.Obj.(string); ok {
+					key = indexVal.Obj // ja e o interface{} boxado: sem convTstring (issue #66, item 4)
 				} else {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
@@ -62,13 +62,12 @@ func (vm *VM) setIndexGeneric(c *chunk.Chunk, ip int) error {
 			}
 			// RC: so libera o velho se a chave ja existia (dec a
 			// menos e proibido); retain-antes-de-release quando existe.
-			if old, exists := mapObj.Get(key); exists {
-				value.Retain(val)
-				mapObj.Set(key, val)
+			// Swap faz a leitura do velho e a escrita sob UM lock
+			// (issue #66, item 4); a ordem retain -> escrita -> release e a
+			// mesma de antes.
+			value.Retain(val)
+			if old, existed := mapObj.Swap(key, val); existed {
 				value.Release(old)
-			} else {
-				value.Retain(val)
-				mapObj.Set(key, val)
 			}
 			vm.push(val)
 			return nil
@@ -105,8 +104,8 @@ func (vm *VM) getIndexGeneric(c *chunk.Chunk, ip int) error {
 			if indexVal.Type == value.VAL_INT {
 				key = indexVal.Int()
 			} else if indexVal.Type == value.VAL_OBJ {
-				if str, ok := indexVal.Obj.(string); ok {
-					key = str
+				if _, ok := indexVal.Obj.(string); ok {
+					key = indexVal.Obj // ja e o interface{} boxado: sem convTstring (issue #66, item 4)
 				} else {
 					return vm.runtimeError(c, ip, "map key must be int or string")
 				}
