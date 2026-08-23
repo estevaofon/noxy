@@ -53,6 +53,32 @@ func requireValidUTF8(function string, data string) error {
 	return fmt.Errorf("%s: bytes are not valid UTF-8 at byte offset %d", function, offset)
 }
 
+// clampSubstringRange e o clamp de strings.substring: indices negativos contam
+// do fim (Python), depois tudo e preso a [0, n]; ok == false quando a faixa
+// fica vazia. n e o comprimento em runes — ou em bytes quando a string e ASCII
+// (issue #66, item 2); os dois ramos passam por aqui para nao divergirem.
+func clampSubstringRange(start, end, n int) (lo, hi int, ok bool) {
+	if start < 0 {
+		start = n + start
+	}
+	if end < 0 {
+		end = n + end
+	}
+	if start < 0 {
+		start = 0
+	}
+	if end < 0 {
+		end = 0
+	}
+	if start > n {
+		start = n
+	}
+	if end > n {
+		end = n
+	}
+	return start, end, start < end
+}
+
 func (vm *VM) defineStringBuiltins() {
 	// Strings Module
 	vm.DefineContextualNative("strings_contains", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
@@ -285,36 +311,24 @@ func (vm *VM) defineStringBuiltins() {
 			return value.NewNull(), err
 		}
 		s := args[0].String()
-		runes := []rune(s)
-		n := len(runes)
 		start := int(args[1].Int())
 		end := int(args[2].Int())
-
-		// Negative indices count from the end (Python-style)
-		if start < 0 {
-			start = n + start
+		// ASCII: indice em runes == indice em bytes e a fatia compartilha o
+		// storage — sem []rune nem copia (issue #66, item 2). Qualquer byte
+		// >= 0x80 (inclusive invalido) cai no ramo de runes de sempre.
+		if isASCII(s) {
+			lo, hi, ok := clampSubstringRange(start, end, len(s))
+			if !ok {
+				return value.NewString(""), nil
+			}
+			return value.NewString(s[lo:hi]), nil
 		}
-		if end < 0 {
-			end = n + end
-		}
-		// Clamp to valid range [0, n]
-		if start < 0 {
-			start = 0
-		}
-		if end < 0 {
-			end = 0
-		}
-		if start > n {
-			start = n
-		}
-		if end > n {
-			end = n
-		}
-		if start >= end {
+		runes := []rune(s)
+		lo, hi, ok := clampSubstringRange(start, end, len(runes))
+		if !ok {
 			return value.NewString(""), nil
 		}
-
-		return value.NewString(string(runes[start:end])), nil
+		return value.NewString(string(runes[lo:hi])), nil
 	})
 	vm.DefineContextualNative("strings_is_empty", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if len(args) < 1 {
@@ -407,8 +421,14 @@ func (vm *VM) defineStringBuiltins() {
 			return value.NewNull(), err
 		}
 		s := args[0].String()
-		runes := []rune(s)
 		idx := int(args[1].Int())
+		if isASCII(s) { // byte == rune (issue #66, item 2)
+			if idx < 0 || idx >= len(s) {
+				return value.NewString(""), nil
+			}
+			return value.NewString(s[idx:idx+1]), nil
+		}
+		runes := []rune(s)
 		if idx < 0 || idx >= len(runes) {
 			return value.NewString(""), nil
 		}

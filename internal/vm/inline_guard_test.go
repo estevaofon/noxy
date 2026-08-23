@@ -204,3 +204,26 @@ const minPopInlineSitesInRun = 70
 // minEnsureCallCapacityInlineSitesInCalls e uma margem sob o unico call site
 // de hoje (call(), calls.go).
 const minEnsureCallCapacityInlineSitesInCalls = 1
+
+// isASCII (strings_ascii.go) decide o fast path de substring/char_at/s[i]/
+// slice (issue #66, item 2). E chamada de builtins e de getIndexGeneric —
+// funcoes normais, orcamento 80 — nunca de dentro de run(). Custa 23 hoje.
+func TestIsASCIIStaysInlinable(t *testing.T) {
+	build := exec.Command("go", "build", "-gcflags=-m=2", "./")
+	output, err := build.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build -gcflags=-m=2 failed: %v\n%s", err, output)
+	}
+	pattern := regexp.MustCompile(`can inline isASCII with cost (\d+)`)
+	match := pattern.FindStringSubmatch(string(output))
+	if match == nil {
+		t.Fatalf("o compilador nao inlina isASCII — procure por 'cannot inline isASCII' em `go build -gcflags=-m=2 ./internal/vm`")
+	}
+	cost, convErr := strconv.Atoi(match[1])
+	if convErr != nil {
+		t.Fatalf("custo ilegivel em %q: %v", match[0], convErr)
+	}
+	if cost > inlineNormalMaxCost {
+		t.Errorf("isASCII tem custo de inline %d, maximo %d", cost, inlineNormalMaxCost)
+	}
+}

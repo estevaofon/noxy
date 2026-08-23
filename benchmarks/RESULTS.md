@@ -3,6 +3,114 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.15.0 (73cf11a) × strings: fast path ASCII + `to_str(int)` — v0.15.1 (perf/issue-66-string-ascii-fastpath, 0bc9e5d)
+
+**Data:** 2026-08-22 · Windows 11 · **Intel Core 7 150U** (máquina diferente das
+seções abaixo, que rodaram num i7-1165G7 — só o delta intra-sessão é
+comparável; piso de processo aqui ≈ 11 ms, lá ≈ 90 ms) · Python 3.14.7 · Go
+1.26.6 · Lua ausente · protocolo intercalado, mediana de 9 (headline), mediana
+de 11 (A/B por estágio), mínimo de 9 no cross-runtime. Máquina sem `go test`
+nem build durante as medições; CPU 2–26 % no início de cada passo. Três
+binários compilados na mesma sessão (base, estágio 1 = só fast path ASCII,
+head). Dados brutos, perfis e carga por passo em
+[`results/2026-08-22-issue-66-strings-raw.md`](results/2026-08-22-issue-66-strings-raw.md).
+Spec: `docs/superpowers/specs/2026-08-22-vm-perf-issue-66-string-ascii-fastpath-design.md`
+(issue #66, item 2, etapa 1). Scripts rodados no Windows PowerShell 5.1 via
+cópias com BOM (pwsh 7 não instalado nesta máquina; os `.ps1` são UTF-8 sem BOM).
+
+O que mudou: **nenhum opcode, nenhuma mudança em `run()`, representação de
+string intocada.** Um helper `isASCII(s)` (varredura por byte `>= 0x80`, sem
+alocar, custo de inline 23) decide em `strings_substring`, `strings_char_at`,
+`s[i]` (`getIndexGeneric`) e `slice()` de string entre o ramo novo (índices
+em bytes, fatia de `string` compartilhada — zero alocação além do box) e o
+ramo atual (`[]rune`), que fica como estava; bytes ≥ 0x80 — inclusive
+inválidos — nunca entram no ramo novo. O clamp de `substring` virou helper
+compartilhado pelos dois ramos (`clampSubstringRange`). Mais: `Value.String()`
+de `int` via `strconv.FormatInt` em vez de `fmt.Sprintf("%d")` (saída idêntica,
+beneficia `print`, interpolação e concatenação) e `to_str` de escalar sem
+`requireValidUTF8`. `length` ficou como estava: `RuneCountInString` já é
+varredura por byte sem alocar (1,3 % do perfil).
+
+**Verificação completa:** `go test ./...` verde (12 pacotes); `go test -race
+./internal/value ./internal/vm` verde; **corpus 177/177**
+(`run_all_tests_concurrent.nx`); **diff de saída base × head: 146 iguais, 0
+divergentes** (`compare_examples.ps1`); guards de inline verdes e inalterados
+(`push` 20, `pop` 18, `Retain` 67, `Release` 80, `NeverTracked`,
+`arrayTagIsRefSlot` 20, `ensureCallCapacity` 80), novo `isASCII` 23 (≤ 80).
+
+### Achado que mudou o desenho
+
+O perfil de `string_ops` (10x iterações, 940 ms de amostras) **não** confirma
+a hipótese da issue como maior termo: `length` → `RuneCountInString` é 1,3 %;
+`strings_substring` (`[]rune` + cópia) 13,8 %; e **`to_str(i)` é 22,3 %** —
+`fmt.Sprintf("%d")` com o `pp` do fmt, boxing do int e `requireValidUTF8`
+sobre o resultado. Por isso o PR inclui `to_str(int)`/`Value.String()` (decisão
+tomada com o usuário antes de codar) e deixa `length` de fora.
+
+### Headline — base × head (`interleaved_compare.ps1 -Runs 9`)
+
+| bench | v0150_ms | str_ms | delta | veredito |
+|---|---|---|---|---|
+| bench_map_churn | 230,1 | 203,6 | **−11,5 %** | ✅ `f"k{i % 500}"` interpola um int por iteração → `FormatInt` |
+| bench_spawn_sum | 431,5 | 419,4 | −2,8 % | ➖ ruído |
+| bench_conway | 1348,9 | 1330,3 | −1,4 % | ✅ gate CoW (≤ +5 %) |
+| bench_call_ref | 1252,2 | 1240,7 | −0,9 % | ➖ ruído |
+| bench_generic_vs_hand | 474,4 | 474,8 | +0,1 % | ✅ sentinela de `run()`: nada mudou em `run()` e o bench confirma |
+| bench_call_readonly | 587,7 | 591,6 | +0,7 % | ➖ ruído |
+| bench_share_mutate | 144,4 | 146,5 | +1,5 % | ✅ gate CoW |
+| bench_bubblesort | 862,7 | 878,8 | +1,9 % | ➖ ruído (não toca string) |
+| bench_path_update | 239,1 | 244,6 | +2,3 % | ➖ ruído |
+| bench_typed_call_map | 22,4 | 21,5 | −4,0 % | ➖ piso¹ (gate CoW ok) |
+| bench_call_light | 20,3 | 19,8 | −2,5 % | ➖ piso¹ (gate CoW ok) |
+| bench_value_call_mutate | 20,2 | 20,1 | −0,5 % | ➖ piso¹ |
+
+¹ ~20 ms com piso de processo ~11 ms: não decidem nada.
+
+### A/B por estágio — três binários intercalados (mediana de 11, parede; piso 11 ms)
+
+`s1` = só fast path ASCII (`isASCII`, `substring`/`char_at`, `s[i]`/`slice`) ·
+`str` = head (+ `to_str(int)`/`FormatInt`).
+
+| bench | base | s1 | str | s1 vs base | str vs base | líquido str vs base |
+|---|---|---|---|---|---|---|
+| `cross_runtime/string_ops` | 120,5 | 109,7 | **97,1** | −9,0 % | **−19,4 %** | **−21 %** (109,5 → 86,1) |
+| `cross_runtime/map_churn` | 151,8 | 150,6 | **133,8** | −0,8 % | **−11,9 %** | −12,8 % (todo do `to_str`) |
+
+### Cross-runtime (mínimo de 9, intercalado com CPython 3.14.7 / Go 1.26.6)
+
+Tempo líquido (descontado o piso de `startup`, 11 ms nos dois Noxy); tabela
+completa em [`cross_runtime/results/cross_runtime.md`](cross_runtime/results/cross_runtime.md).
+
+| bench | v0.15.0 | v0.15.1 | v0.15.1 ÷ v0.15.0 | ÷ python (antes → agora, esta máquina) |
+|---|---|---|---|---|
+| `string_ops` | 96,2 | **74,2** | **0,77x** | 3,1x → **2,4x** |
+| `map_churn` | 132,3 | **115,0** | **0,87x** | 2,3x → **2,0x** |
+| `fib` | 202,8 | 197,5 | 0,97x | 2,1x → 2,0x |
+| `loop_arith` | 202,7 | 198,7 | 0,98x | 1,1x → 1,0x |
+| `mandelbrot` | 136,0 | 138,0 | 1,01x | 1,8x → 1,8x |
+| `bubblesort` | 126,4 | 129,0 | 1,02x | 1,8x → 1,8x |
+
+### Leitura
+
+**A meta da issue ("`string_ops` 4,2x → ~2x do CPython com a etapa 1") fica a
+meio caminho: 3,1x → 2,4x nesta máquina (−23 % líquido), e só um terço disso
+vem do fast path ASCII que a issue propunha** (`s1`: −10 %); o resto é
+`to_str(int)` sem `fmt` (−11 % a mais), que a issue não listava. `map_churn`
+vem de carona (−13 %), pela interpolação de int nas chaves. Nenhum outro bench
+mexe (±3 %), como esperado de uma mudança que não toca `run()`, opcodes ou RC.
+
+**O que resta em `string_ops` (perfil do head):** protocolo de chamada de
+builtin — `callNative` 27 % das amostras, com o wrapper Noxy de `substring`
+(`stdlib/strings.nx`: `substring` → `strings_substring`) custando um frame
+inteiro por chamada — é o item 3; o box da string em `interface{}`
+(`convTstring` 5 %) é a etapa 2 do item 2 (string boxada), que **não se
+justifica por `length`** (1,3 %) e só faria sentido medida contra o boxing.
+`formatBase10` 5 % é irredutível.
+
+**Gates CoW (≤ +5 %):** `conway` −1,4 %, `share_mutate` +1,5 %,
+`typed_call_map` −4,0 %, `call_light` −2,5 % — verdes. Sentinela
+`bench_generic_vs_hand` +0,1 %.
+
 ## v0.14.3 (7eed082) × indexação tipada de array — v0.15.0 (perf/issue-66-typed-array-index, d870a02)
 
 **Data:** 2026-08-22 · Windows 11 · i7-1165G7 · protocolo intercalado, mediana

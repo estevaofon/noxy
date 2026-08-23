@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.15.1] - 2026-08-22
+
+Strings: fast path ASCII e `to_str(int)` sem `fmt` (issue #66, item 2 do
+roadmap pós-fase 2, etapa 1). Nenhuma mudança de sintaxe, semântica, saída ou
+mensagem de erro — em ASCII e em não-ASCII; nenhum opcode novo, `run()` e a
+representação de string intocados. Corpus 177/177 e diff de saída base × head
+sem divergência. Números em `benchmarks/RESULTS.md` (seção do topo) e
+`benchmarks/results/2026-08-22-issue-66-strings-raw.md`.
+
+### Performance
+
+- **Fast path ASCII** em `strings.substring`, `strings.char_at`, `s[i]` e
+  `slice()` de string: uma varredura por byte (`isASCII`, sem alocar) e, se a
+  string é ASCII, índices em bytes e fatia de `string` compartilhada — sem
+  `[]rune(s)` nem cópia por chamada. Qualquer byte ≥ 0x80 (acento, emoji,
+  inválido) cai no caminho por runes de antes, intocado; o clamp de
+  `substring` (negativos do fim, `[0, n]`) é um helper único para os dois
+  ramos. `length` fica como estava: `utf8.RuneCountInString` já é varredura por
+  byte sem alocar (1,3 % do perfil).
+- **`to_str(int)` e `Value.String()` de `int`** via `strconv.FormatInt` em vez
+  de `fmt.Sprintf("%d")` (saída idêntica, inclusive `MinInt64`) — o maior
+  termo isolado de `string_ops` no perfil (22 %); beneficia `print`,
+  interpolação (`f"k{i}"`) e concatenação. `to_str` de escalar
+  (`int`/`float`/`bool`/`null`) pula `requireValidUTF8`: escalares renderizam
+  ASCII por construção; a validação continua onde pode haver bytes.
+- **Resultado (v0.15.0 × v0.15.1, mesma máquina, intercalado):** cross-runtime
+  `string_ops` **96,2 → 74,2 ms líquidos (0,77x; ÷ CPython 3,1x → 2,4x)**,
+  `map_churn` 132,3 → 115,0 (0,87x; 2,3x → 2,0x); `bench_map_churn` −11,5 %;
+  demais benches ±3 % (ruído); gates CoW verdes; sentinela
+  `bench_generic_vs_hand` +0,1 %. Por estágio: só o fast path ASCII dá −10 %
+  em `string_ops`, `to_str(int)` mais −11 %.
+
+### Interno
+
+- `internal/vm/strings_ascii.go`: `isASCII` (custo de inline 23, guard em
+  `inline_guard_test.go`); `clampSubstringRange` em `builtins_strings.go`.
+
 ## [0.15.0] - 2026-08-22
 
 Indexação tipada de array (issue #66, item 1 do roadmap pós-fase 2). Nenhuma

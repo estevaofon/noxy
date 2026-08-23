@@ -153,6 +153,12 @@ func TestSliceBuiltin(t *testing.T) {
 		{name: "string clamps boundaries", sequence: value.NewString("abc"), start: -2, end: 99, want: value.NewString("abc")},
 		{name: "string reversed range", sequence: value.NewString("abc"), start: 2, end: 1, want: value.NewString("")},
 		{name: "empty string", sequence: value.NewString(""), start: 0, end: 1, want: value.NewString("")},
+		// issue #66 item 2: ramo ASCII por byte == ramo por rune
+		{name: "ascii string mid", sequence: value.NewString("item_12345"), start: 5, end: 6, want: value.NewString("1")},
+		{name: "ascii string clamps", sequence: value.NewString("abc"), start: -2, end: 99, want: value.NewString("abc")},
+		{name: "ascii string reversed", sequence: value.NewString("abc"), start: 2, end: 1, want: value.NewString("")},
+		{name: "ascii string end at n", sequence: value.NewString("abc"), start: 2, end: 3, want: value.NewString("c")},
+		{name: "accent string end clamp", sequence: value.NewString("café"), start: 3, end: 10, want: value.NewString("é")},
 		{name: "bytes use byte indexes", sequence: value.NewBytes("aéz"), start: 1, end: 3, want: value.NewBytes("é")},
 		{name: "bytes reversed range", sequence: value.NewBytes("abc"), start: 2, end: 1, want: value.NewBytes("")},
 		{name: "empty bytes", sequence: value.NewBytes(""), start: -1, end: 1, want: value.NewBytes("")},

@@ -127,7 +127,17 @@ func (vm *VM) getIndexGeneric(c *chunk.Chunk, ip int) error {
 				return vm.runtimeError(c, ip, "string index must be integer")
 			}
 			idx := int(indexVal.Int())
-			runes := []rune(str) // Expensive but correct for now
+			// Indexacao e por code point (spec §12). Se a string e ASCII,
+			// code point == byte e a fatia de 1 byte compartilha o storage —
+			// sem []rune (issue #66, item 2). Nao-ASCII decodifica como antes.
+			if isASCII(str) {
+				if idx < 0 || idx >= len(str) {
+					return vm.runtimeError(c, ip, "string index out of bounds")
+				}
+				vm.push(value.NewString(str[idx : idx+1]))
+				return nil
+			}
+			runes := []rune(str)
 			if idx < 0 || idx >= len(runes) {
 				return vm.runtimeError(c, ip, "string index out of bounds")
 			}

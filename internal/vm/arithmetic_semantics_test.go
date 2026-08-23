@@ -352,9 +352,22 @@ func TestStringIndexingIsByCodePointAndBoundsChecked(t *testing.T) {
 			t.Fatalf("célula %d: got %s, want %q", i, cell.String(), want[i])
 		}
 	}
+	// ASCII toma o ramo por byte (issue #66, item 2): mesmo resultado e mesma
+	// mensagem de erro que o ramo por rune.
+	gotASCII := captureVMSource(t, "let s: string = \"item_1\"\ntest_report([s[0], s[4], s[5]])\n")
+	wantASCII := []string{"i", "_", "1"}
+	for i, cell := range semArray(t, gotASCII) {
+		if s, ok := cell.Obj.(string); !ok || s != wantASCII[i] {
+			t.Fatalf("ascii célula %d: got %s, want %q", i, cell.String(), wantASCII[i])
+		}
+	}
 	cases := []struct{ name, source, want string }{
 		{"string past end", "let s: string = \"abc\"\nlet i: int = 3\nprint(s[i])\n", "string index out of bounds"},
 		{"string negative", "let s: string = \"abc\"\nlet i: int = -1\nprint(s[i])\n", "string index out of bounds"},
+		{"ascii past end", "let s: string = \"item_1\"\nlet i: int = 6\nprint(s[i])\n", "string index out of bounds"},
+		{"ascii negative", "let s: string = \"item_1\"\nlet i: int = -1\nprint(s[i])\n", "string index out of bounds"},
+		{"empty string", "let s: string = \"\"\nlet i: int = 0\nprint(s[i])\n", "string index out of bounds"},
+		{"accent past end", "let s: string = \"héllo\"\nlet i: int = 5\nprint(s[i])\n", "string index out of bounds"},
 		{"bytes past end", "let b: bytes = b\"ab\"\nlet i: int = 2\nprint(b[i])\n", "bytes index out of bounds"},
 		{"array past end", "let a: int[] = [1]\nlet i: int = 5\nprint(a[i])\n", "array index out of bounds"},
 		{"array set past end", "let a: int[] = [1]\nlet i: int = 5\na[i] = 2\n", "array index out of bounds"},

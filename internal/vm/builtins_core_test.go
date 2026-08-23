@@ -55,6 +55,11 @@ func TestConversionBuiltins(t *testing.T) {
 		{name: "to_str null", builtin: "to_str", args: []value.Value{value.NewNull()}, want: value.NewString("null")},
 		{name: "to_str bool", builtin: "to_str", args: []value.Value{value.NewBool(true)}, want: value.NewString("true")},
 		{name: "to_str int", builtin: "to_str", args: []value.Value{value.NewInt(-42)}, want: value.NewString("-42")},
+		// issue #66 item 2: escalares saem sem requireValidUTF8 e int sem fmt
+		{name: "to_str int zero", builtin: "to_str", args: []value.Value{value.NewInt(0)}, want: value.NewString("0")},
+		{name: "to_str int min", builtin: "to_str", args: []value.Value{value.NewInt(-9223372036854775808)}, want: value.NewString("-9223372036854775808")},
+		{name: "to_str float negative", builtin: "to_str", args: []value.Value{value.NewFloat(-0.5)}, want: value.NewString("-0.500000")},
+		{name: "to_str bool false", builtin: "to_str", args: []value.Value{value.NewBool(false)}, want: value.NewString("false")},
 		{name: "to_str float", builtin: "to_str", args: []value.Value{value.NewFloat(3.5)}, want: value.NewString("3.500000")},
 		{name: "to_str string", builtin: "to_str", args: []value.Value{value.NewString("noxy")}, want: value.NewString("noxy")},
 		// to_str/to_int/to_float now raise on bad arity instead of returning

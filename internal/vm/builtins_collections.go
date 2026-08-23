@@ -246,6 +246,14 @@ func (vm *VM) defineCollectionBuiltins() {
 		switch seq.Type {
 		case value.VAL_OBJ:
 			if str, ok := seq.Obj.(string); ok {
+				if isASCII(str) { // byte == rune, fatia sem copia (issue #66, item 2)
+					start = clamp(start, len(str))
+					end = clamp(end, len(str))
+					if start > end {
+						return value.NewString("")
+					}
+					return value.NewString(str[start:end])
+				}
 				runes := []rune(str)
 				start = clamp(start, len(runes))
 				end = clamp(end, len(runes))
