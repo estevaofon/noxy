@@ -121,6 +121,11 @@ func ParseManifest(data []byte) (*Manifest, error) {
 			return nil, fmt.Errorf("noxy_ext.toml: stateless extension cannot declare stateful export %q", exp.Name)
 		}
 	}
+	// M1 nao implementa capability nenhuma: aceitar a declaracao seria
+	// prometer o que o host ignora (revisao do plano, item 6).
+	if len(m.Capabilities) != 0 {
+		return nil, fmt.Errorf("noxy_ext.toml: capabilities are not supported in this phase (M1)")
+	}
 	return &m, nil
 }
 
