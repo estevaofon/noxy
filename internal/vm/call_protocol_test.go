@@ -75,6 +75,32 @@ test_report([r, base[0]])
 	}
 }
 
+// OP_CLOSURE (e os sites que vinculam um function constant ao ambiente) copiam
+// o ObjFunction campo a campo; se esquecerem ParamsUntracked o fast path de
+// OP_CALL_STATIC nunca e tomado — silenciosamente, sem erro funcional. Este
+// teste pergunta ao proprio valor de closure.
+func TestClosureKeepsParamsUntracked(t *testing.T) {
+	cases := []struct {
+		name, source string
+		want         bool
+	}{
+		{"int param", "func f(n: int) -> int\n    return n\nend\ntest_report(f)\n", true},
+		{"array param", "func f(a: int[]) -> int\n    return 0\nend\ntest_report(f)\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := captureVMSource(t, tc.source)
+			closure, ok := got.Obj.(*value.ObjClosure)
+			if got.Type != value.VAL_FUNCTION || !ok {
+				t.Fatalf("test_report recebeu %s, esperava closure", got.String())
+			}
+			if closure.Function.ParamsUntracked != tc.want {
+				t.Fatalf("closure.Function.ParamsUntracked = %v, want %v (copia de ObjFunction perdeu o flag?)", closure.Function.ParamsUntracked, tc.want)
+			}
+		})
+	}
+}
+
 // As mensagens de erro do protocolo de chamada nao mudam: overflow de frames
 // (growForCall continua o unico dono da mensagem) e aridade errada pela
 // fronteira dinamica (callValue, caminho lento).

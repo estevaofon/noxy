@@ -90,13 +90,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				fn := constant.Obj.(*value.ObjFunction)
 				// Clone so compiler constants remain unbound and reusable.
 				boundFn := &value.ObjFunction{
-					Name:         fn.Name,
-					Arity:        fn.Arity,
-					UpvalueCount: fn.UpvalueCount,
-					Params:       fn.Params,
-					Chunk:        fn.Chunk,
-					Environment:  frame.Environment,
-					RuntimeType:  fn.RuntimeType,
+					Name:            fn.Name,
+					Arity:           fn.Arity,
+					UpvalueCount:    fn.UpvalueCount,
+					Params:          fn.Params,
+					Chunk:           fn.Chunk,
+					Environment:     frame.Environment,
+					RuntimeType:     fn.RuntimeType,
+					ParamsUntracked: fn.ParamsUntracked, // issue #66 item 3: sem isto o fast path de OP_CALL_STATIC nunca dispara
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -111,13 +112,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if constant.Type == value.VAL_FUNCTION {
 				fn := constant.Obj.(*value.ObjFunction)
 				boundFn := &value.ObjFunction{
-					Name:         fn.Name,
-					Arity:        fn.Arity,
-					UpvalueCount: fn.UpvalueCount,
-					Params:       fn.Params,
-					Chunk:        fn.Chunk,
-					Environment:  frame.Environment,
-					RuntimeType:  fn.RuntimeType,
+					Name:            fn.Name,
+					Arity:           fn.Arity,
+					UpvalueCount:    fn.UpvalueCount,
+					Params:          fn.Params,
+					Chunk:           fn.Chunk,
+					Environment:     frame.Environment,
+					RuntimeType:     fn.RuntimeType,
+					ParamsUntracked: fn.ParamsUntracked, // issue #66 item 3: sem isto o fast path de OP_CALL_STATIC nunca dispara
 				}
 				vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: boundFn})
 			} else {
@@ -1235,13 +1237,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			fnVal := c.Constants[idx]
 			fn := fnVal.Obj.(*value.ObjFunction)
 			boundFn := &value.ObjFunction{
-				Name:         fn.Name,
-				Arity:        fn.Arity,
-				UpvalueCount: fn.UpvalueCount,
-				Params:       fn.Params,
-				Chunk:        fn.Chunk,
-				Environment:  frame.Environment,
-				RuntimeType:  fn.RuntimeType,
+				Name:            fn.Name,
+				Arity:           fn.Arity,
+				UpvalueCount:    fn.UpvalueCount,
+				Params:          fn.Params,
+				Chunk:           fn.Chunk,
+				Environment:     frame.Environment,
+				RuntimeType:     fn.RuntimeType,
+				ParamsUntracked: fn.ParamsUntracked, // issue #66 item 3: sem isto o fast path de OP_CALL_STATIC nunca dispara
 			}
 
 			closure := &value.ObjClosure{
