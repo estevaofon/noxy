@@ -220,3 +220,56 @@ func TestRegexFindNoMatchAndAbsentGroup(t *testing.T) {
 		t.Fatalf("group_ends[1] = %d, want -1", ends[1])
 	}
 }
+
+func TestRegexFindAllUnicode(t *testing.T) {
+	machine := New()
+	definitions := newRegexTestDefinitions()
+	regexInstance := compileRegexForTest(t, machine, definitions, "[0-9]+")
+	// "é1🙂22x333": runas é=0 1=1 🙂=2 2=3,4 x=5 3=6,7,8
+	result := requireBuiltinInstance(t,
+		callBuiltin(t, machine, "regex_find_all", regexValueFor(regexInstance),
+			value.NewString("é1🙂22x333"),
+			regexTemplate(definitions.matchesResult), regexTemplate(definitions.match)),
+		definitions.matchesResult)
+	if !result.Fields["ok"].Bool() {
+		t.Fatal("find_all devolveu ok=false")
+	}
+	matches, ok := result.Fields["matches"].Obj.(*value.ObjArray)
+	if !ok || len(matches.Elements) != 3 {
+		t.Fatalf("matches = %#v, want 3 itens", result.Fields["matches"])
+	}
+	wants := []struct {
+		text          string
+		start, endIdx int64
+	}{{"1", 1, 2}, {"22", 3, 5}, {"333", 6, 9}}
+	for index, want := range wants {
+		matchInstance := matches.Elements[index].Obj.(*value.ObjInstance)
+		if text := matchInstance.Fields["text"].String(); text != want.text {
+			t.Fatalf("matches[%d].text = %q, want %q", index, text, want.text)
+		}
+		if start := matchInstance.Fields["start"].Int(); start != want.start {
+			t.Fatalf("matches[%d].start = %d, want %d", index, start, want.start)
+		}
+		if endIdx := matchInstance.Fields["end_idx"].Int(); endIdx != want.endIdx {
+			t.Fatalf("matches[%d].end_idx = %d, want %d", index, endIdx, want.endIdx)
+		}
+	}
+}
+
+func TestRegexFindAllEmpty(t *testing.T) {
+	machine := New()
+	definitions := newRegexTestDefinitions()
+	regexInstance := compileRegexForTest(t, machine, definitions, "[0-9]+")
+	result := requireBuiltinInstance(t,
+		callBuiltin(t, machine, "regex_find_all", regexValueFor(regexInstance),
+			value.NewString("sem digitos"),
+			regexTemplate(definitions.matchesResult), regexTemplate(definitions.match)),
+		definitions.matchesResult)
+	if !result.Fields["ok"].Bool() {
+		t.Fatal("find_all sem matches deve devolver ok=true com array vazio")
+	}
+	matches := result.Fields["matches"].Obj.(*value.ObjArray)
+	if len(matches.Elements) != 0 {
+		t.Fatalf("matches = %d itens, want 0", len(matches.Elements))
+	}
+}

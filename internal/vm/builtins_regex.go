@@ -168,4 +168,41 @@ func (vm *VM) defineRegexBuiltins() {
 			"match": buildMatchInstance(matchTemplate.Struct, subject, pairs, converter),
 		}), nil
 	})
+
+	vm.DefineContextualNative("regex_find_all", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, err := nativeVM(context)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) != 4 {
+			return value.NewNull(), fmt.Errorf("regex.find_all: expects 4 arguments, got %d", len(args))
+		}
+		instance, ok := args[0].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.find_all: first argument must be a Regex")
+		}
+		resultTemplate, ok := args[2].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.find_all: invalid result template")
+		}
+		matchTemplate, ok := args[3].Obj.(*value.ObjInstance)
+		if !ok {
+			return value.NewNull(), fmt.Errorf("regex.find_all: invalid match template")
+		}
+		compiled, valid := regexFromInstance(machine, instance)
+		if !valid {
+			return value.NewNull(), fmt.Errorf("regex.find_all: invalid regex handle %d", instance.Fields["handle"].Int())
+		}
+		subject := args[1].String()
+		allPairs := compiled.FindAllStringSubmatchIndex(subject, -1)
+		converter := newRuneConverter(subject)
+		matchValues := make([]value.Value, 0, len(allPairs))
+		for _, pairs := range allPairs {
+			matchValues = append(matchValues, buildMatchInstance(matchTemplate.Struct, subject, pairs, converter))
+		}
+		return value.NewInstanceWith(resultTemplate.Struct, map[string]value.Value{
+			"ok":      value.NewBool(true),
+			"matches": value.NewArray(matchValues),
+		}), nil
+	})
 }
