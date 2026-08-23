@@ -3,6 +3,105 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## v0.15.2 (4ac27f5) × maps e structs — v0.15.3 (perf/issue-66-maps-structs, 410d170)
+
+**Data:** 2026-08-22 · Windows 11 · Intel Core 7 150U (mesma máquina dos itens
+2 e 3) · Python 3.14.7 · Lua 5.4.6 · Go 1.26.6 · pwsh 7.6.5 · protocolo
+intercalado, mediana de 9 (headline), mediana de 11 (A/B por estágio, três
+binários), mínimo de 9 no cross-runtime. Branch **empilhada** sobre o item 3:
+a base é 4ac27f5 (v0.15.2 = head do PR #69), o `develop` que vai existir.
+Dados brutos, perfis e carga por passo em
+[`results/2026-08-22-issue-66-maps-structs-raw.md`](results/2026-08-22-issue-66-maps-structs-raw.md).
+Spec: `docs/superpowers/specs/2026-08-22-vm-perf-issue-66-maps-structs-design.md`
+(issue #66 item 4; #40 item 1).
+
+O que mudou: **structs** — `ObjStruct` cacheia o schema validado do construtor
+(`atomic.Pointer[ValidatedCtor]`: schema aceito + `[]ParamInfo` prontos), então
+`validStructConstructorType`/`validateStructConstructorArguments` deixam de
+alocar um `map` de ciclo, reandar a árvore de tipos e formatar um `TypeName`
+por campo **a cada construção** (só veredito válido é cacheado; o leitor confere
+que o schema é o `ConstructorType` atual); `NewInstance` e o clone CoW de
+instância pré-dimensionam o `map` de campos. **Maps** — `m[k] = v` usa
+`ObjMap.Swap` (leitura do velho + escrita sob **um** lock, em vez de `Get` +
+`Set`), a chave string reaproveita o `interface{}` já boxado em `Value.Obj`
+(zero `convTstring`) em get/set/`has_key`/`delete`/literal/ref, e `ObjMap.Len()`
+conta sob `RLock` em vez de `len(Snapshot())` (copiava o map inteiro). Nenhum
+opcode, `run()` intocado, RC idêntico (retain → escrita → release do velho só
+se existia). Bench novo **`bench_struct_records.nx`** (pedido no Test Plan da
+#40). O estágio opcional "construtor via `OP_CALL_STATIC` sem validação por
+argumento" **não entrou**: depois do cache, a validação some do perfil.
+
+**Verificação completa:** `go test ./...` verde (12 pacotes); `go test -race
+./internal/value ./internal/vm` verde (o cache é lido por tasks paralelas);
+**corpus 177/177**; **diff de saída base × head: 146 iguais, 0 divergentes**;
+mensagem e aridade de construtor mal-tipado iguais com cache frio × quente
+(`struct_ctor_cache_test.go`); RC do valor velho do map observado por
+`OwnersCount` (`map_fastpath_test.go`).
+
+### Headline — base × head (`interleaved_compare.ps1 -Runs 9`)
+
+| bench | v0152_ms | maps_ms | delta | veredito |
+|---|---|---|---|---|
+| bench_struct_records | 146,3 | 77,5 | **−47,0 %** | ✅ meta da #40 (≥ −40 %) |
+| bench_map_churn | 204,8 | 184,8 | **−9,8 %** | ✅ |
+| bench_call_light | 19,3 | 18,6 | −3,6 % | ➖ piso¹ (gate CoW ok) |
+| bench_typed_call_map | 22,6 | 22,0 | −2,7 % | ➖ piso¹ (gate CoW ok) |
+| bench_path_update | 236,6 | 234,6 | −0,8 % | ➖ ruído |
+| bench_generic_vs_hand | 455,1 | 452,3 | −0,6 % | ✅ sentinela de `run()` |
+| bench_spawn_sum | 361,0 | 359,8 | −0,3 % | ➖ |
+| bench_call_ref | 1152,1 | 1152,9 | +0,1 % | ➖ |
+| bench_bubblesort | 685,1 | 687,2 | +0,3 % | ➖ |
+| bench_conway | 1285,7 | 1291,4 | +0,4 % | ✅ gate CoW (≤ +5 %) |
+| bench_call_readonly | 540,8 | 543,9 | +0,6 % | ➖ |
+| bench_share_mutate | 95,8 | 98,9 | +3,2 % | ✅ gate CoW (≤ +5 %) |
+| bench_value_call_mutate | 20,8 | 20,7 | −0,5 % | ➖ piso¹ |
+
+¹ ~20 ms com piso de processo ~9,5 ms: não decidem nada.
+
+### A/B por estágio — três binários intercalados (mediana de 11, parede)
+
+`s0` = cache do construtor + `NewInstance` pré-dimensionado · `s1` = head
+(+ maps).
+
+| bench | base | s0 | head | s0 vs base | head vs s0 | **head vs base** |
+|---|---|---|---|---|---|---|
+| `bench_struct_records` | 145,4 | 75,2 | 75,8 | **−48,3 %** | +0,8 % | **−47,9 %** |
+| `cross_runtime/map_churn` | 135,8 | 132,7 | 121,7 | −2,3 % | **−8,3 %** | **−10,4 %** |
+| `bench_map_churn` | 204,7 | 205,1 | 191,2 | +0,2 % | **−6,8 %** | **−6,6 %** |
+
+### Cross-runtime (mínimo de 9, intercalado com CPython 3.14.7 / Lua 5.4.6 / Go 1.26.6)
+
+Tempo líquido (descontado `startup`, ~9,5 ms); tabela completa em
+[`cross_runtime/results/cross_runtime.md`](cross_runtime/results/cross_runtime.md).
+
+| bench | v0.15.2 | v0.15.3 | v0.15.3 ÷ v0.15.2 | ÷ python (antes → agora, esta máquina) |
+|---|---|---|---|---|
+| `map_churn` | 118,0 | **103,6** | **0,88x** | 2,0x → **1,78x** |
+| `loop_arith` | 200,5 | 190,7 | 0,95x | 1,1x → 1,04x (ruído) |
+| `string_ops` | 69,2 | 67,4 | 0,97x | 2,2x → 2,1x |
+| `mandelbrot` | 134,5 | 132,9 | 0,99x | 1,8x → 1,8x |
+| `fib` | 109,1 | 109,6 | 1,00x | 1,2x → 1,2x |
+| `bubblesort` | 103,9 | 107,7 | 1,04x | 1,6x → 1,6x (ruído) |
+
+### Leitura
+
+**As duas metas confirmam:** o bench da #40 cai **−47 %** (meta ≥ −40 %) só com
+o cache do schema + o map pré-dimensionado — e o perfil do head mostra que o
+que sobrou da construção de struct é o **próprio `map[string]Value` da
+instância** (alocar + escrever 5 campos = ~30 % do tempo), ou seja, o "campos
+por índice" da #40 item 3 é o próximo passo de struct, não a validação. A
+validação por argumento restante (`validateParameterModes` +
+`runtimeValueMatchesType`, O(campos)) não aparece no perfil — por isso o
+estágio "construtor sem validação via `OP_CALL_STATIC`" ficou de fora.
+`map_churn` vai de 2,0x para **1,78x** do CPython (meta ~1,7x): −8 % do `Swap`
+sob um lock + chave sem re-boxing; o que resta ali é RWMutex/`gen` por operação
+(~12 % — estrutural, por causa de tasks), `to_str`+concat (~20 %) e a chave
+`interface{}` (store `map[string]Value` só com número).
+
+**Gates CoW (≤ +5 %):** `share_mutate` +3,2 %, `conway` +0,4 %,
+`typed_call_map` −2,7 %, `call_light` −3,6 % — verdes. Sentinela
+`bench_generic_vs_hand` −0,6 % (nada mudou em `run()`).
+
 ## v0.15.1 (c1cc12a) × protocolo de chamada — v0.15.2 (perf/issue-66-call-protocol, 868d435)
 
 **Data:** 2026-08-22 · Windows 11 · Intel Core 7 150U (mesma máquina do item
