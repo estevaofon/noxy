@@ -39,6 +39,11 @@ returns = "any"
 name = "rust_sha256"
 params = ["bytes"]
 returns = "bytes"
+
+[[export]]
+name = "rust_empty"
+params = []
+returns = "any"
 `))
 	if err != nil {
 		tb.Fatalf("manifest: %v", err)
@@ -97,6 +102,26 @@ func TestRustGuestSha256MatchesNative(t *testing.T) {
 	want := sha256.Sum256(raw)
 	if got.Type != value.VAL_BYTES || got.Obj.(string) != string(want[:]) {
 		t.Fatalf("sha256 mismatch")
+	}
+}
+
+// fn_index 4 devolve ret_raw(&[]) — regiao real de 1 byte, porem len 0 (o
+// ramo de payload vazio que expunha o vazamento em nx_free: o host chama
+// nx_free(ptr, 0)). Uma regiao de 0 bytes nao decodifica como NXB valido,
+// entao a chamada falha com erro de protocolo — mas isso NAO deve
+// envenenar a instancia (concurrency = "single"): a chamada seguinte na
+// mesma instancia precisa continuar funcionando.
+func TestRustGuestEmptyResultDoesNotPoisonInstance(t *testing.T) {
+	m := loadRustGuest(t)
+	if _, err := m.Call(context.Background(), 4, nil); err == nil {
+		t.Fatalf("expected protocol error for empty result region, got nil")
+	}
+	got, err := m.Call(context.Background(), 0, []value.Value{value.NewBytes("ok")})
+	if err != nil {
+		t.Fatalf("call after empty result: %v", err)
+	}
+	if got.Type != value.VAL_BYTES || got.Obj.(string) != "ok" {
+		t.Fatalf("echo after empty result: %#v", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 //! Guest de referencia do ABI v1 do Noxy (spec §2): sem WASI, sem imports
 //! fora de `noxy:host/v1`. Fixture do gate positivo de imports e dos
-//! benchmarks da §11. fn_index: 0 echobytes, 1 fail, 2 trap, 3 sha256.
+//! benchmarks da §11. fn_index: 0 echobytes, 1 fail, 2 trap, 3 sha256,
+//! 4 empty (regiao de resultado vazio, ver ret_raw/nx_free).
 
 use sha2::{Digest, Sha256};
 use std::alloc::{alloc, dealloc, Layout};
@@ -26,12 +27,17 @@ pub extern "C" fn nx_alloc(size: u32) -> u32 {
     unsafe { alloc(layout) as u32 }
 }
 
+/// Regiao de resultado vazio tem 1 byte real (espelha ret_raw abaixo) — 0 e
+/// o sentinela de falha do ABI, entao ret_raw aloca 1 byte mesmo quando o
+/// payload esta vazio. nx_free precisa desalocar esse mesmo tamanho real,
+/// senao a regiao vaza a cada resultado vazio numa instancia reusada.
 #[no_mangle]
 pub extern "C" fn nx_free(ptr: u32, size: u32) {
-    if ptr == 0 || size == 0 {
+    if ptr == 0 {
         return;
     }
-    let layout = Layout::from_size_align(size as usize, 1).unwrap();
+    let real_size = if size == 0 { 1 } else { size as usize };
+    let layout = Layout::from_size_align(real_size, 1).unwrap();
     unsafe { dealloc(ptr as *mut u8, layout) }
 }
 
@@ -81,6 +87,10 @@ pub extern "C" fn nx_call(fn_index: u32, args_ptr: u32, args_len: u32) -> u64 {
         1 => fail("boom from rust guest"),
         2 => core::arch::wasm32::unreachable(),
         3 => ret_nxb_bytes(&Sha256::digest(args)),
+        // empty: exercita o ramo de payload vazio de ret_raw (ptr real,
+        // len 0) — o host ve uma regiao de 0 bytes, o que nao decodifica
+        // como NXB valido; fixture do fix de nx_free acima.
+        4 => ret_raw(&[]),
         _ => fail("unknown fn_index"),
     }
 }
