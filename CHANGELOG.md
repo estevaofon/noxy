@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.18.0] - 2026-08-23
+
+Mecanismo experimental de extensões WASM (issue #78, fase M1): um pacote
+nativo compilado para `wasm32` pode ser carregado dentro de um processo
+Noxy via `use`, e suas exports viram natives Noxy comuns, chamáveis como
+qualquer função da stdlib. Runtime embutido via wazero; `go.mod` sobe para
+`go 1.25` (piso do wazero v1.12.0). Sem capabilities nesta fase — toda
+extensão é função pura dos argumentos declarados.
+
+### Added
+
+- **Mecanismo de extensões WASM, fase M1** (issue #78): pacote novo
+  `internal/ext` — codec NXB (troca de valores por cópia entre host e
+  guest: tags null, bool, int, float, string, bytes, array, map, struct;
+  funções, channels, tasks e `ref` não cruzam a fronteira), parser de
+  `noxy_ext.toml` (nome, `abi`, `min_noxy`, `concurrency`, `memory_max_mb`,
+  `capabilities`, `[[export]]` com params/returns tipados; chave
+  desconhecida é erro de carga), loader sobre wazero com gate de imports
+  (só `noxy:host/v1` é permitido; qualquer outro import recusa a carga —
+  WASI não é fornecido, o que também é o modelo de permissão: uma extensão
+  sem capabilities é função pura dos argumentos), modos `concurrency =
+  "single"` (uma instância, chamadas serializadas — obrigatório para
+  extensões com estado por handle) e `"stateless"` (pool de instâncias,
+  chamadas concorrentes), poisoning de instância em trap (out-of-bounds,
+  unreachable, estouro de memória, timeout de chamada — 30s padrão por
+  `nx_call`, cancelamento de contexto do lado do host) e cache de
+  compilação persistente em `<user cache dir>/noxy/wazero` (best-effort:
+  falha ao criar o diretório não impede a carga).
+  - Um pacote com `noxy_ext.toml` é carregado automaticamente ao ser
+    importado com `use`; cada `[[export]]` vira uma native contextual
+    assinada (arity, tipo de cada parâmetro, tipo de retorno). Antes de
+    registrar qualquer export, o loader confere todos contra os globais já
+    existentes — nome de export que colida com uma native da stdlib ou com
+    export de outra extensão falha a carga inteira, atomicamente, em vez
+    de sombrear em silêncio.
+  - `noxy --get` grava o sha256 do manifesto e do `.wasm` em `noxy.sum`
+    (mínimo viável: uma linha por artefato). A verificação só se aplica a
+    pacotes sob `noxy_libs`; havendo entrada, o manifesto é verificado
+    primeiro e só depois o wasm (o manifesto escolhe qual arquivo `.wasm` é
+    o verificado, então precisa ser verificado ele mesmo antes). Pacote sem
+    entrada correspondente, ou extensão carregada fora de `noxy_libs` em
+    desenvolvimento, roda sem verificação (trust-on-first-use); spec de
+    integridade completa fica para depois.
+  - Sem capabilities nesta fase: `capabilities` não-vazio no manifesto é
+    erro de carga, não aviso.
+  - Benchmarks em `internal/ext` (guest de referência em Rust,
+    `internal/ext/testdata/rustguest/`, além de um guest Go de teste):
+    ida-e-volta de 1 KB de `bytes` na fronteira ~3.5–4.0 µs; `sha256` de
+    1 MB no guest ~7–8x o tempo do `crypto/sha256` nativo (asm/SHA-NI) para
+    a mesma entrada; delta de tamanho de binário ao embutir o wazero ~4.0
+    MiB; carga de módulo ~29 ms com cache de compilação quente, ~565 ms
+    frio (sem cache).
+  - `go.mod` passa a exigir `go 1.25` (piso do
+    `github.com/tetratelabs/wazero` v1.12.0).
+
 ## [0.17.1] - 2026-08-23
 
 Patch de checagem estática (issue #75, PR #76): operandos aritméticos e de
