@@ -91,6 +91,27 @@ pub extern "C" fn nx_call(fn_index: u32, args_ptr: u32, args_len: u32) -> u64 {
         // len 0) — o host ve uma regiao de 0 bytes, o que nao decodifica
         // como NXB valido; fixture do fix de nx_free acima.
         4 => ret_raw(&[]),
+        // hash31: h = (h*31 + b) % 2^32 sobre o payload de bytes (args =
+        // u32 count + tag 0x05 + u32 len + payload → pula 9 bytes). Mesmo
+        // kernel do script Noxy de comparacao (§11); devolve NXB int.
+        5 => {
+            if args.len() < 9 {
+                return fail("hash31 expects one bytes argument");
+            }
+            let mut h: u64 = 0;
+            for &b in &args[9..] {
+                h = (h * 31 + b as u64) % 4294967296;
+            }
+            ret_nxb_int(h as i64)
+        }
         _ => fail("unknown fn_index"),
     }
+}
+
+/// NXB int: tag 0x02 + i64 LE.
+fn ret_nxb_int(v: i64) -> u64 {
+    let mut out = Vec::with_capacity(9);
+    out.push(0x02);
+    out.extend_from_slice(&v.to_le_bytes());
+    ret_raw(&out)
 }

@@ -44,6 +44,11 @@ returns = "bytes"
 name = "rust_empty"
 params = []
 returns = "any"
+
+[[export]]
+name = "rust_hash31"
+params = ["bytes"]
+returns = "int"
 `))
 	if err != nil {
 		tb.Fatalf("manifest: %v", err)
@@ -146,5 +151,51 @@ func BenchmarkRustSHA256_1MB(b *testing.B) {
 		if _, err := m.Call(context.Background(), 3, []value.Value{payload}); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// hash31 em Go puro — baseline de software para o mesmo kernel do guest
+// (fn 5) e do script Noxy de comparacao (spec §11).
+func nativeHash31(data []byte) int64 {
+	h := uint64(0)
+	for _, b := range data {
+		h = (h*31 + uint64(b)) % 4294967296
+	}
+	return int64(h)
+}
+
+func TestRustGuestHash31MatchesNative(t *testing.T) {
+	m := loadRustGuest(t)
+	payload := []byte(strings.Repeat("a", 1<<20))
+	got, err := m.Call(context.Background(), 5, []value.Value{value.NewBytes(string(payload))})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if got.Type != value.VAL_INT || got.Int() != nativeHash31(payload) {
+		t.Fatalf("hash31 mismatch: %#v vs %d", got, nativeHash31(payload))
+	}
+}
+
+// Comparacao ilustrativa da §11: o mesmo kernel em wasm (Rust), Go puro e
+// Noxy (benchmarks/bench_hash31_bytes.nx, medido pelo binario).
+func BenchmarkRustHash31_1MB(b *testing.B) {
+	m := loadRustGuest(b)
+	payload := value.NewBytes(strings.Repeat("a", 1<<20))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := m.Call(context.Background(), 5, []value.Value{payload}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// hash31Sink impede o compilador de descartar o resultado nao usado.
+var hash31Sink int64
+
+func BenchmarkNativeHash31_1MB(b *testing.B) {
+	payload := []byte(strings.Repeat("a", 1<<20))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		hash31Sink += nativeHash31(payload)
 	}
 }
