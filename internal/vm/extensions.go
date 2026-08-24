@@ -64,7 +64,7 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 	if err != nil {
 		return fmt.Errorf("extension %q: %w", manifest.Name, err)
 	}
-	if err := vm.verifyExtensionSum(dir, manifest, wasmBytes); err != nil {
+	if err := vm.verifyExtensionSum(dir, manifest, manifestData, wasmBytes); err != nil {
 		return err
 	}
 
@@ -110,7 +110,13 @@ func signatureTypeName(declared string) string {
 // noxy.sum do projeto (M1 trust-on-first-use: spec §15, noxy.sum spec
 // pendente). So se aplica a pacotes sob <RootPath>/noxy_libs — layouts de
 // desenvolvimento fora dali nao tem entrada e a checagem e ignorada.
-func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, wasmBytes []byte) error {
+//
+// O manifesto decide QUAL wasm verificar (manifest.Wasm), entao ele proprio
+// precisa ser verificado primeiro — senao renomear o artefato no manifesto
+// (ex.: trocar "wasm = ..." para apontar para um binario nao registrado)
+// contorna a checagem, pois a busca pelo novo nome no noxy.sum simplesmente
+// nao encontra entrada e cai no ramo de TOFU-allow (achado de revisao).
+func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestData, wasmBytes []byte) error {
 	rootAbs, err := filepath.Abs(vm.Config.RootPath)
 	if err != nil {
 		return nil
@@ -129,6 +135,14 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, wasmBytes [
 		return err
 	}
 	pkg := filepath.ToSlash(rel)
+	if wantManifest, ok := sums.Lookup(pkg, "noxy_ext.toml"); ok {
+		manifestSum := sha256.Sum256(manifestData)
+		gotManifest := hex.EncodeToString(manifestSum[:])
+		if gotManifest != wantManifest {
+			return fmt.Errorf("extension artifact mismatch for %s/noxy_ext.toml: noxy.sum has sha256:%s, disk has sha256:%s",
+				pkg, wantManifest, gotManifest)
+		}
+	}
 	want, ok := sums.Lookup(pkg, manifest.Wasm)
 	if !ok {
 		return nil // sem entrada: TOFU do M1 (spec §15, noxy.sum spec pendente)

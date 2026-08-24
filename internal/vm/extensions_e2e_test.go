@@ -186,3 +186,40 @@ func TestExtensionSumRoundTripViaPkgmanager(t *testing.T) {
 		t.Fatalf("writer/reader must agree on noxy.sum path and key, got %v", err)
 	}
 }
+
+// Um atacante com acesso de escrita a noxy_libs/<pkg>/ pode trocar o wasm
+// (evil.wasm) e apontar noxy_ext.toml para ele: a busca por (pkg,
+// "evil.wasm") no noxy.sum nao acha entrada e cairia no TOFU-allow se o
+// proprio manifesto nao fosse verificado primeiro (achado de revisao —
+// bypass por rename do manifesto).
+func TestExtensionSumManifestTamperRefusesLoad(t *testing.T) {
+	root := t.TempDir()
+	writeExtensionPackage(t, root)
+	pkgDir := filepath.Join(root, "noxy_libs", "guest")
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+		t.Fatal(err)
+	}
+	origWasm, err := os.ReadFile(filepath.Join(pkgDir, "ext.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "evil.wasm"), origWasm, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A linha "wasm = ..." precisa entrar ANTES da primeira [[export]] — TOML
+	// trataria uma chave solta apos uma tabela de array como pertencente a
+	// ultima entrada de [[export]], nao ao nivel superior do manifesto.
+	tampered := strings.Replace(testExtManifest, "abi = 1", "abi = 1\nwasm = \"evil.wasm\"", 1)
+	if err := os.WriteFile(filepath.Join(pkgDir, "noxy_ext.toml"), []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extensionLoaderPermits = []string{"wasi_snapshot_preview1"}
+	t.Cleanup(func() { extensionLoaderPermits = nil })
+
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	code := compileVMSourceAtRoot(t, root, "use guest as g\n")
+	err = machine.Interpret(code)
+	if err == nil || !strings.Contains(err.Error(), "mismatch") || !strings.Contains(err.Error(), "noxy_ext.toml") {
+		t.Fatalf("manifest tamper (wasm rename) must refuse load with a noxy_ext.toml mismatch, got %v", err)
+	}
+}
