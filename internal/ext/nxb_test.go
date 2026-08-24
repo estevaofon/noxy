@@ -123,6 +123,31 @@ func TestNXBTruncatedInputFails(t *testing.T) {
 	}
 }
 
+// TestNXBArrayCountBombIsBounded prova que um guest hostil nao consegue mais
+// pedir uma pre-alocacao de ~128 GiB anunciando um count de array gigante
+// sem ter os bytes correspondentes no payload (achado de revisao: o hint de
+// capacidade agora e limitado pelos bytes restantes, entao a alocacao real
+// fica na casa de bytes, nao gigabytes, e o decode falha rapido por
+// truncamento).
+func TestNXBArrayCountBombIsBounded(t *testing.T) {
+	bomb := []byte{nxbArray, 0xFF, 0xFF, 0xFF, 0xFF}
+	_, err := DecodeValue(bomb, DefaultLimits())
+	if err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("expected a truncation error, got %v", err)
+	}
+}
+
+// TestNXBArgsCountBombIsBounded e o mesmo achado, mas no caminho de
+// DecodeArgs (chamado com os argumentos de uma extension call) — o count de
+// argumentos vem dos mesmos bytes nao confiaveis do guest.
+func TestNXBArgsCountBombIsBounded(t *testing.T) {
+	bomb := []byte{0xFF, 0xFF, 0xFF, 0xFF}
+	_, err := DecodeArgs(bomb, DefaultLimits())
+	if err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("expected a truncation error, got %v", err)
+	}
+}
+
 func TestNXBArgsRoundTrip(t *testing.T) {
 	args := []value.Value{value.NewInt(1), value.NewBytes("zz")}
 	data, err := EncodeArgs(args, DefaultLimits())

@@ -90,6 +90,9 @@ func ParseManifest(data []byte) (*Manifest, error) {
 	if m.MemoryMaxMB == 0 {
 		m.MemoryMaxMB = defaultMemoryMB
 	}
+	if m.MemoryMaxMB < 0 {
+		return nil, fmt.Errorf("noxy_ext.toml: memory_max_mb %d must not be negative", m.MemoryMaxMB)
+	}
 	if m.MemoryMaxMB > hostMemoryCeilingMB {
 		return nil, fmt.Errorf("noxy_ext.toml: memory_max_mb %d exceeds host ceiling %d", m.MemoryMaxMB, hostMemoryCeilingMB)
 	}

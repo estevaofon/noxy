@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"noxy-vm/internal/ext"
 	"noxy-vm/internal/version"
 	"os"
 	"os/exec"
@@ -182,9 +183,11 @@ func updateModFile(pkg, pkgVersion string) error {
 // integracao do VM exercitar o mesmo escritor usado por "--get" e provar que
 // caminho e chave batem com o leitor (vm.verifyExtensionSum).
 //
-// O parse do manifesto aqui e uma varredura de linha crua (nao
-// noxy_ext.toml/internal/ext) para evitar que pkgmanager importe internal/ext
-// — aceitavel para M1.
+// O manifesto e parseado com ext.ParseManifest (internal/ext importa so
+// internal/value — nao ha ciclo real com pkgmanager; um comentario anterior
+// alegava ciclo por engano, revisao final corrigiu). Um manifesto invalido
+// (ou ausente) apenas pula o registro de sums: "--get" nao deve falhar por
+// causa de um pacote que nao e uma extensao WASM.
 func RecordExtensionSums(root, targetDir, localPath string) error {
 	manifestPath := filepath.Join(targetDir, "noxy_ext.toml")
 	manifestData, err := os.ReadFile(manifestPath)
@@ -194,15 +197,11 @@ func RecordExtensionSums(root, targetDir, localPath string) error {
 		}
 		return err
 	}
-	wasmName := "ext.wasm"
-	for _, line := range strings.Split(string(manifestData), "\n") {
-		// So a chave exata "wasm" — um prefixo pegaria "wasm_qualquer_coisa"
-		// (revisao do plano).
-		key, after, found := strings.Cut(line, "=")
-		if found && strings.TrimSpace(key) == "wasm" {
-			wasmName = strings.Trim(strings.TrimSpace(after), `"`)
-		}
+	manifest, err := ext.ParseManifest(manifestData)
+	if err != nil {
+		return nil
 	}
+	wasmName := manifest.Wasm
 	sums, err := ParseSumFile(SumFilePath(root))
 	if err != nil {
 		return err

@@ -68,8 +68,10 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 		return err
 	}
 
+	// Sem campo diagOut no VM ainda: nx_log vai para stderr explicitamente
+	// (achado de revisao) ate a spec de diagOut chegar.
 	module, err := ext.LoadModule(context.Background(), wasmBytes, manifest,
-		ext.LoaderConfig{PermittedImports: extensionLoaderPermits})
+		ext.LoaderConfig{PermittedImports: extensionLoaderPermits, Log: os.Stderr})
 	if err != nil {
 		return err
 	}
@@ -119,15 +121,19 @@ func signatureTypeName(declared string) string {
 func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestData, wasmBytes []byte) error {
 	rootAbs, err := filepath.Abs(vm.Config.RootPath)
 	if err != nil {
-		return nil
+		return err
 	}
 	libs := filepath.Join(rootAbs, "noxy_libs")
 	dirAbs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil
+		return err
 	}
 	rel, err := filepath.Rel(libs, dirAbs)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	// "rel == ".."" cobre o proprio noxy_libs; HasPrefix com o separador
+	// junto evita o falso positivo de um irmao como "noxy_libs-outro" que
+	// comeca com ".." apos Rel mas nao esta de fato fora da arvore (achado
+	// de revisao).
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil // fora de noxy_libs (layout de desenvolvimento): sem verificacao
 	}
 	sums, err := pkgmanager.ParseSumFile(pkgmanager.SumFilePath(rootAbs))
@@ -135,7 +141,16 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestDat
 		return err
 	}
 	pkg := filepath.ToSlash(rel)
-	if wantManifest, ok := sums.Lookup(pkg, "noxy_ext.toml"); ok {
+	wantManifest, hasManifest := sums.Lookup(pkg, "noxy_ext.toml")
+	wantWasm, hasWasm := sums.Lookup(pkg, manifest.Wasm)
+	if !hasManifest && !hasWasm {
+		// TOFU do M1 (spec §15, noxy.sum spec pendente): sem NENHUMA entrada,
+		// o load segue, mas nao em silencio — quem roda o script deve saber
+		// que esta extensao nunca foi registrada por "noxy --get" (achado de
+		// revisao).
+		fmt.Fprintf(os.Stderr, "warning: extension '%s' loaded from noxy_libs without a noxy.sum entry — run 'noxy --get' to record it\n", manifest.Name)
+	}
+	if hasManifest {
 		manifestSum := sha256.Sum256(manifestData)
 		gotManifest := hex.EncodeToString(manifestSum[:])
 		if gotManifest != wantManifest {
@@ -143,15 +158,14 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestDat
 				pkg, wantManifest, gotManifest)
 		}
 	}
-	want, ok := sums.Lookup(pkg, manifest.Wasm)
-	if !ok {
+	if !hasWasm {
 		return nil // sem entrada: TOFU do M1 (spec §15, noxy.sum spec pendente)
 	}
 	sum := sha256.Sum256(wasmBytes)
 	got := hex.EncodeToString(sum[:])
-	if got != want {
+	if got != wantWasm {
 		return fmt.Errorf("extension artifact mismatch for %s/%s: noxy.sum has sha256:%s, disk has sha256:%s",
-			pkg, manifest.Wasm, want, got)
+			pkg, manifest.Wasm, wantWasm, got)
 	}
 	return nil
 }

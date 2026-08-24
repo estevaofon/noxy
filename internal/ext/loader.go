@@ -3,6 +3,7 @@ package ext
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -25,8 +26,13 @@ type LoaderConfig struct {
 	// loop infinito vira trap por cancelamento de contexto, nao um processo
 	// travado sem saida.
 	CallTimeout time.Duration
-	// MaxInstances limita o pool do modo stateless (0 → runtime.NumCPU()).
+	// MaxInstances limita o pool do modo stateless (0 → runtime.GOMAXPROCS(0),
+	// spec §5).
 	MaxInstances int
+	// Log e o destino de nx_log (nil → os.Stderr). A spec fala em "diagOut",
+	// mas nao ha campo diagOut no VM ainda — stderr explicito ate existir
+	// (achado de revisao).
+	Log io.Writer
 }
 
 type callState struct {
@@ -63,7 +69,19 @@ type Module struct {
 }
 
 func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg LoaderConfig) (*Module, error) {
+	// Cinto e suspensorio (achado de revisao): ParseManifest ja rejeita
+	// memory_max_mb negativo, mas um Manifest pode chegar aqui construido a
+	// mao (testes, chamadores futuros). uint32(negativo)*16 estoura para um
+	// numero de paginas gigantesco e wazero.WithMemoryLimitPages entra em
+	// panico (nao erro) acima de 65536 paginas — sem essa guarda isso
+	// derrubaria a VM inteira sem recover.
+	if manifest.MemoryMaxMB <= 0 {
+		return nil, fmt.Errorf("extension %q: memory_max_mb %d is not a positive page count", manifest.Name, manifest.MemoryMaxMB)
+	}
 	pages := uint32(manifest.MemoryMaxMB) * 16 // paginas wasm de 64 KiB
+	if pages > 65536 {
+		return nil, fmt.Errorf("extension %q: memory_max_mb %d exceeds the wazero page limit", manifest.Name, manifest.MemoryMaxMB)
+	}
 	runtimeConfig := wazero.NewRuntimeConfig().
 		WithCloseOnContextDone(true).
 		WithMemoryLimitPages(pages)
@@ -77,6 +95,11 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 		}
 	}
 	r := wazero.NewRuntimeWithConfig(ctx, runtimeConfig)
+
+	logOut := cfg.Log
+	if logOut == nil {
+		logOut = os.Stderr
+	}
 
 	hostBuilder := r.NewHostModuleBuilder(hostModuleName)
 	hostBuilder.NewFunctionBuilder().
@@ -93,7 +116,7 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 	hostBuilder.NewFunctionBuilder().
 		WithFunc(func(ctx context.Context, mod api.Module, level, ptr, size uint32) {
 			if data, ok := mod.Memory().Read(ptr, size); ok {
-				fmt.Fprintf(os.Stderr, "[ext %s] %s\n", manifest.Name, data)
+				fmt.Fprintf(logOut, "[ext %s] %s\n", manifest.Name, data)
 			}
 		}).Export("nx_log")
 	if _, err := hostBuilder.Instantiate(ctx); err != nil {
@@ -130,6 +153,10 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 			return nil, fmt.Errorf("extension %q does not export %q (ABI v1, spec §2)", manifest.Name, required)
 		}
 	}
+	if err := validateABISignatures(exports); err != nil {
+		r.Close(ctx)
+		return nil, fmt.Errorf("extension %q: %w", manifest.Name, err)
+	}
 
 	callTimeout := cfg.CallTimeout
 	if callTimeout == 0 {
@@ -137,7 +164,7 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 	}
 	maxInstances := cfg.MaxInstances
 	if maxInstances == 0 {
-		maxInstances = runtime.NumCPU()
+		maxInstances = runtime.GOMAXPROCS(0)
 	}
 	m := &Module{
 		Manifest:    manifest,
@@ -166,6 +193,67 @@ func LoadModule(ctx context.Context, wasmBytes []byte, manifest *Manifest, cfg L
 		m.single = first
 	}
 	return m, nil
+}
+
+// abiSignature declara os tipos esperados (spec §2) de um export ABI v1.
+type abiSignature struct {
+	params  []api.ValueType
+	results []api.ValueType
+}
+
+var requiredABISignatures = map[string]abiSignature{
+	"nx_abi_version": {params: nil, results: []api.ValueType{api.ValueTypeI32}},
+	"nx_alloc":       {params: []api.ValueType{api.ValueTypeI32}, results: []api.ValueType{api.ValueTypeI32}},
+	"nx_free":        {params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32}, results: nil},
+	"nx_call":        {params: []api.ValueType{api.ValueTypeI32, api.ValueTypeI32, api.ValueTypeI32}, results: []api.ValueType{api.ValueTypeI64}},
+}
+
+// validateABISignatures confere que os quatro exports obrigatorios do ABI v1
+// tem a assinatura exata declarada na spec §2. Sem essa checagem, um export
+// com aridade errada (ex.: nx_call com um parametro a menos) so falha na
+// primeira chamada real, e falha como panico do host ao indexar results[0]
+// em vez de um erro de carregamento (achado de revisao).
+func validateABISignatures(exports map[string]api.FunctionDefinition) error {
+	for _, name := range []string{"nx_abi_version", "nx_alloc", "nx_free", "nx_call"} {
+		want := requiredABISignatures[name]
+		def, ok := exports[name]
+		if !ok {
+			continue // presenca ja foi checada pelo chamador
+		}
+		if !sameValueTypes(def.ParamTypes(), want.params) || !sameValueTypes(def.ResultTypes(), want.results) {
+			return fmt.Errorf("export %q has signature %s -> %s, want %s -> %s (ABI v1, spec §2)",
+				name,
+				formatValueTypes(def.ParamTypes()), formatValueTypes(def.ResultTypes()),
+				formatValueTypes(want.params), formatValueTypes(want.results))
+		}
+	}
+	return nil
+}
+
+func sameValueTypes(got, want []api.ValueType) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func formatValueTypes(types []api.ValueType) string {
+	if len(types) == 0 {
+		return "()"
+	}
+	s := "("
+	for i, t := range types {
+		if i > 0 {
+			s += ", "
+		}
+		s += api.ValueTypeName(t)
+	}
+	return s + ")"
 }
 
 func (m *Module) newInstance(ctx context.Context) (*instance, error) {

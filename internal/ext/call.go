@@ -102,15 +102,26 @@ func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (val
 	// Os args so sao liberados DEPOIS de copiar o retorno: liberar antes
 	// funcionaria hoje (o guest nao roda com o host no controle), mas e
 	// fragilidade gratuita — revisao do plano.
-	freeArgs := func() {
+	//
+	// Um nx_free que trapa e tao grave quanto qualquer outro trap: o
+	// alocador do guest pode ter ficado em estado inconsistente. O erro NAO
+	// pode ser descartado — envenena a instancia (ela e fechada no release)
+	// e vira o erro devolvido a chamada (achado de revisao).
+	freeArgs := func() error {
 		if len(encoded) != 0 {
-			inst.free.Call(callCtx, argsPtr, uint64(len(encoded)))
+			if _, err := inst.free.Call(callCtx, argsPtr, uint64(len(encoded))); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
 
 	packed := results[0]
 	if packed == 0 {
-		freeArgs()
+		if ferr := freeArgs(); ferr != nil {
+			poisoned = true
+			return value.NewNull(), fmt.Errorf("extension '%s' trapped: %v", name, ferr)
+		}
 		if state.failed {
 			return value.NewNull(), fmt.Errorf("extension '%s' failed: %s", name, state.failMsg)
 		}
@@ -120,14 +131,23 @@ func (m *Module) Call(ctx context.Context, fnIndex int, args []value.Value) (val
 	retLen := uint32(packed & 0xffffffff)
 	data, ok := inst.mod.Memory().Read(retPtr, retLen)
 	if !ok {
-		freeArgs()
+		if ferr := freeArgs(); ferr != nil {
+			poisoned = true
+			return value.NewNull(), fmt.Errorf("extension '%s' trapped: %v", name, ferr)
+		}
 		return value.NewNull(), fmt.Errorf("extension '%s': result region out of guest memory", name)
 	}
 	// Copia antes do free: data aponta para a memoria linear do guest.
 	owned := make([]byte, len(data))
 	copy(owned, data)
-	inst.free.Call(callCtx, uint64(retPtr), uint64(retLen))
-	freeArgs()
+	if _, err := inst.free.Call(callCtx, uint64(retPtr), uint64(retLen)); err != nil {
+		poisoned = true
+		return value.NewNull(), fmt.Errorf("extension '%s' trapped: %v", name, err)
+	}
+	if ferr := freeArgs(); ferr != nil {
+		poisoned = true
+		return value.NewNull(), fmt.Errorf("extension '%s' trapped: %v", name, ferr)
+	}
 
 	result, err := DecodeValue(owned, m.limits)
 	if err != nil {

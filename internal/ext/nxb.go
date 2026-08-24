@@ -286,7 +286,15 @@ func (d *nxbDecoder) decode(depth int) (value.Value, error) {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		elements := make([]value.Value, 0, count)
+		// count vem de bytes nao confiaveis do guest: cada elemento consome
+		// >= 1 byte, entao o hint de capacidade nunca deve exceder os bytes
+		// restantes — senao "06 FF FF FF FF" pede ~128 GiB antes de decodificar
+		// um unico elemento (achado de revisao).
+		hint := int(count)
+		if remaining := len(d.data) - d.pos; hint > remaining {
+			hint = remaining
+		}
+		elements := make([]value.Value, 0, hint)
 		for i := uint32(0); i < count; i++ {
 			element, err := d.decode(depth + 1)
 			if err != nil {
@@ -394,7 +402,14 @@ func DecodeArgs(data []byte, limits Limits) ([]value.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := make([]value.Value, 0, count)
+	// count vem de bytes nao confiaveis do guest: cada argumento consome
+	// >= 1 byte, entao o hint de capacidade nunca deve exceder os bytes
+	// restantes (mesmo raciocinio do bloco nxbArray acima).
+	hint := int(count)
+	if remaining := len(d.data) - d.pos; hint > remaining {
+		hint = remaining
+	}
+	args := make([]value.Value, 0, hint)
 	for i := uint32(0); i < count; i++ {
 		arg, err := d.decode(0)
 		if err != nil {

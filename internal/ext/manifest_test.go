@@ -52,6 +52,11 @@ func TestManifestRejects(t *testing.T) {
 	mustFail(t, strings.Replace(validManifest, `abi = 1`, "abi = 1\ncapabilities = [\"net\"]", 1), "capabilities")
 	// stateless nao pode declarar export stateful (spec §5)
 	mustFail(t, validManifest+"\n[[export]]\nname = \"zstd_new\"\nparams = [\"int\"]\nreturns = \"int\"\nstateful = true\n", "stateful")
+	// memory_max_mb negativo nao pode passar: uint32(negativo)*16 estoura em
+	// LoadModule e wazero.WithMemoryLimitPages entra em panico acima de 65536
+	// paginas (achado de revisao — sem essa rejeicao a VM inteira cai sem
+	// recover). Este teste nunca chega em wazero: so exercita ParseManifest.
+	mustFail(t, validManifest+"\nmemory_max_mb = -1\n", "memory_max_mb")
 }
 
 func TestManifestTypeVocabulary(t *testing.T) {
