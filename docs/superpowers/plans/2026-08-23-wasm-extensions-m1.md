@@ -2643,7 +2643,9 @@ cross. Structs arrive back in Noxy as struct-shaped maps.
 Target `wasm32-unknown-unknown` (Rust) or equivalent. WASI is **not**
 provided: an extension importing anything outside `noxy:host/v1` fails to
 load, which is also the permission model — a capability-free extension is a
-pure function of its arguments.
+pure function of its arguments. A complete minimal guest in Rust lives at
+`internal/ext/testdata/rustguest/` (allocator, `nx_call` dispatch, `nx_fail`,
+NXB bytes result) — copy it as your starting point.
 
 ## Errors
 
@@ -2688,6 +2690,316 @@ Run: `go test ./internal/... -count=1` and `go run ./cmd/noxy noxy_examples/run_
 ```bash
 git add docs/EXTENSIONS.md CHANGELOG.md docs/PACKAGE_MANAGER.md
 git commit -m "docs: guia de autoria de extensões WASM, noxy.sum no PACKAGE_MANAGER e CHANGELOG (issue #78)"
+```
+
+---
+
+### Task 10: Rust reference guest — real import-gate positive path and honest §11 numbers
+
+Added after plan review (items 8 and 9) once Rust became available locally. The Go
+wasip1 guest cannot exercise a capability-free load (it needs WASI) and its runtime
+distorts the boundary-overhead numbers. A minimal Rust guest on
+`wasm32-unknown-unknown` — no WASI, ABI v1 only — fixes both and is the seed of the
+Rust SDK. **CI has no Rust:** the compiled `.wasm` is committed next to its Cargo
+source; Go tests only consume the binary.
+
+**Files:**
+- Create: `internal/ext/testdata/rustguest/Cargo.toml`
+- Create: `internal/ext/testdata/rustguest/src/lib.rs`
+- Create: `internal/ext/testdata/rustguest/.gitignore` (`target/`)
+- Create: `internal/ext/testdata/rustguest/README.md` (rebuild steps)
+- Create: `internal/ext/testdata/rustguest/rustguest.wasm` (committed build artifact)
+- Create: `internal/ext/rustguest_test.go` (tests + benchmarks)
+
+**Interfaces:**
+- Consumes: `LoadModule`, `Module.Call`, `ParseManifest`, `EncodeArgs` (Tasks 1–5).
+- Produces: a guest that implements ABI v1 with zero imports outside `noxy:host/v1`, loaded with `LoaderConfig{}` (no permits) — the first genuine capability-free extension the loader has ever run. fn_index dispatch: 0 = echobytes (copy-echo, no compute), 1 = fail ("boom from rust guest"), 2 = trap (`unreachable`), 3 = sha256 of the raw args payload (NXB bytes).
+
+Rust toolchain on this machine: `C:\Users\sandr\.cargo\bin` — prepend it to PATH in the shell (`$env:PATH = "C:\Users\sandr\.cargo\bin;" + $env:PATH` in PowerShell; `export PATH="/c/Users/sandr/.cargo/bin:$PATH"` in bash).
+
+- [ ] **Step 1: Write the Cargo project**
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "rustguest"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sha2 = { version = "0.10", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"
+codegen-units = 1
+```
+
+`src/lib.rs`:
+
+```rust
+//! Guest de referencia do ABI v1 do Noxy (spec §2): sem WASI, sem imports
+//! fora de `noxy:host/v1`. Fixture do gate positivo de imports e dos
+//! benchmarks da §11. fn_index: 0 echobytes, 1 fail, 2 trap, 3 sha256.
+
+use sha2::{Digest, Sha256};
+use std::alloc::{alloc, dealloc, Layout};
+
+#[link(wasm_import_module = "noxy:host/v1")]
+extern "C" {
+    fn nx_fail(ptr: u32, len: u32);
+    #[allow(dead_code)]
+    fn nx_log(level: u32, ptr: u32, len: u32);
+}
+
+#[no_mangle]
+pub extern "C" fn nx_abi_version() -> u32 {
+    1
+}
+
+#[no_mangle]
+pub extern "C" fn nx_alloc(size: u32) -> u32 {
+    if size == 0 {
+        return 0;
+    }
+    let layout = Layout::from_size_align(size as usize, 1).unwrap();
+    unsafe { alloc(layout) as u32 }
+}
+
+#[no_mangle]
+pub extern "C" fn nx_free(ptr: u32, size: u32) {
+    if ptr == 0 || size == 0 {
+        return;
+    }
+    let layout = Layout::from_size_align(size as usize, 1).unwrap();
+    unsafe { dealloc(ptr as *mut u8, layout) }
+}
+
+/// Devolve `data` numa regiao nova: (ptr << 32) | len. Payload vazio ainda
+/// aloca 1 byte — 0 e o sentinela de falha do ABI.
+fn ret_raw(data: &[u8]) -> u64 {
+    if data.is_empty() {
+        let ptr = nx_alloc(1);
+        return (ptr as u64) << 32;
+    }
+    let ptr = nx_alloc(data.len() as u32);
+    let out = unsafe { core::slice::from_raw_parts_mut(ptr as *mut u8, data.len()) };
+    out.copy_from_slice(data);
+    ((ptr as u64) << 32) | (data.len() as u64)
+}
+
+/// NXB bytes: tag 0x05 + u32 LE len + payload.
+fn ret_nxb_bytes(payload: &[u8]) -> u64 {
+    let mut out = Vec::with_capacity(5 + payload.len());
+    out.push(0x05);
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(payload);
+    ret_raw(&out)
+}
+
+fn fail(msg: &str) -> u64 {
+    unsafe { nx_fail(msg.as_ptr() as u32, msg.len() as u32) }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn nx_call(fn_index: u32, args_ptr: u32, args_len: u32) -> u64 {
+    let args: &[u8] = if args_len == 0 {
+        &[]
+    } else {
+        unsafe { core::slice::from_raw_parts(args_ptr as *const u8, args_len as usize) }
+    };
+    match fn_index {
+        // echobytes: args = u32 count + um valor NXB bytes; devolve o valor
+        // tal qual (ja e tag+len+payload) — cópia pura, sem compute.
+        0 => {
+            if args.len() < 4 {
+                return fail("echobytes expects one bytes argument");
+            }
+            ret_raw(&args[4..])
+        }
+        1 => fail("boom from rust guest"),
+        2 => core::arch::wasm32::unreachable(),
+        3 => ret_nxb_bytes(&Sha256::digest(args)),
+        _ => fail("unknown fn_index"),
+    }
+}
+```
+
+`.gitignore`: `target/`
+
+`README.md`:
+
+```markdown
+# rustguest — ABI v1 reference guest
+
+Minimal Noxy extension guest in Rust: no WASI, only `noxy:host/v1` imports.
+Used by `internal/ext/rustguest_test.go` as the capability-free load fixture
+and for the spec §11 benchmarks. **The compiled `rustguest.wasm` is committed**
+because CI has no Rust toolchain; rebuild it after editing `src/lib.rs`:
+
+    rustup target add wasm32-unknown-unknown
+    cargo build --release --target wasm32-unknown-unknown
+    cp target/wasm32-unknown-unknown/release/rustguest.wasm rustguest.wasm
+```
+
+- [ ] **Step 2: Build it**
+
+From `internal/ext/testdata/rustguest/`, with `C:\Users\sandr\.cargo\bin` on PATH:
+`rustup target add wasm32-unknown-unknown` then
+`cargo build --release --target wasm32-unknown-unknown`, then copy
+`target/wasm32-unknown-unknown/release/rustguest.wasm` to `rustguest.wasm`.
+Record the artifact size in the report (expect tens of KB). Commit `Cargo.lock` too.
+
+- [ ] **Step 3: Write the failing tests and benchmarks**
+
+`internal/ext/rustguest_test.go`:
+
+```go
+package ext
+
+import (
+	"context"
+	"crypto/sha256"
+	_ "embed"
+	"strings"
+	"testing"
+
+	"noxy-vm/internal/value"
+)
+
+//go:embed testdata/rustguest/rustguest.wasm
+var rustGuestWasm []byte
+
+func rustManifest(tb testing.TB) *Manifest {
+	tb.Helper()
+	m, err := ParseManifest([]byte(`
+name = "rust"
+abi = 1
+concurrency = "single"
+
+[[export]]
+name = "rust_echobytes"
+params = ["bytes"]
+returns = "bytes"
+
+[[export]]
+name = "rust_fail"
+params = []
+returns = "any"
+
+[[export]]
+name = "rust_trap"
+params = []
+returns = "any"
+
+[[export]]
+name = "rust_sha256"
+params = ["bytes"]
+returns = "bytes"
+`))
+	if err != nil {
+		tb.Fatalf("manifest: %v", err)
+	}
+	return m
+}
+
+// Gate positivo REAL: guest sem WASI carrega com LoaderConfig{} — nenhum
+// import fora de noxy:host/v1.
+func loadRustGuest(tb testing.TB) *Module {
+	tb.Helper()
+	m, err := LoadModule(context.Background(), rustGuestWasm, rustManifest(tb), LoaderConfig{})
+	if err != nil {
+		tb.Fatalf("load rust guest without permits: %v", err)
+	}
+	tb.Cleanup(func() { m.Close(context.Background()) })
+	return m
+}
+
+func TestRustGuestLoadsWithoutPermits(t *testing.T) {
+	loadRustGuest(t)
+}
+
+func TestRustGuestEchoBytes(t *testing.T) {
+	m := loadRustGuest(t)
+	got, err := m.Call(context.Background(), 0, []value.Value{value.NewBytes("héllo")})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if got.Type != value.VAL_BYTES || got.Obj.(string) != "héllo" {
+		t.Fatalf("echo: %#v", got)
+	}
+}
+
+func TestRustGuestFailAndTrap(t *testing.T) {
+	m := loadRustGuest(t)
+	_, err := m.Call(context.Background(), 1, nil)
+	if err == nil || !strings.Contains(err.Error(), "extension 'rust' failed: boom from rust guest") {
+		t.Fatalf("fail: %v", err)
+	}
+	_, err = m.Call(context.Background(), 2, nil)
+	if err == nil || !strings.Contains(err.Error(), "extension 'rust' trapped") {
+		t.Fatalf("trap: %v", err)
+	}
+}
+
+func TestRustGuestSha256MatchesNative(t *testing.T) {
+	m := loadRustGuest(t)
+	arg := value.NewBytes("abc")
+	got, err := m.Call(context.Background(), 3, []value.Value{arg})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	// O guest faz sha256 do payload cru de args (mesma convencao do guest Go).
+	raw, _ := EncodeArgs([]value.Value{arg}, DefaultLimits())
+	want := sha256.Sum256(raw)
+	if got.Type != value.VAL_BYTES || got.Obj.(string) != string(want[:]) {
+		t.Fatalf("sha256 mismatch")
+	}
+}
+
+// Numeros honestos da spec §11 para um guest de qualidade nativa (compare
+// com BenchmarkExt* do guest Go).
+func BenchmarkRustRoundTrip1KB(b *testing.B) {
+	m := loadRustGuest(b)
+	payload := value.NewBytes(strings.Repeat("a", 1024))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := m.Call(context.Background(), 0, []value.Value{payload}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRustSHA256_1MB(b *testing.B) {
+	m := loadRustGuest(b)
+	payload := value.NewBytes(strings.Repeat("a", 1<<20))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := m.Call(context.Background(), 3, []value.Value{payload}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+```
+
+- [ ] **Step 4: Run the tests and benchmarks**
+
+Run: `go test ./internal/ext/ -run TestRustGuest -v` → PASS (the load test fails with an "ungranted module" error if the Rust build accidentally pulled WASI — that's the point of the test).
+Run: `go test ./internal/ext/ -bench 'Rust|Ext' -benchtime=2s -run XXX` and record Rust vs Go-guest numbers side by side for round-trip and sha256, plus the native sha256 baseline. Compare against the §11 gates.
+
+- [ ] **Step 5: Full gate and commit**
+
+Run: `go test ./internal/... -count=1`. Then:
+
+```bash
+git add internal/ext/testdata/rustguest internal/ext/rustguest_test.go
+git commit -m "feat(ext): guest de referência em Rust (sem WASI) — gate positivo real e números honestos da §11 (issue #78)"
 ```
 
 ---
