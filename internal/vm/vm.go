@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"noxy-vm/internal/chunk"
+	"noxy-vm/internal/ext"
 	"noxy-vm/internal/value"
 	"os"
 	"sync"
@@ -76,6 +77,12 @@ type SharedState struct {
 
 	SignalSubMu      sync.Mutex
 	ActiveSignalChan chan os.Signal
+
+	// Extensoes WASM carregadas (spec 2026-08-23): chave = diretorio do
+	// pacote; ExtNames detecta colisao de nome entre pacotes distintos.
+	ExtMu    sync.Mutex
+	Ext      map[string]*ext.Module
+	ExtNames map[string]string
 }
 
 type VM struct {

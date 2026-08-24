@@ -68,3 +68,17 @@ To create a shareable package:
 2.  Initialize a git repository.
 3.  Push to a public host (e.g., GitHub).
 4.  Users can now install it via `noxy --get`.
+
+## Integrity (`noxy.sum`)
+
+When a downloaded package contains a WASM extension (`noxy_ext.toml`),
+`noxy --get` records the sha256 of both the manifest and the `.wasm`
+artifact in `noxy.sum` next to your `noxy.mod`. Verification only applies to
+packages installed under `noxy_libs`; when the package has a matching
+`noxy.sum` entry, the VM verifies the manifest hash first (an attacker who
+could repoint the manifest at an unregistered `.wasm` file would otherwise
+bypass the check by renaming the artifact) and then the wasm hash — either
+mismatch refuses the load. A package with no matching entry, or an
+extension loaded from outside `noxy_libs` (a development layout), runs
+unverified: trust on first use. The full integrity design (including
+hashing packages without extensions) is tracked separately.

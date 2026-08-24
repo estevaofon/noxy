@@ -308,12 +308,13 @@ type architecturePackage struct {
 }
 
 type architectureImporter struct {
-	moduleRoot    string
-	packages      map[string]*types.Package
-	loading       map[string]bool
-	fallback      types.Importer
-	exportFiles   map[string]string
-	moduleImports types.Importer
+	moduleRoot        string
+	packages          map[string]*types.Package
+	loading           map[string]bool
+	fallback          types.Importer
+	exportFiles       map[string]string
+	exportFilesLoaded bool
+	moduleImports     types.Importer
 }
 
 func newArchitectureImporter(t *testing.T) *architectureImporter {
@@ -350,16 +351,25 @@ func (loader *architectureImporter) Import(importPath string) (*types.Package, e
 			}
 		}
 	}
-	loaded, fallbackErr := loader.fallback.Import(importPath)
-	if fallbackErr == nil {
+	// Tenta primeiro o importer com dados de exportacao do modulo (mesma
+	// instancia de moduleImports para todo o teste): assim um pacote como
+	// "context", alcancavel tanto diretamente quanto via dependencia
+	// transitiva de terceiros (ex.: github.com/tetratelabs/wazero),
+	// resolve sempre para o MESMO *types.Package. Se a ordem fosse
+	// invertida (fallback primeiro), o mesmo import path podia gerar dois
+	// *types.Package distintos — um via importer.Default, outro embutido
+	// nos dados de exportacao de um dependente — e o checker via erros do
+	// tipo "does not implement ... (wrong type for method)".
+	loaded, moduleErr := loader.importModuleExportData(importPath)
+	if moduleErr == nil {
 		loader.packages[importPath] = loaded
 		return loaded, nil
 	}
-	loaded, moduleErr := loader.importModuleExportData(importPath)
-	if moduleErr != nil {
+	loaded, fallbackErr := loader.fallback.Import(importPath)
+	if fallbackErr != nil {
 		return nil, errors.Join(
-			fmt.Errorf("default importer for %q: %w", importPath, fallbackErr),
 			fmt.Errorf("module-aware importer for %q: %w", importPath, moduleErr),
+			fmt.Errorf("default importer for %q: %w", importPath, fallbackErr),
 		)
 	}
 	loader.packages[importPath] = loaded
@@ -375,31 +385,9 @@ type architectureListedPackage struct {
 }
 
 func (loader *architectureImporter) importModuleExportData(importPath string) (*types.Package, error) {
-	if loader.exportFiles[importPath] == "" {
-		command := exec.Command("go", "list", "-deps", "-export", "-json", importPath)
-		command.Dir = loader.moduleRoot
-		output, err := command.Output()
-		if err != nil {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) && len(exitErr.Stderr) != 0 {
-				return nil, fmt.Errorf("go list: %s: %w", strings.TrimSpace(string(exitErr.Stderr)), err)
-			}
-			return nil, fmt.Errorf("go list: %w", err)
-		}
-		decoder := json.NewDecoder(bytes.NewReader(output))
-		for {
-			var listed architectureListedPackage
-			if err := decoder.Decode(&listed); errors.Is(err, io.EOF) {
-				break
-			} else if err != nil {
-				return nil, fmt.Errorf("decode go list output: %w", err)
-			}
-			if listed.Error != nil {
-				return nil, fmt.Errorf("go list package %q: %s", listed.ImportPath, listed.Error.Err)
-			}
-			if listed.Export != "" {
-				loader.exportFiles[listed.ImportPath] = listed.Export
-			}
+	if !loader.exportFilesLoaded {
+		if err := loader.populateExportFiles(); err != nil {
+			return nil, err
 		}
 	}
 	if loader.exportFiles[importPath] == "" {
@@ -410,6 +398,44 @@ func (loader *architectureImporter) importModuleExportData(importPath string) (*
 		return nil, fmt.Errorf("read export data: %w", err)
 	}
 	return loaded, nil
+}
+
+// populateExportFiles roda "go list -deps -export" uma unica vez para
+// "./..." (o modulo inteiro), em vez de uma vez por import path de
+// primeiro nivel: alem de mais barato (um so processo "go list"), garante
+// que todo pacote alheio — padrao ou de terceiros — passe sempre por
+// loader.moduleImports, a mesma instancia de importer.ForCompiler, o que
+// e o que da a eles identidade de tipo consistente (ver comentario em
+// Import). "testdata" e ignorado por convencao do proprio "go list", entao
+// o guest wasip1/wasm de internal/ext/testdata nunca entra nesta listagem.
+func (loader *architectureImporter) populateExportFiles() error {
+	loader.exportFilesLoaded = true
+	command := exec.Command("go", "list", "-deps", "-export", "-json", "./...")
+	command.Dir = loader.moduleRoot
+	output, err := command.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && len(exitErr.Stderr) != 0 {
+			return fmt.Errorf("go list: %s: %w", strings.TrimSpace(string(exitErr.Stderr)), err)
+		}
+		return fmt.Errorf("go list: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	for {
+		var listed architectureListedPackage
+		if err := decoder.Decode(&listed); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			return fmt.Errorf("decode go list output: %w", err)
+		}
+		if listed.Error != nil {
+			return fmt.Errorf("go list package %q: %s", listed.ImportPath, listed.Error.Err)
+		}
+		if listed.Export != "" {
+			loader.exportFiles[listed.ImportPath] = listed.Export
+		}
+	}
+	return nil
 }
 
 func (loader *architectureImporter) openExportData(importPath string) (io.ReadCloser, error) {

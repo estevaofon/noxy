@@ -1,0 +1,24 @@
+// hash31 sobre 1 MiB de bytes em Noxy puro: h = (h*31 + b) % 2^32.
+// Mesmo kernel de BenchmarkRustHash31_1MB / BenchmarkNativeHash31_1MB
+// (internal/ext/rustguest_test.go) — comparacao ilustrativa da spec §11:
+// Noxy vs extensao wasm (Rust) vs Go puro. Referencia (dev, 2026-08-23):
+// Noxy ~900 ms, wasm ~8,3 ms (com copia de 1 MB pela fronteira), Go ~1,4 ms.
+let s: string = "a"
+let k: int = 0
+while k < 20 do
+    s = s + s
+    k = k + 1
+end
+let data: bytes = to_bytes(s)
+let n: int = length(data)
+
+let t0: int = time_now_ms()
+let h: int = 0
+let i: int = 0
+while i < n do
+    let b: int = data[i]
+    h = (h * 31 + b) % 4294967296
+    i = i + 1
+end
+let t1: int = time_now_ms()
+print("bytes=" + to_str(n) + " hash31=" + to_str(h) + " ms=" + to_str(t1 - t0))
