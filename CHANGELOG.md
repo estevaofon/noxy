@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.18.0] - 2026-08-23
 
 Mecanismo experimental de extensões WASM (issue #78, fase M1): um pacote
 nativo compilado para `wasm32` pode ser carregado dentro de um processo
