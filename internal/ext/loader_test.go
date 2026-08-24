@@ -8,8 +8,8 @@ import (
 	"noxy-vm/internal/ext/exttest"
 )
 
-func testManifest(t *testing.T, concurrency string) *Manifest {
-	t.Helper()
+func testManifest(tb testing.TB, concurrency string) *Manifest {
+	tb.Helper()
 	m, err := ParseManifest([]byte(`
 name = "guest"
 abi = 1
@@ -46,7 +46,7 @@ params = []
 returns = "int"
 `))
 	if err != nil {
-		t.Fatalf("manifest: %v", err)
+		tb.Fatalf("manifest: %v", err)
 	}
 	return m
 }
