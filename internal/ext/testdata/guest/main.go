@@ -2,7 +2,8 @@
 // tempo de teste por exttest.BuildGuest. O fn_index de nx_call despacha:
 // 0 echo, 1 fail, 2 trap (panic), 3 sha256 do payload, 4 loop infinito
 // (fixture de timeout), 5 tipo declarado mentiroso (fixture de
-// checkDeclaredReturn).
+// checkDeclaredReturn), 6 copia pura sem compute (fixture do gate de
+// overhead de ida-e-volta da spec §11).
 package main
 
 import (
@@ -92,6 +93,15 @@ func nxCall(fnIndex, argsPtr, argsLen uint32) uint64 {
 	case 4: // loop infinito — fixture do teste de timeout de chamada
 		for {
 		}
+	case 6: // fixture do gate de overhead da §11 — copia pura, sem compute.
+		// params = ["bytes"] tem exatamente 1 arg: EncodeArgs grava um u32
+		// de contagem e so entao a codificacao NXB do valor unico — pulando
+		// os 4 bytes do contador, o resto ja e essa codificacao pronta,
+		// sem precisar reenvelopar com outro tag+len.
+		if len(args) < 4 {
+			return 0
+		}
+		return retBytes(args[4:])
 	case 5: // NXB string valida com returns declarado "int" (fixture do
 		// teste de checkDeclaredReturn: extensao mentirosa e pega na fronteira)
 		msg := []byte("oops")

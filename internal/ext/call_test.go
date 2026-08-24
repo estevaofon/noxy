@@ -36,6 +36,20 @@ func TestCallSha256RoundTrip(t *testing.T) {
 	}
 }
 
+func TestCallEchoBytesRoundTrip(t *testing.T) {
+	m := loadTestModule(t, "single")
+	// fnIndex 6: copia pura sem compute, fixture do gate de overhead da §11
+	// (BenchmarkExtRoundTrip1KB). Verifica que o guest devolve os mesmos
+	// bytes que recebeu, encapsulados como NXB bytes valido.
+	got, err := m.Call(context.Background(), 6, []value.Value{value.NewBytes("abc")})
+	if err != nil {
+		t.Fatalf("call: %v", err)
+	}
+	if got.Type != value.VAL_BYTES || got.Obj.(string) != "abc" {
+		t.Fatalf("echobytes must return the input verbatim, got %#v", got)
+	}
+}
+
 func TestCallFailBecomesError(t *testing.T) {
 	m := loadTestModule(t, "single")
 	_, err := m.Call(context.Background(), 1, nil)

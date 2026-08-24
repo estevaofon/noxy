@@ -44,6 +44,11 @@ returns = "any"
 name = "guest_badtype"
 params = []
 returns = "int"
+
+[[export]]
+name = "guest_echobytes"
+params = ["bytes"]
+returns = "bytes"
 `))
 	if err != nil {
 		tb.Fatalf("manifest: %v", err)
