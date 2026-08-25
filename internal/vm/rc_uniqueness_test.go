@@ -1138,7 +1138,7 @@ func helper(db: Db) -> int
 end
 
 func put(db: ref Db, key: string, val: string) -> void
-    let x: int = helper(db)
+    let x: int = helper(*db)
     db.state.payloads[key] = val
 end
 
@@ -1457,14 +1457,14 @@ end
 
 func run(head: ref Node) -> int
     let second: Node = *head.proximo
-    probe_before(head.proximo)
+    probe_before(*head.proximo)
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
         u = u.proximo
         return 1
     end
     let ignored: int = f()
-    probe_after(head.proximo)
+    probe_after(*head.proximo)
     return 1
 end
 
@@ -1592,7 +1592,7 @@ func _append(node: ref Node, valor: int)
 end
 
 func get_second(h: ref Node) -> Node
-    return h.proximo
+    return *h.proximo
 end
 
 // (a) slot POSSUIDO que estava null na captura, escrito de dentro da closure
@@ -1740,7 +1740,7 @@ func _append(node: ref Node, valor: int)
 end
 
 func get_second(h: ref Node) -> Node
-    return h.proximo
+    return *h.proximo
 end
 
 func setit(n: ref Node, v: Node)
@@ -1759,14 +1759,14 @@ end
 
 func run(head: ref Node) -> int
     let x: Node = null
-    probe_p1(head.proximo)
+    probe_p1(*head.proximo)
     setit(ref x, get_second(head))
-    probe_p2(head.proximo)
+    probe_p2(*head.proximo)
     x.valor = 99
-    probe_p3(head.proximo)
+    probe_p3(*head.proximo)
     let u: ref Node = head.proximo
     u.valor = 77
-    probe_p4(head.proximo)
+    probe_p4(*head.proximo)
     return sum_list(head)
 end
 

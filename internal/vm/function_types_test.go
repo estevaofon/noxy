@@ -200,7 +200,7 @@ end
 let get_reference: func() -> ref int = make_reference_factory()
 let pointer: ref int = get_reference()
 *pointer = 42
-test_report(pointer)`)
+test_report(*pointer)`)
 	testExpectedObject(t, 42, got)
 }
 

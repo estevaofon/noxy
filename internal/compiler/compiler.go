@@ -2142,17 +2142,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				n.Token.Line, functionName, noxyTypeName(actual),
 			)
 		}
-		if ref, ok := actual.(*ast.RefType); ok {
-			if _, expectsRef := expected.(*ast.RefType); !expectsRef {
-				c.emitByte(byte(chunk.OP_DEREF))
+		// R2: `return r` com retorno T e erro; `return *r` de composto
+		// preserva o OP_COPY que o antigo return-deref emitia (valor
+		// independente do slot apontado).
+		if prefix, ok := n.ReturnValue.(*ast.PrefixExpression); ok && prefix.Operator == "*" {
+			if _, primitive := expected.(*ast.PrimitiveType); !primitive {
 				c.emitByte(byte(chunk.OP_COPY))
-				actual = ref.ElementType
 			}
 		}
 		if !c.areStrictTypesCompatible(expected, actual) {
 			return nil, nil, fmt.Errorf(
-				"[line %d] return type mismatch in '%s': expected %s, got %s",
+				"[line %d] return type mismatch in '%s': expected %s, got %s%s",
 				n.Token.Line, functionName, expected.String(), noxyTypeName(actual),
+				c.derefReadHint(expected, actual, n.ReturnValue),
 			)
 		}
 		if err := c.emitRuntimeValueType(expected); err != nil {
@@ -2502,17 +2504,12 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			return nil, nil, err
 		}
 
+		// R2: um argumento `ref T` para parametro T e erro (abaixo, com
+		// hint); para parametro any ou callee sem assinatura o ref passa
+		// como valor (print(r) mostra a referencia).
 		_, argType, err := c.Compile(arg)
 		if err != nil {
 			return nil, nil, err
-		}
-		explicitReference := false
-		if prefix, ok := arg.(*ast.PrefixExpression); ok {
-			explicitReference = prefix.Operator == "ref"
-		}
-		if ref, ok := argType.(*ast.RefType); ok && !explicitReference {
-			c.emitByte(byte(chunk.OP_DEREF))
-			argType = ref.ElementType
 		}
 		argTypes = append(argTypes, argType)
 		if isExact {
@@ -2524,9 +2521,10 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 		if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
 			return nil, nil, fmt.Errorf(
-				"[line %d] argument %d to '%s': expected %s, got %s",
+				"[line %d] argument %d to '%s': expected %s, got %s%s",
 				c.currentLine, i+1, callableName(call.Function),
 				funcType.Params[i].String(), noxyTypeName(argType),
+				c.derefReadHint(funcType.Params[i], argType, arg),
 			)
 		}
 		if isExact {

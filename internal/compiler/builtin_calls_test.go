@@ -376,7 +376,7 @@ func TestDeleteAcceptsImplicitReadFromExistingReferenceKey(t *testing.T) {
 let key_value: string = "a"
 let key: ref string = ref key_value
 let mapping: map[any, int] = {"a": 1}
-delete(mapping, key)`)
+delete(mapping, *key)`)
 	if err != nil {
 		t.Fatal(err)
 	}

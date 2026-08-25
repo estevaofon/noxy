@@ -38,7 +38,7 @@ func runMalformedReferenceProgram(t *testing.T, source string, malformed value.V
 func TestMalformedNativeReferenceReadIsRuntimeError(t *testing.T) {
 	err := runMalformedReferenceProgram(t, `
 func read(value: ref int) -> int
-    return value
+    return *value
 end
 let dynamic: func = read
 dynamic(malformed_ref())`, value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"})
@@ -80,7 +80,7 @@ func TestMalformedReferenceMetadataIsRuntimeErrorForReadAndWrite(t *testing.T) {
 
 	readSource := `
 func read(value: ref int) -> int
-    return value
+    return *value
 end
 let dynamic: func = read
 dynamic(malformed_ref())`

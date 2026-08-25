@@ -178,7 +178,7 @@ func TestTypedIndexLocalErrorsMatchGenericPath(t *testing.T) {
 func TestTypedIndexRefBubbleSortMutatesCaller(t *testing.T) {
 	got := captureVMSource(t, `
 func bubble(data: ref int[]) -> void
-    let n: int = length(data)
+    let n: int = length(*data)
     let i: int = 0
     while i < n do
         let j: int = 0

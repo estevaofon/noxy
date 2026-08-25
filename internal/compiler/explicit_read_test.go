@@ -172,3 +172,62 @@ for x in *r do
     let s: string = x
 end`, "type mismatch in 's' declaration: expected string, got int")
 }
+
+func TestReturnRefForValueTypeIsError(t *testing.T) {
+	requireCompileError(t, `func f(r: ref int) -> int
+    return r
+end`, "return type mismatch in 'f': expected int, got ref int", "hint: use '*r'")
+}
+
+func TestReturnDerefCompiles(t *testing.T) {
+	requireCompiles(t, `func f(r: ref int) -> int
+    return *r
+end
+func g(r: ref int) -> ref int
+    return r
+end`)
+}
+
+func TestValueParameterRefArgumentIsError(t *testing.T) {
+	requireCompileError(t, `func dobro(n: int) -> int
+    return n * 2
+end
+let x: int = 2
+let r: ref int = ref x
+let y: int = dobro(r)`, "argument 1 to 'dobro': expected int, got ref int", "hint: use '*r'")
+	requireCompileError(t, `func dobro(n: int) -> int
+    return n * 2
+end
+let x: int = 2
+let y: int = dobro(ref x)`, "argument 1 to 'dobro': expected int, got ref int", "hint: use '*'")
+}
+
+func TestValueParameterDerefArgumentCompiles(t *testing.T) {
+	requireCompiles(t, `func dobro(n: int) -> int
+    return n * 2
+end
+let x: int = 2
+let r: ref int = ref x
+let y: int = dobro(*r)`)
+}
+
+// Parametro any e nativo sem assinatura recebem o ref como valor (R2, ultimo
+// paragrafo): compila, e print/to_str mostram a referencia.
+func TestAnyAndUnsignedNativeAcceptRefAsValue(t *testing.T) {
+	requireCompiles(t, `func guarda(v: any) -> any
+    return v
+end
+let x: int = 2
+let r: ref int = ref x
+let kept: any = guarda(r)
+print(r)
+let s: string = to_str(r)
+let f: string = f"{r}"`)
+}
+
+func TestAppendValueArgumentRefIsError(t *testing.T) {
+	requireCompileError(t, `let xs: int[] = []
+let x: int = 1
+let r: ref int = ref x
+append(ref xs, r)`, "argument 2 to 'append': expected int, got ref int", "hint: use '*r'")
+}

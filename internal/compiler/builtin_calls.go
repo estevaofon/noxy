@@ -10,20 +10,12 @@ func builtinType(name string) ast.NoxyType {
 	return &ast.PrimitiveType{Name: name}
 }
 
+// compileBuiltinValueArgument compila um argumento de VALOR de builtin
+// (item de append, chave de delete, texto de json_loads, limites de range).
+// R2: um `ref T` aqui e devolvido como esta — o chamador rejeita com hint.
 func (c *Compiler) compileBuiltinValueArgument(expression ast.Expression) (ast.NoxyType, error) {
 	_, actual, err := c.Compile(expression)
-	if err != nil {
-		return nil, err
-	}
-	explicitReference := false
-	if prefix, ok := expression.(*ast.PrefixExpression); ok {
-		explicitReference = prefix.Operator == "ref"
-	}
-	if ref, ok := actual.(*ast.RefType); ok && !explicitReference {
-		c.emitByte(byte(chunk.OP_DEREF))
-		return ref.ElementType, nil
-	}
-	return actual, nil
+	return actual, err
 }
 
 func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmission) (bool, ast.NoxyType, error) {
@@ -91,8 +83,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			}
 			if _, explicitRef := item.(*ast.RefType); explicitRef {
 				return true, nil, fmt.Errorf(
-					"[line %d] argument 2 to 'append': expected %s, got %s",
+					"[line %d] argument 2 to 'append': expected %s, got %s%s",
 					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
+					c.derefReadHint(array.ElementType, item, call.Arguments[1]),
 				)
 			}
 			if !c.areStrictTypesCompatible(array.ElementType, item) {
@@ -133,8 +126,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		}
 		if _, explicitRef := key.(*ast.RefType); explicitRef {
 			return true, nil, fmt.Errorf(
-				"[line %d] argument 2 to 'delete': expected %s, got %s",
+				"[line %d] argument 2 to 'delete': expected %s, got %s%s",
 				c.currentLine, noxyTypeName(mapping.KeyType), noxyTypeName(key),
+				c.derefReadHint(mapping.KeyType, key, call.Arguments[1]),
 			)
 		}
 		if !c.areStrictTypesCompatible(mapping.KeyType, key) {

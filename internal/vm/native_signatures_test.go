@@ -540,7 +540,7 @@ func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
 	t.Run("null ref slot gets a fresh referent cell", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 func le(r: ref int) -> int
-    return r
+    return *r
 end
 let target: (ref int)[] = [null]
 let ok: bool = json_loads("[42]", target)
@@ -1015,7 +1015,7 @@ func wrong_return(value: int) -> string
     return "bad"
 end
 func wrong_mode(value: ref int) -> int
-    return value
+    return *value
 end
 let invoke: any = append
 let targets: (func(int) -> int)[] = [identity]
@@ -2007,7 +2007,7 @@ let seed: int[] = [1]
 let target: int[][] = [seed]
 pop(target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`,
 		},
 		{
@@ -2020,7 +2020,7 @@ let seed: int[] = [1]
 let target: int[][] = [seed]
 pop(target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`,
 		},
 	}
@@ -2069,7 +2069,7 @@ let seed: map[string, int] = {"seed": 1}
 let target: map[string, int][] = [seed]
 pop(target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`
 		l := lexer.New(source)
 		p := parser.New(l)
@@ -2112,7 +2112,7 @@ let seed: chan int = make_chan(1)
 let target: (chan int)[] = [seed]
 pop(target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`
 		l := lexer.New(source)
 		p := parser.New(l)
