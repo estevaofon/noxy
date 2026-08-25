@@ -436,22 +436,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "Property reference base must be an object")
 			}
 
-			// Base que o compilador nao conhecia (`any`, struct de outro
-			// modulo): se o campo e declarado `ref T`, comporta como
-			// OP_CONTEXT_REF_PROPERTY — encaminha a ref/null armazenada em vez
-			// de fabricar uma ref para o slot (que deixaria `*n = T` gravar
-			// cru). Spec 2026-08-20-ref-slot-invariant §6.2.
+			// Base que o compilador nao conhecia (any, struct de outro
+			// modulo): campo declarado ref T e erro (R1).
 			if instance, ok := container.Obj.(*value.ObjInstance); ok && instance != nil && instance.Struct.FieldIsRef(name) {
-				stored, exists := instance.Fields[name]
-				if !exists {
-					return vm.runtimeError(c, ip, "undefined property '%s'", name)
-				}
-				forwarded, err := forwardRefSlot(stored, "'"+name+"'")
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				vm.push(forwarded)
-				continue
+				return vm.runtimeError(c, ip, "slot '%s' already holds a reference\n  hint: pass it directly, without 'ref'", name)
 			}
 
 			// Push a reference wrapping the container and property name,
@@ -473,9 +461,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			// Base que o compilador nao conhecia (`any`): resolve um
 			// eventual ref (como OP_REF_PROPERTY) e, se o array/map esta
-			// etiquetado com elemento/valor `ref T`, espelha
-			// OP_CONTEXT_REF_INDEX por inteiro (encaminha ref/null; chave
-			// ausente le null; valor cru e erro). Spec §6.2.
+			// etiquetado com elemento/valor `ref T`, e erro (R1) — o slot
+			// ja guarda uma referencia, `ref` sobre ele nao encaminha.
 			if container.Type == value.VAL_REF {
 				resolved, err := vm.resolveReferenceValue(container)
 				if err != nil {
@@ -487,36 +474,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				switch collection := container.Obj.(type) {
 				case *value.ObjArray:
 					if arrayElementIsRefSlot(collection) {
-						if idx.Type != value.VAL_INT {
-							return vm.runtimeError(c, ip, "array index must be integer")
-						}
-						arrayIndex := int(idx.Int())
-						if arrayIndex < 0 || arrayIndex >= len(collection.Elements) {
-							return vm.runtimeError(c, ip, "array index out of bounds")
-						}
-						forwarded, err := forwardRefSlot(collection.Elements[arrayIndex], describeRefSlotIndex(idx, false))
-						if err != nil {
-							return vm.runtimeError(c, ip, "%s", err)
-						}
-						vm.push(forwarded)
-						continue
+						return vm.runtimeError(c, ip, "slot %s already holds a reference\n  hint: pass it directly, without 'ref'", describeRefSlotIndex(idx, false))
 					}
 				case *value.ObjMap:
 					if mapValueIsRefSlot(collection) {
-						key, err := referenceMapKey(idx)
-						if err != nil {
-							return vm.runtimeError(c, ip, "%s", err)
-						}
-						stored, found := collection.Get(key)
-						if !found {
-							stored = value.NewNull()
-						}
-						forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx, true))
-						if err != nil {
-							return vm.runtimeError(c, ip, "%s", err)
-						}
-						vm.push(forwarded)
-						continue
+						return vm.runtimeError(c, ip, "slot %s already holds a reference\n  hint: pass it directly, without 'ref'", describeRefSlotIndex(idx, true))
 					}
 				}
 			}
@@ -648,8 +610,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if refVal.Type == value.VAL_NULL {
 				vm.push(refVal) // Passthrough null
 			} else if refVal.Type != value.VAL_REF {
-				// Not a ref - pass through as-is (already dereferenced)
-				vm.push(refVal)
+				// R3 (spec 2026-08-24-explicit-ref): `*x` de nao-ref e erro
+				// tambem em runtime (tipo estatico desconhecido).
+				return vm.runtimeError(c, ip, "cannot dereference %s", runtimeTypeName(refVal))
 			} else {
 				resolved, err := vm.resolveReferenceValue(refVal)
 				if err != nil {
@@ -1753,13 +1716,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 		case chunk.OP_DEREF_MUT:
 			refVal := vm.pop()
+			if refVal.Type == value.VAL_NULL {
+				return vm.runtimeError(c, ip, "cannot write through a null reference")
+			}
 			if refVal.Type != value.VAL_REF {
-				// Tolerância herdada do auto-deref antigo: slots com tipo
-				// estático ref podem conter valores planos (checker leniente
-				// pré-0.4). O valor já foi unicizado no nível anterior da
-				// cadeia MUT — segue adiante como contêiner.
-				vm.push(refVal)
-				continue
+				// R3: slot de tipo estatico ref T guarda ref ou null
+				// (invariante do slot, spec 2026-08-20) — outra coisa e erro.
+				return vm.runtimeError(c, ip, "cannot dereference %s", runtimeTypeName(refVal))
 			}
 			v, err := vm.unicizeThroughRefValue(refVal)
 			if err != nil {

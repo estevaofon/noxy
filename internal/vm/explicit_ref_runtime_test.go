@@ -52,3 +52,63 @@ main()
 		t.Fatalf("[len xs, len copia] = %s, want [2, 3]", got.String())
 	}
 }
+
+// R3 em runtime: `*x` sobre um valor que nao e ref (so alcancavel por tipo
+// estatico desconhecido — membro dinamico de modulo/any nested) e erro.
+func TestDerefOfNonRefAtRuntimeIsError(t *testing.T) {
+	err := interpretVMSource(t, New(), `
+struct Caixa
+    v: any
+end
+func main()
+    let c: Caixa = Caixa(7)
+    let d: any = c
+    let n: int = *d.v
+end
+main()
+`)
+	if err == nil || !strings.Contains(err.Error(), "cannot dereference int") {
+		t.Fatalf("err = %v, want 'cannot dereference int'", err)
+	}
+}
+
+// R1 em runtime: `ref` sobre um slot ref T alcancado por base any nao
+// encaminha — e erro, espelhando o estatico 'is already a reference'.
+func TestRefOfRefSlotThroughAnyIsError(t *testing.T) {
+	err := interpretVMSource(t, New(), `
+struct Node
+    valor: int
+    next: ref Node
+end
+func toca(n: ref Node) -> void
+    return
+end
+func main()
+    let seg: Node = Node(2, null)
+    let a: any = Node(1, ref seg)
+    toca(ref a.next)
+end
+main()
+`)
+	if err == nil || !strings.Contains(err.Error(), "slot 'next' already holds a reference") || !strings.Contains(err.Error(), "pass it directly") {
+		t.Fatalf("err = %v, want 'slot 'next' already holds a reference ... pass it directly'", err)
+	}
+}
+
+func TestRefOfRefIndexSlotThroughAnyIsError(t *testing.T) {
+	err := interpretVMSource(t, New(), `
+func toca(n: ref int) -> void
+    return
+end
+func main()
+    let x: int = 1
+    let xs: (ref int)[] = [ref x]
+    let a: any = xs
+    toca(ref a[0])
+end
+main()
+`)
+	if err == nil || !strings.Contains(err.Error(), "already holds a reference") {
+		t.Fatalf("err = %v, want 'already holds a reference'", err)
+	}
+}

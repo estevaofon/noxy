@@ -65,9 +65,14 @@ func newCorruptingVM(t *testing.T) *VM {
 //     leitura comum (OP_GET_PROPERTY, sem checagem — R5 nao cria ref
 //     implicitamente, entao nao ha mais "argumento contextual"); `ref
 //     a.proximo` e agora erro de COMPILACAO (R1, 'a.proximo' ja e uma
-//     referencia). O caso abaixo passa pelo boundary dinamico (`func`
-//     bare) que ainda AUDITA o modo em runtime (validateParameterModes) —
-//     mensagem generica, nao mais a especifica do campo.
+//     referencia). O caso "dynamic call via bare func" passa pelo boundary
+//     dinamico (`func` bare) que ainda AUDITA o modo em runtime
+//     (validateParameterModes) — mensagem generica, nao mais a especifica
+//     do campo. O caso "base any" (Task 8, spec 2026-08-24-explicit-ref
+//     §5.2) mudou de sentido: `ref d.proximo` agora e sempre erro de R1 em
+//     runtime (schema diz que o campo e ref T, ponto final) — o corpo
+//     corrompido nem chega a ser inspecionado, entao a mensagem e a
+//     generica de "ja guarda uma referencia", nao mais a de valor cru.
 func TestRawValueInRefFieldIsExplicitRuntimeError(t *testing.T) {
 	cases := []struct {
 		name string
@@ -90,7 +95,7 @@ let a: Node = Node(1, null)
 corrupt_ref_field(a, "proximo", Node(2, null))
 let d: any = a
 let r: bool = eh_nulo(ref d.proximo)`,
-			want: "reference slot 'proximo' holds a non-reference value",
+			want: "slot 'proximo' already holds a reference",
 		},
 	}
 	for _, tc := range cases {
@@ -124,6 +129,8 @@ let r: bool = dynamic(arr[0])`)
 // conhece o campo); o runtime consulta RefFields e encaminha como o opcode
 // contextual — `*n = ...` sobre campo nulo e "cannot update null reference",
 // igual a base tipada; campo nao-nulo escreve atraves da ref existente.
+// Task 8 (spec 2026-08-24-explicit-ref §5.2): passar o campo ref T em si
+// (sem `ref`) e a forma sancionada — `ref a.proximo` agora e erro de R1.
 func TestAnyBaseRefFieldForwardsLikeTypedBase(t *testing.T) {
 	err := runTypedFunctionProgramError(t, refSlotPrelude+`
 func preenche(n: ref Node)
@@ -142,9 +149,15 @@ end
 let b: Node = Node(2, null)
 let a: any = Node(1, ref b)
 preenche(a.proximo)
-test_report([b.valor == 7, eh_nulo(a.proximo), eh_nulo(ref a.proximo)])`, []bool{true, false, false})
+test_report([b.valor == 7, eh_nulo(a.proximo), eh_nulo(a.proximo)])`, []bool{true, false, false})
 }
 
+// Task 8 (spec 2026-08-24-explicit-ref §5.2): `ref d.child` via base any
+// seria erro de R1 (campo declarado ref T ja e uma referencia); o alvo
+// direto (sem `ref`) e a forma sancionada, e espelha o comportamento de
+// base tipada em TestJSONLoadsDirectNullRefIntSlotReturnsFalse — alvo
+// direto nulo nao da uma localizacao para escrever, entao json_loads
+// devolve false sem tocar o campo.
 func TestAnyBaseNullRefFieldJSONLoadsReturnsFalse(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Holder
@@ -152,7 +165,7 @@ struct Holder
 end
 let h: Holder = Holder(null)
 let d: any = h
-let ok: bool = json_loads("{\"a\": 1}", ref d.child)
+let ok: bool = json_loads("{\"a\": 1}", d.child)
 if !ok && h.child == null then
     test_report(42)
 else
@@ -244,8 +257,11 @@ test_report(type(a.valor))`)
 // Valor de map `ref T`: mesmo invariante (encaminha ref/null; cru e erro
 // explicito com `for key "k"`). Base TIPADA so alcanca mais o check
 // especifico via boundary dinamico (`func` bare — R5 tornou `m["k"]` sem
-// `ref` uma leitura comum); base `any` continua exata via `ref d["k"]`
-// (OP_REF_INDEX ainda consulta o schema em runtime nesse caso).
+// `ref` uma leitura comum). Base `any` (Task 8, spec 2026-08-24-explicit-ref
+// §5.2): `ref d["k"]` num slot de valor ref T e sempre erro de R1 em
+// runtime, so pelo schema — a corrupcao do valor armazenado nem chega a
+// ser inspecionada, entao a mensagem e a generica de "ja guarda uma
+// referencia".
 func TestRawValueInRefMapValueIsExplicitRuntimeError(t *testing.T) {
 	cases := []struct {
 		name string
@@ -268,7 +284,7 @@ let m: map[string, ref Node] = {"k": null}
 corrupt_ref_map(m, "k", Node(2, null))
 let d: any = m
 let r: bool = eh_nulo(ref d["k"])`,
-			want: `reference slot for key "k" holds a non-reference value`,
+			want: `slot for key "k" already holds a reference`,
 		},
 	}
 	for _, tc := range cases {
