@@ -19,7 +19,7 @@ func helper(db: Db) -> int
 end
 
 func put(db: ref Db, key: string, val: string) -> void
-    let x: int = helper(db)
+    let x: int = helper(*db)
     db.state.payloads[key] = val
 end
 

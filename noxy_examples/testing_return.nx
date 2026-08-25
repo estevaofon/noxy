@@ -4,12 +4,12 @@ func append_1(i: ref int[]) -> ref int[]
 end
 
 let a: int[] = [1, 2]
-let b: ref int[] = append_1(a)
+let b: ref int[] = append_1(ref a)
 print(a)
 append_1(b)
-print(b)
+print(*b)
 append_1(b)
-print(b)
+print(*b)
 append_1(b)
-print(b)
+print(*b)
 print(a)

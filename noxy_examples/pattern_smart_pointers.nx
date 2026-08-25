@@ -10,7 +10,7 @@ struct Observer
 end
 
 func observe(o: Observer) -> string
-    return fmt("%s sees: %d", o.name, o.watched_value)
+    return fmt("%s sees: %d", o.name, *o.watched_value)
 end
 
 func notify(o: Observer, new_val: int)

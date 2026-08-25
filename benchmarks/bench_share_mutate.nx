@@ -4,7 +4,7 @@ func main()
     let a: int[]
     let i: int = 0
     while i < 5000 do
-        append(a, i)
+        append(ref a, i)
         i = i + 1
     end
     let s: int = 0

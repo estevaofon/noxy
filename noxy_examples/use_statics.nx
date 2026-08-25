@@ -8,10 +8,11 @@ func main()
     let s: ref statics.Statics = statics.new_statics(data)
     
     // Module members are dynamic calls, so keep the reference explicit.
-    // Since s is already ref Statics, ref s forwards it without nesting.
-    statics.compute(ref s)
+    // Since s is already ref Statics, pass it directly (ref s would be
+    // 'ref' over a ref, which is a compile error: R1).
+    statics.compute(s)
     
-    // Access fields (auto-dereference handles the pointer)
+    // Field access goes through the ref automatically (no '*' needed for '.')
     print("Mean: " + to_str(s.mean))
     print("Median: " + to_str(s.median))
     print("Mode: " + to_str(s.mode))

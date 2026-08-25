@@ -32,7 +32,7 @@ end
 
 func modificar_array_dinamico_ref(arr: ref int[]) -> void
     print("  [Func Dyn Ref] Recebido. Modificando índice 0 para 666...")
-    if length(arr) > 0 then
+    if length(*arr) > 0 then
         arr[0] = 666
     end
     print(f"  [Func Dyn Ref] Valor interno: {arr[0]}")
@@ -59,7 +59,7 @@ end
 
 print("")
 print(f"Original antes (Ref): {fixo[0]}")
-modificar_array_fixo_ref(fixo)
+modificar_array_fixo_ref(ref fixo)
 print(f"Original depois (Ref): {fixo[0]}")
 if fixo[0] == 888 then
     print("-> CONCLUSÃO: Array Fixo passado por REFERÊNCIA (com 'ref')")
@@ -73,8 +73,8 @@ print("TESTE 2: Arrays Dinâmicos (int[])")
 print("========================================")
 
 let dinamico: int[]
-append(dinamico, 100)
-append(dinamico, 200)
+append(ref dinamico, 100)
+append(ref dinamico, 200)
 
 print(f"Original antes (Val): {dinamico[0]}")
 modificar_array_dinamico_val(dinamico)
@@ -89,7 +89,7 @@ end
 
 print("")
 print(f"Original antes (Ref): {dinamico[0]}")
-modificar_array_dinamico_ref(dinamico)
+modificar_array_dinamico_ref(ref dinamico)
 print(f"Original depois (Ref): {dinamico[0]}")
 
 if dinamico[0] == 666 then

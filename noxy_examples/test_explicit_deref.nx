@@ -19,7 +19,7 @@ func verify_syntax(r: ref int)
     if *r == 100 then
         print("PASS: Update worked")
     else
-        print(f"FAIL: Expected 100, got {r}")
+        print(f"FAIL: Expected 100, got {*r}")
     end
 end
 
@@ -29,11 +29,11 @@ func test_rebind()
     let r: ref int = ref a
     
     // Initial State
-    print(f"Initial r points to a: {r}")
+    print(f"Initial r points to a: {*r}")
     
     // Rebind
     r = ref b
-    print(f"Rebound r points to b: {r}")
+    print(f"Rebound r points to b: {*r}")
     
     // Update New Target
     *r = 99
@@ -92,7 +92,7 @@ let global_ref: ref int = ref global_A
 func test_global_scope()
     print("\n--- Testing Global Scope ---")
     // 1. Read Global Ref
-    print(f"Initial global_ref points to global_A: {global_ref}") // Should be 1000
+    print(f"Initial global_ref points to global_A: {*global_ref}") // Should be 1000
     
     // 2. Update via Deref (*global_ref = ...)
     *global_ref = 1500
@@ -108,7 +108,7 @@ func test_global_scope()
     // So `global_ref = ...` should hit the global logic in `AssignStmt`.
     
     global_ref = ref global_B
-    print(f"Rebound global_ref to global_B. Value is: {global_ref}") // 2000
+    print(f"Rebound global_ref to global_B. Value is: {*global_ref}") // 2000
     
     // 4. Update new target
     *global_ref = 2500

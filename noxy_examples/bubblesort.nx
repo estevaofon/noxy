@@ -23,6 +23,6 @@ func bubblesort2(struct_array: ref strucArray) -> void
     end
 end
 
-bubblesort2(myArray)
+bubblesort2(ref myArray)
 print(to_str(myArray.array))
 

@@ -1,7 +1,7 @@
 // O(n^2) de leitura/escrita indexada em array, ordenado in-place via ref
 // (equivalente a lista Python, que ja e passada por referencia).
 func bubble(data: ref int[]) -> void
-    let n: int = length(data)
+    let n: int = length(*data)
     let i: int = 0
     while i < n do
         let j: int = 0
@@ -21,10 +21,10 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 1200 do
-        append(data, (i * 7919) % 104729)
+        append(ref data, (i * 7919) % 104729)
         i = i + 1
     end
-    bubble(data)
+    bubble(ref data)
     let s: int = 0
     i = 0
     while i < 1200 do

@@ -14,13 +14,13 @@ end
 
 func test_assign(node: ref Node)
     // This works in stack.nx style:
-    node.next = n2
+    node.next = ref n2
     print("Basic assign works")
     
     // This is what mergesort does:
-    node.next = get_node(n2)
+    node.next = get_node(ref n2)
     print("Function return assign works")
 end
 
-test_assign(n1)
+test_assign(ref n1)
 print("Test passed!")

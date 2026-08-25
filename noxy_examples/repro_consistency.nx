@@ -11,18 +11,10 @@ print("Initial c.r via implicit deref logic in print? No, print receives value."
 // But we can't explicit deref?
 // We can use a helper to print ref int
 func print_ref(val: ref int)
-    print("Value: %v", val) 
-    // val is ref int. In printf, does it deref? 
-    // fmt implementation in Noxy might not auto-deref ValRef.
-    // But 'val' in expression is usage?
-    // In compiler Identifier lookup: 
-    // If local is Ref, emits OP_GET_LOCAL (pushes Ref).
-    // So 'val' is Ref.
-    // If usage is in BinaryExpr, it auto-derefs.
-    // In Call args?
-    // Argument processing checks if param is ref. 
-    // print takes 'any'.
-    // So it receives Ref.
+    // RESOLVED: a ref is never read implicitly. Passing 'val' (a ref int)
+    // to a builtin expecting 'any' passes the ref itself, not its value;
+    // print(val) would show '<ref ...>'. To print the value, use '*val'.
+    print("Value: %v", *val)
 end
 
 // Helper to check rebind
@@ -33,8 +25,8 @@ end
 c.r = ref global_y // Field Rebind - Should OK
 print("Rebound field c.r")
 
-// Printing c.r using arithmetic to force deref
-let v: int = c.r + 0
+// Printing c.r: explicit '*c.r' reads the pointed value (never implicit)
+let v: int = *c.r + 0
 print("c.r value: %v", v)
 
 let local_ref: ref int = ref global_x

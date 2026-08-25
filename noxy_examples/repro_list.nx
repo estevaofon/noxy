@@ -19,7 +19,7 @@ print("Typed elem: " + to_str(elem.id))
 
 print("Test 6: Append to typed array")
 let v2: Vertex = Vertex(2)
-append(arr, ref v2)
+append(ref arr, ref v2)
 print("Arr len: " + to_str(length(arr)))
 
 

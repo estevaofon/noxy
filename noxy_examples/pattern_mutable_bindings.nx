@@ -5,14 +5,14 @@
 // This is like "pass by reference" in other languages.
 
 func double_it(val: ref int)
-    // UPDATE: val is ref int, 2 * val is int -> writes to target
-    *val = val * 2
+    // UPDATE: read explicitly with '*val', then write with '*val ='
+    *val = *val * 2
 end
 
 func swap(a: ref int, b: ref int)
-    // Must read BOTH values first to avoid ref-to-ref rebind
-    let val_a: int = a  // Read value from 'a' target
-    let val_b: int = b  // Read value from 'b' target
+    // Read BOTH values explicitly with '*' before writing either target
+    let val_a: int = *a  // Read value from 'a' target
+    let val_b: int = *b  // Read value from 'b' target
     *a = val_b           // UPDATE: write val_b into 'a' target
     *b = val_a           // UPDATE: write val_a into 'b' target
 end

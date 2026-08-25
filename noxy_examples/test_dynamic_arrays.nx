@@ -9,9 +9,9 @@ func main() -> void
     print("Tamanho inicial: " + to_str(length(arr)))
     
     // Append
-    append(arr, 10)
-    append(arr, 20)
-    append(arr, 30)
+    append(ref arr, 10)
+    append(ref arr, 20)
+    append(ref arr, 30)
     print("Tamanho após appends: " + to_str(length(arr)))
     print("Elemento 0: " + to_str(arr[0]))
     print("Elemento 1: " + to_str(arr[1]))
@@ -22,7 +22,7 @@ func main() -> void
     print("Elemento 1 modificado: " + to_str(arr[1]))
     
     // Pop
-    let last: int = pop(arr)
+    let last: int = pop(ref arr)
     print("Pop retornou: " + to_str(last))
     print("Tamanho após pop: " + to_str(length(arr)))
     
@@ -32,8 +32,8 @@ func main() -> void
     // Vamos usar let sem init.
     
     let nomes: string[]
-    append(nomes, "Alice")
-    append(nomes, "Bob")
+    append(ref nomes, "Alice")
+    append(ref nomes, "Bob")
     print(f"Nomes: {nomes[0]}, {nomes[1]}")
 
     // Teste contains

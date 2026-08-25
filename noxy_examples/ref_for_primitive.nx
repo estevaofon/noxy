@@ -7,6 +7,6 @@ func swap(x: ref int, y: ref int)
     *y = temp
 end
 
-swap(a, b)
+swap(ref a, ref b)
 print(a)
 print(b)

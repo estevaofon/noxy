@@ -10,8 +10,8 @@ let n2: Node = Node(2, null)
 let n3: Node = Node(3, null)
 let n4: Node = Node(4, null)
 
-n1.next = n3
-n2.next = n4
+n1.next = ref n3
+n2.next = ref n4
 
 func merge(l1: ref Node, l2: ref Node) -> ref Node
     if l1 == null then
@@ -37,5 +37,5 @@ func merge(l1: ref Node, l2: ref Node) -> ref Node
 end
 
 print("Starting")
-let r: ref Node = merge(n1, n2)
+let r: ref Node = merge(ref n1, ref n2)
 print("Done")

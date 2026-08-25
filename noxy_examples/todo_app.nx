@@ -62,7 +62,7 @@ func handle_get_todos() -> HttpResponse
         
         let row: Row = res.rows[i]
         let item: TodoItem = TodoItem(row.values[0], row.values[1], row.values[2])
-        append(items, item)
+        append(ref items, item)
         count = count + 1
         i = i + 1
     end

@@ -56,7 +56,7 @@ func main()
 
     // Array literal infere T[] dinamico (nao int[3]): push e reatribuir
     let xs = [1, 2, 3]
-    append(xs, 4)
+    append(ref xs, 4)
     let n_items = length(xs)          // builtin central: int
     let label = to_str(n_items)       // builtin central: string
     assert(n_items == 4 && label == "4", "append em array inferido + builtins tipados")

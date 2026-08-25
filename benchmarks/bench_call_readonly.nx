@@ -14,7 +14,7 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 20000 do
-        append(data, i)
+        append(ref data, i)
         i = i + 1
     end
     let total: int = 0

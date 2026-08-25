@@ -23,7 +23,7 @@ func modificar_ref(arr: ref int[], tamanho: int) -> void
         arr[i] = arr[i] * 10
         i = i + 1
     end
-    print(f"  Dentro (ref): {to_str(arr)}")
+    print(f"  Dentro (ref): {to_str(*arr)}")
 end
 
 // ============================================
@@ -41,7 +41,7 @@ print("")
 print("=== TESTE 2: Array passado por REFERÊNCIA ===")
 let arr2: int[5] = [1, 2, 3, 4, 5]
 print(f"Antes: {to_str(arr2)}")
-modificar_ref(arr2, 5)
+modificar_ref(ref arr2, 5)
 print(f"Depois: {to_str(arr2)}")
 print("(Array original FOI modificado)")
 print("")

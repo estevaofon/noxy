@@ -42,7 +42,7 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 64 do
-        append(data, i)
+        append(ref data, i)
         i = i + 1
     end
     let half_n: int = 1500000

@@ -12,21 +12,21 @@ func merge(left: int[], right: int[]) -> int[]
     
     while i < length(left) && j < length(right) do
         if left[i] <= right[j] then
-            append(result, left[i])
+            append(ref result, left[i])
             i = i + 1
         else
-            append(result, right[j])
+            append(ref result, right[j])
             j = j + 1
         end
     end
     
     while i < length(left) do
-        append(result, left[i])
+        append(ref result, left[i])
         i = i + 1
     end
     
     while j < length(right) do
-        append(result, right[j])
+        append(ref result, right[j])
         j = j + 1
     end
     
@@ -44,12 +44,12 @@ func merge_sort(arr: int[]) -> int[]
     
     let i: int = 0
     while i < mid do
-        append(left, arr[i])
+        append(ref left, arr[i])
         i = i + 1
     end
     
     while i < length(arr) do
-        append(right, arr[i])
+        append(ref right, arr[i])
         i = i + 1
     end
     
@@ -95,7 +95,7 @@ func sieve_of_eratosthenes(limit: int) -> int[]
     // Inicializa todos como true
     let i: int = 0
     while i <= limit do
-        append(is_prime, true)
+        append(ref is_prime, true)
         i = i + 1
     end
     
@@ -119,7 +119,7 @@ func sieve_of_eratosthenes(limit: int) -> int[]
     i = 2
     while i <= limit do
         if is_prime[i] then
-            append(primes, i)
+            append(ref primes, i)
         end
         i = i + 1
     end
@@ -165,7 +165,7 @@ end
 // --------------------------------------------
 func collatz(n: int) -> int[]
     let sequence: int[]
-    append(sequence, n)
+    append(ref sequence, n)
     
     while n != 1 do
         if n % 2 == 0 then
@@ -173,7 +173,7 @@ func collatz(n: int) -> int[]
         else
             n = 3 * n + 1
         end
-        append(sequence, n)
+        append(ref sequence, n)
     end
     
     return sequence

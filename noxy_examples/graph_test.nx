@@ -54,13 +54,13 @@ end
 
 func create_vertex(g: ref Graph, id: int, nome: string) -> ref Vertex
     let v: Vertex = Vertex(id, nome, [], false)
-    append(g.vertices, ref v)
+    append(ref g.vertices, ref v)
     return ref v
 end
 
 func add_edge(v1: ref Vertex, v2: ref Vertex)
-    append(v1.vizinhos, v2)
-    append(v2.vizinhos, v1)  // Undirected graph (bidirectional ref)
+    append(ref v1.vizinhos, v2)
+    append(ref v2.vizinhos, v1)  // Undirected graph (bidirectional ref)
 end
 
 func reset_visited(g: ref Graph)
@@ -112,7 +112,7 @@ func bfs(start: ref Vertex)
             let vizinho: ref Vertex = atual.vizinhos[i]
             if vizinho.visitado == false then
                 vizinho.visitado = true
-                append(fila, vizinho)
+                append(ref fila, vizinho)
             end
             i = i + 1
         end

@@ -19,12 +19,13 @@ print("--- TEST 1: EXPRESSIONS ---")
 // RESULTADO: Runtime Error (Panic no VM).
 // let x: int = b.val + 1 
 
-let x: int = b.val + 1
+let x: int = *b.val + 1
 print("Expression Result (100+1): %v", x)
 
-// [PROPOSED FIX]
-// O compilador vai olhar a definição de 'Box', ver que 'val' é 'ref int'.
-// Ele insere automaticamente o opcode OP_DEREF.
+// [IMPLEMENTADO: LEITURA EXPLICITA]
+// O compilador sabe que 'val' e 'ref int', mas NAO insere OP_DEREF
+// automaticamente (uma ref nunca e lida implicitamente). E preciso
+// escrever '*b.val' para ler o valor apontado.
 // RESULTADO: Sucesso (100 + 1 = 101).
 
 
@@ -56,7 +57,7 @@ print("--- TEST 3: UPDATE ---")
 let g2: int = 200
 
 b.val = ref g2
-print(fmt("b.val: %v", b.val))
+print(fmt("b.val: %v", *b.val))
 
 // [CURRENT BEHAVIOR]
 // b.val = ref g2

@@ -33,7 +33,7 @@ func main() -> void
     end
     
     // Delete
-    delete(scores, "Bob")
+    delete(ref scores, "Bob")
     if !has_key(scores, "Bob") then
         print("Bob deletado")
     end

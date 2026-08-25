@@ -279,7 +279,7 @@ func build_frame(state: GameState, invaders: Invader[], shot: Projectile, enemy_
     let cells: string[] = []
     let i: int = 0
     while i < WIDTH * HEIGHT do
-        append(cells, " ")
+        append(ref cells, " ")
         i = i + 1
     end
 

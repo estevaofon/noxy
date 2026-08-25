@@ -23,7 +23,7 @@ let AREA: int = WIDTH * HEIGHT
 let grid: int[] = []
 let _i: int = 0
 while _i < AREA do
-    append(grid, 0)
+    append(ref grid, 0)
     _i = _i + 1
 end
 

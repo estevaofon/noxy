@@ -100,11 +100,11 @@ root.left.right = Node(5, null, null)
 func pre_order(node: ref Node, array: ref DynamicArray) -> void
   if *node != null then
     adicionar_elemento(array, node.data)
-    pre_order(node.left, array)
-    pre_order(node.right, array)
+    pre_order(ref node.left, array)
+    pre_order(ref node.right, array)
   end
 end
 
-pre_order(root, meu_array)
+pre_order(ref root, ref meu_array)
 print("Pre-order traversal:")
-imprimir_array(meu_array)
+imprimir_array(ref meu_array)

@@ -11,8 +11,8 @@ let n3: Node = Node(3, null)
 let n4: Node = Node(4, null)
 
 // Two lists: 1->3 and 2->4
-n1.next = n3
-n2.next = n4
+n1.next = ref n3
+n2.next = ref n4
 
 func print_list(head: ref Node) 
     let current: ref Node = head
@@ -40,12 +40,12 @@ func merge(l1: ref Node, l2: ref Node) -> ref Node
 end
 
 print("List 1:")
-print_list(n1)
+print_list(ref n1)
 print("List 2:")
-print_list(n2)
+print_list(ref n2)
 
 print("Merging...")
-let result: ref Node = merge(n1, n2)
+let result: ref Node = merge(ref n1, ref n2)
 
 print("Result:")
 print_list(result)

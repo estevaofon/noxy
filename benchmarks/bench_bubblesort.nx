@@ -1,6 +1,6 @@
 // Sort in-place via ref: dominado por leitura/escrita indexada.
 func bubble(data: ref int[]) -> void
-    let n: int = length(data)
+    let n: int = length(*data)
     let i: int = 0
     while i < n do
         let j: int = 0
@@ -20,10 +20,10 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 3000 do
-        append(data, (i * 7919) % 104729)
+        append(ref data, (i * 7919) % 104729)
         i = i + 1
     end
-    bubble(data)
+    bubble(ref data)
     let s: int = 0
     i = 0
     while i < 3000 do

@@ -256,10 +256,10 @@ func test_ordenacao_strings()
     check("Z" < "a", "maiuscula antes de minuscula (byte order)")
     check("e" < "é", "ascii antes de acentuado (code point order)")
 
-    // ref string ordena pelo valor apontado (auto-deref de expressao).
+    // ref string ordena pelo valor apontado (leitura explicita com '*rs').
     let s: string = "a"
     let rs: ref string = ref s
-    check(rs < "b", "ref string participa da ordenacao pelo valor")
+    check(*rs < "b", "ref string participa da ordenacao pelo valor")
 end
 
 // ------------------------------------------------------------
@@ -438,33 +438,33 @@ func test_ref_avancado()
     *r = 5
     check_int(m["k"], 5, "ref para entrada de map escreve no map")
 
-    // 'ref' sobre um ref FORWARDA a referencia existente (nao existe
-    // ref ref T): o resultado e o mesmo slot.
+    // 'ref' sobre uma ref ja existente e erro de compilacao (R1: nao existe
+    // ref ref T). Para repassar o mesmo slot, atribua a ref diretamente.
     let x: int = 1
     let rx: ref int = ref x
-    let fwd: ref int = ref rx
-    check(fwd == rx, "forwarding preserva a identidade do slot")
+    let fwd: ref int = rx
+    check(fwd == rx, "atribuir uma ref existente preserva a identidade do slot")
     *fwd = 2
-    check_int(x, 2, "escrever via forward alcanca o original")
+    check_int(x, 2, "escrever via 'fwd' alcanca o original")
 
-    // '*' tambem funciona em posicao de leitura, como forma explicita.
+    // '*r' e a unica forma de ler o valor apontado (nunca implicito).
     check_int(*rx, 2, "'*r' le o valor apontado")
 
-    // No alvo '*r =' o RHS ref e lido (o '*' ja desfez a ambiguidade
-    // update/rebind): '*ra = ro' equivale a '*ra = *ro'.
+    // No alvo '*r =' o RHS tambem precisa de leitura explicita quando e
+    // uma ref: '*ra = *ro' le o valor de ro e escreve no slot de ra.
     let alvo: int = 1
     let origem: int = 5
     let ra: ref int = ref alvo
     let ro: ref int = ref origem
-    *ra = ro
-    check_int(alvo, 5, "'*r = outro_ref' escreve o valor apontado pelo RHS")
+    *ra = *ro
+    check_int(alvo, 5, "'*r = *outro_ref' escreve o valor lido do RHS")
     check_int(origem, 5, "o RHS so e lido, nao alterado")
 
     // ref para local sobrevive ao frame que o criou (promocao a heap).
     let esc: ref int = cria_ref()
-    check_int(esc, 42, "ref devolvido le o valor da local promovida")
+    check_int(*esc, 42, "ref devolvido le o valor da local promovida")
     *esc = 99
-    check_int(esc, 99, "o slot promovido continua gravavel")
+    check_int(*esc, 99, "o slot promovido continua gravavel")
 
     // Duas closures sobre a MESMA variavel compartilham o slot.
     let fs: (func() -> int)[] = par_de_closures()

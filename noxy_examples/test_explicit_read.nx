@@ -1,0 +1,31 @@
+// Leitura explicita: r e a referencia, *r e o valor (spec 2026-08-24-explicit-ref)
+// Este teste verifica que 'y' recebe uma COPIA independente do valor lido
+// via '*i', e nao a referencia em si (int e sempre passado por valor).
+
+func increment_and_ret(i: ref int) -> int
+    *i = *i + 1
+    return *i // Leitura explicita: '*i' converte ref int -> int
+end
+
+let x: int = 10
+print("Original x:", x)
+
+let y: int = increment_and_ret(ref x)
+// x passado por ref. x vira 11.
+// y recebe COPIA do valor de x (11).
+
+print("After increment_and_ret(x)")
+print("x:", x) // Should be 11
+print("y:", y) // Should be 11
+
+print("Assigning y = 50")
+y = 50
+
+print("x:", x) // Should still be 11 (if y is value)
+print("y:", y) // Should be 50
+
+if x == 11 && y == 50 then
+    print("SUCCESS: leitura explicita com '*r' funcionou. y e um valor distinto.")
+else
+    print("FAILURE: y might be a reference to x, or logic error.")
+end

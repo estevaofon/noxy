@@ -26,14 +26,14 @@ struct Stack<T>
 end
 
 func push<T>(s: ref Stack<T>, item: T)
-    append(s.items, item)
+    append(ref s.items, item)
 end
 
 // Chamado `pop_stack` (nao `pop`) para nao sombrear o builtin `pop` — uma
 // funcao generica com o mesmo nome do builtin faria `pop(s.items)` abaixo
 // resolver para ELA MESMA em vez do builtin, gerando recursao mal tipada.
 func pop_stack<T>(s: ref Stack<T>) -> T
-    return pop(s.items)
+    return pop(ref s.items)
 end
 
 func peek<T>(s: Stack<T>) -> T

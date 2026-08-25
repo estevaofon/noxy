@@ -74,20 +74,20 @@ func print_list(node: ref Node)
 end
 
 func stack_push(valor: int)
-    _append(no1, valor)
+    _append(ref no1, valor)
 end
 
 func stack_pop() -> int
-    let i:int = pop(no1)
+    let i:int = pop(ref no1)
     return i
 end
 
 func peek() -> int
-    return _peek(no1)
+    return _peek(ref no1)
 end
 
 func is_empty() -> bool
-    return _is_empty(no1)
+    return _is_empty(ref no1)
 end
 
 func print_is_empty()
@@ -100,12 +100,12 @@ end
 
 stack_push(20)
 stack_push(30)
-print_list(no1)
+print_list(ref no1)
 let topo: int = peek()
 print("Topo da pilha "+to_str(topo))
 let popped: int = stack_pop()
 print("pop(): "+to_str(popped))
-print_list(no1)
+print_list(ref no1)
 topo = peek()
 print("Topo da pilha "+to_str(topo))
 popped = stack_pop()

@@ -65,13 +65,13 @@ end
 func create_file(dir: ref Directory, nome: string, tamanho: int)
     let meta: Metadata = create_metadata(644)
     let arquivo: File = File(nome, tamanho, ref meta)
-    append(dir.arquivos, ref arquivo)
+    append(ref dir.arquivos, ref arquivo)
 end
 
 func create_dir(parent: ref Directory, nome: string) -> ref Directory
     let meta: Metadata = create_metadata(755)
     let novo: Directory = Directory(nome, ref meta, parent, [], [])
-    append(parent.subdirs, ref novo)
+    append(ref parent.subdirs, ref novo)
     return ref novo
 end
 

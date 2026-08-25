@@ -47,7 +47,7 @@ func main() -> void
     print(f"Generating {count} complex users...")
     while i < count do
         let u: User = User(i, f"user_{i}", true, 9.5, prof, [1, 2, 3, 4, 5, i])
-        append(users, u)
+        append(ref users, u)
         i = i + 1
     end
     

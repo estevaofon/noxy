@@ -80,9 +80,9 @@ func merge_sort(head: ref Node) -> ref Node
 end
 
 print("Before sorting:")
-print_list(node_9)
+print_list(ref node_9)
 
-let sorted_head: ref Node = merge_sort(node_9)
+let sorted_head: ref Node = merge_sort(ref node_9)
 
 print("After sorting:")
 print_list(sorted_head)

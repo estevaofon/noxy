@@ -12,9 +12,9 @@ func test_unified_consistency()
     // 1. Local Rebind (Should compile now)
     let r: ref int = ref g1
     r = ref g2 // REBIND
-    print(fmt("After r = ref g2: r=%d (Expected 20)", r))
+    print(fmt("After r = ref g2: r=%d (Expected 20)", *r))
 
-    // 2. Field Update (Should compile now with implicit Deref)
+    // 2. Field Update (leitura/escrita explicitas com '*c.val')
     *c.val = 30 // UPDATE value of g1 (via c.val)
     print(fmt("After c.val = 30: g1=%d (Expected 30)", g1))
 

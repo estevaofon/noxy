@@ -69,8 +69,8 @@ func run_simulation(generations: int)
     // Initialize with zeros
     let i: int = 0
     while i < AREA do
-        append(grid, 0)
-        append(next_grid, 0)
+        append(ref grid, 0)
+        append(ref next_grid, 0)
         i = i + 1
     end
 

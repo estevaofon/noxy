@@ -1,7 +1,7 @@
 // Mutação in-place via ref: custo deve ficar neutro entre baseline e CoW.
 func bump(data: ref int[], rounds: int) -> void
     let i: int = 0
-    while i < length(data) do
+    while i < length(*data) do
         data[i] = data[i] + rounds
         i = i + 1
     end
@@ -11,12 +11,12 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 20000 do
-        append(data, i)
+        append(ref data, i)
         i = i + 1
     end
     let r: int = 0
     while r < 300 do
-        bump(data, r)
+        bump(ref data, r)
         r = r + 1
     end
     let s: int = 0
