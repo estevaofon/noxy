@@ -270,10 +270,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 					addrStr = address
 				case value.REF_PROPERTY:
-					containerAddr := fmt.Sprintf("%p", ref.Container.Obj)
-					addrStr = fmt.Sprintf("<prop %s of %s>", ref.Name, containerAddr)
+					addrStr = fmt.Sprintf("<prop %s of %s>", ref.Name, borrowBaseAddr(ref))
 				case value.REF_INDEX:
-					addrStr = fmt.Sprintf("<index %s>", ref.Index.String())
+					addrStr = fmt.Sprintf("<index %s of %s>", ref.Index.String(), borrowBaseAddr(ref))
 				}
 				vm.push(value.NewString(addrStr))
 			} else {
@@ -1489,10 +1488,18 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			val := vm.pop()
 			instanceVal := vm.pop()
 
-			// Auto-dereference if instance is a ref
-
+			// Auto-dereference if instance is a ref.
+			//
+			// issue #83: aqui a referência é ALVO DE ESCRITA, então a
+			// resolução tem de ser em modo de escrita — unicizar o caminho e
+			// gravar os clones de volta. Com `resolveReferenceValue` (modo de
+			// leitura) a mutação ia direto no objeto compartilhado e vazava
+			// numa cópia posterior, que é o bug do #83 chegando por um site de
+			// escrita tipado `any`: `func setx(p: any) -> void  p.x = 99 end`
+			// chamada com `setx(ref arr[0])`. É o caminho dinâmico; via base
+			// tipada o compilador emite a família *_MUT, que já unicizava.
 			if instanceVal.Type == value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(instanceVal)
+				resolved, err := vm.unicizeThroughRefValue(instanceVal)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
@@ -1543,9 +1550,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			val := vm.pop()
 			instanceVal := vm.pop()
 
-			// Expect Instance (Can be Ref to Instance)
+			// Expect Instance (Can be Ref to Instance). Mesmo motivo do
+			// OP_SET_PROPERTY: alvo de escrita resolve em modo de escrita
+			// (issue #83).
 			if instanceVal.Type == value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(instanceVal)
+				resolved, err := vm.unicizeThroughRefValue(instanceVal)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}

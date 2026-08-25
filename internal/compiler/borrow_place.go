@@ -33,19 +33,28 @@ import (
 // estático do CONTEÚDO daquele lugar (já com ref desembrulhado, porque o
 // runtime auto-dereferencia um lugar que guarda referência).
 func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) {
+	// Lugar que JÁ guarda uma referência — `xs: ref int[]`, ou o campo `next`
+	// de um nó de lista (`next: ref Node`). O lugar de verdade é o REFERENTE, e
+	// ler a expressão como valor já produz o ref que aponta para lá: uma
+	// referência de célula, que é exatamente a raiz que a cadeia procura.
+	//
+	// Precisa vir ANTES da recursão. Emitir `OP_REF_PROPERTY` sobre um campo
+	// declarado `ref T` dispara a guarda de R1 do runtime ("slot 'next' already
+	// holds a reference"), que existe para o passo FINAL de um empréstimo — não
+	// se toma referência de referência — mas que não sabe distinguir o passo
+	// final de um passo INTERMEDIÁRIO do caminho, onde atravessar um campo ref
+	// é legal e é como toda estrutura ligada do Noxy é percorrida.
+	if declared, known := c.lvalueStaticType(expr); known {
+		if refType, isRef := declared.(*ast.RefType); isRef {
+			if _, _, err := c.Compile(expr); err != nil {
+				return nil, err
+			}
+			return refType.ElementType, nil
+		}
+	}
+
 	switch n := expr.(type) {
 	case *ast.Identifier:
-		// Nome que JÁ guarda uma referência (`xs: ref int[]`): o lugar é o
-		// referente, e o valor do slot já é o ref que aponta para lá. Compilar
-		// como valor empilha exatamente esse ref.
-		if declared, known := c.identifierDeclaredType(n.Value); known {
-			if refType, isRef := declared.(*ast.RefType); isRef {
-				if _, _, err := c.Compile(n); err != nil {
-					return nil, err
-				}
-				return refType.ElementType, nil
-			}
-		}
 		// Nome comum: ref de célula. É a raiz da cadeia e o ponto em que a
 		// recursão para.
 		return c.compileReferenceArgumentValue(n)
@@ -79,6 +88,31 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 	// dessas formas é um lvalue nomeável de onde o vazamento parta.
 	t, _, err := c.compileLValueBase(expr)
 	return t, err
+}
+
+// lvalueStaticType devolve o tipo estático de uma cadeia de l-value SEM emitir
+// nada — a mesma recursão de compileBorrowBase, só que sobre tipos. Serve para
+// decidir, antes de emitir, se um nível do caminho guarda uma referência.
+func (c *Compiler) lvalueStaticType(expr ast.Expression) (ast.NoxyType, bool) {
+	switch n := expr.(type) {
+	case *ast.Identifier:
+		return c.identifierDeclaredType(n.Value)
+	case *ast.MemberAccessExpression:
+		owner, ok := c.lvalueStaticType(n.Left)
+		if !ok {
+			return nil, false
+		}
+		t := c.memberType(unwrapRefType(owner), n.Member)
+		return t, t != nil
+	case *ast.IndexExpression:
+		container, ok := c.lvalueStaticType(n.Left)
+		if !ok {
+			return nil, false
+		}
+		t := indexElementType(unwrapRefType(container))
+		return t, t != nil
+	}
+	return nil, false
 }
 
 // identifierDeclaredType devolve o tipo declarado de um nome, na ordem de

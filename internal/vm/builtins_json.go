@@ -223,10 +223,21 @@ func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
 // apontado passa por jsonStoreThrough (storeReferenceValue), nunca pelo
 // store cru de referenceStorage — spec 2026-08-20-ref-slot-invariant §5.3.
 func populateRef(vm *VM, target value.Value, ref *value.ObjRef, data interface{}) bool {
-	currentVal, exists, store, err := vm.referenceStorage(ref)
+	currentVal, exists, store, err := vm.referenceStorageMode(ref, true)
 	if err != nil || !exists || store == nil {
 		return false
 	}
+	// Semântica de valor: prepareJSONMutation muta o objeto apontado NO LUGAR.
+	// Se ele estiver compartilhado — `let copia = u` antes do json_loads — a
+	// mutação vazava para quem compartilha, inclusive com `ref` a um local
+	// simples. Unicizar e gravar o clone de volta no lugar apontado antes de
+	// mutar é a mesma disciplina da família *_MUT (e, para um empréstimo,
+	// referenceStorageMode acima já unicizou o caminho até aqui).
+	unique, err := vm.unicizeThroughRefValue(target)
+	if err != nil {
+		return false
+	}
+	currentVal = unique
 	set := jsonStoreThrough(vm, target)
 	if ref.JSONDynamic.Load() {
 		replacement, ok := dynamicJSONValue(data)

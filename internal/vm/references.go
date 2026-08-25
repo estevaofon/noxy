@@ -344,3 +344,39 @@ func (vm *VM) resolveReferenceValue(input value.Value) (value.Value, error) {
 	}
 	return vm.lookupReferenceValue(ref)
 }
+
+// borrowBaseAddr descreve o LUGAR do pai de um empréstimo, para `addr` (issue
+// #83). Imprimir o ponteiro de `Container` deixou de ser honesto quando o
+// empréstimo passou a denotar um caminho: aquele campo é o retrato do instante
+// da criação, e dois roots ainda preguiçosamente compartilhados imprimiam o
+// mesmo endereço para lugares diferentes — e, depois de uma escrita, o endereço
+// nomeava o objeto que a CÓPIA ficou possuindo.
+//
+// O caminho é a identidade, então é ele que `addr` mostra:
+//
+//	addr(ref a[0].x)  ->  <prop x of <index 0 of <global a>>>
+func borrowBaseAddr(ref *value.ObjRef) string {
+	if ref.Base.Type != value.VAL_REF {
+		return fmt.Sprintf("%p", ref.Container.Obj)
+	}
+	base, ok := ref.Base.Obj.(*value.ObjRef)
+	if !ok || base == nil {
+		return "<invalid base>"
+	}
+	switch base.RefType {
+	case value.REF_GLOBAL:
+		return fmt.Sprintf("<global %s>", base.Name)
+	case value.REF_UPVALUE:
+		if address, ok := base.Upvalue.LocationAddress(); ok {
+			return address
+		}
+		return "<invalid upvalue>"
+	case value.REF_PTR:
+		return fmt.Sprintf("%p", base.Ptr)
+	case value.REF_PROPERTY:
+		return fmt.Sprintf("<prop %s of %s>", base.Name, borrowBaseAddr(base))
+	case value.REF_INDEX:
+		return fmt.Sprintf("<index %s of %s>", base.Index.String(), borrowBaseAddr(base))
+	}
+	return "<invalid base>"
+}
