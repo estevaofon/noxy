@@ -30,8 +30,8 @@ Fato que dimensiona o trabalho (levantamento de 2026-08-24 sobre `3c579ae`): **a
 
 **Fora (issues de follow-up, abertas pelo plano):**
 
-- `ref` tomado para dentro de container **antes** de uma cópia — a cópia posterior enxerga escritas pelo ref pré-existente ("documented edge" da §2.2). É bug de CoW na VM, não de sintaxe.
-- `ref T` não-nulo por padrão / `ref T?`.
+- `ref` tomado para dentro de container **antes** de uma cópia — a cópia posterior enxerga escritas pelo ref pré-existente ("documented edge" da §2.2). É bug de CoW na VM, não de sintaxe. — issue #83
+- `ref T` não-nulo por padrão / `ref T?`. — issue #84
 
 **Não muda:** opcodes existentes e suas variantes `_BORROW`; RC/CoW/`Owned`; `validateParameterModes`; `OP_EQUAL` e `valuesEqual` (identidade de slot); invariante do slot `ref T`; `addr()`; generics (`T` não liga a `ref X`; `ref T` no parâmetro); `null` como valor de `ref T`.
 
@@ -39,7 +39,7 @@ Fato que dimensiona o trabalho (levantamento de 2026-08-24 sobre `3c579ae`): **a
 
 **R1. `ref x` cria uma referência.** `x` deve ser endereçável: variável local/global, campo, índice de array, entrada de map, variável capturada. Literal não-nulo ou temporário (resultado de chamada cujo tipo não é `ref T`) → erro `reference argument '…' is not addressable`. Se o tipo estático de `x` já é `ref T` → erro `'x' is already a reference` (hint `pass 'x' directly`). Consequência: `ref ref T` não pode ser produzido; a anotação `ref ref T` é rejeitada no parser.
 
-**R2. Um `ref T` nunca é lido implicitamente.** Onde o compilador espera `T` e encontra `ref T` → erro de tipo com hint `use '*r' to read the referenced value`. Posições: operandos de operador binário e unário (`+ - * / % == != < > <= >= && || ! - ~` e bitwise), condição de `if`/`while`/`when case`, coleção de `for … in`, índice em `a[i]`, argumento para parâmetro não-`ref` (função, `func` tipado, construtor, builtin, nativo), `return` para tipo de retorno não-`ref`, inicializador `let x: T = r`, RHS de `x = r`, RHS de `*r = s`, interpolação `{r}` em f-string. Um parâmetro ou slot `any` **aceita** um `ref T` como valor (a referência viaja, como em `chan_send(ch, r)`); isso não é leitura.
+**R2. Um `ref T` nunca é lido implicitamente.** Onde o compilador espera `T` e encontra `ref T` → erro de tipo com hint `use '*r' to read the referenced value`. Posições: operandos de operador binário e unário (`+ - * / % == != < > <= >= && || ! - ~` e bitwise), condição de `if`/`while`, coleção de `for … in`, índice em `a[i]`, argumento para parâmetro não-`ref` (função, `func` tipado, construtor, builtin, nativo), `return` para tipo de retorno não-`ref`, inicializador `let x: T = r`, RHS de `x = r`, RHS de `*r = s`. Um parâmetro sem assinatura (`print`, `to_str`, nativos legados) recebe o `ref` como valor — `print(r)`, `to_str(r)` e `f"{r}"` (que desugara para `to_str(r)`) mostram `<ref …>`; para ver o valor, `*r`. Um parâmetro ou slot `any` **aceita** um `ref T` como valor (a referência viaja, como em `chan_send(ch, r)`); isso não é leitura.
 
 **R3. `*r` é a única leitura e escrita do valor apontado.** `*r` em expressão lê; `*r = v` escreve. `*x` com `x` de tipo estático não-ref → erro `cannot dereference <tipo>`. Via `any` (tipo estático desconhecido) a mesma checagem ocorre em runtime, com a mesma mensagem. `*r` com `r == null` continua erro de runtime (null reference).
 
@@ -64,7 +64,7 @@ Custo: uma alocação de célula por local referenciada, e a partir daí a vari�
 
 **R10. Compartilhamento.** Zen e §2.2 passam a dizer: *"`ref` is the only sharing mechanism visible in a type. Closures capture variables by name and globals are shared by name — those are the only other places where two names can see one slot, and the only ones that need coordination under concurrency."* A regra 8 da §2.2 deixa de dizer "orthogonal to value semantics".
 
-**Consequências diretas:** `print(r)`, `f"{r}"` e `to_str(r)` com `r: ref T` — `print` e `to_str` recebem a referência e imprimem `<ref …>`/`null` (é o que `ObjRef.String()` já faz); f-string é R2 (erro, `{*r}`). `addr(ref x)` fica. `let v = r` (inferência) dá `v: ref T`. `let v: T = r` → erro (R2).
+**Consequências diretas:** `print(r)`, `f"{r}"` e `to_str(r)` com `r: ref T` — `print` e `to_str` recebem a referência e imprimem `<ref …>`/`null` (é o que `ObjRef.String()` já faz); f-string mostra `<ref …>` como `to_str` (é `to_str(r)` depois do parser). `addr(ref x)` fica. `let v = r` (inferência) dá `v: ref T`. `let v: T = r` → erro (R2).
 
 ### 3.1 Tabela antes × depois
 
@@ -94,7 +94,7 @@ Custo: uma alocação de célula por local referenciada, e a partir daí a vari�
 | `append(xs, 1)` | empresta `xs` | **erro**, hint `ref xs` |
 | `append(ref xs, 1)` | ok | igual |
 | `print(r)` | imprime 10 | imprime `<ref …>` |
-| `f"{r}"` | interpola 10 | **erro**, hint `{*r}` |
+| `f"{r}"` | interpola 10 | interpola `<ref …>` |
 | `return r` (retorno `int`) | lê | **erro**, hint `*r` |
 | `r.f`, `r[i]`, `r.f = v`, `ref r.f` | atravessa | igual |
 | `let q: ref ref int` | parser aceita | **erro** de parser |
@@ -110,7 +110,6 @@ Formato existente: mensagem + linha `hint:` (ver `derefReadHint`, `referenceAssi
 |---|---|---|
 | R2, qualquer posição com `r` identificador | `type mismatch …: expected T, got ref T` (texto da posição, como hoje em assignment) | `use '*r' to read the referenced value` |
 | R2, RHS não-identificador (`a.f`, `xs[i]`) | idem | `use '*' to read the referenced value` (forma genérica já existente) |
-| R2, f-string | `cannot interpolate ref T` | `use '{*r}'` |
 | R2, `for x in r` | `cannot iterate over ref T[]` | `use 'for x in *r'` |
 | R2, índice | `array index must be int, got ref int` | `use 'xs[*ri]'` |
 | R5, função/construtor/`func` | `argument N of 'f' expects ref T, got T` | `use 'ref x'` |
@@ -194,7 +193,7 @@ TDD: cada diagnóstico entra RED (teste do erro + hint) **antes** de remover o c
 
 | Arquivo | Ação |
 |---|---|
-| `ref_operand_semantics_test.go` (VM) e novo `explicit_read_test.go` (compiler) | hoje travam o auto-deref; passam a travar R2 por construto: binário, unário, `if`/`while`, `for`, índice, argumento, `return`, `let x: T = r`, `*r = s`, f-string; e que `any` aceita um ref como valor |
+| `ref_operand_semantics_test.go` (VM) e novo `explicit_read_test.go` (compiler) | hoje travam o auto-deref; passam a travar R2 por construto: binário, unário, `if`/`while`, `for`, índice, argumento, `return`, `let x: T = r`, `*r = s`; e que `print`/`to_str`/f-string mostram a referência e `any` aceita um ref como valor |
 | `reference_arguments_test.go` | `:78` (forwarding via `OP_CONTEXT_REF_*` quando o usuário escreveu `ref`) → erro R1; novos: `f(x)` → erro R5 com hint; `f(r)`, `f(null)`, `f(ref x)`, `f(a.next)`, `f(g())` com `g -> ref T` compilam; builtins R5 |
 | `assign_deref_hint_test.go`, `ref_equality_strict_test.go` | ficam (comportamento igual); acrescentar `let n: int = r` e `*r = s` ao primeiro |
 | `ref_base_field_assignment_test.go` | fica; acrescentar `*x.next = ref n` → erro R6 |
