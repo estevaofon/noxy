@@ -149,7 +149,19 @@ end
 let b: Node = Node(2, null)
 let a: any = Node(1, ref b)
 preenche(a.proximo)
-test_report([b.valor == 7, eh_nulo(a.proximo), eh_nulo(a.proximo)])`, []bool{true, false, false})
+test_report([b.valor == 7, eh_nulo(a.proximo)])`, []bool{true, false})
+
+	// Outra face de R1 (Task 8, revisao rodada 1): `ref a.proximo` sobre o
+	// MESMO slot ja apontando nao encaminha mais — erro, mesmo com valor
+	// nao-nulo. Documenta que a linha acima so funciona porque perdeu o
+	// `ref`; com ele, e sempre erro, independente do conteudo do slot.
+	refErr := interpretVMSource(t, New(), refSlotPrelude+`
+let b: Node = Node(2, null)
+let a: any = Node(1, ref b)
+let r: bool = eh_nulo(ref a.proximo)`)
+	if refErr == nil || !strings.Contains(refErr.Error(), "slot 'proximo' already holds a reference") {
+		t.Fatalf("via base any, 'ref a.proximo' sobre slot ja apontando deveria ser erro de R1: %v", refErr)
+	}
 }
 
 // Task 8 (spec 2026-08-24-explicit-ref §5.2): `ref d.child` via base any
