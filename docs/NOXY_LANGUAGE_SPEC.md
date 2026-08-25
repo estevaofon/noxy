@@ -2130,7 +2130,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.18.0`). It is a module binding, not a
+string `noxy --version` prints (`v0.19.0`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 
