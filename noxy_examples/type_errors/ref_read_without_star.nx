@@ -1,0 +1,3 @@
+func dobro(r: ref int) -> int
+    return r * 2
+end

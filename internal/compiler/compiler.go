@@ -1239,7 +1239,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		// Em `==`/`!=` um operando ref NUNCA e dereferenciado
-		// implicitamente (spec §2.3, excecao 1): dois refs chegam inteiros
+		// implicitamente (spec 2026-08-24-explicit-ref, R7): dois refs chegam inteiros
 		// ate OP_EQUAL para comparar IDENTIDADE DE SLOT (§2.2.7), ref vs
 		// null pergunta sobre o PROPRIO ref, e o caso misto estatico
 		// ref vs valor e rejeitado logo abaixo (rejectMixedRefComparison)
@@ -1478,9 +1478,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 		if n.Operator == "*" {
 			// Deref explicito. Tipo estatico conhecido e nao-ref (inclui any,
-			// que nunca guarda ref) e erro aqui: OP_DEREF em runtime PASSA um
-			// nao-ref adiante sem erro (executor), entao esta e a unica guarda.
-			// Tipo desconhecido (nil) mantem a leniencia: emite OP_DEREF.
+			// que nunca guarda ref) e erro aqui, em compilacao. Tipo
+			// desconhecido (nil) emite OP_DEREF e deixa a checagem para o
+			// executor, que ja recusa dereferenciar um valor nao-ref/nao-nulo
+			// em runtime ("cannot dereference <tipo>", desde a Task 8) —
+			// entao os dois lados juntos cobrem R3.
 			ref, isRef := rightType.(*ast.RefType)
 			if !isRef && rightType != nil {
 				return nil, nil, fmt.Errorf("[line %d] cannot dereference non-reference value of type %s", c.currentLine, rightType.String())
@@ -3122,8 +3124,8 @@ func (c *Compiler) derefReadHint(expected, actual ast.NoxyType, rhs ast.Expressi
 	return "\n  hint: use '*' to read the referenced value"
 }
 
-// rejectMixedRefComparison aplica a regra "em `==`/`!=` um ref nunca e
-// dereferenciado implicitamente" ao caso misto estatico: exatamente um dos
+// rejectMixedRefComparison aplica R2/R7 (spec 2026-08-24-explicit-ref) ao
+// caso misto estatico de ==/!=: exatamente um dos
 // lados e `ref T` e o outro e um valor de tipo conhecido. Ref vs null
 // pergunta sobre o proprio ref, e `any`/tipo desconhecido e fronteira
 // dinamica (pode carregar um ref em runtime, comparacao de identidade

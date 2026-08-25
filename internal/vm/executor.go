@@ -1090,7 +1090,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			// Em `==`/`!=` um ref NUNCA e dereferenciado implicitamente
-			// (spec §2.3, excecao 1): dois refs comparam identidade de slot
+			// (spec 2026-08-24-explicit-ref, R7): dois refs comparam identidade de slot
 			// (§2.2.7), um ref nulo E o proprio VAL_NULL (entao `r == null`
 			// pergunta sobre o ref, nao sobre o valor apontado — o que
 			// mantem `no.proximo != null` funcionando e torna distinguivel

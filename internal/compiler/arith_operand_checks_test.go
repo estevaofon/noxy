@@ -2,10 +2,12 @@ package compiler
 
 // Issue #75: operandos aritmeticos/de comparacao de tipo estatico
 // incompativel sao erro de COMPILACAO, com o texto do runtime + "got A and
-// B" — mesmo padrao do #56 para `!`, `~` e bitwise. `any`, tipo desconhecido
-// (nil) e `ref` (auto-deref) continuam no caminho generico com checagem em
-// runtime. Bytecode de programa valido nao muda (a checagem so le os tipos
-// que o compilador ja calcula para escolher OP_ADD_INT/OP_ADD_FLOAT).
+// B" — mesmo padrao do #56 para `!`, `~` e bitwise. `any` e tipo desconhecido
+// (nil) continuam no caminho generico com checagem em runtime; um operando
+// `ref` e rejeitado antes disso, por rejectRefRead (R2), e nunca chega em
+// checkArithmeticOperands. Bytecode de programa valido nao muda (a checagem
+// so le os tipos que o compilador ja calcula para escolher
+// OP_ADD_INT/OP_ADD_FLOAT).
 
 import (
 	"strings"

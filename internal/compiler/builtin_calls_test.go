@@ -371,7 +371,7 @@ delete(ref mapping, ref key)`)
 	}
 }
 
-func TestDeleteAcceptsImplicitReadFromExistingReferenceKey(t *testing.T) {
+func TestDeleteAcceptsDerefOfExistingReferenceKey(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let key_value: string = "a"
 let key: ref string = ref key_value

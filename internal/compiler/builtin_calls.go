@@ -26,6 +26,9 @@ func (c *Compiler) compileBuiltinRefArgument(arg ast.Expression, position, expec
 	if err != nil {
 		return nil, err
 	}
+	// refArg.proven e descartado de proposito: builtins sempre emitem
+	// emitCall(n, emission, false) — nunca OP_CALL_STATIC — entao nao ha
+	// modesProven a alimentar aqui.
 	if refArg.plain != nil {
 		return nil, fmt.Errorf("[line %d] %s: expected %s, got %s%s",
 			c.currentLine, position, expected, noxyTypeName(refArg.plain), refArgumentHint(arg))

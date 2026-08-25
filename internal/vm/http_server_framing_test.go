@@ -54,11 +54,11 @@ func TestNewServerInstallsDefaults(t *testing.T) {
 
 // server_limits, bind_server, and stop_server take `ref HttpServer`.
 // `use http_server select *` erases the exact static signature at this call
-// site (see docs/REF_SEMANTICS.md section 2: a module member whose exact
-// type isn't known is a dynamic boundary), so the contextual ref conversion
-// that lets same-file callers write a plain local variable does not apply
-// here. Every call below is explicit `ref s` for that reason; omitting it
-// raises "expected ref HttpServer, got object".
+// site, so it is a dynamic boundary that validates the ref mode at runtime
+// (validateParameterModes) instead of statically — but R5 (spec
+// 2026-08-24-explicit-ref) requires an explicit `ref` at every call site
+// regardless, static or dynamic. Every call below is explicit `ref s` for
+// that reason; omitting it raises "expected ref HttpServer, got object".
 
 func TestServerLimitsReplacesNonPositiveWithDefaults(t *testing.T) {
 	source := `let s: HttpServer = new_server("127.0.0.1", 8080)

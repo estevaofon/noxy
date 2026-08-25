@@ -1,0 +1,4 @@
+let x: int = 1
+let z: int = 2
+let r: ref int = ref x
+*r = ref z

@@ -1,0 +1,7 @@
+func soma(r: ref int[]) -> int
+    let t: int = 0
+    for x in r do
+        t = t + x
+    end
+    return t
+end

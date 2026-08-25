@@ -267,9 +267,11 @@ h.callback = id`
 // nomeando um TEMPLATE DE FUNCAO (aqui e `id`, que E chamado, entao o hook
 // de call site e quem atua, nao o de target-typing). No call site,
 // compileGenericCallSite chama typeOfDiscardedExpression(r), que retorna o
-// tipo ESTATICO de `r` — `ref int` — sem auto-deref (auto-deref so acontece
-// para PARAMETROS concretos tipados sem `ref`, e aqui o parametro e `x: T`,
-// ainda generico, unify decide). unify(T, ref int, ...) cai exatamente no
+// tipo ESTATICO de `r` — `ref int` — sem deref algum (R2: um ref nunca e
+// lido implicitamente; para um parametro concreto tipado sem `ref` o mesmo
+// argumento seria erro de compilacao "expected int, got ref int", nao
+// auto-deref). Aqui o parametro e `x: T`, ainda generico, unify decide.
+// unify(T, ref int, ...) cai exatamente no
 // case `tp, ok := expected.(*ast.TypeParamType)` de generics_unify.go, que
 // rejeita `ref` como alvo de binding ANTES de qualquer outra regra —
 // exatamente a garantia que a spec pede.

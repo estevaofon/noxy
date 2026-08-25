@@ -14,8 +14,9 @@ import (
 // e roda antes de qualquer emissao: o bytecode de programa valido nao muda.
 //
 // Fronteira dinamica: `any` e tipo desconhecido (nil) passam e ficam para o
-// runtime, como em checkBitwiseOperands. `ref T` ja chega aqui desembrulhado
-// (auto-deref do caminho infixo). `==`/`!=` tem regra propria (§2.3) e nao
+// runtime, como em checkBitwiseOperands. `ref T` nunca chega aqui: o
+// caminho infixo rejeita um operando ref antes, por rejectRefRead (R2,
+// spec 2026-08-24-explicit-ref). `==`/`!=` tem regra propria (§2.3) e nao
 // entram. Struct como operando e recusado antes, por structOperandName.
 // (Unica variante textual do runtime nao reproduzida: OP_ADD com dois
 // objetos nao-string — array+array, map+map — diz "numbers, strings or

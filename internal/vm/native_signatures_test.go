@@ -535,8 +535,10 @@ end`)
 func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
 	// Issue #50 Parte 3 (opcao a): slot `ref T` nulo recebe uma CELULA heap
 	// nova com o referente + ref para ela — o analogo de `let novo = T;
-	// slot = ref novo`. A sonda `type(ref viz)` distingue ref ("ref") de
-	// valor cru (erro do marcador); `type(slot)` nao serve (auto-deref).
+	// slot = ref novo`. A sonda `type(viz)` distingue ref ("ref") de valor
+	// cru (erro do marcador); `viz` e ligado a parte para reusar no *viz
+	// abaixo, mas `type(target[0])` tambem devolveria "ref" direto (R2: o
+	// indice nunca e lido implicitamente).
 	t.Run("null ref slot gets a fresh referent cell", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 func le(r: ref int) -> int
