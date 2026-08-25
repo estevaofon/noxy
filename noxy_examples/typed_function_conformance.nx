@@ -22,7 +22,7 @@ func make_multiplier(factor: int) -> func(int) -> int
 end
 
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 
 func make_counter() -> func() -> int

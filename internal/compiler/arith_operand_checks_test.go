@@ -55,8 +55,9 @@ func TestArithmeticOperandsCompatibleStillCompile(t *testing.T) {
 		// Fronteira dinamica: any e tipo desconhecido ficam para o runtime.
 		"let v: any = 1\nprint(v + \"x\")\nprint(v < 2)\nprint(v % 2)\n",
 		"print(desconhecido + 1)\n",
-		// ref auto-deref: `ref int` + int e int + int.
-		"let n: int = 1\nlet r: ref int = ref n\nprint(r + 1)\nprint(1 < r)\n",
+		// R2: leitura de `ref int` e sempre explicita com '*r'; depois do
+		// deref e int + int.
+		"let n: int = 1\nlet r: ref int = ref n\nprint(*r + 1)\nprint(1 < *r)\n",
 		// Igualdade tem regra propria e nao entra aqui.
 		"print(1 == \"a\")\nprint(1 != \"a\")\n",
 	} {

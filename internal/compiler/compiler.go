@@ -1183,10 +1183,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+			if err := c.rejectRefRead(leftType, n.Left, "operand of '"+n.Operator+"'"); err != nil {
+				return nil, nil, err
+			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_FALSE)
 			c.emitByte(byte(chunk.OP_POP))
 			_, rightType, err := c.Compile(n.Right)
 			if err != nil {
+				return nil, nil, err
+			}
+			if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
 				return nil, nil, err
 			}
 			c.patchJump(endJump)
@@ -1209,10 +1215,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+			if err := c.rejectRefRead(leftType, n.Left, "operand of '"+n.Operator+"'"); err != nil {
+				return nil, nil, err
+			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_TRUE)
 			c.emitByte(byte(chunk.OP_POP))
 			_, rightType, err := c.Compile(n.Right)
 			if err != nil {
+				return nil, nil, err
+			}
+			if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
 				return nil, nil, err
 			}
 			c.patchJump(endJump)
@@ -1236,8 +1248,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// ate OP_EQUAL para comparar IDENTIDADE DE SLOT (§2.2.7), ref vs
 		// null pergunta sobre o PROPRIO ref, e o caso misto estatico
 		// ref vs valor e rejeitado logo abaixo (rejectMixedRefComparison)
-		// com hint para o deref explicito. Todos os demais operadores
-		// seguem dereferenciando neste ponto.
+		// com hint para o deref explicito. Nos demais operadores um ref e
+		// erro (R2).
 		identityComparison := n.Operator == "==" || n.Operator == "!="
 
 		// Superinstrucoes (issue #66, item 3): `local ± K` (resultado int,
@@ -1257,12 +1269,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			if _, ok := leftType.(*ast.RefType); ok && !identityComparison {
-				// Always deref ref types before comparison (including null comparison)
-				// This ensures 'ref Node == null' compares the pointed-to value, not the ref itself
-				c.emitByte(byte(chunk.OP_DEREF))
-				if ref, ok := leftType.(*ast.RefType); ok {
-					leftType = ref.ElementType
+			// R2: operando ref nunca e lido; em `==`/`!=` os refs seguem
+			// inteiros ate OP_EQUAL (identidade de slot, R7) e o caso misto
+			// e rejectMixedRefComparison abaixo.
+			if !identityComparison {
+				if err := c.rejectRefRead(leftType, n.Left, "operand of '"+n.Operator+"'"); err != nil {
+					return nil, nil, err
 				}
 			}
 
@@ -1271,11 +1283,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			if _, ok := rightType.(*ast.RefType); ok && !identityComparison {
-				// Always deref ref types before comparison (including null comparison)
-				c.emitByte(byte(chunk.OP_DEREF))
-				if ref, ok := rightType.(*ast.RefType); ok {
-					rightType = ref.ElementType
+			if !identityComparison {
+				if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
+					return nil, nil, err
 				}
 			}
 		}
@@ -1486,9 +1496,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 			return c.currentChunk, nil, nil
 		}
-		if ref, ok := rightType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-			rightType = ref.ElementType
+		if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
+			return nil, nil, err
 		}
 		if n.Operator == "-" {
 			c.emitByte(byte(chunk.OP_NEGATE))
@@ -1545,9 +1554,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if ref, ok := condType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
-				condType = ref.ElementType
+			if err := c.rejectRefRead(condType, n.Condition, "condition"); err != nil {
+				return nil, nil, err
 			}
 			if err := c.checkCondition(condType); err != nil {
 				return nil, nil, err
@@ -1609,9 +1617,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if ref, ok := condType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
-				condType = ref.ElementType
+			if err := c.rejectRefRead(condType, n.Condition, "condition"); err != nil {
+				return nil, nil, err
 			}
 			if err := c.checkCondition(condType); err != nil {
 				return nil, nil, err

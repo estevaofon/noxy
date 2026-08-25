@@ -7,26 +7,25 @@ import (
 	"noxy-vm/internal/value"
 )
 
-// Refs como operandos (spec §2.3 e §7): a condição de `while`/`if` com um
-// `ref bool` é dereferenciada automaticamente; um ref no lado DIREITO de um
-// infix e como operando de um unário também é lido (o compilador emite
-// OP_DEREF); `*r = s` com s: ref T grava o valor apontado por s; e um índice
-// que é `ref int` vale como o int apontado tanto em `ref arr[ri]` quanto em
-// `arr[ri] = v`. O perfil mostrou cada um desses caminhos do compilador sem
-// teste Go.
+// Refs como operandos (spec 2026-08-24-explicit-ref, R2/R3): a leitura e
+// sempre `*r`. Estes testes verificam PELO VALOR EM RUNTIME que `*r` em
+// condicao de while/if, como operando de infix e de unario, no RHS de
+// `*r = *s` e como indice (`arr[*ri]`, `ref arr[*ri]`) produz o valor
+// apontado — o compilador nao pode ter deixado passar nenhum OP_DEREF
+// implicito nem ter perdido o explicito.
 
-func TestWhileAndIfConditionsDereferenceRefBool(t *testing.T) {
+func TestWhileAndIfConditionsReadDerefRefBool(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let flag: bool = true
     let rf: ref bool = ref flag
     let n: int = 0
-    while rf do
+    while *rf do
         n = n + 1
         flag = false
     end
     let after: int = 0
-    if rf then
+    if *rf then
         after = 1
     else
         after = 2
@@ -41,15 +40,15 @@ main()
 	}
 }
 
-func TestInfixRightOperandAndUnaryOperandDereferenceRefs(t *testing.T) {
+func TestInfixAndUnaryOperandsReadDerefRefs(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let x: int = 10
     let rx: ref int = ref x
     let flag: bool = false
     let rb: ref bool = ref flag
-    let ints: int[] = [1 + rx, rx + 1, rx * rx, -rx]
-    let bools: bool[] = [5 > rx, rx < 5, !rb]
+    let ints: int[] = [1 + *rx, *rx + 1, *rx * *rx, -*rx]
+    let bools: bool[] = [5 > *rx, *rx < 5, !*rb]
     test_report([to_str(ints), to_str(bools)])
 end
 main()

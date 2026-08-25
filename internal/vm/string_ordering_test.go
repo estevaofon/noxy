@@ -49,7 +49,7 @@ func TestStringOrderingDereferencesRefOperands(t *testing.T) {
 	got := captureVMSource(t, `
 let s: string = "a"
 let r: ref string = ref s
-test_report(r < "b")`)
+test_report(*r < "b")`)
 	if !got.Bool() {
 		t.Fatal("ref string < string deveria comparar o valor apontado")
 	}

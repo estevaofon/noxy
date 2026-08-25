@@ -150,7 +150,7 @@ test_report([eh_nulo_int(da[0]), eh_nulo_int(dm["x"])])`, []bool{true, true})
 func TestAnyBasePlainFieldStillReferencesTheSlot(t *testing.T) {
 	requireBoolResults(t, refSlotPrelude+`
 func soma(n: ref int)
-    *n = n + 10
+    *n = *n + 10
 end
 let a: any = Node(1, null)
 soma(a.valor)

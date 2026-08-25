@@ -182,7 +182,7 @@ func launch(value: int) -> any
     let captured: int = value
     func worker() -> int
         let pointer: ref int = ref captured
-        *pointer = pointer + 1
+        *pointer = *pointer + 1
         return captured
     end
     return spawn_task(worker)

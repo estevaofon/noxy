@@ -104,7 +104,7 @@ test_report(add10(5))`)
 func TestExecutesExactReferenceArgument(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 let answer: int = 41
 increment(answer)
@@ -162,7 +162,7 @@ fill(head.next)`)
 func TestExplicitReferenceSurvivesBareFunctionCall(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 let dynamic: func = increment
 let answer: int = 41
@@ -174,7 +174,7 @@ test_report(answer)`)
 func TestContextualReferenceUpdatesClosedUpvalue(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 func make_incrementer() -> func() -> int
     let value: int = 40
@@ -211,7 +211,7 @@ func get_reference() -> ref int
     return ref answer
 end
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 increment(get_reference())
 test_report(answer)`)

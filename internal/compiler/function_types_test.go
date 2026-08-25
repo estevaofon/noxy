@@ -208,7 +208,7 @@ set(values[0])`)
 func TestReferenceValueAssignmentSuggestsDereference(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func increment(value: ref int) -> void
-    value = value + 1
+    value = *value + 1
 end`)
 	if err == nil {
 		t.Fatal("expected reference assignment error")
@@ -228,7 +228,7 @@ func TestReferenceSlotValueAssignmentsSuggestDereference(t *testing.T) {
 			name: "local reference parameter",
 			input: `
 func increment(value: ref int) -> void
-    value = value + 1
+    value = *value + 1
 end`,
 			hints: []string{"use '*value = ...'"},
 		},
@@ -245,7 +245,7 @@ value = 1`,
 			input: `
 func outer(value: ref int) -> void
     func inner() -> void
-        value = value + 1
+        value = *value + 1
     end
 end`,
 			hints: []string{"use '*value = ...'"},
@@ -603,7 +603,7 @@ end`)
 func TestExactReferenceCallAcceptsCapturedVariable(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 func make_incrementer() -> func() -> int
     let value: int = 0

@@ -1,5 +1,5 @@
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 
 increment(41)
