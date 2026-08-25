@@ -12,6 +12,35 @@
 
 ## 0. Decisão
 
+> ## ⚠️ ESTA SPEC FOI SUPERADA PELA IMPLEMENTAÇÃO (2026-08-25)
+>
+> O desenho abaixo — SE-0176 em três peças (P1 convenção na assinatura, P2 ordem
+> de avaliação, P3 exclusividade dinâmica) — **não foi o que resolveu o bug**. Ele
+> foi abandonado depois que a validação adversarial da H4 (§7.5) encontrou o
+> **repro G**, em que o alias é adquirido num *ancestral* do contêiner e nenhuma
+> checagem centrada no contêiner o enxerga.
+>
+> **O que foi implementado:** o empréstimo passa a denotar um **LUGAR**, e o
+> caminho raiz→contêiner é re-resolvido **na escrita**, unicizando e gravando o
+> clone de volta em cada nível. Fecha os sete repros, incluindo G, sem nenhuma
+> regra nova na linguagem e sem nenhum erro novo de compilação ou de runtime nos
+> programas que já funcionavam.
+>
+> - Implementação: `internal/compiler/borrow_place.go`, `borrowContainer` em
+>   `internal/vm/references.go`, `ObjRef.Base` em `internal/value/value.go`.
+> - Testes: `internal/vm/borrow_place_test.go` (os sete repros, cada um com a
+>   contraprova da §1.3).
+> - **A §8 desta spec estava errada** ao descartar o empréstimo path-based como
+>   "invenção sem precedente": é como qualquer linguagem modela um *lugar*, e a
+>   caminhada com gravação de volta **já estava implementada** na família `_MUT`
+>   (§1.4). A correção reusa essa caminhada mudando só o INSTANTE em que ela roda.
+> - **P1 e P3 não existem mais.** R11, R12 e `own ref` foram implementados e
+>   depois revertidos: passaram a avisar sobre código correto. P2 (§3) continua
+>   sendo uma melhoria válida e independente, não implementada.
+>
+> O que segue é o desenho original, mantido porque a análise do problema (§1.1,
+> §1.2, §1.3, §1.4) continua correta e é o que explica a correção.
+
 O Noxy tem exatamente a combinação do Swift: tipos de valor com **copy-on-write**,
 unicidade decidida por **contagem de referências** (`Owners`/`Retain`, série #66), e
 referência mutável de primeira classe (`ref`). O Swift enfrentou este mesmo bug e o
@@ -641,7 +670,7 @@ teste mais barato de "esta ideia nova já foi descartada?".
 | Rota | O que é | Por que não |
 |---|---|---|
 | **Pin / clone eager** (proposta da issue) | `ref` para dentro de contêiner conta como owner; a próxima cópia materializa na hora | Sem precedente: nenhuma linguagem estabelecida marca um contêiner para sempre por causa de uma referência. Obstáculo estrutural: `Retain(v Value) bool` não pode **substituir** o valor, então a cópia ansiosa teria de ser replicada nos 41+ sites de ligação — enumeração aberta, o mesmo modo de falha que ela deveria evitar. E o pin é *sticky*: sem RC de referências, não há como saber quando o último `ref` morreu, então um contêiner que teve empréstimo copia ansioso para sempre — custo invisível na linha que o paga, ferindo "copies are cheap" do README |
-| **Empréstimo path-based** | `ObjRef` guarda (slot, índice) e re-resolve na escrita | Invenção sem precedente. Muda a representação de referência da VM para resolver um caso; o Swift não faz isso |
+| **Empréstimo path-based** | `ObjRef` guarda o LUGAR do pai e re-resolve na escrita | ~~Invenção sem precedente. Muda a representação de referência da VM para resolver um caso; o Swift não faz isso~~ — **ESTA REJEIÇÃO ESTAVA ERRADA, e é a rota que consertou o bug (2026-08-25).** Não é invenção: é como se modela um *lugar*, e a caminhada com unicização e gravação de volta **já estava implementada** na família `_MUT` (§1.4) para `a[i].x = v`. A correção reusa essa caminhada mudando só o INSTANTE em que roda — criação → escrita. O erro de análise foi ler "re-resolve na escrita" como sinônimo da armadilha da §1.3 (unicizar na escrita, que perde a escrita num clone anônimo); o que separa as duas é a GRAVAÇÃO DE VOLTA em cada nível do caminho |
 | **Pré-passe de escape** (ponto fixo) | inferir quais parâmetros `ref` o callee guarda | §2.2: torna a legalidade de uma chamada dependente de corpo invisível. Nenhuma das quatro referências infere |
 | **Exclusividade estática no call site** | proibir que outro argumento alcance a raiz | Enumeração aberta: repro F põe o alias dentro de um struct e o call site não menciona a raiz |
 
