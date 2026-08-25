@@ -133,6 +133,14 @@ type Compiler struct {
 	// argumento cujo callee nao tem contrato `ref` inspecionavel (R12 check 3)
 	// de um emprestimo que realmente escapa — let, return, store, captura (R11).
 	borrowArgDepth int
+
+	// ownedParams guarda os flags `own` das assinaturas de funcao nomeadas
+	// (R12, issue #83). Existe porque `ast.FunctionType` — o que vive em
+	// c.globals — nao carrega o modificador de proposito (§2.3: `own` nao e
+	// tipo), e a checagem do lado do chamador precisa dele. Copiado por
+	// compilador, como globals/structs: o registro de um filho nao vaza para
+	// o pai.
+	ownedParams map[string][]bool
 }
 
 type callEmission struct {
@@ -195,6 +203,10 @@ func NewChild(parent *Compiler) *Compiler {
 		childNamespaceImports[name] = module
 	}
 	childNamespaceOrder := append([]string(nil), parent.namespaceOrder...)
+	childOwnedParams := make(map[string][]bool, len(parent.ownedParams))
+	for name, flags := range parent.ownedParams {
+		childOwnedParams[name] = flags
+	}
 	if parent.warnings == nil {
 		parent.warnings = &[]Warning{}
 	}
@@ -219,6 +231,7 @@ func NewChild(parent *Compiler) *Compiler {
 		pass1:            parent.pass1,
 		namespaceImports: childNamespaceImports,
 		namespaceOrder:   childNamespaceOrder,
+		ownedParams:      childOwnedParams,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -2205,6 +2218,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
+		// R12 (issue #83): publica os flags `own` para o call site, e cobra do
+		// corpo o contrato da propria assinatura.
+		c.recordOwnedParams(n.Name, n.Parameters)
+		c.checkBorrowParamKept(n.Parameters, n.Body)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
 		if err != nil {
@@ -2482,6 +2499,11 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
+				// R12 (issue #83), lado do chamador: parametro `own ref T`
+				// guarda o argumento alem da chamada, logo so aceita
+				// referencia de celula (R10) — nunca um emprestimo. Uma
+				// consulta a assinatura, sem olhar o corpo do callee.
+				c.checkOwnArgument(callableName(call.Function), i, arg)
 				// R5: parametro ref T recebe `ref x`, uma expressao ja ref T,
 				// null, ou any/desconhecido (modo validado em runtime).
 				refArg, err := c.compileRefArgument(arg)

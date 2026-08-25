@@ -35,7 +35,7 @@ func TestBorrowCorpusScan(t *testing.T) {
 			return nil
 		})
 	}
-	parseErr, warned, total := 0, 0, 0
+	parseErr, warned, warnedOwn, total := 0, 0, 0, 0
 	for _, f := range files {
 		total++
 		src, err := os.ReadFile(f)
@@ -54,16 +54,31 @@ func TestBorrowCorpusScan(t *testing.T) {
 			c := compiler.NewWithStateAndRoot(map[string]ast.NoxyType{}, map[string]*ast.StructStatement{}, f, filepath.Dir(f))
 			c.Compile(prog)
 			hit := false
+			hitOwn := false
 			for _, w := range c.Warnings() {
-				if strings.Contains(w.Message, "reference into a container") || strings.Contains(w.Message, "no ref-parameter contract") {
+				switch {
+				case strings.Contains(w.Message, "reference into a container"),
+					strings.Contains(w.Message, "no ref-parameter contract"):
 					if !hit {
 						warned++
 						hit = true
 					}
-					t.Logf("%s:%d: %s", f, w.Line, strings.SplitN(w.Message, "\n", 2)[0])
+					t.Logf("R11 %s:%d: %s", f, w.Line, strings.SplitN(w.Message, "\n", 2)[0])
+				// R12 (issue #83): o corpo que guarda um emprestimo, e o call
+				// site que passa um emprestimo para um parametro `own ref`.
+				// Contado SEPARADO de R11 — as duas regras tem rollout
+				// independente, e misturar os numeros esconderia qual delas
+				// custa quanto na migracao.
+				case strings.Contains(w.Message, "is a borrow and cannot be kept"),
+					strings.Contains(w.Message, "is declared 'own ref'"):
+					if !hitOwn {
+						warnedOwn++
+						hitOwn = true
+					}
+					t.Logf("R12 %s:%d: %s", f, w.Line, strings.SplitN(w.Message, "\n", 2)[0])
 				}
 			}
 		}()
 	}
-	t.Logf("TOTAIS: %d arquivos | %d parse-erro | %d com aviso R11", total, parseErr, warned)
+	t.Logf("TOTAIS: %d arquivos | %d parse-erro | %d com aviso R11 | %d com aviso R12", total, parseErr, warned, warnedOwn)
 }

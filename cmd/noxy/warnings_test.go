@@ -45,3 +45,28 @@ func TestREPLCompilerWarningsGoToDiagOut(t *testing.T) {
 		t.Fatalf("stdout=%q", stdout)
 	}
 }
+
+// R12 (issue #83): o aviso de emprestimo guardado usa o MESMO canal — diagOut,
+// exit 0, stdout so com a saida do programa. Etapa 1 do rollout (spec §9.2):
+// enquanto for aviso, nenhum programa existente quebra.
+const keptBorrowWarningProgram = "let g: ref int = null\nfunc keep(r: ref int) -> void\n    g = r\nend\n" +
+	"let arr: int[] = [1, 2, 3]\nkeep(ref arr[0])\nprint(*g)\n"
+
+func TestKeptBorrowWarningGoesToDiagOutNotStdout(t *testing.T) {
+	diag := withDiagBuffer(t)
+	var code int
+	stdout := captureStdout(t, func() { code = runWithConfig("kept.nx", keptBorrowWarningProgram, ".", false) })
+	if code != 0 {
+		t.Fatalf("exit code=%d, want 0 (aviso nao e erro)", code)
+	}
+	want := "warning: parameter 'r' is a borrow and cannot be kept: it is stored in 'g'"
+	if !strings.Contains(diag.String(), want) {
+		t.Fatalf("diagnostics=%q, want %q", diag.String(), want)
+	}
+	if !strings.Contains(diag.String(), "--> kept.nx:3") {
+		t.Fatalf("o aviso tem de apontar a linha ofensora DENTRO do callee; diagnostics=%q", diag.String())
+	}
+	if strings.Contains(stdout, "warning") || stdout != "1\n" {
+		t.Fatalf("stdout=%q, want so a saida do programa", stdout)
+	}
+}
