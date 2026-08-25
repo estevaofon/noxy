@@ -112,3 +112,33 @@ main()
 		t.Fatalf("err = %v, want 'already holds a reference'", err)
 	}
 }
+
+// Task 10a (issue #82): length/keys/slice/contains/has_key sao nativas sem
+// assinatura. O compilador rejeita `ref T` estatico (explicit_read_test.go em
+// internal/compiler); aqui a fronteira dinamica (base any) precisa da mesma
+// recusa em runtime, ja que essas nativas nao tem NativeSignature para o
+// validador de modos de parametro pegar.
+func TestValueNativesRejectRefAtRuntimeThroughAny(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"length", "let xs: int[] = [1, 2]\nlet r: ref int[] = ref xs\nlet a: any = r\nlet n: int = length(a)", "length: argument 1 expected a value, got ref"},
+		{"keys", "let m: map[string, int] = {\"a\": 1}\nlet r: ref map[string, int] = ref m\nlet a: any = r\nlet k: any = keys(a)", "keys: argument 1 expected a value, got ref"},
+		{"slice", "let xs: int[] = [1, 2]\nlet r: ref int[] = ref xs\nlet a: any = r\nlet s: any = slice(a, 0, 1)", "slice: argument 1 expected a value, got ref"},
+		{"contains", "let xs: int[] = [1, 2]\nlet r: ref int[] = ref xs\nlet a: any = r\nlet c: any = contains(a, 1)", "contains: argument 1 expected a value, got ref"},
+		{"has_key", "let m: map[string, int] = {\"a\": 1}\nlet r: ref map[string, int] = ref m\nlet a: any = r\nlet h: any = has_key(a, \"a\")", "has_key: argument 1 expected a value, got ref"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := interpretOrCompileErr(t, New(), tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "use '*r'") {
+				t.Fatalf("%s: err = %v, want %q + hint", tc.name, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLengthOfDerefRefArrayAtRuntime(t *testing.T) {
+	got := captureVMSource(t, "func main()\n    let xs: int[] = [1, 2]\n    let r: ref int[] = ref xs\n    test_report(length(*r))\nend\nmain()\n")
+	if got.Int() != 2 {
+		t.Fatalf("length(*r) = %s, want 2", got.String())
+	}
+}

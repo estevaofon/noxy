@@ -231,3 +231,24 @@ let x: int = 1
 let r: ref int = ref x
 append(ref xs, r)`, "argument 2 to 'append': expected int, got ref int", "hint: use '*r'")
 }
+
+// Task 10a (issue #82): length/keys/slice/contains/has_key sao nativas sem
+// assinatura (DefineNative/DefineContextualNative, sem NativeSignature) —
+// nao passam por compileBuiltinRefArgument nem tem tipo de parametro
+// estatico, entao a rejeicao de `ref T` estatico (R2) precisa de checagem
+// dedicada em vez de vir de areStrictTypesCompatible/compileRefArgument.
+func TestValueNativesRejectRefArgument(t *testing.T) {
+	prelude := "let xs: int[] = [1, 2]\nlet m: map[string, int] = {\"a\": 1}\nlet rx: ref int[] = ref xs\nlet rm: ref map[string, int] = ref m\n"
+	requireCompileError(t, prelude+"let n: int = length(rx)", "argument 1 to 'length': expected a value, got ref int[]", "hint: use '*rx' to read the referenced value")
+	requireCompileError(t, prelude+"let ks: string[] = keys(rm)", "argument 1 to 'keys': expected a value, got ref map[string, int]", "hint: use '*rm'")
+	requireCompileError(t, prelude+"let s: int[] = slice(rx, 0, 1)", "argument 1 to 'slice': expected a value, got ref int[]", "hint: use '*rx'")
+	requireCompileError(t, prelude+"let c: bool = contains(rx, 1)", "argument 1 to 'contains': expected a value, got ref int[]", "hint: use '*rx'")
+	requireCompileError(t, prelude+"let h: bool = has_key(rm, \"a\")", "argument 1 to 'has_key': expected a value, got ref map[string, int]", "hint: use '*rm'")
+	requireCompileError(t, prelude+"let i: int = 0\nlet ri: ref int = ref i\nlet c: bool = contains(xs, ri)", "argument 2 to 'contains': expected a value, got ref int", "hint: use '*ri'")
+}
+
+func TestValueNativesAcceptDerefAndShadowing(t *testing.T) {
+	requireCompiles(t, "let xs: int[] = [1, 2]\nlet m: map[string, int] = {\"a\": 1}\nlet rx: ref int[] = ref xs\nlet rm: ref map[string, int] = ref m\nlet n: int = length(*rx)\nlet ks: string[] = keys(*rm)\nlet s: int[] = slice(*rx, 0, 1)\nlet c: bool = contains(*rx, 1)\nlet h: bool = has_key(*rm, \"a\")")
+	// Sombreamento: um `length` do usuario nao e o native — a regra nao se aplica.
+	requireCompiles(t, "func length(r: ref int[]) -> int\n    return 7\nend\nlet xs: int[] = [1]\nlet rx: ref int[] = ref xs\nlet n: int = length(rx)")
+}

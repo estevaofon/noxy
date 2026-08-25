@@ -94,6 +94,49 @@ func refArgumentHint(arg ast.Expression) string {
 	return "\n  hint: bind the value to a variable and pass 'ref <name>'"
 }
 
+// valueNativeNames sao as nativas centrais sem assinatura (DefineNative /
+// DefineContextualNative sem NativeSignature — builtins_collections.go) cujo
+// argumento e sempre um VALOR, nunca uma referencia: nao passam por
+// compileBuiltinCall (sao length/keys/slice/contains/has_key, nao
+// append/pop/delete/json_loads/range) nem tem ast.FunctionType para
+// areStrictTypesCompatible barrar um `ref T` — sem este check dedicado, um
+// `ref T` estatico chegaria ao native e ele responderia com o default
+// silencioso (0, [], false), como o repro do Task 10a mostrou.
+var valueNativeNames = map[string]bool{
+	"length":   true,
+	"keys":     true,
+	"slice":    true,
+	"contains": true,
+	"has_key":  true,
+}
+
+// rejectRefArgumentsForValueNatives aplica R2 aos argumentos de
+// length/keys/slice/contains/has_key quando o callee resolve para o native
+// global (nao sombreado por local/upvalue/global declarado — mesma checagem
+// de compileBuiltinCall e do fallback de builtinReturnType em
+// compileCallExpression). Um argumento `ref T` estatico e erro; any/tipo
+// desconhecido segue para a checagem em runtime (rejectRefArgs, VM).
+func (c *Compiler) rejectRefArgumentsForValueNatives(call *ast.CallExpression, argTypes []ast.NoxyType) error {
+	ident, ok := call.Function.(*ast.Identifier)
+	if !ok || !valueNativeNames[ident.Value] {
+		return nil
+	}
+	if c.isShadowedByLocal(ident.Value) {
+		return nil
+	}
+	if _, declared := c.globals[ident.Value]; declared {
+		return nil
+	}
+	for i, argType := range argTypes {
+		if _, isRef := argType.(*ast.RefType); !isRef {
+			continue
+		}
+		return fmt.Errorf("[line %d] argument %d to '%s': expected a value, got %s%s",
+			c.currentLine, i+1, ident.Value, noxyTypeName(argType), refReadHint(call.Arguments[i]))
+	}
+	return nil
+}
+
 // alreadyReferenceError e R1: `ref e` com e ja de tipo `ref T`.
 func alreadyReferenceError(line int, expr ast.Expression) error {
 	display := exprDisplay(expr)

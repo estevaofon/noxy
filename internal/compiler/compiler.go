@@ -2547,6 +2547,13 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 	}
 
+	// Task 10a (issue #82): length/keys/slice/contains/has_key sao nativas sem
+	// assinatura — nao passam por compileBuiltinRefArgument/areStrictTypesCompatible
+	// acima (isExact e false para elas), entao um `ref T` estatico so e pego aqui.
+	if err := c.rejectRefArgumentsForValueNatives(call, argTypes); err != nil {
+		return nil, nil, err
+	}
+
 	c.emitCall(len(call.Arguments), emission, modesProven)
 	if isExact {
 		return c.currentChunk, funcType.Return, nil
