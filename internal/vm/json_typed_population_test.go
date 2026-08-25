@@ -49,12 +49,12 @@ test_report([to_str(ok), r.s, to_str(r.f), to_str(r.b), to_str(r.xs), to_str(r.f
 
 func TestJSONLoadsRejectsPayloadThatDoesNotFitWithoutPartialWrites(t *testing.T) {
 	cases := []struct{ name, body string }{
-		{"string into int array", "let xs: int[] = [9]\nlet ok: bool = json_loads(\"[\\\"a\\\"]\", xs)\ntest_report([to_str(ok), to_str(xs)])\n"},
-		{"float into int array", "let xs: int[] = [9]\nlet ok: bool = json_loads(\"[1.5]\", xs)\ntest_report([to_str(ok), to_str(xs)])\n"},
-		{"object into int array", "let xs: int[] = [9]\nlet ok: bool = json_loads(\"{\\\"a\\\":1}\", xs)\ntest_report([to_str(ok), to_str(xs)])\n"},
+		{"string into int array", "let xs: int[] = [9]\nlet ok: bool = json_loads(\"[\\\"a\\\"]\", ref xs)\ntest_report([to_str(ok), to_str(xs)])\n"},
+		{"float into int array", "let xs: int[] = [9]\nlet ok: bool = json_loads(\"[1.5]\", ref xs)\ntest_report([to_str(ok), to_str(xs)])\n"},
+		{"object into int array", "let xs: int[] = [9]\nlet ok: bool = json_loads(\"{\\\"a\\\":1}\", ref xs)\ntest_report([to_str(ok), to_str(xs)])\n"},
 		{"wrong field type in struct", jsonTypedPrelude + "let r: Rec = Rec(\"keep\", 0.0, false, [], [], [], {}, {}, Inner(0), null)\nlet ok: bool = json_loads(\"{\\\"s\\\": 5}\", ref r)\ntest_report([to_str(ok), r.s])\n"},
-		{"array into map", "let m: map[string, int] = {\"keep\": 1}\nlet ok: bool = json_loads(\"[1]\", m)\ntest_report([to_str(ok), to_str(m)])\n"},
-		{"string into map value", "let m: map[string, int[]] = {}\nlet ok: bool = json_loads(\"{\\\"a\\\": \\\"x\\\"}\", m)\ntest_report([to_str(ok), to_str(m)])\n"},
+		{"array into map", "let m: map[string, int] = {\"keep\": 1}\nlet ok: bool = json_loads(\"[1]\", ref m)\ntest_report([to_str(ok), to_str(m)])\n"},
+		{"string into map value", "let m: map[string, int[]] = {}\nlet ok: bool = json_loads(\"{\\\"a\\\": \\\"x\\\"}\", ref m)\ntest_report([to_str(ok), to_str(m)])\n"},
 	}
 	wantAfter := map[string]string{
 		"string into int array":      "[9]",
@@ -83,13 +83,13 @@ func TestJSONLoadsRejectsPayloadThatDoesNotFitWithoutPartialWrites(t *testing.T)
 func TestJSONLoadsGrowsTypedMapAndArrayInPlace(t *testing.T) {
 	got := captureVMSource(t, `
 let m: map[string, float[]] = {"old": [0.5]}
-let ok1: bool = json_loads("{\"new\": [1.5, 2.5]}", m)
+let ok1: bool = json_loads("{\"new\": [1.5, 2.5]}", ref m)
 let xs: int[] = []
-let ok2: bool = json_loads("[1, 2, 3]", xs)
+let ok2: bool = json_loads("[1, 2, 3]", ref xs)
 let bs: bool[] = []
-let ok3: bool = json_loads("[true, false]", bs)
+let ok3: bool = json_loads("[true, false]", ref bs)
 let mm: map[string, map[string, int]] = {}
-let ok4: bool = json_loads("{\"outer\": {\"k\": 1}}", mm)
+let ok4: bool = json_loads("{\"outer\": {\"k\": 1}}", ref mm)
 test_report([to_str(ok1), to_str(length(m)), to_str(m["new"]), to_str(ok2), to_str(xs), to_str(ok3), to_str(bs), to_str(ok4), to_str(mm)])
 `)
 	want := []string{"true", "2", "[1.500000, 2.500000]", "true", "[1, 2, 3]", "true", "[true, false]", "true", "{outer: {k: 1}}"}

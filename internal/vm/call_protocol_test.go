@@ -21,7 +21,7 @@ func fib(n: int) -> int
 end
 func withDefer(n: int) -> int
     let acc: int[] = []
-    defer append(acc, 1)
+    defer append(ref acc, 1)
     return n + 1
 end
 func makeAdder(base: int) -> func(int) -> int
@@ -40,7 +40,7 @@ func sumArr(a: int[]) -> int
 end
 let arr: int[] = [1, 2, 3]
 let total: int = sumArr(arr)
-append(arr, 4)
+append(ref arr, 4)
 let add5: func(int) -> int = makeAdder(5)
 test_report([fib(20), fib(1), fib(0), withDefer(41), add5(10), total, length(arr)])
 `

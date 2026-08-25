@@ -55,7 +55,7 @@ func prepara() -> int[]
     return vazia()
 end
 let r: int[] = prepara()
-append(r, 41)
+append(ref r, 41)
 test_report(r[0] + length(r))
 `)
 	expectInt(t, got, 42, "vazia<int> via anotacao de retorno")
@@ -159,7 +159,7 @@ struct Pilha<T>
     itens: T[]
 end
 func empilha<T>(p: ref Pilha<T>, v: T)
-    append(p.itens, v)
+    append(ref p.itens, v)
 end
 func topo<T>(p: Pilha<T>) -> T
     return p.itens[length(p.itens) - 1]
@@ -314,7 +314,7 @@ end
 func aplica<A, B>(arr: A[], fn: func(A) -> B) -> B[]
     let out: B[] = []
     for item in arr do
-        append(out, fn(item))
+        append(ref out, fn(item))
     end
     return out
 end

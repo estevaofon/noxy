@@ -2711,8 +2711,8 @@ func (c *Compiler) emitBytes(b1, b2 byte) {
 // emitOpWithConstantIndex emits an opcode whose operand is an index into the
 // constant pool, always as a 16-bit big-endian value. OP_GET_GLOBAL,
 // OP_SET_GLOBAL, OP_GET_PROPERTY, OP_SET_PROPERTY, OP_IMPORT, OP_CLOSURE,
-// OP_REF_GLOBAL, OP_REF_PROPERTY, and OP_CONTEXT_REF_PROPERTY all read a name
-// or function constant this way. A single-byte operand silently truncates
+// OP_REF_GLOBAL, and OP_REF_PROPERTY all read a name or function constant
+// this way. A single-byte operand silently truncates
 // past 255 constants: a chunk with, say, 256 distinct global names truncates
 // index 256 to 0, so OP_GET_GLOBAL reads whatever constant happens to sit at
 // index 0 instead of the one the compiler meant, corrupting variable

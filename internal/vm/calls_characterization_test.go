@@ -9,7 +9,7 @@ import (
 func TestScriptCallCopiesOnlyTopLevelCompositeArgument(t *testing.T) {
 	got := captureVMSource(t, `
 func change(values: int[]) -> int
-    append(values, 9)
+    append(ref values, 9)
     return length(values)
 end
 let original: int[] = [1]
@@ -24,7 +24,7 @@ test_report(length(original) * 10 + local_length)`)
 func TestScriptCallKeepsNestedCompositeValuesIndependent(t *testing.T) {
 	got := captureVMSource(t, `
 func change(values: int[][]) -> int
-    append(values[0], 9)
+    append(ref values[0], 9)
     return length(values[0])
 end
 let original: int[][] = [[1]]

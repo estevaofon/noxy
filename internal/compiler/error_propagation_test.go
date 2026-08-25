@@ -49,7 +49,7 @@ func TestCompileErrorInsideAnySubexpressionPropagatesUnchanged(t *testing.T) {
 		{"call callee", "let v: bool = (!0)(1)\n"},
 		{"call argument", "let v: bool = f(!0)\n"},
 		{"builtin argument", "print(!0)\n"},
-		{"append argument", "append(arr, !0)\n"},
+		{"append argument", "append(ref arr, !0)\n"},
 		{"chan_send channel", "chan_send(!0, 1)\n"},
 		{"chan_send value", "chan_send(c, !0)\n"},
 		{"chan_recv argument", "let v: int = chan_recv(!0)\n"},

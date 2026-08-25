@@ -138,3 +138,41 @@ func TestRefArgumentHintQuotesStringIndex(t *testing.T) {
 	requireCompileError(t, refParamPrelude+`let m: map[string, int] = {"k": 1}
 inc(m["k"])`, "argument 1 to 'inc': expected ref int, got int", `hint: use 'ref m["k"]'`)
 }
+
+func TestBuiltinRefArgumentRequiresRef(t *testing.T) {
+	requireCompileError(t, `let xs: int[] = []
+append(xs, 1)`, "argument 1 to 'append': expected ref T[], got int[]", "hint: use 'ref xs'")
+	requireCompileError(t, `let xs: int[] = [1]
+let v: int = pop(xs)`, "argument 1 to 'pop': expected ref T[], got int[]", "hint: use 'ref xs'")
+	requireCompileError(t, `let m: map[string, int] = {"a": 1}
+delete(m, "a")`, "argument 1 to 'delete': expected ref map, got map[string, int]", "hint: use 'ref m'")
+	requireCompileError(t, `let alvo: int = 0
+let ok: bool = json_loads("1", alvo)`, "argument 2 to 'json_loads': expected ref T, got int", "hint: use 'ref alvo'")
+	requireCompileError(t, `let xs: (ref int)[] = []
+let n: int = 1
+append(ref xs, n)`, "argument 2 to 'append': expected ref int, got int", "hint: use 'ref n'")
+}
+
+func TestBuiltinRefArgumentAcceptsRefForms(t *testing.T) {
+	requireCompiles(t, `struct Bag
+    itens: int[]
+end
+let xs: int[] = []
+let m: map[string, int] = {"a": 1}
+let alvo: int = 0
+let b: Bag = Bag([])
+append(ref xs, 1)
+append(ref b.itens, 2)
+let v: int = pop(ref xs)
+delete(ref m, "a")
+let ok: bool = json_loads("1", ref alvo)
+let rxs: (ref int)[] = []
+let n: int = 1
+let rn: ref int = ref n
+append(ref rxs, ref n)
+append(ref rxs, rn)
+append(ref rxs, null)
+func enche(p: ref int[]) -> void
+    append(p, 9)
+end`)
+}

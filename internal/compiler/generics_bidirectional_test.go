@@ -20,7 +20,7 @@ end
 func chaves<K, V>(m: map[K, V]) -> K[]
     let ks: K[] = []
     for k in m do
-        append(ks, k)
+        append(ref ks, k)
     end
     return ks
 end

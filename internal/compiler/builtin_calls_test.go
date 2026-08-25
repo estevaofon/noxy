@@ -10,9 +10,9 @@ func TestMutatingBuiltinsBorrowAddressableArguments(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let values: int[] = [1]
 let mapping: map[string, int] = {"a": 1}
-append(values, 2)
-let removed: int = pop(values)
-delete(mapping, "a")`)
+append(ref values, 2)
+let removed: int = pop(ref values)
+delete(ref mapping, "a")`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +20,7 @@ delete(mapping, "a")`)
 
 func TestMutatingBuiltinsRejectNonAddressableArguments(t *testing.T) {
 	_, err := compileFunctionSource(t, `append([1], 2)`)
-	if err == nil || !strings.Contains(err.Error(), "not addressable") {
+	if err == nil || !strings.Contains(err.Error(), "bind the value to a variable and pass 'ref <name>'") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -28,7 +28,7 @@ func TestMutatingBuiltinsRejectNonAddressableArguments(t *testing.T) {
 func TestAppendChecksElementType(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let values: int[] = [1]
-append(values, "wrong")`)
+append(ref values, "wrong")`)
 	if err == nil || !strings.Contains(err.Error(), "expected int, got string") {
 		t.Fatalf("error=%v", err)
 	}
@@ -43,9 +43,9 @@ let first: Vertex = Vertex(1)
 let second: Vertex = Vertex(2)
 let existing: ref Vertex = ref second
 let values: (ref Vertex)[] = []
-append(values, ref first)
-append(values, first)
-append(values, existing)`)
+append(ref values, ref first)
+append(ref values, ref second)
+append(ref values, existing)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestAppendRejectsExplicitReferenceForOrdinaryElement(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let item: int = 1
 let values: int[] = []
-append(values, ref item)`)
+append(ref values, ref item)`)
 	if err == nil || !strings.Contains(err.Error(), "expected int, got ref int") {
 		t.Fatalf("error=%v", err)
 	}
@@ -65,7 +65,7 @@ func TestAppendRejectsExplicitReferenceForAnyElement(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let item: int = 1
 let values: any[] = []
-append(values, ref item)`)
+append(ref values, ref item)`)
 	if err == nil || !strings.Contains(err.Error(), "expected any, got ref int") {
 		t.Fatalf("error=%v", err)
 	}
@@ -143,7 +143,7 @@ func TestImportedMutatingBuiltinNamesUseDynamicCallPath(t *testing.T) {
 
 func TestUnrelatedWildcardImportKeepsBuiltinLowering(t *testing.T) {
 	_, err := compileFunctionSource(t, "use sys select *\nappend([1], 2)")
-	if err == nil || !strings.Contains(err.Error(), "not addressable") {
+	if err == nil || !strings.Contains(err.Error(), "bind the value to a variable and pass 'ref <name>'") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -213,7 +213,7 @@ func TestBuiltinCallBeforeLaterWildcardImportUsesSequentialBinding(t *testing.T)
 	_, err := compileFunctionSource(t, `
 delete({"a": 1}, "a")
 use http_client select *`)
-	if err == nil || !strings.Contains(err.Error(), "not addressable") {
+	if err == nil || !strings.Contains(err.Error(), "bind the value to a variable and pass 'ref <name>'") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -246,7 +246,7 @@ func TestPlainWrapperImportDoesNotShadowUnqualifiedBuiltin(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 use http
 delete({"a": 1}, "a")`)
-	if err == nil || !strings.Contains(err.Error(), "not addressable") {
+	if err == nil || !strings.Contains(err.Error(), "bind the value to a variable and pass 'ref <name>'") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -265,7 +265,7 @@ func TestUncalledFunctionImportsDoNotShadowOuterBuiltins(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			source := "func unused() -> void\n    " + tt.importUse + "\nend\ndelete({\"a\": 1}, \"a\")"
 			_, err := compileFunctionSource(t, source)
-			if err == nil || !strings.Contains(err.Error(), "not addressable") {
+			if err == nil || !strings.Contains(err.Error(), "bind the value to a variable and pass 'ref <name>'") {
 				t.Fatalf("error=%v", err)
 			}
 		})
@@ -308,7 +308,7 @@ func TestMutatingBuiltinAddressabilityContracts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := compileFunctionSource(t, tt.source)
-			if err == nil || !strings.Contains(err.Error(), "not addressable") {
+			if err == nil || !strings.Contains(err.Error(), "bind the value to a variable and pass 'ref <name>'") {
 				t.Fatalf("error=%v", err)
 			}
 		})
@@ -325,28 +325,28 @@ func TestMutatingBuiltinTypeContracts(t *testing.T) {
 			name: "pop container",
 			source: `
 let mapping: map[string, int] = {"a": 1}
-pop(mapping)`,
+pop(ref mapping)`,
 			want: "pop expects an array, got map[string, int]",
 		},
 		{
 			name: "delete container",
 			source: `
 let values: int[] = [1]
-delete(values, 0)`,
+delete(ref values, 0)`,
 			want: "delete expects a map, got int[]",
 		},
 		{
 			name: "delete key",
 			source: `
 let mapping: map[string, int] = {"a": 1}
-delete(mapping, 0)`,
+delete(ref mapping, 0)`,
 			want: "expected string, got int",
 		},
 		{
 			name: "json text",
 			source: `
 let target: map[string, int] = {}
-json_loads(42, target)`,
+json_loads(42, ref target)`,
 			want: "expected string, got int",
 		},
 	}
@@ -365,7 +365,7 @@ func TestDeleteRejectsExplicitReferenceForOrdinaryAnyKey(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let key: string = "a"
 let mapping: map[any, int] = {"a": 1}
-delete(mapping, ref key)`)
+delete(ref mapping, ref key)`)
 	if err == nil || !strings.Contains(err.Error(), "expected any, got ref string") {
 		t.Fatalf("error=%v", err)
 	}
@@ -376,7 +376,7 @@ func TestDeleteAcceptsImplicitReadFromExistingReferenceKey(t *testing.T) {
 let key_value: string = "a"
 let key: ref string = ref key_value
 let mapping: map[any, int] = {"a": 1}
-delete(mapping, *key)`)
+delete(ref mapping, *key)`)
 	if err != nil {
 		t.Fatal(err)
 	}

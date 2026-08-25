@@ -172,14 +172,14 @@ struct Holder
     values: int[]
 end
 let holder: Holder = Holder([1])
-append(holder.values, 2)`,
+append(ref holder.values, 2)`,
 			opcode: chunk.OP_REF_PROPERTY,
 		},
 		{
 			name: "index",
 			source: `
 let stored: int[][] = [[1]]
-append(stored[0], 2)`,
+append(ref stored[0], 2)`,
 			opcode: chunk.OP_REF_INDEX,
 		},
 	}

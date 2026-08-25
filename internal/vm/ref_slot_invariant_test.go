@@ -152,7 +152,7 @@ struct Holder
 end
 let h: Holder = Holder(null)
 let d: any = h
-let ok: bool = json_loads("{\"a\": 1}", d.child)
+let ok: bool = json_loads("{\"a\": 1}", ref d.child)
 if !ok && h.child == null then
     test_report(42)
 else

@@ -20,16 +20,16 @@ struct Holder
 end
 // slot null + payload não-nulo: célula nova, dona do valor construído
 let target: (ref int)[] = [null]
-let ok1: bool = json_loads("[42]", target)
+let ok1: bool = json_loads("[42]", ref target)
 let viz: ref int = target[0]
 let kind: string = type(viz)
 let lido: int = *viz
 // slot que já aponta: escrita através da referência
 let x: int = 1
 let via: (ref int)[] = [ref x]
-let ok2: bool = json_loads("[5]", via)
+let ok2: bool = json_loads("[5]", ref via)
 // payload null: slot vira null
-let ok3: bool = json_loads("[null]", via)
+let ok3: bool = json_loads("[null]", ref via)
 let zerado: bool = via[0] == null
 // campo ref de struct: null + objeto constrói o Inner numa célula nova
 let h: Holder = Holder(null)

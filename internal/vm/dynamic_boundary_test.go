@@ -122,11 +122,11 @@ func TestForLoopOverStringAndBytes(t *testing.T) {
 	got := captureVMSource(t, `
 let chars: string[] = []
 for c in "héllo" do
-    append(chars, c)
+    append(ref chars, c)
 end
 let octets: int[] = []
 for b in b"ab" do
-    append(octets, b)
+    append(ref octets, b)
 end
 test_report([to_str(chars), to_str(octets)])
 `)

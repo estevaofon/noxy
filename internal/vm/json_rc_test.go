@@ -19,7 +19,7 @@ end
 func TestJSONLoadsNewArrayElementIsOwnedByArray(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
 let t: Pair[] = []
-let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", t)
+let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", ref t)
 let p: Pair = t[0]
 p.a = 99
 if ok then
@@ -33,7 +33,7 @@ end`)
 func TestJSONLoadsNewMapValueIsOwnedByMap(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
 let m: map[string, Pair] = {}
-let ok: bool = json_loads("{\"k\":{\"a\":1,\"b\":2}}", m)
+let ok: bool = json_loads("{\"k\":{\"a\":1,\"b\":2}}", ref m)
 let p: Pair = m["k"]
 p.a = 99
 if ok then
@@ -50,7 +50,7 @@ struct Outer
     inner: Pair
 end
 let o: Outer = Outer(null)
-let ok: bool = json_loads("{\"inner\":{\"a\":1,\"b\":2}}", o)
+let ok: bool = json_loads("{\"inner\":{\"a\":1,\"b\":2}}", ref o)
 let p: Pair = o.inner
 p.a = 99
 if ok then
@@ -65,7 +65,7 @@ func TestJSONLoadsReplacedElementReleasesOldAndRetainsNew(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
 let t: Pair[] = [Pair(0, 0)]
 let antigo: Pair = t[0]
-let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", t)
+let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", ref t)
 let p: Pair = t[0]
 p.a = 99
 antigo.a = 55
@@ -84,7 +84,7 @@ func TestJSONLoadsShrunkArrayReleasesDroppedElements(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
 let t: Pair[] = [Pair(0, 0), Pair(5, 5)]
 let solto: Pair = t[1]
-let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", t)
+let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", ref t)
 solto.a = 77
 if ok && length(t) == 1 then
     test_report(solto.a)
@@ -100,7 +100,7 @@ func TestJSONLoadsThroughRefIntoVariableRetains(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
 let backing: Pair = null
 let t: (ref Pair)[] = [ref backing]
-let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", t)
+let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", ref t)
 let p: Pair = backing
 p.a = 99
 if ok then
@@ -114,7 +114,7 @@ end`)
 func TestJSONLoadsDynamicTopLevelRetains(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let d: any = [1, 2]
-let ok: bool = json_loads("[5, 6]", d)
+let ok: bool = json_loads("[5, 6]", ref d)
 let e: any = d
 e[0] = 99
 if ok then

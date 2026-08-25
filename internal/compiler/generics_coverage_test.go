@@ -27,7 +27,7 @@ func processa<T>(x: T, n: int) -> T[]
         if i % 2 == 0 then
             continue
         else
-            append(out, x)
+            append(ref out, x)
         end
         if i > 5 then
             break
@@ -75,7 +75,7 @@ end
 func chave<K, V>(m: map[K, V]) -> K[]
     let ks: K[] = []
     for k in m do
-        append(ks, k)
+        append(ref ks, k)
     end
     return ks
 end
