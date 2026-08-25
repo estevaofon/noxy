@@ -323,9 +323,10 @@ let v: int = *r     // read
 ```
 
 `*x` where `x` is statically not a reference is a compile error (`cannot
-dereference int`); when the static type is unknown, the same check happens
-at runtime with the same message. `*r` with `r == null` is a runtime null
-reference error.
+dereference non-reference value of type int`; `cannot dereference
+non-reference type int in assignment` for `*x = v`); when the static type is
+unknown, the same check happens at runtime (`cannot dereference int`). `*r`
+with `r == null` is a runtime null reference error.
 
 #### R4. `.` and `[]` go through the reference
 
@@ -433,16 +434,17 @@ cell between routines — coordinate, as for globals ([docs/concurrency.md](conc
 |---|---|---|
 | `ref T` where `T` expected (R2) | `… expected T, got ref T` / `operand of '+' cannot be ref int: a ref is never read implicitly` | `use '*r' to read the referenced value` |
 | `for x in r` | `cannot iterate over ref T[]: a ref is never read implicitly` | `use 'for x in *r'` |
-| `xs[ri]` | `index cannot be ref int: a ref is never read implicitly` | `use '*ri'` |
+| `xs[ri]` | `index cannot be ref int: a ref is never read implicitly` | `use '*ri' to read the referenced value` |
 | `f(x)` for `ref T` param (R5) | `argument N to 'f': expected ref T, got T` | `use 'ref x'` |
 | `append(xs, v)` | `argument 1 to 'append': expected ref T[], got T[]` | `use 'ref xs'` |
 | `f(41)` for `ref T` param | `argument N to 'f': expected ref T, got int` | `bind the value to a variable and pass 'ref <name>'` |
 | `ref r` with `r: ref T` (R1) | `'r' is already a reference` | `pass 'r' directly, without 'ref'` |
 | `let q: ref ref int` | `SyntaxError: 'ref ref' is not a type` | `a reference is never taken to a reference` |
-| `r = v` (R6) | `cannot assign T to ref T` | `use '*r = …' to update the referenced value` |
+| `r = v` (R6) | `cannot assign T to ref T` | `use '*r = ...' to update the referenced value` |
 | `*r = ref y` (R6) | `cannot assign ref T to T through '*r'` | `use 'r = ref y' to rebind the reference, or '*r = y' to write the value` |
 | `r == v` (R7) | `cannot compare ref T with T: a ref is never implicitly dereferenced in '=='` | `use '*r' to compare the referenced value` |
-| `*x`, `x: int` (R3) | `cannot dereference int` | — |
+| `*x`, `x: int` (R3, static) | `cannot dereference non-reference value of type int` (`... in assignment` for `*x = v`) | — |
+| `*x`, `x: any` at runtime (R3) | `cannot dereference int` | — |
 | `length(rx)`, `rx: ref int[]` (R2, static) | `argument 1 to 'length': expected a value, got ref int[]` | `use '*rx' to read the referenced value` |
 | `length(a)` through `any` at runtime (R2) | `length: argument 1 expected a value, got ref` | `a ref is never read implicitly; use '*r'` |
 | `ref a.f` through `any`, slot already ref (runtime) | `slot 'f' already holds a reference` | `pass it directly, without 'ref'` |
@@ -1624,8 +1626,9 @@ All three require `bool` operands — there is no truthy/falsy conversion (§7).
 With a known static type that is not `bool` the program is rejected at compile
 time (`operand of '!' must be bool, got int`, `logical operators require
 boolean operands, got int and bool`); an `any` operand is checked at runtime.
-`&&` and `||` do **not** dereference: with `r: ref bool`, `if r then` works but
-`r || x` is an error — write `*r || x`.
+A `ref bool` operand is never read implicitly (§2.3 R2), in `&&`/`||` or in a
+condition: `r || x` is a compile-time error (hint: `use '*r'`), and so is
+`if r then` — write `*r || x` and `if *r then`.
 
 ### Bitwise
 - `&` (AND)
@@ -2148,7 +2151,7 @@ target (array element, struct field, map value): a slot that already holds a
 reference is written **through** it; a JSON `null` stores `null`; a non-null
 payload for a slot that is `null` (or for a new element/field) builds the `T`
 from the referent schema, allocates a fresh heap cell that owns it, and stores
-a reference to that cell — afterwards `let viz: ref T = slot; type(ref viz)`
+a reference to that cell — afterwards `let viz: ref T = slot; type(viz)`
 is `"ref"` and `*viz` reads the value. A `ref T` field or element passed
 **directly** as the target while it is `null` arrives as `null` (§4.2) and
 `json_loads` returns `false`; pass the owner instead (`json_loads(text, ref h)`).

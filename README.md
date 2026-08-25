@@ -100,9 +100,10 @@ print(first(["b", "a"]))      // first<string> — no runtime dispatch
 ## What this buys you
 
 - **Concurrency without data races by construction** — data handed to a
-  routine by argument or channel is an independent value. Only `ref` and
-  globals need coordination, and both are visible in the code.
-  ([docs/CONCURRENCY.md](docs/CONCURRENCY.md))
+  routine by argument or channel is an independent value. Only `ref`
+  (including a closure that captures one) and globals need coordination, and
+  all of that is visible in the code.
+  ([docs/concurrency.md](docs/concurrency.md))
 - **Refactoring you can trust** — a function's signature tells you exactly
   what it can mutate and how it can fail.
 - **One rule, everywhere** — file, module, and REPL behave the same.
@@ -157,7 +158,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 - ✅ First-class functions
 - ✅ Closures
 - ✅ Generics with zero runtime cost (monomorphization: `func first<T>(arr: T[]) -> T`, `struct Stack<T>`, always inferred from usage)
-- ✅ Concurrency (noxy routines) [docs/CONCURRENCY.md](docs/CONCURRENCY.md)
+- ✅ Concurrency (noxy routines) [docs/concurrency.md](docs/concurrency.md)
 - ✅ Garbage collection
 - ✅ Built-in modules (io, net, http, sqlite)
 - ✅ Package manager (see [docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))

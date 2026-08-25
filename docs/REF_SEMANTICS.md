@@ -17,6 +17,7 @@ especificação completa (R1–R9, diagnósticos) está em
 
 ```noxy
 let x: int = 10
+let y: int = 20
 let r: ref int = ref x
 
 let n: int = *r        // le: 10          (`let n: int = r` e erro)
