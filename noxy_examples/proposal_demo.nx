@@ -1,4 +1,4 @@
-// COMPARISON: CURRENT STATUS vs PROPOSED FIX
+// Leitura e escrita explicitas de ref (spec 2026-08-24-explicit-ref, R2/R6)
 // Objetivo: Tornar structs seguras e consistentes (evitando crashes).
 
 struct Box
@@ -43,10 +43,13 @@ print("--- TEST 2: TYPE SAFETY ---")
 //b.val = 500
 //print("b.val: %v", b.val)
 
-// [PROPOSED FIX]
-// O compilador verifica os tipos.
-// RESULTADO: Compile Error! "Type Mismatch: expected ref int, got int".
-// O usuário é obrigado a passar uma referência válida ou usar a sintaxe correta.
+// [IMPLEMENTADO: R6 — UPDATE vs REBIND SAO SINTATICOS, NUNCA INFERIDOS]
+// O compilador rejeita a atribuicao direta de um 'int' cru a um campo 'ref int':
+// nao existe inferencia pelo tipo do RHS. Escreva '*b.val = 500' para UPDATE
+// (grava no alvo) ou 'b.val = ref outra_var' para REBIND (aponta para outro slot).
+// RESULTADO: Compile Error! "cannot assign int to ref int"
+//   hint: to point the field at a new value, bind it to a variable first and
+//   use 'b.val = ref novo'; to overwrite the referenced value use '*b.val = ...'
 
 
 // ---------------------------------------------------------
@@ -63,20 +66,26 @@ print(fmt("b.val: %v", *b.val))
 // b.val = ref g2
 // Isso altera o PONTEIRO (b.val agora aponta para g2).
 
-// [PROPOSED FIX: TYPE-BASED ASSIGNMENT]
-// A proposta é usar o TIPO do valor atribuído para decidir a operação:
+// [IMPLEMENTADO: R6 — UPDATE E REBIND SAO SINTAXES DISTINTAS]
+// Nao ha "Type-Based Assignment": o compilador nunca decide update vs rebind
+// olhando o tipo do RHS. A sintaxe escolhida e' que decide, sempre:
 
-// A) ATUALIZAR VALOR (Update) - Igual a Locais
-// Se atribuirmos um 'int' (valor), fazemos Auto-Deref.
-// b.val = 300      // Compilador gera: *b.val = 300
-// print(g)         // Imprime 300 (Valor original alterado)
+// A) ATUALIZAR VALOR (Update) - requer '*' explicito no alvo
+// '*b.val = 300' escreve 300 no slot apontado (equivale a '*r = v' em locais).
+// *b.val = 300     // UPDATE: escreve no slot apontado por b.val
+// print(g2)        // Imprime 300 (valor original alterado)
 
-// B) REBIND PONTEIRO (Rebind) - Exclusivo de Campos
-// Se atribuirmos um 'ref int' (ponteiro), mudamos o alvo.
-// b.val = ref g2   // Compilador gera: b.val = address(g2)
-// print(b.val)     // Agora aponta para g2 (200)
+// B) REBIND PONTEIRO (Rebind) - requer 'ref' explicito no RHS
+// 'b.val = ref g2' troca o ALVO do campo (equivale a 'r = ref y' em locais).
+// b.val = ref g2   // REBIND: b.val passa a apontar para g2
+// print(*b.val)    // Agora le' g2 (200)
+
+// C) MISTURAR AS DUAS E' ERRO: '*b.val = ref g2' nao compila.
+// Compiler error: "cannot assign ref int to int through '*r'"
+//   hint: use 'r = ref z' to rebind the reference, or '*r = z' to write the value
 
 // VANTAGEM:
-// - Mantém consistência com locais (b.val = 300 funciona igual r = 300)
-// - Mantém flexibilidade de ponteiros (b.val = ref g2 permite mudar estrutura)
-// - Resolve o bug de corrupção (b.val = 300 não tritura mais o ponteiro)
+// - Sem ambiguidade: a sintaxe ('*' ou 'ref') e' que decide, nunca o tipo do RHS
+// - Consistente entre locais e campos: mesmas regras R2/R6 nos dois casos
+// - Resolve o bug de corrupcao original (nao ha mais atribuicao direta de int
+//   cru a um campo ref; ela e' rejeitada em tempo de compilacao)
