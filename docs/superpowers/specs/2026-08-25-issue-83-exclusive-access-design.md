@@ -26,9 +26,14 @@ Adotamos esse modelo. Três peças, nenhuma inventada aqui:
 | **P2** | Ordem de avaliação: o acesso ao empréstimo começa **depois** de todos os argumentos não-`ref` serem avaliados; nesse ponto o chamador copia storage não-única defensivamente | SE-0176; JOT §6.3 | **C** | compilador |
 | **P3** | Exclusividade dinâmica: enquanto o acesso vive, acesso conflitante ao mesmo contêiner é erro de runtime | SE-0176 (enforcement dinâmico) | **D, E, F** | VM |
 
-**Critério de pronto:** os seis repros da §1.1 deixam de vazar — A, B e C como erro de
-compilação, D, E e F como erro de runtime — e o teste da §1.3 garante que a escrita
+**Critério de pronto:** os **sete** repros da §1.1 deixam de vazar — A, B e C como erro
+de compilação, D, E, F e G como erro de runtime — e o teste da §1.3 garante que a escrita
 através do empréstimo **continua chegando** no original.
+
+> **Nota de 2026-08-25:** G foi acrescentado pela validação adversarial da H4 (§7.5),
+> depois de esta spec estar escrita, e **P3 como desenhado na §4.2 não o fecha**. P1
+> (§2) está implementada em modo aviso e não é afetada. P3 precisa de redesenho antes
+> de começar.
 
 Rotas descartadas, ambas por serem invenção sem precedente: *pin* (nenhuma linguagem
 estabelecida marca um contêiner para sempre porque alguém tomou uma referência) e
@@ -112,12 +117,73 @@ let h: Holder = Holder(ref arr)
 f(ref arr[0], h)
 ```
 
-A e B são **escape**. C, D, E e F são **acesso conflitante** — o empréstimo nunca
+**G — o alias é adquirido num ANCESTRAL do contêiner do empréstimo:**
+
+```noxy
+struct H
+    xs: int[]
+end
+let h: H = H([1, 2, 3])
+let copia: H = H([])
+func f(r: ref int) -> void
+    copia = h                 // 2º dono da INSTÂNCIA h; o array xs não é tocado
+    *r = 999
+end
+f(ref h.xs[0])                // empréstimo em posição de argumento: R11/R12 legal
+print(copia.xs)               // [999, 2, 3] — deveria ser [1, 2, 3]
+```
+
+Encontrado pela validação adversarial da H4 (§7.5) em 2026-08-25, **depois** de esta
+spec estar escrita. Vale também com o ancestral sendo array externo (`ref a[0][0]`,
+`copia = a`), map (`ref m["k"][0]`, `copia = m`), `REF_PROPERTY` (`ref o.inn.x`,
+`copia = o`), e combinado com F — o alias dentro de um valor **e** um nível acima.
+Testes em `internal/vm/borrow_ancestor_alias_test.go`.
+
+A e B são **escape**. C, D, E, F e G são **acesso conflitante** — o empréstimo nunca
 escapa; o contêiner ganha um segundo dono enquanto ele vive. F é o que decide o
 desenho: o alias está dentro de um struct montado em outra linha, e nenhuma checagem
 local no call site pode enxergá-lo. **Fechar C–F estaticamente exige enumerar todos os
 canais pelos quais um alias pode chegar, e essa enumeração é aberta.** Foi por isso que
 o Swift fiscaliza dinamicamente.
+
+**G é o que decide o MECANISMO, e ele derruba a §4.2 como escrita.** A propriedade que
+A–F compartilham sem que ninguém tivesse notado: em todos, o contêiner do empréstimo
+**é** a raiz — `ref arr[0]` sobre um `int[]` plano é um objeto só, um `Owners` só. G tem
+caminho raiz→contêiner de dois níveis, e o segundo dono entra no nível de cima.
+`Retain` é **por objeto**: `copia = h` incrementa o `*ObjInstance`, e o `*ObjArray` de
+`h.xs` — o contêiner que o empréstimo marcaria — fica em `owners=1` durante toda a
+janela. Consequências:
+
+1. **P3 como especificado nunca dispara em G.** Abrir o acesso no contêiner e detectar
+   em `Retain` não vê um retain que acontece noutro objeto.
+2. **Consultar `IsShared` no ramo `REF_INDEX` também não veria.** No instante da escrita
+   o contêiner é, para o RC, perfeitamente único. O compartilhamento mora um nível acima.
+3. **A exclusividade tem de cobrir o CAMINHO raiz→contêiner inteiro, não um objeto** — o
+   que a proposta de codificar o estado na palavra de `Owners` de um objeto (§4.2) não
+   comporta. A cadeia `_MUT` já visita todos os nós do caminho na criação do empréstimo
+   (§1.4); é o lugar natural para abrir o acesso em cada nível.
+
+**A contraprova da §1.3 já é falsa hoje em contêiner aninhado.** Com `copia = h` seguido
+de `h.xs[1] = 7`, o MUT clona a instância, o clone retém `xs`, `xs` vira compartilhado,
+`GET_PROP_MUT` clona `xs` — e o empréstimo escreve no array **velho**. Saem os dois modos
+de falha juntos: `h.xs` fica `[1, 7, 3]` (**escrita perdida**) e `copia.xs` fica
+`[999, 2, 3]` (**vazamento**), com um empréstimo 100% legal sob R11/R12. Antes de servir
+de critério para qualquer correção, a contraprova precisa ser reescrita em contêiner
+aninhado. `TestBorrowAncestorAliasLosesTheWrite`.
+
+**`Retain` também não é funil suficiente.** Há violações de exclusividade que não
+adquirem dono nenhum, logo sem nenhum `Retain` na janela:
+
+- `delete(ref m, "a")` durante um empréstimo em `ref m["a"]` — a escrita **ressuscita** a
+  chave apagada, porque o ramo `REF_INDEX` de `referenceStorage` usa `mapping.Set`, que
+  insere se a chave não existe.
+- `arr = [7, 7, 7]` durante um empréstimo em `ref arr[0]` — a escrita some em silêncio.
+  No Swift isso é exatamente um conflito de acesso simultâneo, e o programa trapa.
+
+E na direção oposta: o `Retain` interno do `copyValue` (o clone retém os filhos,
+`internal/vm/calls.go:164`) dispararia o detector em **bookkeeping de CoW**, não em
+compartilhamento do usuário. P3 precisa distinguir os dois.
+`TestBorrowConflictWithoutAnyRetain`.
 
 ### 1.2 A causa
 
@@ -326,6 +392,12 @@ são exatamente essa família. F é a prova: o call site não menciona a raiz.
 
 ### 4.2 Mecanismo
 
+> ⚠️ **Esta seção está DESATUALIZADA desde a falsificação da H4 (2026-08-25).** O repro
+> G mostra que abrir o acesso no contêiner e detectar em `Retain` não fecha o caso em que
+> o alias entra num ancestral, e que `Retain` não é funil suficiente. Ler os três pontos
+> da §1.1 antes de implementar qualquer coisa daqui. O que segue é o desenho original,
+> mantido para registro.
+
 Enquanto um empréstimo enraizado em `X` está vivo, `X` está em **acesso exclusivo**.
 Qualquer tentativa de dar a `X` um segundo dono durável durante essa janela é erro de
 runtime — não importa o canal.
@@ -532,7 +604,21 @@ codificar o estado na palavra de `Owners` (§4.2) antes de desistir.
 **antes** de escrever a implementação — a propriedade some sem aviso e nenhum teste
 funcional a pega.
 
-### H4 — os seis repros esgotam o problema ❌ NÃO VALIDÁVEL PELO AUTOR
+### H4 — os seis repros esgotam o problema ❌ FALSIFICADA (2026-08-25)
+
+**A validação adversarial rodou e encontrou o sétimo repro: G (§1.1).** Quarta falha
+consecutiva desta mesma hipótese. O canal que faltava não era mais um tipo nem mais um
+lugar de onde o alias vem — era a **profundidade do caminho raiz→contêiner**, que A–F
+mantinham fixa em um nível sem que ninguém tivesse notado.
+
+O custo foi o previsto: **G muda o desenho de P3**, não só a lista de testes. Ver os
+três pontos na §1.1 — a exclusividade precisa cobrir o caminho, `Retain` não é funil
+suficiente, e a contraprova da §1.3 já é falsa hoje.
+
+P1 (R11/R12) **não** é afetada: G é acesso conflitante, família C–F, e sempre foi
+território de P3. A implementação de P1 seguiu.
+
+Registro do que a hipótese era, para o próximo que escrever uma igual:
 
 Esta é a hipótese que já falhou **três vezes** nesta spec: R11 sozinha não pegava C e D;
 a exclusividade estática não pegava E; o conserto de E não pegava F. Em todas, o autor

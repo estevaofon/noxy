@@ -186,11 +186,16 @@ func TestOwnParamRejectsBorrowAtCallSite(t *testing.T) {
 	})
 }
 
-// A CONTRAPROVA da spec §1.3: a escrita atraves do emprestimo continua chegando
-// no original. Um teste de "a copia esta isolada" passa numa implementacao que
-// PERDE a escrita num clone anonimo — que e o conserto errado que a spec proibe.
-// R12 e estatica e nao pode ter mexido nisso; este teste trava a propriedade.
-func TestBorrowWriteStillReachesOriginal(t *testing.T) {
+// O idioma central — `ref` para dentro de um conteiner passado como argumento
+// — nao pode avisar. E o caso NORMAL de emprestimo e o que a issue #82 acabou
+// de estabelecer.
+//
+// NAO confundir com a contraprova da §1.3 ("a escrita atraves do emprestimo
+// continua chegando no original"): esta checagem e ESTATICA e nao diz nada
+// sobre runtime. A contraprova em si esta em internal/vm, e o repro G mostrou
+// que ela JA E FALSA em conteiner aninhado — ver
+// TestBorrowAncestorAliasLosesTheWrite.
+func TestBorrowIdiomIsSilent(t *testing.T) {
 	src := "func inc(n: ref int) -> void\n    *n = *n + 1\nend\n" +
 		"let arr: int[] = [1, 2, 3]\ninc(ref arr[0])\n"
 	if got := ownWarnings(t, src); len(got) > 0 {
