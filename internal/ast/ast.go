@@ -157,25 +157,12 @@ func (ft *FunctionType) String() string {
 type Parameter struct {
 	Name string
 	Type NoxyType
-	// Owned marca o parametro declarado `own ref T` (R12, issue #83). Um
-	// parametro `ref T` e um EMPRESTIMO: o callee le, escreve e repassa, mas
-	// nao guarda. `own` declara o parametro que sobrevive a chamada — e por
-	// isso so aceita referencia de celula (R10), nunca um emprestimo.
-	//
-	// Nao e tipo: `own ref T` e `ref T` sao o mesmo *RefType. O modificador
-	// vive no parametro justamente para NAO existir em FunctionType, campo de
-	// struct, `let` ou retorno — logo funcao de ordem superior nunca guarda, e
-	// isso e limitacao declarada (spec §2.3), nao omissao.
-	Owned bool
 }
 
 func (p *Parameter) String() string {
 	t := "any"
 	if p.Type != nil {
 		t = p.Type.String()
-	}
-	if p.Owned {
-		return p.Name + ": own " + t
 	}
 	return p.Name + ": " + t
 }

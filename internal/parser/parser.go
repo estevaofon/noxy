@@ -1290,52 +1290,6 @@ func (p *Parser) parseFunctionLiteral() ast.Expression {
 	return lit
 }
 
-// startsTypeAfterOwn diz se o token pode COMECAR um tipo, e portanto se o `own`
-// que veio antes dele era tentativa de modificador em vez de um nome de tipo.
-func startsTypeAfterOwn(t token.TokenType) bool {
-	switch t {
-	case token.TYPE_INT, token.TYPE_FLOAT, token.TYPE_STRING, token.TYPE_STR,
-		token.TYPE_BOOL, token.TYPE_BYTES, token.TYPE_VOID, token.TYPE_ANY,
-		token.MAP, token.CHAN, token.FUNC, token.IDENTIFIER:
-		return true
-	}
-	return false
-}
-
-// parseOwnModifier consome o modificador contextual `own` de um parametro
-// (`filho: own ref No`, R12 da issue #83) e diz se ele estava la. Chamado com
-// curToken ja no PRIMEIRO token do tipo.
-//
-// `own` e contextual, nao palavra reservada: so vale como modificador quando
-// vem imediatamente antes de `ref`. Um struct chamado `own` continua legal em
-// `x: own`, e nenhum programa existente quebra por causa desta adicao.
-//
-// `own` sobre um tipo que nao e `ref` e erro de sintaxe: o modificador declara
-// que o parametro sobrevive a chamada, e isso so tem sentido para uma
-// referencia — um valor ja e copiado (semantica de valor, R1).
-func (p *Parser) parseOwnModifier() bool {
-	if !p.curTokenIs(token.IDENTIFIER) || p.curToken.Literal != "own" {
-		return false
-	}
-	if !p.peekTokenIs(token.REF) {
-		// `own` seguido de OUTRO tipo (`x: own int`) e o erro provavel: o
-		// modificador declara que o parametro sobrevive a chamada, e isso so
-		// tem sentido para uma referencia — um valor ja e copiado (R1).
-		//
-		// `own` seguido de `,`, `)` ou `[` NAO e erro: e um struct chamado
-		// `own` em posicao de tipo, e o significado que ja existia vence — a
-		// mesma regra que o C# aplicou ao introduzir `scoped`.
-		if startsTypeAfterOwn(p.peekToken.Type) {
-			msg := fmt.Sprintf("[%d:%d] SyntaxError: 'own' applies only to a 'ref' parameter\n  hint: write 'own ref <type>', or drop 'own'",
-				p.curToken.Line, p.curToken.Column)
-			p.errors = append(p.errors, msg)
-		}
-		return false
-	}
-	p.nextToken() // eat `own`, curToken passa a ser `ref`
-	return true
-}
-
 func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 	parameters := []*ast.Parameter{}
 
@@ -1365,11 +1319,10 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 	if !p.expectPeek(token.COLON) {
 		return nil
 	}
-	p.nextToken()                 // eat COLON
-	owned := p.parseOwnModifier() // eat `own`, se houver (R12)
-	pType := p.parseValueType()   // eat Type
+	p.nextToken()               // eat COLON
+	pType := p.parseValueType() // eat Type
 
-	parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType, Owned: owned})
+	parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType})
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken() // eat COMMA
@@ -1389,10 +1342,9 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 			return nil
 		}
 		p.nextToken()
-		owned = p.parseOwnModifier()
 		pType = p.parseValueType()
 
-		parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType, Owned: owned})
+		parameters = append(parameters, &ast.Parameter{Name: paramName, Type: pType})
 	}
 
 	if !p.expectPeek(token.RPAREN) {

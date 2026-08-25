@@ -125,22 +125,6 @@ type Compiler struct {
 	// o que a CLI consulta via Warnings(). O scratch do pass 1 dos genericos
 	// (newPass1Compiler) tem a SUA lista, descartada — o pass 2 reemite.
 	warnings *[]Warning
-
-	// borrowArgDepth > 0 enquanto um argumento de chamada esta sendo compilado
-	// pelo caminho GENERICO (parametro nao-`ref T`, ou callee sem assinatura).
-	// checkBorrowEscape (borrow_scope.go, issue #83) usa isto para separar duas
-	// situacoes que sao o mesmo caminho de codigo: um emprestimo em posicao de
-	// argumento cujo callee nao tem contrato `ref` inspecionavel (R12 check 3)
-	// de um emprestimo que realmente escapa — let, return, store, captura (R11).
-	borrowArgDepth int
-
-	// ownedParams guarda os flags `own` das assinaturas de funcao nomeadas
-	// (R12, issue #83). Existe porque `ast.FunctionType` — o que vive em
-	// c.globals — nao carrega o modificador de proposito (§2.3: `own` nao e
-	// tipo), e a checagem do lado do chamador precisa dele. Copiado por
-	// compilador, como globals/structs: o registro de um filho nao vaza para
-	// o pai.
-	ownedParams map[string][]bool
 }
 
 type callEmission struct {
@@ -203,10 +187,6 @@ func NewChild(parent *Compiler) *Compiler {
 		childNamespaceImports[name] = module
 	}
 	childNamespaceOrder := append([]string(nil), parent.namespaceOrder...)
-	childOwnedParams := make(map[string][]bool, len(parent.ownedParams))
-	for name, flags := range parent.ownedParams {
-		childOwnedParams[name] = flags
-	}
 	if parent.warnings == nil {
 		parent.warnings = &[]Warning{}
 	}
@@ -231,7 +211,6 @@ func NewChild(parent *Compiler) *Compiler {
 		pass1:            parent.pass1,
 		namespaceImports: childNamespaceImports,
 		namespaceOrder:   childNamespaceOrder,
-		ownedParams:      childOwnedParams,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -1485,12 +1464,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.PrefixExpression:
 		// Handle 'ref' operator specially - don't compile Right first
 		if n.Operator == "ref" {
-			// R11 (issue #83): este e o caminho de `ref x` em toda posicao que
-			// NAO e argumento de parametro `ref T` — let, rebind, store, return,
-			// canal, captura. Um emprestimo (ref para dentro de conteiner) so e
-			// solido enquanto dura a chamada, entao aqui ele escapa. Etapa 1:
-			// aviso (ver borrow_scope.go).
-			c.checkBorrowEscape(n.Right)
 			element, err := c.compileReferenceArgument(n.Right)
 			if err != nil {
 				return nil, nil, err
@@ -2218,10 +2191,6 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		c.globals[n.Name] = newFunctionType(n.Parameters, n.ReturnType)
-		// R12 (issue #83): publica os flags `own` para o call site, e cobra do
-		// corpo o contrato da propria assinatura.
-		c.recordOwnedParams(n.Name, n.Parameters)
-		c.checkBorrowParamKept(n.Parameters, n.Body)
 
 		fnObj, fnCompiler, err := c.compileFunction(n.Name, n.Parameters, n.Body, n.ReturnType)
 		if err != nil {
@@ -2325,7 +2294,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			}
 
 			// Compile Arg 0 (Channel).
-			_, chType, err := c.compileCallArgument(call.Arguments[0])
+			_, chType, err := c.Compile(call.Arguments[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2346,7 +2315,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			}
 
 			// Compile Arg 1 (Value).
-			_, valType, err := c.compileCallArgument(call.Arguments[1])
+			_, valType, err := c.Compile(call.Arguments[1])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2369,7 +2338,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				return nil, nil, err
 			}
 
-			_, chType, err := c.compileCallArgument(call.Arguments[0])
+			_, chType, err := c.Compile(call.Arguments[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2398,7 +2367,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				return nil, nil, fmt.Errorf("[line %d] addr expects 1 argument", c.currentLine)
 			}
 			// We expect a Reference on the stack (ObjRef), without auto-dereference.
-			_, argType, err := c.compileCallArgument(call.Arguments[0])
+			_, argType, err := c.Compile(call.Arguments[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2499,11 +2468,6 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
-				// R12 (issue #83), lado do chamador: parametro `own ref T`
-				// guarda o argumento alem da chamada, logo so aceita
-				// referencia de celula (R10) — nunca um emprestimo. Uma
-				// consulta a assinatura, sem olhar o corpo do callee.
-				c.checkOwnArgument(callableName(call.Function), i, arg)
 				// R5: parametro ref T recebe `ref x`, uma expressao ja ref T,
 				// null, ou any/desconhecido (modo validado em runtime).
 				refArg, err := c.compileRefArgument(arg)
@@ -2557,11 +2521,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		// R2: um argumento `ref T` para parametro T e erro (abaixo, com
 		// hint); para parametro any ou callee sem assinatura o ref passa
 		// como valor (print(r) mostra a referencia).
-		// #83: marca posicao de argumento para checkBorrowEscape distinguir
-		// R12 check 3 (callee sem contrato) de escape de verdade (R11).
-		c.borrowArgDepth++
 		_, argType, err := c.Compile(arg)
-		c.borrowArgDepth--
 		if err != nil {
 			return nil, nil, err
 		}

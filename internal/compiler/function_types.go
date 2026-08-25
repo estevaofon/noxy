@@ -286,10 +286,6 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 				return err
 			}
 			c.globals[declaration.Name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
-			// R12 (issue #83): os flags `own` tem de estar publicados ANTES de
-			// qualquer corpo compilar, senao uma chamada adiantada — legal em
-			// Noxy — nao veria o contrato e passaria sem checagem.
-			c.recordOwnedParams(declaration.Name, declaration.Parameters)
 		case *ast.LetStmt:
 			// Mesma regra do check local do LetStmt (compiler.go): dois `let`
 			// do mesmo nome no MESMO escopo global e redeclaracao — dentro de
