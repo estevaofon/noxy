@@ -472,6 +472,84 @@ compartilhando contêiner.
 verde (descontado o achado da §10); corpus e diff de saída sem diferença fora dos
 arquivos migrados; `CloneCountValue()` inalterado.
 
+## 7.5 Hipóteses e como falsificá-las
+
+Esta spec é desenho, não demonstração. Cada peça repousa numa hipótese verificável.
+Abaixo, cada uma com **experimento**, **o que confirma** e **o que falsifica** — para
+que a validação não dependa de convicção de quem escreveu.
+
+### H1 — R11 + R12 fecham A e B sem quebrar o idioma de célula
+
+**Status:** parcial. R11 prototipado e medido (§6.1); `own ref` não existe.
+**Experimento:** implementar R12; rodar A e B; rodar a lista encadeada completa; rodar
+o gate do corpus.
+**Confirma:** A e B viram erro; o gate não cresce além dos 7 sites conhecidos.
+**Falsifica:** qualquer idioma de célula (lista, árvore, grafo, `node.next = ref novo`,
+`return ref novo`) passar a reclamar. Isso é mais grave que não fechar o repro.
+
+### H2 — a ordem do SE-0176 fecha C reusando o `_MUT` existente ✅ VALIDADA
+
+**Experimento executado** (2026-08-25, binário v0.19.0): escrever o fonte na ordem que a
+reordenação produziria, sem implementá-la.
+
+```noxy
+func f(r: ref int, xs: int[]) -> void
+    *r = 999
+    print(xs)
+end
+let arr: int[] = [1, 2, 3]
+let tmp: int[] = arr          // argumento não-ref avaliado ANTES → Owners = 2
+f(ref arr[0], tmp)            // o _MUT do empréstimo vê IsShared e clona no slot
+print(arr)
+```
+
+**Saída:** `[1, 2, 3]` e `[999, 2, 3]`. As duas propriedades valem: a cópia é
+independente **e** a escrita através do empréstimo chega no original (contraprova da
+§1.3). O mecanismo semântico está confirmado; o que resta em P2 é codegen —
+dissociar ordem de avaliação de ordem de pilha (§3.3) —, que é engenharia, não
+semântica.
+**Falsificaria:** a escrita deixar de alcançar `arr`, ou o bytecode mudar em chamada
+sem empréstimo.
+
+### H3 — a checagem de exclusividade cabe dentro do `Retain` 🟡 MEDIDA, apertada
+
+**Experimento executado:** `go build -gcflags=-m=2 ./internal/value`.
+
+| | custo | orçamento |
+|---|---|---|
+| `ownersOf` | 35 | — |
+| `IsShared` | 55 | — |
+| **`Retain`** | **67** | 80 → **13 nós de folga** |
+| `Release` | 80 | 80 → **zero folga** |
+
+A checagem entra no `Retain`, que tem folga; `Release` está no limite mas não é o lugar.
+Uma comparação extra custa poucos nós — `cow.go` registra que "duas comparações custam
+os 3 nós que a dica `kind` acrescentou". **Não medido ainda:** o custo de mudar a
+assinatura para sinalizar conflito (`Retain(v) bool` → algo que reporte violação).
+**Falsifica:** `Retain` passar de 80 com a checagem e a sinalização. Nesse caso a rota é
+codificar o estado na palavra de `Owners` (§4.2) antes de desistir.
+**Guardrail obrigatório:** estender `inline_guard_test.go` a `Retain`/`Release`
+**antes** de escrever a implementação — a propriedade some sem aviso e nenhum teste
+funcional a pega.
+
+### H4 — os seis repros esgotam o problema ❌ NÃO VALIDÁVEL PELO AUTOR
+
+Esta é a hipótese que já falhou **três vezes** nesta spec: R11 sozinha não pegava C e D;
+a exclusividade estática não pegava E; o conserto de E não pegava F. Em todas, o autor
+tinha testado — e testado só os casos que tinha imaginado.
+
+**Não existe experimento que o autor possa rodar para confirmá-la.** O protocolo é
+adversarial:
+
+- revisão independente, sem o contexto de quem escreveu, com a instrução explícita de
+  **procurar um sétimo repro**;
+- encontrar um repro novo é **sucesso da validação**, não falha da spec;
+- todo repro novo entra na §1.1 e vira teste antes de qualquer implementação seguir.
+
+Quem for validar deve começar pelo **repro F** (alias dentro de um valor, call site sem
+menção à raiz): é o que derruba qualquer proposta de fechar C–F estaticamente, e é o
+teste mais barato de "esta ideia nova já foi descartada?".
+
 ## 8. Alternativas descartadas
 
 | Rota | O que é | Por que não |
@@ -505,10 +583,12 @@ quebra, e a medição real substitui a estimativa.
 Se a medição acusar impacto muito além do previsto — sobretudo em `internal/stdlib/` — a
 decisão volta para a mesa antes de qualquer quebra.
 
-### 9.3 P2 é a incógnita técnica
+### 9.3 P2: incógnita reduzida a codegen
 
-A reordenação de avaliação (§3.3) é o único ponto onde o desenho depende de um detalhe de
-codegen ainda não prototipado. **Protótipo antes de aprovação.**
+A semântica de P2 está **validada** (§7.5 H2). O que resta é a reordenação em si
+(§3.3): dissociar ordem de avaliação de ordem de pilha sem mudar o bytecode de nenhuma
+chamada que não misture empréstimo com argumento por valor. **Protótipo antes de
+aprovação**, com igualdade de bytecode como critério.
 
 ### 9.4 Arrasto de escopo
 
