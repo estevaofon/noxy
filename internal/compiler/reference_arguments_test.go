@@ -134,7 +134,7 @@ func consume(target: ref int[]) -> void
     return
 end
 consume(ref stored["values"])`,
-			forwardSubject: "stored[values]",
+			forwardSubject: `stored["values"]`,
 			forbidden:      []chunk.OpCode{chunk.OP_CONTEXT_REF_INDEX},
 		},
 	}

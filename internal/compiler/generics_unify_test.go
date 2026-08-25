@@ -50,6 +50,14 @@ func TestUnifyTable(t *testing.T) {
 			&ast.PrimitiveType{Name: "func"},
 			&ast.FunctionType{Params: []ast.NoxyType{tInt()}, Return: tString()},
 			map[string]string{}, ""},
+		// Task 6 (spec 2026-08-24-explicit-ref, R5): actual sem `ref` contra
+		// `ref T` nao e mismatch estrutural AQUI — a inferencia segue pelo
+		// elemento (T binda com o tipo cru) e o erro de R5 (call site espera
+		// `ref x`) fica por conta de compileCallExpression, depois da
+		// monomorfizacao (generics_unify.go, case *ast.RefType).
+		{"ref T contra int: infere pelo elemento",
+			&ast.RefType{ElementType: tParam("T")}, tInt(),
+			map[string]string{"T": "int"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

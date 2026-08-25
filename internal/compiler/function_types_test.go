@@ -168,7 +168,7 @@ set(1)`, "argument 1 to 'set': expected ref int, got int"},
     return
 end
 let text: string = "x"
-set(text)`, "argument 1 to 'set': expected ref int, got string"},
+set(ref text)`, "argument 1 to 'set': expected ref int, got ref string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

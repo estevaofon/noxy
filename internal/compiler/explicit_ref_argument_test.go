@@ -129,3 +129,12 @@ end`, "'rg' is already a reference")
     f()
 end`, "'r' is already a reference")
 }
+
+// Achado do review de Task 6 (2026-08-25): exprDisplay precisa preservar
+// aspas em torno de um indice string literal — sem isso o hint sugeria
+// `ref m[k]`, que nao compila de volta (StringLiteral.String() devolve o
+// texto cru, sem aspas).
+func TestRefArgumentHintQuotesStringIndex(t *testing.T) {
+	requireCompileError(t, refParamPrelude+`let m: map[string, int] = {"k": 1}
+inc(m["k"])`, "argument 1 to 'inc': expected ref int, got int", `hint: use 'ref m["k"]'`)
+}

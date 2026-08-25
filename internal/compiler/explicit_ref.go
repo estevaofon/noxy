@@ -66,13 +66,18 @@ func (c *Compiler) compileRefArgument(arg ast.Expression) (refArgument, error) {
 
 // exprDisplay renderiza expr como o fonte Noxy, para mensagens de diagnostico
 // — sem os parenteses de agrupamento que MemberAccessExpression.String() e
-// IndexExpression.String() usam internamente (AST, nao mensagem ao usuario).
+// IndexExpression.String() usam internamente (AST, nao mensagem ao usuario),
+// e com aspas em torno de um indice string literal (StringLiteral.String()
+// devolve o texto cru sem aspas — `m["k"]` viraria `m[k]`, um hint que nao
+// compila de volta).
 func exprDisplay(expr ast.Expression) string {
 	switch e := expr.(type) {
 	case *ast.MemberAccessExpression:
 		return exprDisplay(e.Left) + "." + e.Member
 	case *ast.IndexExpression:
 		return exprDisplay(e.Left) + "[" + exprDisplay(e.Index) + "]"
+	case *ast.StringLiteral:
+		return fmt.Sprintf("%q", e.Value)
 	default:
 		return expr.String()
 	}
