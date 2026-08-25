@@ -440,6 +440,57 @@ the stack. `==` between references compares these cells (R7). A closure that
 captures a `ref` to a local and is handed to `spawn`/`spawn_task` shares the
 cell between routines — coordinate, as for globals ([docs/concurrency.md](concurrency.md)).
 
+#### R10. A reference into a container denotes a place
+
+`ref x` on a **name** promotes that slot to a heap cell (R9). `ref` on a
+**field, an index, or a map entry** — `ref p.x`, `ref a[i]`, `ref m[k]` —
+cannot denote a cell: the referent lives inside a composite that copy-on-write
+may duplicate. Such a reference denotes a **place**, and the path from the root
+variable down to it is resolved **at each access**, not when the reference is
+created:
+
+```noxy
+let arr: int[] = [1, 2, 3]
+let r: ref int = ref arr[0]
+let copia: int[] = arr        // copy AFTER the reference was taken
+*r = 999
+print(arr)                    // [999, 2, 3] — the write reaches the original
+print(copia)                  // [1, 2, 3]   — the copy is independent
+```
+
+Writing through the reference unicizes every level of that path and stores each
+clone back into its parent, exactly as the equivalent direct assignment
+(`arr[0] = 999`) would. So a reference into a container costs what the direct
+assignment costs, and value semantics hold no matter when the copy was made —
+before or after the reference.
+
+Because the path is resolved on access and not frozen, a reference stays valid
+across a copy-on-write fork of anything above it. Two consequences follow from
+the reference naming a *place* rather than an object:
+
+```noxy
+let arr: int[] = [1, 2, 3]
+func f(r: ref int) -> void
+    arr = [7, 7, 7]           // the root now holds a different array
+    *r = 999                  // writes arr[0], which is that array's first slot
+end
+f(ref arr[0])
+print(arr)                    // [999, 7, 7]
+```
+
+```noxy
+let m: map[string, int] = {"a": 1}
+func g(r: ref int) -> void
+    delete(ref m, "a")
+    *r = 999                  // Runtime error: reference target no longer exists
+end
+g(ref m["a"])
+```
+
+A place that has been removed is not silently recreated: writing through a
+reference whose entry no longer exists is an error, in the spirit of the Zen —
+*a failure that indicates a bug raises and stops the program*.
+
 #### Diagnostics
 
 | Situation | Message | Hint |
@@ -463,6 +514,7 @@ cell between routines — coordinate, as for globals ([docs/concurrency.md](conc
 | `json_dumps(rx)`, `rx: ref int[]` (R2, static) | `argument 1 to 'json_dumps': expected a value, got ref int[]` | `use '*rx' to read the referenced value` |
 | `length(a)` through `any` at runtime (R2) | `length: argument 1 expected a value, got ref` | `a ref is never read implicitly; use '*r'` |
 | `ref a.f` through `any`, slot already ref (runtime) | `slot 'f' already holds a reference` | `pass it directly, without 'ref'` |
+| `*r = v` where the map entry `r` names was deleted (R10) | `reference target no longer exists` | — |
 
 ---
 
