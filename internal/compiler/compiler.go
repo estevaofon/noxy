@@ -413,19 +413,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			valType = n.Type
 		}
 
-		// Type Check
-		// Auto-Deref if Value is Reference and Target is NOT Reference
+		// Type Check. R2 (spec 2026-08-24-explicit-ref): `let x: T = r` com
+		// r: ref T NAO le — o hint aponta '*r', como na atribuicao.
 		if n.Type != nil {
-			if refType, isRef := valType.(*ast.RefType); isRef {
-				if _, targetIsRef := n.Type.(*ast.RefType); !targetIsRef {
-					// We have Ref, want Value -> Deref
-					c.emitByte(byte(chunk.OP_DEREF))
-					valType = refType.ElementType
-				}
-			}
-
 			if !c.areTypesCompatible(n.Type, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType))
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s%s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType), c.derefReadHint(n.Type, valType, n.Value))
 			}
 			if err := c.emitRuntimeValueType(n.Type); err != nil {
 				return nil, nil, err
@@ -535,17 +527,21 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// Logic: *ref<T> = T
 			// Check if value type matches the element type of the reference
 
-			// Auto-deref RHS if it is a RefType but we need a Value.
-			if valRef, valIsRef := valType.(*ast.RefType); valIsRef {
-				// If target is value type, dereference the RHS reference.
-				if _, targetIsRef := refT.ElementType.(*ast.RefType); !targetIsRef {
-					c.emitByte(byte(chunk.OP_DEREF))
-					valType = valRef.ElementType
+			// R2/R6 (spec 2026-08-24-explicit-ref): o RHS de `*r = ...` nao
+			// le um ref implicitamente. `*r = ref y` e quase sempre um rebind
+			// escrito no lugar errado — hint com as duas formas legitimas.
+			if _, valIsRef := valType.(*ast.RefType); valIsRef {
+				if prefix, ok := n.Value.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
+					target := prefixExp.Right.String()
+					return nil, nil, fmt.Errorf(
+						"[line %d] cannot assign %s to %s through '*%s'\n  hint: use '%s = ref %s' to rebind the reference, or '*%s = %s' to write the value",
+						c.currentLine, noxyTypeName(valType), noxyTypeName(refT.ElementType), target, target, prefix.Right.String(), target, prefix.Right.String(),
+					)
 				}
 			}
 
 			if !c.areTypesCompatible(refT.ElementType, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s", c.currentLine, refT.ElementType.String(), valType.String())
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s%s", c.currentLine, refT.ElementType.String(), valType.String(), c.derefReadHint(refT.ElementType, valType, n.Value))
 			}
 			if err := c.emitRuntimeValueType(refT.ElementType); err != nil {
 				return nil, nil, err
@@ -3092,8 +3088,8 @@ func referenceSlotAssignmentTypeError(line int, name, slotKind string, expected,
 }
 
 // derefReadHint e o espelho de referenceAssignmentTypeError para a direcao
-// inversa: RHS `ref T` num alvo que espera `T`. Atribuicao nao faz
-// auto-deref (spec §2.3, Type-Based Assignment) — a leitura pede '*'
+// inversa: RHS `ref T` num alvo que espera `T`. Nenhuma posicao le um ref
+// implicitamente (spec 2026-08-24-explicit-ref, R2) — a leitura pede '*'
 // explicito. Devolve "" quando o deref nao consertaria o programa, para o
 // mismatch generico nao sugerir orientacao errada.
 func (c *Compiler) derefReadHint(expected, actual ast.NoxyType, rhs ast.Expression) string {

@@ -66,9 +66,9 @@ main()
 	}
 }
 
-// Spec §2.3: "With s: ref int, *r = s writes the value s points to
-// (equivalent to *r = *s)". É cópia do valor, não aliasing: mudar y depois
-// não alcança x.
+// R2: `*r = *s` copia o valor apontado por s (o RHS `s` sem '*' e erro de
+// compilacao — explicit_read_test.go). E copia, nao aliasing: mudar y
+// depois nao alcanca x.
 func TestDerefAssignmentFromRefRHSCopiesPointedValue(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
@@ -76,7 +76,7 @@ func main()
     let y: int = 3
     let rx: ref int = ref x
     let ry: ref int = ref y
-    *rx = ry
+    *rx = *ry
     let x_after_assign: int = x
     y = 4
     test_report([x_after_assign, x, y])

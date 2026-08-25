@@ -1315,7 +1315,7 @@ test_report(count(head_a) * 10 + count(head_b))`
 // slot local `ref` emprestado.
 //
 // A forma exige DOIS donos reais vivos no no mutado — o campo `proximo` do no
-// anterior E um vinculo por valor (`let second: Node = head.proximo`). Com um
+// anterior E um vinculo por valor (`let second: Node = *head.proximo`). Com um
 // dono so, o Release a mais e absorvido pelo clamp em zero de value.Release e
 // o bug fica invisivel (foi exatamente o ponto cego de
 // TestRefGlobalAndCapturedRefLocalAreBorrows). Com dois, o dec a menos leva
@@ -1359,7 +1359,7 @@ end
 
 // A: rebind do upvalue ref (OP_SET_UPVALUE sobre caixa emprestada).
 func repro_a(head: ref Node) -> int
-    let second: Node = head.proximo
+    let second: Node = *head.proximo
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
         u = u.proximo
@@ -1373,7 +1373,7 @@ end
 // B: mutacao atraves do upvalue ref (OP_GET_UPVALUE_MUT sobre caixa
 // emprestada).
 func repro_b(head: ref Node) -> int
-    let second: Node = head.proximo
+    let second: Node = *head.proximo
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
         u.valor = 77
@@ -1386,7 +1386,7 @@ end
 
 // C: mutacao atraves de um local ref emprestado (OP_GET_LOCAL_MUT).
 func repro_c(head: ref Node) -> int
-    let second: Node = head.proximo
+    let second: Node = *head.proximo
     let u: ref Node = head.proximo
     u.valor = 77
     second.valor = 99
@@ -1456,7 +1456,7 @@ func _append(node: ref Node, valor: int)
 end
 
 func run(head: ref Node) -> int
-    let second: Node = head.proximo
+    let second: Node = *head.proximo
     probe_before(head.proximo)
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
@@ -1625,7 +1625,7 @@ end
 // indice em frame.Owned, o segundo reaproveita o MESMO indice para um
 // emprestimo (let u: ref Node).
 func repro_f(head: ref Node) -> int
-    let second: Node = head.proximo
+    let second: Node = *head.proximo
     if 1 == 1 then
         let dead: Node = Node(7, null)
         let touch: int = dead.valor
@@ -1640,7 +1640,7 @@ end
 
 // (b2) controle: sem o bloco irmao morto, o indice nunca foi possuido.
 func repro_f2(head: ref Node) -> int
-    let second: Node = head.proximo
+    let second: Node = *head.proximo
     if 1 == 1 then
         let u: ref Node = head.proximo
         u.valor = 77

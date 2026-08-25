@@ -126,7 +126,7 @@ struct Pair
 end
 let target: (ref Pair)[] = [null]
 let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", target)
-let copia: Pair = target[0]
+let copia: Pair = *target[0]
 copia.a = 99
 let viz: ref Pair = target[0]
 if ok && viz.a == 1 then
