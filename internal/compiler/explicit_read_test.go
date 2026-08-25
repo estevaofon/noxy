@@ -120,3 +120,55 @@ while *rb do
     f = false
 end`)
 }
+
+func TestIndexOperandRefIsError(t *testing.T) {
+	base := `let i: int = 0
+let ri: ref int = ref i
+let xs: int[] = [1, 2]
+`
+	requireCompileError(t, base+`let v: int = xs[ri]`, "index cannot be ref int: a ref is never read implicitly", "hint: use '*ri'")
+	requireCompileError(t, base+`xs[ri] = 5`, "index cannot be ref int", "hint: use '*ri'")
+	requireCompileError(t, base+`func f(t: ref int)
+    *t = 1
+end
+f(ref xs[ri])`, "index cannot be ref int", "hint: use '*ri'")
+	requireCompileError(t, `func g()
+    let i: int = 0
+    let ri: ref int = ref i
+    let xs: int[] = [1, 2]
+    let v: int = xs[ri]
+end`, "index cannot be ref int", "hint: use '*ri'")
+	requireCompileError(t, `func h()
+    let i: int = 0
+    let ri: ref int = ref i
+    let xs: int[] = [1, 2]
+    xs[ri] = 5
+end`, "index cannot be ref int", "hint: use '*ri'")
+}
+
+func TestIndexOperandDerefCompiles(t *testing.T) {
+	requireCompiles(t, `func g()
+    let i: int = 0
+    let ri: ref int = ref i
+    let xs: int[] = [1, 2]
+    let v: int = xs[*ri]
+    xs[*ri] = 5
+end
+g()`)
+}
+
+func TestForOverRefCollectionIsError(t *testing.T) {
+	requireCompileError(t, `let xs: int[] = [1, 2]
+let r: ref int[] = ref xs
+for x in r do
+    print(x)
+end`, "cannot iterate over ref int[]: a ref is never read implicitly", "hint: use 'for x in *r'")
+}
+
+func TestForOverDerefCollectionTypesLoopVariable(t *testing.T) {
+	requireCompileError(t, `let xs: int[] = [1, 2]
+let r: ref int[] = ref xs
+for x in *r do
+    let s: string = x
+end`, "type mismatch in 's' declaration: expected string, got int")
+}

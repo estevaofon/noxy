@@ -139,15 +139,12 @@ func (c *Compiler) tryFuseLocalIndexAssign(target *ast.IndexExpression, valueExp
 	if err != nil {
 		return true, err
 	}
-	if _, isRef := idxType.(*ast.RefType); isRef {
-		c.emitByte(byte(chunk.OP_DEREF))
+	if err := c.rejectRefRead(idxType, target.Index, "index"); err != nil {
+		return true, err
 	}
 	_, valType, err := c.Compile(valueExpr)
 	if err != nil {
 		return true, err
-	}
-	if ref, isRef := idxType.(*ast.RefType); isRef {
-		idxType = ref.ElementType
 	}
 	if idxType != nil && idxType.String() != "int" {
 		return true, fmt.Errorf("[line %d] array index must be int, got %s", c.currentLine, idxType.String())

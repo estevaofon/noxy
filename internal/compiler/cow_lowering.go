@@ -52,8 +52,8 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		if err != nil {
 			return nil, false, err
 		}
-		if _, ok := idxType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		if err := c.rejectRefRead(idxType, n.Index, "index"); err != nil {
+			return nil, false, err
 		}
 		c.emitByte(byte(chunk.OP_GET_INDEX_MUT))
 		var t ast.NoxyType

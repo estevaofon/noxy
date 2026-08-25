@@ -724,8 +724,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			if _, ok := idxType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
+			if err := c.rejectRefRead(idxType, indexExp.Index, "index"); err != nil {
+				return nil, nil, err
 			}
 
 			// 3. Compile Value
@@ -1081,8 +1081,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, isRef := idxType.(*ast.RefType); isRef {
-				c.emitByte(byte(chunk.OP_DEREF))
+			if err := c.rejectRefRead(idxType, n.Index, "index"); err != nil {
+				return nil, nil, err
 			}
 			c.emitBytes(byte(op), byte(slot))
 			return c.currentChunk, elem, nil
@@ -1108,14 +1108,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
-		// Auto-dereference index if Ref
-		if _, ok := idxType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-		}
-
-		// Unwrap RefType in index
-		if ref, ok := idxType.(*ast.RefType); ok {
-			idxType = ref.ElementType
+		// R2: indice ref e erro (hint '*ri').
+		if err := c.rejectRefRead(idxType, n.Index, "index"); err != nil {
+			return nil, nil, err
 		}
 
 		// Index should be int (usually)
@@ -1124,8 +1119,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// return nil, nil, fmt.Errorf("index must be int, got %s", idxType)
 		}
 
-		// perf #66: base estaticamente T[] (ou ref T[], ja dereferenciada
-		// acima) indexa sem despacho dinamico; o VM cai no OP_GET_INDEX
+		// perf #66: base estaticamente T[] (ou ref T[], base atravessada
+		// acima — R4) indexa sem despacho dinamico; o VM cai no OP_GET_INDEX
 		// generico se o container em runtime nao for array.
 		if _, isArray := arrayTypeOf(leftType); isArray {
 			c.emitByte(byte(chunk.OP_GET_INDEX_ARRAY))
@@ -1662,6 +1657,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		_, colType, err := c.Compile(n.Collection)
 		if err != nil {
 			return nil, nil, err
+		}
+
+		// R2: a colecao de um for-each nunca e um ref (antes compilava e
+		// iterava zero vezes: OP_LEN devolve 0 para VAL_REF).
+		if _, isRef := colType.(*ast.RefType); isRef {
+			return nil, nil, fmt.Errorf(
+				"[line %d] cannot iterate over %s: a ref is never read implicitly\n  hint: use 'for %s in *%s'",
+				c.currentLine, noxyTypeName(colType), n.Identifier, n.Collection.String(),
+			)
 		}
 
 		// Handle Map: transform to keys array
@@ -2637,10 +2641,9 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := indexType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		if err := c.rejectRefRead(indexType, target.Index, "index"); err != nil {
+			return nil, err
 		}
-		indexType = unwrapRefType(indexType)
 		switch collection := unwrapRefType(container).(type) {
 		case *ast.ArrayType:
 			expected := &ast.PrimitiveType{Name: "int"}

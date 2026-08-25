@@ -88,16 +88,16 @@ main()
 	}
 }
 
-func TestRefIntIndexIsDereferencedInIndexExpressions(t *testing.T) {
+func TestDerefIndexReadsPointedInt(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let arr: int[] = [10, 20, 30]
     let i: int = 1
     let ri: ref int = ref i
-    let re: ref int = ref arr[ri]
+    let re: ref int = ref arr[*ri]
     *re = 200
     let after_ref: int = arr[1]
-    arr[ri] = 222
+    arr[*ri] = 222
     test_report([after_ref, arr[0], arr[1], arr[2]])
 end
 main()
@@ -156,5 +156,27 @@ test_report([to_str(length(b)), to_str(m), s, to_str(arr), to_str(f), to_str(ok)
 		if s, ok := cell.Obj.(string); !ok || s != want[i] {
 			t.Fatalf("célula %d: got %s, want %q", i, cell.String(), want[i])
 		}
+	}
+}
+
+// R2: `for x in *r` itera o array apontado. (Antes, `for x in r` compilava
+// e iterava zero vezes: OP_LEN devolve 0 para VAL_REF.)
+func TestForOverDerefRefArrayIteratesPointedArray(t *testing.T) {
+	got := captureVMSource(t, `
+func soma(r: ref int[]) -> int
+    let total: int = 0
+    for x in *r do
+        total = total + x
+    end
+    return total
+end
+func main()
+    let xs: int[] = [1, 2, 3]
+    test_report(soma(ref xs))
+end
+main()
+`)
+	if got.Int() != 6 {
+		t.Fatalf("soma = %s, want 6", got.String())
 	}
 }
