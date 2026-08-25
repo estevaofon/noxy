@@ -234,22 +234,28 @@ test_report(main())
 	}
 }
 
+// Os erros de indexacao pelo caminho tipado (`ref T[]`, opcodes fundidos) sao
+// os mesmos do caminho dinamico — EXCETO com ref nulo: desde a revisao final
+// da issue #82 (I5) um slot `ref T` nulo erra ao ser LIDO/ESCRITO atraves
+// ("cannot dereference/write through null reference"), enquanto um `any` que
+// guarda null nunca prometeu referente nenhum e segue reclamando da
+// indexacao. Por isso cada caso fixa a mensagem dos dois lados.
 func TestTypedIndexRefErrorsMatchGenericPath(t *testing.T) {
-	cases := []struct{ name, typed, dynamic, want string }{
-		{"leitura fora da faixa via ref", "func f(d: ref int[]) -> int\n    let i: int = 5\n    return d[i]\nend\nlet a: int[] = [1]\nprint(f(ref a))\n", "func f(d: any) -> any\n    let i: int = 5\n    return d[i]\nend\nlet a: any = [1]\nprint(f(a))\n", "array index out of bounds"},
-		{"escrita fora da faixa via ref", "func f(d: ref int[]) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: int[] = [1]\nf(ref a)\n", "func f(d: any) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: any = [1]\nf(a)\n", "array index out of bounds"},
-		{"ref null leitura", "func f(d: ref int[]) -> int\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "func f(d: any) -> any\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "cannot index non-array/map/bytes"},
-		{"ref null escrita", "func f(d: ref int[]) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "func f(d: any) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "cannot set index on non-array/map"},
+	cases := []struct{ name, typed, dynamic, wantTyped, wantDynamic string }{
+		{"leitura fora da faixa via ref", "func f(d: ref int[]) -> int\n    let i: int = 5\n    return d[i]\nend\nlet a: int[] = [1]\nprint(f(ref a))\n", "func f(d: any) -> any\n    let i: int = 5\n    return d[i]\nend\nlet a: any = [1]\nprint(f(a))\n", "array index out of bounds", "array index out of bounds"},
+		{"escrita fora da faixa via ref", "func f(d: ref int[]) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: int[] = [1]\nf(ref a)\n", "func f(d: any) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: any = [1]\nf(a)\n", "array index out of bounds", "array index out of bounds"},
+		{"ref null leitura", "func f(d: ref int[]) -> int\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "func f(d: any) -> any\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "cannot dereference null reference", "cannot index non-array/map/bytes"},
+		{"ref null escrita", "func f(d: ref int[]) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "func f(d: any) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "cannot write through a null reference", "cannot set index on non-array/map"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			typedErr := interpretVMSource(t, New(), tc.typed)
 			dynErr := interpretVMSource(t, New(), tc.dynamic)
-			if typedErr == nil || !strings.Contains(typedErr.Error(), tc.want) {
-				t.Fatalf("tipado: esperava %q, obtido %v", tc.want, typedErr)
+			if typedErr == nil || !strings.Contains(typedErr.Error(), tc.wantTyped) {
+				t.Fatalf("tipado: esperava %q, obtido %v", tc.wantTyped, typedErr)
 			}
-			if dynErr == nil || !strings.Contains(dynErr.Error(), tc.want) {
-				t.Fatalf("dinamico: esperava %q, obtido %v", tc.want, dynErr)
+			if dynErr == nil || !strings.Contains(dynErr.Error(), tc.wantDynamic) {
+				t.Fatalf("dinamico: esperava %q, obtido %v", tc.wantDynamic, dynErr)
 			}
 		})
 	}

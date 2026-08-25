@@ -25,13 +25,12 @@ let server: HttpServer = new_server("127.0.0.1", 8080)
 serve(ref server, handler)
 ```
 
-`serve`, `bind_server`, and `stop_server` all take `ref HttpServer`. Calling
-them through `use http_server select *`, as above, crosses a module boundary
-that erases the exact static signature the compiler would otherwise use to
-convert a plain variable into a reference automatically — see
-[`docs/REF_SEMANTICS.md`](REF_SEMANTICS.md), section 2. `ref server` is
-required at every such call site; omitting it raises
-`expected ref HttpServer, got object`.
+`serve`, `bind_server`, and `stop_server` all take `ref HttpServer`. Since
+0.19 a `ref` parameter is fed `ref x` at EVERY call site — there is no
+module boundary to distinguish, and no automatic conversion anywhere — see
+[`docs/REF_SEMANTICS.md`](REF_SEMANTICS.md), section "Em chamadas".
+Omitting it raises `argument 1 to 'serve': expected ref HttpServer, got
+HttpServer` with the hint `use 'ref server'`.
 
 ## Binding
 

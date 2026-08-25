@@ -13,7 +13,7 @@ end
 func verify_syntax(r: ref int)
     // 1. Explicit Update (*r = val)
     *r = 100
-    print(f"Updated value via *r: {*r}") // *r in expression is valid (though r works too)
+    print(f"Updated value via *r: {*r}") // '*r' is the ONLY read (R2): 'r' alone would be the reference
     
     // 2. Read via explicit deref ('==' never auto-derefs a ref operand)
     if *r == 100 then
@@ -62,13 +62,10 @@ func test_struct_field_syntax()
     // Let's create a local ref to struct
     let r_box: ref Box = ref b1
     
-    // Update field of ref struct
-    // r_box.val = 50 
-    // This is implicitly valid? 
-    // r_box.val accesses field 'val' (int). 
-    // Assigning int to int. Standard assignment.
-    // Wait, r_box is ref. r_box.val auto-derefs r_box.
-    // So YES, r_box.val = 50 is fine if .val is not a ref field.
+    // Update field of ref struct: '.' goes THROUGH the reference (R4),
+    // so r_box.val names the field 'val' (int) of the referenced Box and
+    // writes it in place -- b1.val changes too. No implicit read of r_box
+    // is involved (R2); reading the Box itself would be '*r_box'.
     
     r_box.val = 50
     print(f"Updated r_box.val to 50. Original b1.val: {b1.val}")

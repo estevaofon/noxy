@@ -79,7 +79,7 @@ func (vm *VM) defineCoreBuiltins() {
 		}
 		return value.NewString(result), nil
 	})
-	vm.DefineNative("hex", func(args []value.Value) value.Value {
+	vm.defineValueNative("hex", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewNull()
 		}
@@ -92,7 +92,7 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewString(args[0].String())
 	})
 
-	vm.DefineNative("hex_encode", func(args []value.Value) value.Value {
+	vm.defineValueNative("hex_encode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewString("")
 		}
@@ -106,7 +106,7 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewString(hex.EncodeToString([]byte(data)))
 	})
 
-	vm.DefineNative("hex_decode", func(args []value.Value) value.Value {
+	vm.defineValueNative("hex_decode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}
@@ -117,7 +117,7 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewBytes(string(decoded))
 	})
 
-	vm.DefineNative("base64_encode", func(args []value.Value) value.Value {
+	vm.defineValueNative("base64_encode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewString("")
 		}
@@ -131,7 +131,7 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewString(base64.StdEncoding.EncodeToString([]byte(data)))
 	})
 
-	vm.DefineNative("base64_decode", func(args []value.Value) value.Value {
+	vm.defineValueNative("base64_decode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}
@@ -144,7 +144,7 @@ func (vm *VM) defineCoreBuiltins() {
 
 	const base62Chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-	vm.DefineNative("base62_encode", func(args []value.Value) value.Value {
+	vm.defineValueNative("base62_encode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewString("")
 		}
@@ -181,7 +181,7 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewString(string(coded))
 	})
 
-	vm.DefineNative("base62_decode", func(args []value.Value) value.Value {
+	vm.defineValueNative("base62_decode", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewInt(0)
 		}
@@ -226,7 +226,7 @@ func (vm *VM) defineCoreBuiltins() {
 		return value.NewString(runtimeTypeName(args[0])), nil
 	})
 
-	vm.DefineNative("fmt", func(args []value.Value) value.Value {
+	vm.defineValueNative("fmt", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("")
 		}

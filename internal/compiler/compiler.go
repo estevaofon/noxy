@@ -1477,14 +1477,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		if n.Operator == "*" {
-			// Deref explicito. Tipo estatico conhecido e nao-ref (inclui any,
-			// que nunca guarda ref) e erro aqui, em compilacao. Tipo
-			// desconhecido (nil) emite OP_DEREF e deixa a checagem para o
-			// executor, que ja recusa dereferenciar um valor nao-ref/nao-nulo
-			// em runtime ("cannot dereference <tipo>", desde a Task 8) —
-			// entao os dois lados juntos cobrem R3.
+			// Deref explicito. Tipo estatico conhecido, nao-ref e nao-any e
+			// erro aqui, em compilacao. `any` guarda ref sim (R2: toda
+			// posicao any recebe a referencia como valor), entao ele e
+			// tratado como tipo desconhecido: emite OP_DEREF e deixa a
+			// checagem para o executor, que recusa dereferenciar um valor
+			// nao-ref ("cannot dereference <tipo>") e um ref nulo ("cannot
+			// dereference null reference") — os dois lados juntos cobrem R3.
 			ref, isRef := rightType.(*ast.RefType)
-			if !isRef && rightType != nil {
+			if !isRef && rightType != nil && !isAny(rightType) {
 				return nil, nil, fmt.Errorf("[line %d] cannot dereference non-reference value of type %s", c.currentLine, rightType.String())
 			}
 			c.emitByte(byte(chunk.OP_DEREF))
@@ -2965,10 +2966,12 @@ func (c *Compiler) tryEmitLocalAddImm(infix *ast.InfixExpression) bool {
 }
 
 // tryEmitLocalPair funde dois operandos que sao locais PLANOS de tipo
-// primitivo em OP_GET_LOCAL_2 (issue #66, item 3). Sem ref: o site do infix
-// emite OP_DEREF para RefType e isso tem de continuar acontecendo pelo caminho
-// normal. Devolve os tipos como resolveLocal os da, para o chamador seguir
-// exatamente como se tivesse compilado os dois operandos.
+// primitivo em OP_GET_LOCAL_2 (issue #66, item 3). Sem ref: um operando
+// `ref T` e REJEITADO pelo caminho normal desde a issue #82 (R2:
+// rejectRefRead, "operand of '+' cannot be ref int"), e o filtro de
+// PrimitiveType aqui ja deixa RefType passar reto para la. Devolve os tipos
+// como resolveLocal os da, para o chamador seguir exatamente como se tivesse
+// compilado os dois operandos.
 func (c *Compiler) tryEmitLocalPair(left, right ast.Expression) (ast.NoxyType, ast.NoxyType, bool) {
 	leftIdent, ok := left.(*ast.Identifier)
 	if !ok {

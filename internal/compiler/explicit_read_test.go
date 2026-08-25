@@ -244,11 +244,91 @@ func TestValueNativesRejectRefArgument(t *testing.T) {
 	requireCompileError(t, prelude+"let s: int[] = slice(rx, 0, 1)", "argument 1 to 'slice': expected a value, got ref int[]", "hint: use '*rx'")
 	requireCompileError(t, prelude+"let c: bool = contains(rx, 1)", "argument 1 to 'contains': expected a value, got ref int[]", "hint: use '*rx'")
 	requireCompileError(t, prelude+"let h: bool = has_key(rm, \"a\")", "argument 1 to 'has_key': expected a value, got ref map[string, int]", "hint: use '*rm'")
-	requireCompileError(t, prelude+"let i: int = 0\nlet ri: ref int = ref i\nlet c: bool = contains(xs, ri)", "argument 2 to 'contains': expected a value, got ref int", "hint: use '*ri'")
 }
 
 func TestValueNativesAcceptDerefAndShadowing(t *testing.T) {
 	requireCompiles(t, "let xs: int[] = [1, 2]\nlet m: map[string, int] = {\"a\": 1}\nlet rx: ref int[] = ref xs\nlet rm: ref map[string, int] = ref m\nlet n: int = length(*rx)\nlet ks: string[] = keys(*rm)\nlet s: int[] = slice(*rx, 0, 1)\nlet c: bool = contains(*rx, 1)\nlet h: bool = has_key(*rm, \"a\")")
 	// Sombreamento: um `length` do usuario nao e o native — a regra nao se aplica.
 	requireCompiles(t, "func length(r: ref int[]) -> int\n    return 7\nend\nlet xs: int[] = [1]\nlet rx: ref int[] = ref xs\nlet n: int = length(rx)")
+}
+
+// M1 (revisao final #82): nas cinco nativas de colecao a regra R2 vale para
+// o argumento 1 — a COLECAO. O argumento 2 de contains/has_key e um elemento
+// ou uma chave quaisquer: um ref ali e um valor de busca legitimo (array de
+// `ref int` procurado por identidade), nao uma leitura implicita.
+func TestContainsAndHasKeySecondArgumentAcceptsRef(t *testing.T) {
+	requireCompiles(t, `let i: int = 0
+let ri: ref int = ref i
+let ys: (ref int)[] = [ref i]
+let c: bool = contains(ys, ri)`)
+	requireCompiles(t, `let k: string = "a"
+let rk: ref string = ref k
+let m: map[string, int] = {"a": 1}
+let h: bool = has_key(m, rk)`)
+	// A colecao (argumento 1) continua barrada.
+	requireCompileError(t, `let xs: int[] = [1, 2]
+let rx: ref int[] = ref xs
+let c: bool = contains(rx, 1)`, "argument 1 to 'contains': expected a value, got ref int[]", "hint: use '*rx'")
+}
+
+// Revisao final #82: as nativas de codificacao/serializacao tambem consomem
+// seus argumentos como VALOR, em TODAS as posicoes. Sem esta lista um `ref T`
+// chegaria ao native e ele codificaria o String() da referencia
+// ("<ref ...>") em silencio.
+func TestEncodingValueNativesRejectRefArgument(t *testing.T) {
+	prelude := `let s: string = "a"
+let xs: int[] = [1, 2]
+let rs: ref string = ref s
+let rx: ref int[] = ref xs
+`
+	cases := []struct{ name, call, got, hint string }{
+		{"json_dumps", `let d: string = json_dumps(rx)`, "ref int[]", "*rx"},
+		{"json_dumps_result", `let d: any = json_dumps_result(rx, 0)`, "ref int[]", "*rx"},
+		{"json_parse", `let d: any = json_parse(rs)`, "ref string", "*rs"},
+		{"base64_encode", `let d: string = base64_encode(rs)`, "ref string", "*rs"},
+		{"base64_decode", `let d: bytes = base64_decode(rs)`, "ref string", "*rs"},
+		{"hex", `let d: string = hex(rs)`, "ref string", "*rs"},
+		{"hex_encode", `let d: string = hex_encode(rs)`, "ref string", "*rs"},
+		{"hex_decode", `let d: bytes = hex_decode(rs)`, "ref string", "*rs"},
+		{"base62_encode", `let d: any = base62_encode(rx)`, "ref int[]", "*rx"},
+		{"base62_decode", `let d: any = base62_decode(rs)`, "ref string", "*rs"},
+		{"to_bytes", `let d: bytes = to_bytes(rs)`, "ref string", "*rs"},
+		{"fmt", `let d: string = fmt(rs)`, "ref string", "*rs"},
+		{"crypto_pbkdf2_sha256", `let d: any = crypto_pbkdf2_sha256(rs, rs, 1, 1)`, "ref string", "*rs"},
+		{"crypto_aes256_gcm_encrypt", `let d: any = crypto_aes256_gcm_encrypt(rs, rs)`, "ref string", "*rs"},
+		{"crypto_aes256_gcm_decrypt", `let d: any = crypto_aes256_gcm_decrypt(rs, rs)`, "ref string", "*rs"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requireCompileError(t, prelude+tc.call,
+				"argument 1 to '"+tc.name+"': expected a value, got "+tc.got,
+				"hint: use '"+tc.hint+"' to read the referenced value")
+		})
+	}
+}
+
+// fmt checa TODAS as posicoes (o formato e cada valor formatado).
+func TestFmtRejectsRefInAnyArgument(t *testing.T) {
+	requireCompileError(t, `let x: int = 1
+let r: ref int = ref x
+let d: string = fmt("%d", r)`, "argument 2 to 'fmt': expected a value, got ref int", "hint: use '*r'")
+	requireCompiles(t, `let x: int = 1
+let r: ref int = ref x
+let d: string = fmt("%d", *r)`)
+}
+
+// I6 (revisao final #82): `any` PODE guardar um ref (R2 deixa o ref passar
+// como valor para toda posicao any), entao `*a` com a: any nao e erro de
+// compilacao — e um deref de tipo desconhecido, checado em runtime.
+func TestDerefOfAnyCompiles(t *testing.T) {
+	requireCompiles(t, `let x: int = 1
+let r: ref int = ref x
+let a: any = r
+let n: int = *a`)
+}
+
+// O erro estatico continua para tipo conhecido e NAO-any.
+func TestDerefOfKnownNonRefIsStaticError(t *testing.T) {
+	requireCompileError(t, `let n: int = 7
+let m: int = *n`, "cannot dereference non-reference value of type int")
 }

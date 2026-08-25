@@ -29,7 +29,7 @@ func (vm *VM) defineCryptoBuiltins() {
 		return value.NewBytes(string(bytes))
 	})
 
-	vm.DefineNative("crypto_pbkdf2_sha256", func(args []value.Value) value.Value {
+	vm.defineValueNative("crypto_pbkdf2_sha256", func(args []value.Value) value.Value {
 		// args: (senha: string, salt: bytes, iteracoes: int, tamanho: int)
 		if len(args) < 4 {
 			return value.NewNull()
@@ -56,7 +56,7 @@ func (vm *VM) defineCryptoBuiltins() {
 		return value.NewBytes(string(chave))
 	})
 
-	vm.DefineNative("crypto_aes256_gcm_encrypt", func(args []value.Value) value.Value {
+	vm.defineValueNative("crypto_aes256_gcm_encrypt", func(args []value.Value) value.Value {
 		// args: (chave: bytes, texto: bytes) -> bytes (nonce + ciphertext + tag)
 		if len(args) < 2 {
 			return value.NewNull()
@@ -102,7 +102,7 @@ func (vm *VM) defineCryptoBuiltins() {
 		return value.NewBytes(string(resultado))
 	})
 
-	vm.DefineNative("crypto_aes256_gcm_decrypt", func(args []value.Value) value.Value {
+	vm.defineValueNative("crypto_aes256_gcm_decrypt", func(args []value.Value) value.Value {
 		// args: (chave: bytes, dados: bytes) -> bytes (plaintext)
 		if len(args) < 2 {
 			return value.NewNull()

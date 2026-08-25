@@ -240,17 +240,64 @@ func TestGetRefLocalIndexArrayResolvesUpvalueRef(t *testing.T) {
 }
 
 // Slot de tipo estatico ref que guarda null (parametro `ref T[]` recebendo
-// null): OP_DEREF passa null adiante e OP_GET_INDEX reclama — a forma fundida
-// tem de produzir a mesma mensagem.
+// null): desde a revisao final da issue #82 (I5) o OP_DEREF do caminho
+// generico erra em vez de passar o null adiante — a forma fundida tem de
+// produzir a MESMA mensagem, e o teste compara as duas.
 func TestGetRefLocalIndexArrayNullRefMatchesGeneric(t *testing.T) {
-	code := &chunk.Chunk{}
-	code.Write(byte(chunk.OP_NULL), 1) // slot 0 = null
-	writeConstInt(code, 0)
-	code.Write(byte(chunk.OP_GET_REF_LOCAL_INDEX_ARRAY), 1)
-	code.Write(0, 1)
-	err := New().Interpret(code)
-	if err == nil || !strings.Contains(err.Error(), "cannot index non-array/map/bytes") {
-		t.Fatalf("esperava erro do generico para ref null, obtido %v", err)
+	fused := &chunk.Chunk{}
+	fused.Write(byte(chunk.OP_NULL), 1) // slot 0 = null
+	writeConstInt(fused, 0)
+	fused.Write(byte(chunk.OP_GET_REF_LOCAL_INDEX_ARRAY), 1)
+	fused.Write(0, 1)
+	fusedErr := New().Interpret(fused)
+
+	// Caminho generico: GET_LOCAL + OP_DEREF + indice + GET_INDEX.
+	generic := &chunk.Chunk{}
+	generic.Write(byte(chunk.OP_NULL), 1) // slot 0 = null
+	generic.Write(byte(chunk.OP_GET_LOCAL), 1)
+	generic.Write(0, 1)
+	generic.Write(byte(chunk.OP_DEREF), 1)
+	writeConstInt(generic, 0)
+	generic.Write(byte(chunk.OP_GET_INDEX), 1)
+	genericErr := New().Interpret(generic)
+
+	if fusedErr == nil || genericErr == nil {
+		t.Fatalf("ambos os caminhos deveriam errar: fundido=%v generico=%v", fusedErr, genericErr)
+	}
+	if !strings.Contains(fusedErr.Error(), "cannot dereference null reference") {
+		t.Fatalf("fundido: %v, esperava 'cannot dereference null reference'", fusedErr)
+	}
+	if !strings.Contains(genericErr.Error(), "cannot dereference null reference") {
+		t.Fatalf("generico: %v, esperava 'cannot dereference null reference'", genericErr)
+	}
+}
+
+// Escrita: o generico e GET_LOCAL_MUT_BORROW + DEREF_MUT, que recusa gravar
+// atraves de ref nulo; a forma fundida acompanha.
+func TestSetRefLocalIndexArrayNorcNullRefMatchesGeneric(t *testing.T) {
+	fused := &chunk.Chunk{}
+	fused.Write(byte(chunk.OP_NULL), 1)
+	writeConstInt(fused, 0)
+	writeConstInt(fused, 1)
+	fused.Write(byte(chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC), 1)
+	fused.Write(0, 1)
+	fusedErr := New().Interpret(fused)
+
+	generic := &chunk.Chunk{}
+	generic.Write(byte(chunk.OP_NULL), 1)
+	generic.Write(byte(chunk.OP_GET_LOCAL_MUT_BORROW), 1)
+	generic.Write(0, 1)
+	generic.Write(byte(chunk.OP_DEREF_MUT), 1)
+	genericErr := New().Interpret(generic)
+
+	if fusedErr == nil || genericErr == nil {
+		t.Fatalf("ambos os caminhos deveriam errar: fundido=%v generico=%v", fusedErr, genericErr)
+	}
+	if !strings.Contains(fusedErr.Error(), "cannot write through a null reference") {
+		t.Fatalf("fundido: %v, esperava 'cannot write through a null reference'", fusedErr)
+	}
+	if !strings.Contains(genericErr.Error(), "cannot write through a null reference") {
+		t.Fatalf("generico: %v, esperava 'cannot write through a null reference'", genericErr)
 	}
 }
 
@@ -296,18 +343,5 @@ func TestSetRefLocalIndexArrayNorcClonesSharedThroughRef(t *testing.T) {
 	}
 	if got := machine.stack[1].Obj.(*value.ObjArray); got == original.Obj.(*value.ObjArray) || got.Elements[0].Int() != 42 {
 		t.Fatalf("o slot apontado pelo ref deveria guardar o clone escrito")
-	}
-}
-
-func TestSetRefLocalIndexArrayNorcNullRefMatchesGeneric(t *testing.T) {
-	code := &chunk.Chunk{}
-	code.Write(byte(chunk.OP_NULL), 1)
-	writeConstInt(code, 0)
-	writeConstInt(code, 1)
-	code.Write(byte(chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC), 1)
-	code.Write(0, 1)
-	err := New().Interpret(code)
-	if err == nil || !strings.Contains(err.Error(), "cannot set index on non-array/map") {
-		t.Fatalf("esperava erro do generico para ref null, obtido %v", err)
 	}
 }

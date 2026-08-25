@@ -344,7 +344,7 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		return value.NewBool(false), nil
 	})
-	vm.DefineNative("to_bytes", func(args []value.Value) value.Value {
+	vm.defineValueNative("to_bytes", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}

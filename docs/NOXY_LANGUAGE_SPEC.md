@@ -305,14 +305,22 @@ A parameter or slot typed `any`, and a native without a signature (`print`,
 `print(r)`, `to_str(r)` and `f"{r}"` (which is `to_str(r)`) show `<ref …>`;
 write `print(*r)` to see the value. `let v = r` (inferred) gives `v: ref T`.
 
-The natives `length`, `keys`, `slice`, `contains`, and `has_key` also reject
-a `ref` argument — they take a value, never a reference. When the argument's
-type is known, the compiler rejects it statically with the same `*r` hint
-(`argument 1 to 'length': expected a value, got ref int[]`); when it arrives
-through `any`, the same check happens at runtime (`length: argument 1
-expected a value, got ref`, hint `a ref is never read implicitly; use
-'*r'`). `print`, `to_str`, f-strings, the other unsigned natives, and any
-`any` parameter or slot still receive the ref as a value, as above.
+A group of natives also rejects a `ref` argument — they take a value, never
+a reference. `length`, `keys`, `slice`, `contains`, and `has_key` check
+**argument 1** (the collection): the second argument of `contains`/`has_key`
+is an element or a key, and a `ref` there is a legitimate search value
+(`contains(ys, r)` over a `(ref int)[]` finds it by identity). The encoding,
+serialization, and crypto natives check **every** argument: `json_dumps`,
+`json_dumps_result`, `json_parse`, `base64_encode`, `base64_decode`, `hex`,
+`hex_encode`, `hex_decode`, `base62_encode`, `base62_decode`, `to_bytes`,
+`fmt`, `crypto_pbkdf2_sha256`, `crypto_aes256_gcm_encrypt`, and
+`crypto_aes256_gcm_decrypt`. When the argument's type is known, the compiler
+rejects it statically with the same `*r` hint (`argument 1 to 'length':
+expected a value, got ref int[]`); when it arrives through `any`, the same
+check happens at runtime (`length: argument 1 expected a value, got ref`,
+hint `a ref is never read implicitly; use '*r'`). `print`, `to_str`,
+f-strings, the other unsigned natives, and any `any` parameter or slot still
+receive the ref as a value, as above.
 
 #### R3. `*r` is the only read and the only write of the referenced value
 
@@ -322,11 +330,15 @@ let v: int = *r     // read
 *r = *s             // copy the value s points to into x
 ```
 
-`*x` where `x` is statically not a reference is a compile error (`cannot
-dereference non-reference value of type int`; `cannot dereference
-non-reference type int in assignment` for `*x = v`); when the static type is
-unknown, the same check happens at runtime (`cannot dereference int`). `*r`
-with `r == null` is a runtime null reference error.
+`*x` where `x` has a KNOWN static type that is not a reference is a compile
+error (`cannot dereference non-reference value of type int`; `cannot
+dereference non-reference type int in assignment` for `*x = v`). When the
+static type is `any` or unknown, `*x` compiles — `any` does hold references
+(R2) — and the same check happens at runtime (`cannot dereference int`).
+`*r` with `r == null` is a runtime error too: `cannot dereference null
+reference` when reading, `cannot write through a null reference` when
+writing. Iterating a `ref` reached through `any` (`for v in a`) is the same
+refusal: `cannot iterate over a ref: a ref is never read implicitly`.
 
 #### R4. `.` and `[]` go through the reference
 
@@ -445,7 +457,10 @@ cell between routines — coordinate, as for globals ([docs/concurrency.md](conc
 | `r == v` (R7) | `cannot compare ref T with T: a ref is never implicitly dereferenced in '=='` | `use '*r' to compare the referenced value` |
 | `*x`, `x: int` (R3, static) | `cannot dereference non-reference value of type int` (`... in assignment` for `*x = v`) | — |
 | `*x`, `x: any` at runtime (R3) | `cannot dereference int` | — |
+| `*r` with `r == null` at runtime (R3) | `cannot dereference null reference` (`cannot write through a null reference` for `*r = v`) | — |
+| `for v in a`, `a: any` holding a ref, at runtime (R2) | `cannot iterate over a ref: a ref is never read implicitly` | `use '*r'` |
 | `length(rx)`, `rx: ref int[]` (R2, static) | `argument 1 to 'length': expected a value, got ref int[]` | `use '*rx' to read the referenced value` |
+| `json_dumps(rx)`, `rx: ref int[]` (R2, static) | `argument 1 to 'json_dumps': expected a value, got ref int[]` | `use '*rx' to read the referenced value` |
 | `length(a)` through `any` at runtime (R2) | `length: argument 1 expected a value, got ref` | `a ref is never read implicitly; use '*r'` |
 | `ref a.f` through `any`, slot already ref (runtime) | `slot 'f' already holds a reference` | `pass it directly, without 'ref'` |
 

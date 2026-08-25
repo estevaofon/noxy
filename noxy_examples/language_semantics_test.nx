@@ -346,7 +346,8 @@ func test_igualdade()
 
     // O mesmo vale para dois refs comparados diretamente: '==' entre dois
     // 'ref T' pergunta "e o MESMO objeto?", nao "tem o mesmo valor?".
-    // Este e o unico ponto da linguagem onde um ref NAO sofre auto-deref.
+    // Um ref nunca e lido implicitamente (spec 2.3 R2): comparar os valores
+    // apontados pede '*rx == *ry'.
     let rx: ref int = ref x
     let ry: ref int = ref y
     let rx2: ref int = ref x

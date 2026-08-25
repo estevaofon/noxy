@@ -157,8 +157,9 @@ end
 
 // "Method" employing pointer/reference semantics
 func compute(s: ref Statics) -> void
-    // Access fields directly via reference (auto-dereference)
-    // Note: In Noxy, s.data works even if s is a reference.
+    // '.' goes through the reference (spec 2.3 R4, the language's one
+    // shortcut) -- it is not an implicit read: reading the referenced
+    // struct itself would be '*s'.
     // Assignments to s.mean also update the original struct.
     
     s.mean = calculate_mean(s.data)

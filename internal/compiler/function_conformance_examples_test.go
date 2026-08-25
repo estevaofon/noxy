@@ -48,7 +48,7 @@ func TestTypedFunctionInvalidConformanceExamplesFail(t *testing.T) {
 		{"incompatible assignment", "typed_function_incompatible_assignment.nx", "expected func(int) -> int, got func(string) -> int"},
 		{"dynamic narrowing", "typed_function_dynamic_narrowing.nx", "expected func(int) -> int, got func"},
 		{"invalid ref argument", "typed_function_invalid_ref_argument.nx", "argument 1 to 'increment': expected ref int, got int\n  hint: bind the value to a variable and pass 'ref <name>'"},
-		{"ref read without star", "ref_read_without_star.nx", "operand of '*' cannot be ref int: a ref is never read implicitly\n  hint: use '*r' to read the referenced value"},
+		{"ref read without star", "ref_read_without_star.nx", "operand of '+' cannot be ref int: a ref is never read implicitly\n  hint: use '*r' to read the referenced value"},
 		{"ref for without star", "ref_for_without_star.nx", "cannot iterate over ref int[]: a ref is never read implicitly\n  hint: use 'for x in *r'"},
 		{"ref builtin without ref", "ref_builtin_without_ref.nx", "argument 1 to 'append': expected ref T[], got int[]\n  hint: use 'ref xs'"},
 		{"ref of ref", "ref_of_ref.nx", "'r' is already a reference\n  hint: pass 'r' directly, without 'ref'"},

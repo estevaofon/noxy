@@ -38,10 +38,12 @@ main()
 	}
 }
 
-func TestDerefOfNullRefYieldsNull(t *testing.T) {
-	got := captureVMSource(t, "let r: ref int = null\ntest_report(*r)\n")
-	if got.Type != value.VAL_NULL {
-		t.Fatalf("*null = %s, want null", got.String())
+// I5 (revisao final #82): ler atraves de um ref nulo passou de null
+// silencioso a erro de runtime, tambem no topo do programa.
+func TestDerefOfNullRefErrorsAtTopLevel(t *testing.T) {
+	err := interpretVMSource(t, New(), "let r: ref int = null\nprint(*r)\n")
+	if err == nil || !strings.Contains(err.Error(), "cannot dereference null reference") {
+		t.Fatalf("*null: err = %v, want 'cannot dereference null reference'", err)
 	}
 }
 

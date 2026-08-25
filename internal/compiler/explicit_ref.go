@@ -94,31 +94,90 @@ func refArgumentHint(arg ast.Expression) string {
 	return "\n  hint: bind the value to a variable and pass 'ref <name>'"
 }
 
-// valueNativeNames sao as nativas centrais sem assinatura (DefineNative /
-// DefineContextualNative sem NativeSignature — builtins_collections.go) cujo
-// argumento e sempre um VALOR, nunca uma referencia: nao passam por
-// compileBuiltinCall (sao length/keys/slice/contains/has_key, nao
-// append/pop/delete/json_loads/range) nem tem ast.FunctionType para
-// areStrictTypesCompatible barrar um `ref T` — sem este check dedicado, um
-// `ref T` estatico chegaria ao native e ele responderia com o default
-// silencioso (0, [], false), como o repro do Task 10a mostrou.
-var valueNativeNames = map[string]bool{
-	"length":   true,
-	"keys":     true,
-	"slice":    true,
-	"contains": true,
-	"has_key":  true,
+// valueNativeSpec descreve QUAIS argumentos de uma native central sao sempre
+// um VALOR (R2). `all` cobre todas as posicoes; senao valem so as posicoes
+// listadas em `positions` (0-based).
+type valueNativeSpec struct {
+	all       bool
+	positions []int
 }
 
-// rejectRefArgumentsForValueNatives aplica R2 aos argumentos de
-// length/keys/slice/contains/has_key quando o callee resolve para o native
-// global (nao sombreado por local/upvalue/global declarado — mesma checagem
-// de compileBuiltinCall e do fallback de builtinReturnType em
-// compileCallExpression). Um argumento `ref T` estatico e erro; any/tipo
-// desconhecido segue para a checagem em runtime (rejectRefArgs, VM).
+func (spec valueNativeSpec) checksArg(pos int) bool {
+	if spec.all {
+		return true
+	}
+	for _, p := range spec.positions {
+		if p == pos {
+			return true
+		}
+	}
+	return false
+}
+
+// valueNatives sao as nativas centrais sem assinatura (DefineNative /
+// DefineContextualNative sem NativeSignature) cujos argumentos sao sempre um
+// VALOR, nunca uma referencia: nao passam por compileBuiltinCall (nao sao
+// append/pop/delete/json_loads/range) nem tem ast.FunctionType para
+// areStrictTypesCompatible barrar um `ref T` — sem este check dedicado um
+// `ref T` estatico chegaria a native, que responderia com o default
+// silencioso (0, [], false) ou codificaria o String() da referencia
+// ("<ref ...>"), como o repro do Task 10a mostrou.
+//
+// A tabela e a MESMA para o check estatico (rejectRefArgumentsForValueNatives,
+// aqui) e para o dinamico (rejectRefArgs, internal/vm) — o runtime a consulta
+// por ValueNativeChecksArg.
+//
+// Escopo por posicao (M1 da revisao final #82): nas cinco colecoes so o
+// argumento 1 e a colecao; o argumento 2 de contains/has_key e um elemento ou
+// uma chave, e um ref ali e um valor de busca legitimo. As nativas de
+// codificacao/serializacao consomem TODOS os argumentos como valor.
+var valueNatives = map[string]valueNativeSpec{
+	// colecoes: so a colecao (argumento 1)
+	"length":   {positions: []int{0}},
+	"keys":     {positions: []int{0}},
+	"slice":    {positions: []int{0}},
+	"contains": {positions: []int{0}},
+	"has_key":  {positions: []int{0}},
+	// codificacao / serializacao / cripto: todos os argumentos
+	"json_dumps":                {all: true},
+	"json_dumps_result":         {all: true},
+	"json_parse":                {all: true},
+	"base64_encode":             {all: true},
+	"base64_decode":             {all: true},
+	"hex":                       {all: true},
+	"hex_encode":                {all: true},
+	"hex_decode":                {all: true},
+	"base62_encode":             {all: true},
+	"base62_decode":             {all: true},
+	"to_bytes":                  {all: true},
+	"fmt":                       {all: true},
+	"crypto_pbkdf2_sha256":      {all: true},
+	"crypto_aes256_gcm_encrypt": {all: true},
+	"crypto_aes256_gcm_decrypt": {all: true},
+}
+
+// ValueNativeChecksArg diz se o argumento na posicao pos (0-based) da native
+// central chamada name e sempre um valor (R2). E o ponto de consulta do
+// runtime (internal/vm, rejectRefArgs): o compilador e a VM decidem pela
+// MESMA tabela quais posicoes recusam um `ref T`.
+func ValueNativeChecksArg(name string, pos int) bool {
+	spec, listed := valueNatives[name]
+	return listed && spec.checksArg(pos)
+}
+
+// rejectRefArgumentsForValueNatives aplica R2 aos argumentos das nativas de
+// valueNatives quando o callee resolve para o native global (nao sombreado
+// por local/upvalue/global declarado — mesma checagem de compileBuiltinCall e
+// do fallback de builtinReturnType em compileCallExpression). Um argumento
+// `ref T` estatico e erro; any/tipo desconhecido segue para a checagem em
+// runtime (rejectRefArgs, VM).
 func (c *Compiler) rejectRefArgumentsForValueNatives(call *ast.CallExpression, argTypes []ast.NoxyType) error {
 	ident, ok := call.Function.(*ast.Identifier)
-	if !ok || !valueNativeNames[ident.Value] {
+	if !ok {
+		return nil
+	}
+	spec, listed := valueNatives[ident.Value]
+	if !listed {
 		return nil
 	}
 	if c.isShadowedByLocal(ident.Value) {
@@ -127,8 +186,21 @@ func (c *Compiler) rejectRefArgumentsForValueNatives(call *ast.CallExpression, a
 	if _, declared := c.globals[ident.Value]; declared {
 		return nil
 	}
+	// argTypes so e posicional no caminho NAO-exato: no exato (callee com
+	// ast.FunctionType) o laco de compileCallExpression pula o append em
+	// argumentos de parametro `ref T`, e o indice deixaria de casar com
+	// call.Arguments. Nenhuma native desta tabela e exata (todas sao sem
+	// assinatura, isExact false), entao o guard so protege contra um futuro
+	// que lhes de assinatura — nesse dia o check certo passa a ser o de
+	// areStrictTypesCompatible, nao este.
+	if len(argTypes) != len(call.Arguments) {
+		return nil
+	}
 	for i, argType := range argTypes {
 		if _, isRef := argType.(*ast.RefType); !isRef {
+			continue
+		}
+		if !spec.checksArg(i) {
 			continue
 		}
 		return fmt.Errorf("[line %d] argument %d to '%s': expected a value, got %s%s",

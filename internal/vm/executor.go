@@ -492,6 +492,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				},
 			})
 
+		// nao emitido pelo compilador desde 0.19 (issue #82); mantido para bytecode/testes de bytecode malformado
 		case chunk.OP_CONTEXT_REF_PROPERTY:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
@@ -517,6 +518,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			vm.push(forwarded)
 
+		// nao emitido pelo compilador desde 0.19 (issue #82); mantido para bytecode/testes de bytecode malformado
 		case chunk.OP_CONTEXT_REF_INDEX:
 			idx := vm.pop()
 			container := vm.pop()
@@ -608,7 +610,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_DEREF:
 			refVal := vm.pop()
 			if refVal.Type == value.VAL_NULL {
-				vm.push(refVal) // Passthrough null
+				// I5 (revisao final #82): ler atraves de um ref nulo e erro,
+				// nao null silencioso — o tipo estatico da posicao promete um
+				// T. Mesma frase de resolveReferenceValue (references.go).
+				return vm.runtimeError(c, ip, "cannot dereference null reference")
 			} else if refVal.Type != value.VAL_REF {
 				// R3 (spec 2026-08-24-explicit-ref): `*x` de nao-ref e erro
 				// tambem em runtime (tipo estatico desconhecido).
@@ -771,6 +776,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.stackTop--
 		case chunk.OP_LEN:
 			val := vm.pop()
+			if val.Type == value.VAL_REF {
+				// I7 (revisao final #82): OP_LEN e o comprimento da colecao
+				// de um `for ... in`. Um ref chegando aqui so vem pela
+				// fronteira dinamica (o compilador barra o `ref T` estatico);
+				// antes caia no default 0 e o laco nao iterava em silencio.
+				return vm.runtimeError(c, ip, "cannot iterate over a ref: a ref is never read implicitly\n  hint: use '*r'")
+			}
 			if val.Type == value.VAL_OBJ {
 				if arr, ok := val.Obj.(*value.ObjArray); ok {
 					vm.push(value.NewInt(int64(len(arr.Elements))))
@@ -1795,6 +1807,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slot := c.Code[ip]
 			ip++
 			refVal := vm.stack[frame.LocalBase+int(slot)]
+			if refVal.Type == value.VAL_NULL {
+				// I5 (revisao final #82): o caminho generico erra no OP_DEREF;
+				// a forma fundida tem de dar a MESMA mensagem.
+				return vm.runtimeError(c, ip, "cannot dereference null reference")
+			}
 			if ref, ok := refVal.Obj.(*value.ObjRef); ok && ref.RefType == value.REF_UPVALUE {
 				if stored, ok := ref.Upvalue.Load(); ok {
 					if arr, ok := stored.Obj.(*value.ObjArray); ok && arr != nil {
@@ -1812,8 +1829,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 				}
 			}
-			// Fallback: GET_LOCAL + OP_DEREF (null e nao-ref passam; ref
-			// resolve) + GET_INDEX.
+			// Fallback: GET_LOCAL + OP_DEREF (nao-ref passa; ref resolve; o
+			// null ja errou acima) + GET_INDEX.
 			container := refVal
 			if refVal.Type == value.VAL_REF {
 				resolved, err := vm.resolveReferenceValue(refVal)
@@ -1907,6 +1924,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip++
 			localIdx := frame.LocalBase + int(slot)
 			refVal := vm.stack[localIdx]
+			if refVal.Type == value.VAL_NULL {
+				// I5: espelha o OP_DEREF_MUT do caminho generico
+				// (GET_LOCAL_MUT_BORROW + DEREF_MUT), que recusa escrever
+				// atraves de um ref nulo.
+				return vm.runtimeError(c, ip, "cannot write through a null reference")
+			}
 			top := vm.stackTop
 			if ref, ok := refVal.Obj.(*value.ObjRef); ok && ref.RefType == value.REF_UPVALUE {
 				if stored, ok := ref.Upvalue.Load(); ok {
