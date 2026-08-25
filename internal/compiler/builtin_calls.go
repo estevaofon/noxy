@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
+	"noxy-vm/internal/value"
 )
 
 func builtinType(name string) ast.NoxyType {
@@ -16,6 +17,142 @@ func builtinType(name string) ast.NoxyType {
 func (c *Compiler) compileBuiltinValueArgument(expression ast.Expression) (ast.NoxyType, error) {
 	_, actual, err := c.Compile(expression)
 	return actual, err
+}
+
+// compileBorrowedArgument e a semantica PRE-Task-6 do argumento de container
+// dos builtins mutantes (append/pop/delete/json_loads): aceita `ref x` OU x
+// nu (cria a referencia implicitamente — R5 ainda nao vale para builtins,
+// fica para a Task 7) e, se x ja for `ref T`, encaminha o valor em vez de
+// erro (forwarding — R1 tambem so vale para call sites de funcao tipada,
+// nao aqui). E a copia da antiga compileReferenceArgumentValue, mantida so
+// para estes quatro builtins; compileReferenceArgumentValue (abaixo, em
+// compiler.go) agora so cria (R1).
+func (c *Compiler) compileBorrowedArgument(expression ast.Expression) (ast.NoxyType, error) {
+	targetType, err := c.compileBorrowedArgumentValue(expression)
+	if err != nil || targetType == nil {
+		return targetType, err
+	}
+	if runtimeType := c.runtimeTypeInfo(targetType); runtimeType != nil {
+		typeConstant := c.makeConstant(value.NewRuntimeTypeInfo(runtimeType))
+		if typeConstant > 65535 {
+			return nil, fmt.Errorf("[line %d] too many constants for reference target metadata", c.currentLine)
+		}
+		c.emitByte(byte(chunk.OP_MARK_REF_TARGET_TYPE))
+		c.emitByte(byte((typeConstant >> 8) & 0xff))
+		c.emitByte(byte(typeConstant & 0xff))
+	}
+	return targetType, nil
+}
+
+func (c *Compiler) compileBorrowedArgumentValue(expression ast.Expression) (ast.NoxyType, error) {
+	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
+		expression = prefix.Right
+	}
+
+	switch target := expression.(type) {
+	case *ast.Identifier:
+		if slot, declared := c.resolveLocal(target.Value); slot != -1 {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
+				return ref.ElementType, nil
+			}
+			if c.localOwns(slot) {
+				c.emitBytes(byte(chunk.OP_REF_LOCAL), byte(slot))
+			} else {
+				c.emitBytes(byte(chunk.OP_REF_LOCAL_BORROW), byte(slot))
+			}
+			c.locals[slot].IsCaptured = true
+			return declared, nil
+		}
+		if upvalue, declared := c.resolveUpvalue(target.Value); upvalue != -1 {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(upvalue))
+				return ref.ElementType, nil
+			}
+			c.emitBytes(byte(chunk.OP_REF_UPVALUE), byte(upvalue))
+			return declared, nil
+		}
+		name := c.makeConstant(value.NewString(target.Value))
+		if declared, ok := c.resolveGlobalType(target.Value); ok {
+			if ref, ok := declared.(*ast.RefType); ok {
+				c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, name)
+				return ref.ElementType, nil
+			}
+			c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
+			return declared, nil
+		}
+		c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
+		return nil, nil
+	case *ast.MemberAccessExpression:
+		owner, _, err := c.compileLValueBase(target.Left)
+		if err != nil {
+			return nil, err
+		}
+		element := c.memberType(owner, target.Member)
+		name := c.makeConstant(value.NewString(target.Member))
+		if ref, ok := element.(*ast.RefType); ok {
+			c.emitOpWithConstantIndex(chunk.OP_CONTEXT_REF_PROPERTY, name)
+			return ref.ElementType, nil
+		}
+		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
+		return element, nil
+	case *ast.IndexExpression:
+		container, _, err := c.compileLValueBase(target.Left)
+		if err != nil {
+			return nil, err
+		}
+		element := indexElementType(container)
+		_, indexType, err := c.Compile(target.Index)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.rejectRefRead(indexType, target.Index, "index"); err != nil {
+			return nil, err
+		}
+		switch collection := unwrapRefType(container).(type) {
+		case *ast.ArrayType:
+			expected := &ast.PrimitiveType{Name: "int"}
+			if !c.areStrictTypesCompatible(expected, indexType) {
+				return nil, fmt.Errorf(
+					"[line %d] array reference index must be int, got %s",
+					c.currentLine, noxyTypeName(indexType),
+				)
+			}
+		case *ast.MapType:
+			if !c.areStrictTypesCompatible(collection.KeyType, indexType) {
+				return nil, fmt.Errorf(
+					"[line %d] map reference key must be %s, got %s",
+					c.currentLine, noxyTypeName(collection.KeyType), noxyTypeName(indexType),
+				)
+			}
+		}
+		if ref, ok := element.(*ast.RefType); ok {
+			c.emitByte(byte(chunk.OP_CONTEXT_REF_INDEX))
+			return ref.ElementType, nil
+		}
+		c.emitByte(byte(chunk.OP_REF_INDEX))
+		return element, nil
+	case *ast.NullLiteral:
+		c.emitByte(byte(chunk.OP_NULL))
+		return nil, nil
+	case *ast.CallExpression:
+		_, result, err := c.Compile(target)
+		if err != nil {
+			return nil, err
+		}
+		if ref, ok := result.(*ast.RefType); ok {
+			return ref.ElementType, nil
+		}
+		return nil, fmt.Errorf(
+			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
+			c.currentLine, expression.String(),
+		)
+	default:
+		return nil, fmt.Errorf(
+			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
+			c.currentLine, expression.String(),
+		)
+	}
 }
 
 func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmission) (bool, ast.NoxyType, error) {
@@ -56,7 +193,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 
 	switch name {
 	case "append":
-		container, err := c.compileReferenceArgument(call.Arguments[0])
+		container, err := c.compileBorrowedArgument(call.Arguments[0])
 		if err != nil {
 			return true, nil, err
 		}
@@ -65,7 +202,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			return true, nil, fmt.Errorf("[line %d] append expects an array, got %s", c.currentLine, noxyTypeName(container))
 		}
 		if expectedRef, ok := array.ElementType.(*ast.RefType); ok {
-			actualElement, err := c.compileReferenceArgument(call.Arguments[1])
+			actualElement, err := c.compileBorrowedArgument(call.Arguments[1])
 			if err != nil {
 				return true, nil, err
 			}
@@ -101,7 +238,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		c.emitCall(2, emission, false)
 		return true, builtinType("void"), nil
 	case "pop":
-		container, err := c.compileReferenceArgument(call.Arguments[0])
+		container, err := c.compileBorrowedArgument(call.Arguments[0])
 		if err != nil {
 			return true, nil, err
 		}
@@ -112,7 +249,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		c.emitCall(1, emission, false)
 		return true, array.ElementType, nil
 	case "delete":
-		container, err := c.compileReferenceArgument(call.Arguments[0])
+		container, err := c.compileBorrowedArgument(call.Arguments[0])
 		if err != nil {
 			return true, nil, err
 		}
@@ -150,7 +287,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 				c.currentLine, noxyTypeName(jsonText),
 			)
 		}
-		targetType, err := c.compileReferenceArgument(call.Arguments[1])
+		targetType, err := c.compileBorrowedArgument(call.Arguments[1])
 		if err != nil {
 			return true, nil, err
 		}

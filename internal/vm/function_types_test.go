@@ -57,7 +57,7 @@ dynamic(null)`)
 func TestExactCallableReferenceParameterReceivesNullValue(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func accept(value: ref func() -> int) -> void
-    test_report(ref value)
+    test_report(value)
 end
 accept(null)`)
 	if got.Type != value.VAL_NULL {
@@ -107,7 +107,7 @@ func increment(value: ref int) -> void
     *value = *value + 1
 end
 let answer: int = 41
-increment(answer)
+increment(ref answer)
 test_report(answer)`)
 	testExpectedObject(t, 42, got)
 }
@@ -134,7 +134,7 @@ func fill(parent: ref Node) -> void
 end
 let head: Node = Node(1, null)
 let was_null: bool = is_null(head.next)
-fill(head)
+fill(ref head)
 if was_null then
     test_report(head.next.value)
 else
@@ -179,7 +179,7 @@ end
 func make_incrementer() -> func() -> int
     let value: int = 40
     return func() -> int
-        increment(value)
+        increment(ref value)
         return value
     end
 end

@@ -16,7 +16,7 @@ end
 let target: (ref Pair)[] = []
 let ok: bool = json_loads("[{\"a\":3,\"b\":4}]", target)
 let viz: ref Pair = target[0]
-if ok && type(ref viz) == "ref" && viz.a * 10 + viz.b == 34 then
+if ok && type(viz) == "ref" && viz.a * 10 + viz.b == 34 then
     test_report(34)
 else
     test_report(999)
@@ -32,7 +32,7 @@ end
 let h: Holder = Holder(null)
 let ok: bool = json_loads("{\"child\": 5}", h)
 let viz: ref int = h.child
-if ok && type(ref viz) == "ref" && *viz == 5 then
+if ok && type(viz) == "ref" && *viz == 5 then
     test_report(5)
 else
     test_report(999)
@@ -81,7 +81,7 @@ end
 let m: map[string, ref Pair] = {"k": null}
 let ok: bool = json_loads("{\"k\":{\"a\":1,\"b\":2}}", m)
 let viz: ref Pair = m["k"]
-if ok && type(ref viz) == "ref" && viz.a * 10 + viz.b == 12 then
+if ok && type(viz) == "ref" && viz.a * 10 + viz.b == 12 then
     test_report(12)
 else
     test_report(999)
@@ -94,7 +94,7 @@ end`)
 let m: map[string, ref int] = {}
 let ok: bool = json_loads("{\"k\": 7}", m)
 let viz: ref int = m["k"]
-if ok && type(ref viz) == "ref" && *viz == 7 then
+if ok && type(viz) == "ref" && *viz == 7 then
     test_report(7)
 else
     test_report(999)

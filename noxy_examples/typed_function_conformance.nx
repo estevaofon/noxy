@@ -28,7 +28,7 @@ end
 func make_counter() -> func() -> int
     let count: int = 40
     return func() -> int
-        increment(count)
+        increment(ref count)
         return count
     end
 end
@@ -40,7 +40,7 @@ let double: func(int) -> int = make_multiplier(2)
 assert(double(21) == 42, "typed closure must preserve its signature")
 
 let answer: int = 41
-increment(answer)
+increment(ref answer)
 assert(answer == 42, "ref parameter must update the caller")
 
 let counter: func() -> int = make_counter()

@@ -120,7 +120,7 @@ end
 func main()
     let a: int[]
     append(a, 1)
-    bump(a)
+    bump(ref a)
     test_report(a[0])
 end
 main()
@@ -140,7 +140,7 @@ end
 
 func main()
     let p: P = P(1)
-    poke(p)
+    poke(ref p)
     test_report(p.x)
 end
 main()

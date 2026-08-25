@@ -2465,15 +2465,26 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
-				actualElement, err := c.compileReferenceArgument(arg)
+				// R5: parametro ref T recebe `ref x`, uma expressao ja ref T,
+				// null, ou any/desconhecido (modo validado em runtime).
+				refArg, err := c.compileRefArgument(arg)
 				if err != nil {
 					return nil, nil, err
+				}
+				if refArg.plain != nil {
+					return nil, nil, fmt.Errorf(
+						"[line %d] argument %d to '%s': expected %s, got %s%s",
+						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), noxyTypeName(refArg.plain), refArgumentHint(arg),
+					)
+				}
+				if !refArg.proven {
+					modesProven = false
 				}
 				if _, isNull := arg.(*ast.NullLiteral); isNull {
 					continue
 				}
-				if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
-					actual := &ast.RefType{ElementType: actualElement}
+				if refArg.element != nil && !c.areStrictTypesCompatible(expectedRef.ElementType, refArg.element) {
+					actual := &ast.RefType{ElementType: refArg.element}
 					return nil, nil, fmt.Errorf(
 						"[line %d] argument %d to '%s': expected %s, got %s",
 						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), actual.String(),
@@ -2569,17 +2580,16 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 	return targetType, nil
 }
 
+// compileReferenceArgumentValue emite a CRIACAO de uma referencia para o
+// operando de `ref` (R1): l-value de tipo T -> OP_REF_*. Operando que ja e
+// `ref T` e erro (alreadyReferenceError) — nao existe forwarding: uma
+// expressao ref T e passada como qualquer valor (compileRefArgument).
 func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast.NoxyType, error) {
-	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
-		expression = prefix.Right
-	}
-
 	switch target := expression.(type) {
 	case *ast.Identifier:
 		if slot, declared := c.resolveLocal(target.Value); slot != -1 {
-			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
-				return ref.ElementType, nil
+			if _, ok := declared.(*ast.RefType); ok {
+				return nil, alreadyReferenceError(c.currentLine, target)
 			}
 			// RC: a caixa aberta sobre o slot herda a condicao do slot. Slot
 			// nao-possuidor (hoje, apenas os de tipo `ref`) produz caixa
@@ -2594,18 +2604,16 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 			return declared, nil
 		}
 		if upvalue, declared := c.resolveUpvalue(target.Value); upvalue != -1 {
-			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(upvalue))
-				return ref.ElementType, nil
+			if _, ok := declared.(*ast.RefType); ok {
+				return nil, alreadyReferenceError(c.currentLine, target)
 			}
 			c.emitBytes(byte(chunk.OP_REF_UPVALUE), byte(upvalue))
 			return declared, nil
 		}
 		name := c.makeConstant(value.NewString(target.Value))
 		if declared, ok := c.resolveGlobalType(target.Value); ok {
-			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, name)
-				return ref.ElementType, nil
+			if _, ok := declared.(*ast.RefType); ok {
+				return nil, alreadyReferenceError(c.currentLine, target)
 			}
 			c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 			return declared, nil
@@ -2622,9 +2630,8 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		}
 		element := c.memberType(owner, target.Member)
 		name := c.makeConstant(value.NewString(target.Member))
-		if ref, ok := element.(*ast.RefType); ok {
-			c.emitOpWithConstantIndex(chunk.OP_CONTEXT_REF_PROPERTY, name)
-			return ref.ElementType, nil
+		if _, ok := element.(*ast.RefType); ok {
+			return nil, alreadyReferenceError(c.currentLine, target)
 		}
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
 		return element, nil
@@ -2659,22 +2666,20 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 				)
 			}
 		}
-		if ref, ok := element.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_CONTEXT_REF_INDEX))
-			return ref.ElementType, nil
+		if _, ok := element.(*ast.RefType); ok {
+			return nil, alreadyReferenceError(c.currentLine, target)
 		}
 		c.emitByte(byte(chunk.OP_REF_INDEX))
 		return element, nil
 	case *ast.NullLiteral:
-		c.emitByte(byte(chunk.OP_NULL))
-		return nil, nil
+		return nil, fmt.Errorf("[line %d] 'null' is not addressable\n  hint: pass null directly, without 'ref'", c.currentLine)
 	case *ast.CallExpression:
 		_, result, err := c.Compile(target)
 		if err != nil {
 			return nil, err
 		}
-		if ref, ok := result.(*ast.RefType); ok {
-			return ref.ElementType, nil
+		if _, ok := result.(*ast.RefType); ok {
+			return nil, alreadyReferenceError(c.currentLine, target)
 		}
 		return nil, fmt.Errorf(
 			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",

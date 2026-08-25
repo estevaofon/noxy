@@ -6,29 +6,13 @@ import (
 	"testing"
 )
 
-func containsBytecodePattern(code []byte, pattern []int) bool {
-	for start := 0; start+len(pattern) <= len(code); start++ {
-		matches := true
-		for offset, expected := range pattern {
-			if expected >= 0 && code[start+offset] != byte(expected) {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			return true
-		}
-	}
-	return false
-}
-
 func TestReferenceArgumentValidatesArrayIndexType(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func set(target: ref int) -> void
     return
 end
 let values: int[] = [1]
-set(values["zero"])`)
+set(ref values["zero"])`)
 	if err == nil || !strings.Contains(err.Error(), "array reference index must be int, got string") {
 		t.Fatalf("error=%v", err)
 	}
@@ -40,7 +24,7 @@ func set(target: ref int) -> void
     return
 end
 let mapping: map[string, int] = {"value": 1}
-set(mapping[0])`)
+set(ref mapping[0])`)
 	if err == nil || !strings.Contains(err.Error(), "map reference key must be string, got int") {
 		t.Fatalf("error=%v", err)
 	}
@@ -69,17 +53,26 @@ end
 func set(target: ref int) -> void
     return
 end
-set(get_value())`)
+set(ref get_value())`)
 	if err == nil || !strings.Contains(err.Error(), "reference argument 'get_value()' is not addressable") {
 		t.Fatalf("error=%v", err)
 	}
 }
 
-func TestReferenceArgumentLoadsStoredReferencesFromPropertiesAndIndexes(t *testing.T) {
+// TestStoredRefSlotIsPassedAsValueNotReferenced e R1 (spec
+// 2026-08-24-explicit-ref): um slot ja `ref T` (campo, elemento de array,
+// valor de map) e passado para um parametro `ref T` como QUALQUER valor —
+// sem `ref` no call site, e sem OP_CONTEXT_REF_PROPERTY/OP_CONTEXT_REF_INDEX
+// (que so existiam para essa leitura contextual, agora eliminada; os
+// opcodes e os cases da VM continuam existindo, so deixam de ser emitidos).
+// `ref` sobre esse mesmo slot e erro ("ja e uma referencia").
+func TestStoredRefSlotIsPassedAsValueNotReferenced(t *testing.T) {
 	tests := []struct {
-		name    string
-		source  string
-		pattern []int
+		name           string
+		source         string
+		forwardSource  string
+		forwardSubject string
+		forbidden      []chunk.OpCode
 	}{
 		{
 			name: "property",
@@ -89,35 +82,60 @@ struct Holder
 end
 let values: int[] = [1]
 let holder: Holder = Holder(ref values)
-append(holder.values, 2)`,
-			// OP_GET_GLOBAL and OP_CONTEXT_REF_PROPERTY's constant-pool index
-			// is a 16-bit operand (see emitOpWithConstantIndex), hence the
-			// extra -1 wildcard after each.
-			// CoW: a base do ref é carregada com OP_GET_GLOBAL_MUT (unicizada
-			// na criação do ref), ver compileLValueBase.
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL_MUT), -1, -1, int(chunk.OP_CONTEXT_REF_PROPERTY), -1, -1, int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+func consume(target: ref int[]) -> void
+    return
+end
+consume(holder.values)`,
+			forwardSource: `
+struct Holder
+    values: ref int[]
+end
+let values: int[] = [1]
+let holder: Holder = Holder(ref values)
+func consume(target: ref int[]) -> void
+    return
+end
+consume(ref holder.values)`,
+			forwardSubject: "holder.values",
+			forbidden:      []chunk.OpCode{chunk.OP_CONTEXT_REF_PROPERTY},
 		},
 		{
 			name: "array index",
 			source: `
 let values: int[] = [1]
 let stored: (ref int[])[] = [ref values]
-append(stored[0], 2)`,
-			// OP_GET_GLOBAL's constant-pool index is a 16-bit operand (see
-			// emitOpWithConstantIndex), hence the extra -1 wildcard after each.
-			// CoW: base do ref via OP_GET_GLOBAL_MUT (ver compileLValueBase).
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL_MUT), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+func consume(target: ref int[]) -> void
+    return
+end
+consume(stored[0])`,
+			forwardSource: `
+let values: int[] = [1]
+let stored: (ref int[])[] = [ref values]
+func consume(target: ref int[]) -> void
+    return
+end
+consume(ref stored[0])`,
+			forwardSubject: "stored[0]",
+			forbidden:      []chunk.OpCode{chunk.OP_CONTEXT_REF_INDEX},
 		},
 		{
 			name: "map index",
 			source: `
 let values: int[] = [1]
 let stored: map[string, ref int[]] = {"values": ref values}
-append(stored["values"], 2)`,
-			// OP_GET_GLOBAL's constant-pool index is a 16-bit operand (see
-			// emitOpWithConstantIndex), hence the extra -1 wildcard after each.
-			// CoW: base do ref via OP_GET_GLOBAL_MUT (ver compileLValueBase).
-			pattern: []int{int(chunk.OP_GET_GLOBAL), -1, -1, int(chunk.OP_GET_GLOBAL_MUT), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CONTEXT_REF_INDEX), int(chunk.OP_MARK_REF_TARGET_TYPE), -1, -1, int(chunk.OP_CONSTANT), -1, int(chunk.OP_CALL), 2},
+func consume(target: ref int[]) -> void
+    return
+end
+consume(stored["values"])`,
+			forwardSource: `
+let values: int[] = [1]
+let stored: map[string, ref int[]] = {"values": ref values}
+func consume(target: ref int[]) -> void
+    return
+end
+consume(ref stored["values"])`,
+			forwardSubject: "stored[values]",
+			forbidden:      []chunk.OpCode{chunk.OP_CONTEXT_REF_INDEX},
 		},
 	}
 
@@ -125,10 +143,17 @@ append(stored["values"], 2)`,
 		t.Run(tt.name, func(t *testing.T) {
 			compiler, err := compileFunctionSource(t, tt.source)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("passing the stored ref slot directly should compile: %v", err)
 			}
-			if !containsBytecodePattern(compiler.currentChunk.Code, tt.pattern) {
-				t.Fatalf("bytecode %v does not contain stored-reference load pattern %v", compiler.currentChunk.Code, tt.pattern)
+			for _, op := range tt.forbidden {
+				if containsOpcode(compiler.currentChunk.Code, op) {
+					t.Fatalf("bytecode %v still emits %s — forwarding must read the slot as a plain value", compiler.currentChunk.Code, op)
+				}
+			}
+			_, err = compileFunctionSource(t, tt.forwardSource)
+			want := "'" + tt.forwardSubject + "' is already a reference"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error=%v, want %q", err, want)
 			}
 		})
 	}

@@ -90,7 +90,7 @@ func TestReferenceTargetMetadataPreservesForwardedReferenceIdentity(t *testing.T
 	source := `
 let value: int = 1
 let forwarded: ref int = ref value
-typed_test(ref forwarded)`
+typed_test(forwarded)`
 	l := lexer.New(source)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -545,7 +545,7 @@ end
 let target: (ref int)[] = [null]
 let ok: bool = json_loads("[42]", target)
 let viz: ref int = target[0]
-if ok && type(ref viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
+if ok && type(viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
     test_report(42)
 else
     test_report(999)
@@ -957,7 +957,7 @@ test_report(length(values))`)
 let invoke: any = append
 let values: int[] = [1]
 let forwarded: ref int[] = ref values
-invoke(ref forwarded, 2)
+invoke(forwarded, 2)
 test_report(length(values))`)
 		testExpectedObject(t, 2, got)
 	})
@@ -1115,12 +1115,12 @@ test_report(length(targets))`)
 		got := runTypedFunctionProgram(t, `
 func store(channel: chan int, targets: ref (chan int)[]) -> void
     let invoke: any = append
-    invoke(ref targets, channel)
+    invoke(targets, channel)
 end
 let seed: chan int = make_chan(1)
 let targets: (chan int)[] = [seed]
 pop(targets)
-store(make_chan(1), targets)
+store(make_chan(1), ref targets)
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
 	})
@@ -1850,12 +1850,12 @@ func TestCollectionSchemaSurvivesShallowCopyAndMutation(t *testing.T) {
 func forward(item: int[4], target: ref int[4][]) -> void
     pop(item)
     let invoke: any = append
-    invoke(ref target, item)
+    invoke(target, item)
 end
 let item: int[4] = [1, 2, 3, 4]
 let target: int[4][] = [item]
 pop(target)
-forward(item, target)
+forward(item, ref target)
 test_report(length(target) * 10 + length(item))`)
 		testExpectedObject(t, 14, got)
 	})
@@ -1865,12 +1865,12 @@ test_report(length(target) * 10 + length(item))`)
 func forward(item: map[string, int], target: ref map[string, int][]) -> void
     delete(item, "value")
     let invoke: any = append
-    invoke(ref target, item)
+    invoke(target, item)
 end
 let item: map[string, int] = {"value": 1}
 let target: map[string, int][] = [item]
 pop(target)
-forward(item, target)
+forward(item, ref target)
 test_report(length(target) * 10 + length(keys(item)))`)
 		testExpectedObject(t, 11, got)
 	})

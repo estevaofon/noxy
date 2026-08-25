@@ -45,13 +45,16 @@ func TestDerefOfNullRefYieldsNull(t *testing.T) {
 	}
 }
 
-func TestRefParameterCanBeForwardedWithRef(t *testing.T) {
+// R1 (spec 2026-08-24-explicit-ref): um parametro `ref int` ja e a
+// referencia — encaminha-lo para outra chamada `ref T` e so passa-lo direto,
+// sem `ref` (que agora seria "ja e uma referencia").
+func TestRefParameterIsForwardedAsPlainValue(t *testing.T) {
 	got := captureVMSource(t, `
 func inc(r: ref int) -> void
     *r = *r + 1
 end
 func fwd(r: ref int) -> void
-    inc(ref r)
+    inc(r)
 end
 let x: int = 1
 fwd(ref x)

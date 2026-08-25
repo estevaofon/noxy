@@ -47,7 +47,7 @@ func TestTypedFunctionInvalidConformanceExamplesFail(t *testing.T) {
 		{"wrong return", "typed_function_wrong_return.nx", "return type mismatch in 'invalid': expected int, got string"},
 		{"incompatible assignment", "typed_function_incompatible_assignment.nx", "expected func(int) -> int, got func(string) -> int"},
 		{"dynamic narrowing", "typed_function_dynamic_narrowing.nx", "expected func(int) -> int, got func"},
-		{"invalid ref argument", "typed_function_invalid_ref_argument.nx", "reference argument '41' is not addressable\n  hint: use a variable, property, index, or null"},
+		{"invalid ref argument", "typed_function_invalid_ref_argument.nx", "argument 1 to 'increment': expected ref int, got int\n  hint: bind the value to a variable and pass 'ref <name>'"},
 	}
 
 	for _, tt := range tests {

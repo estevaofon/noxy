@@ -153,28 +153,28 @@ end
 
 func get(url: string) -> ClientResponse
     let h: string[64]
-    return request(default_client, "GET", url, h, 0, b"")
+    return request(ref default_client, "GET", url, h, 0, b"")
 end
 
 func post(url: string, body: bytes) -> ClientResponse
     let h: string[64]
     h[0] = "Content-Type: application/json"
-    return request(default_client, "POST", url, h, 1, body)
+    return request(ref default_client, "POST", url, h, 1, body)
 end
 
 func put(url: string, body: bytes) -> ClientResponse
     let h: string[64]
     h[0] = "Content-Type: application/json"
-    return request(default_client, "PUT", url, h, 1, body)
+    return request(ref default_client, "PUT", url, h, 1, body)
 end
 
 func delete(url: string) -> ClientResponse
     let h: string[64]
-    return request(default_client, "DELETE", url, h, 0, b"")
+    return request(ref default_client, "DELETE", url, h, 0, b"")
 end
 
 func patch(url: string, body: bytes) -> ClientResponse
     let h: string[64]
     h[0] = "Content-Type: application/json"
-    return request(default_client, "PATCH", url, h, 1, body)
+    return request(ref default_client, "PATCH", url, h, 1, body)
 end

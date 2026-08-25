@@ -22,7 +22,7 @@ end
 let target: (ref int)[] = [null]
 let ok1: bool = json_loads("[42]", target)
 let viz: ref int = target[0]
-let kind: string = type(ref viz)
+let kind: string = type(viz)
 let lido: int = *viz
 // slot que já aponta: escrita através da referência
 let x: int = 1

@@ -1221,10 +1221,10 @@ end
 
 func main()
     let head: Node = Node(0, null)
-    _append(head, 20)
-    _append(head, 30)
-    let popped: int = pop(head)
-    test_report(count(head) * 100 + popped)
+    _append(ref head, 20)
+    _append(ref head, 30)
+    let popped: int = pop(ref head)
+    test_report(count(ref head) * 100 + popped)
 end
 
 main()`
@@ -1286,18 +1286,18 @@ func make_dropper(node: ref Node) -> func() -> int
 end
 
 let head_a: Node = Node(0, null)
-_append(head_a, 20)
-_append(head_a, 30)
+_append(ref head_a, 20)
+_append(ref head_a, 30)
 let g: ref Node = head_a.proximo
 g.proximo = null
 
 let head_b: Node = Node(0, null)
-_append(head_b, 20)
-_append(head_b, 30)
-let dropper: func() -> int = make_dropper(head_b)
+_append(ref head_b, 20)
+_append(ref head_b, 30)
+let dropper: func() -> int = make_dropper(ref head_b)
 let done: int = dropper()
 
-test_report(count(head_a) * 10 + count(head_b))`
+test_report(count(ref head_a) * 10 + count(ref head_b))`
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
 	}
@@ -1395,19 +1395,19 @@ end
 
 func main()
     let ha: Node = Node(0, null)
-    _append(ha, 20)
-    _append(ha, 30)
-    let a: int = repro_a(ha)
+    _append(ref ha, 20)
+    _append(ref ha, 30)
+    let a: int = repro_a(ref ha)
 
     let hb: Node = Node(0, null)
-    _append(hb, 20)
-    _append(hb, 30)
-    let b: int = repro_b(hb)
+    _append(ref hb, 20)
+    _append(ref hb, 30)
+    let b: int = repro_b(ref hb)
 
     let hc: Node = Node(0, null)
-    _append(hc, 20)
-    _append(hc, 30)
-    let c: int = repro_c(hc)
+    _append(ref hc, 20)
+    _append(ref hc, 30)
+    let c: int = repro_c(ref hc)
 
     test_report(a * 10000 + b * 100 + c)
 end
@@ -1470,9 +1470,9 @@ end
 
 func main()
     let head: Node = Node(0, null)
-    _append(head, 20)
-    _append(head, 30)
-    let ok: int = run(head)
+    _append(ref head, 20)
+    _append(ref head, 30)
+    let ok: int = run(ref head)
 end
 
 main()`
@@ -1651,24 +1651,24 @@ end
 
 func main()
     let ha: Node = Node(0, null)
-    _append(ha, 20)
-    _append(ha, 30)
-    let a: int = repro_e(ha)
+    _append(ref ha, 20)
+    _append(ref ha, 30)
+    let a: int = repro_e(ref ha)
 
     let hb: Node = Node(0, null)
-    _append(hb, 20)
-    _append(hb, 30)
-    let b: int = repro_e2(hb)
+    _append(ref hb, 20)
+    _append(ref hb, 30)
+    let b: int = repro_e2(ref hb)
 
     let hc: Node = Node(0, null)
-    _append(hc, 20)
-    _append(hc, 30)
-    let c: int = repro_f(hc)
+    _append(ref hc, 20)
+    _append(ref hc, 30)
+    let c: int = repro_f(ref hc)
 
     let hd: Node = Node(0, null)
-    _append(hd, 20)
-    _append(hd, 30)
-    let d: int = repro_f2(hd)
+    _append(ref hd, 20)
+    _append(ref hd, 30)
+    let d: int = repro_f2(ref hd)
 
     test_report(a * 1000000 + b * 10000 + c * 100 + d)
 end
@@ -1772,9 +1772,9 @@ end
 
 func main()
     let h: Node = Node(0, null)
-    _append(h, 20)
-    _append(h, 30)
-    test_report(run(h))
+    _append(ref h, 20)
+    _append(ref h, 30)
+    test_report(run(ref h))
 end
 
 main()`
