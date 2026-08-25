@@ -2671,10 +2671,10 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 		return nil, nil
 	case *ast.MemberAccessExpression:
-		// CoW: um ref para dentro de um contêiner fixa a identidade do
-		// contêiner — a base precisa ser unicizada na criação do ref para a
-		// escrita através dele não vazar em cópias pendentes.
-		owner, _, err := c.compileLValueBase(target.Left)
+		// issue #83: a base vira uma REFERÊNCIA AO LUGAR do pai, não o valor
+		// unicizado na criação. O caminho é re-resolvido na escrita — ver
+		// borrow_place.go.
+		owner, err := c.compileBorrowBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
@@ -2686,8 +2686,8 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
 		return element, nil
 	case *ast.IndexExpression:
-		// CoW: base do ref unicizada na criação (ver caso MemberAccess acima)
-		container, _, err := c.compileLValueBase(target.Left)
+		// issue #83: base como lugar (ver caso MemberAccess acima)
+		container, err := c.compileBorrowBase(target.Left)
 		if err != nil {
 			return nil, err
 		}
