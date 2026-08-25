@@ -23,7 +23,7 @@ Simplicity is sophistication.
 Typing is safety — and the compiler speaks first.
 Dynamic exists, but it is explicit: any says what it is.
 Variables are copies, unless explicitly stated otherwise.
-Sharing is ref. There is no other way.
+Sharing is ref — in the type and at the call site. Closures and globals share by name; nothing else does.
 CoW + ref is one heck of a duo!
 An error is a value, not an exception.
 One rule, everywhere: file, module, REPL.
@@ -160,21 +160,24 @@ Arrays, maps, and structs are composite **values**. Every binding without
    nested mutation inside the callee never leaks to the caller.
 3. **Reading from a container copies**: `let p = arr[0]` produces an
    independent value; mutating `p` does not affect `arr[0]`.
-4. **Storing into a container copies**: `append(outer, inner)`, `m[k] = v`,
+4. **Storing into a container copies**: `append(ref outer, inner)`, `m[k] = v`,
    `s.field = arr`, and constructor arguments store independent values.
 5. **Channels carry values**: `chan_send` delivers an independent copy. This
    applies to `spawn` and `spawn_task` arguments equally.
-6. **`ref` is the only sharing mechanism.** A `ref` points to a *slot*
-   (variable, field, index, map entry); writes through any alias of the slot
-   are visible to all aliases of that slot.
+6. **`ref` is the only sharing mechanism visible in a type.** A `ref` points
+   to a *slot* (variable, field, index, map entry); writes through any alias
+   of the slot are visible to all aliases of that slot. Closures capture
+   variables by name and globals are shared by name — those are the only
+   other places where two names can see one slot, and the only ones that
+   need coordination under concurrency (see §2.3 R9).
 7. **`==`/`!=` on composites is structural** (recursive by content). `ref`
    values compare by slot identity and are not dereferenced — both as fields
    nested inside a composite and as the two operands of a direct comparison.
    A `ref` compared against `null` asks whether the reference *itself* is
    null, and a `ref` compared against a plain value is a compile-time error:
-   the read must be explicit (`*r == value`); see §2.3.
-8. Closures capture *variables* (slots); captured-variable aliasing is
-   unchanged and orthogonal to value semantics.
+   the read must be explicit (`*r == value`); see §2.3 R7.
+8. Closures capture *variables* (slots) by name; that is the second way two
+   names can see one slot (rule 6).
 
 The runtime implements this contract with **copy-on-write**: no copy is made
 at the binding site — composites are marked as shared and cloned lazily, one
@@ -185,6 +188,7 @@ One documented edge: a `ref` taken *into* a container (`ref arr[0]`, a `ref`
 field) pins that container's identity at creation time. If the container is
 copied *afterwards*, writes through the pre-existing `ref` are visible to
 copies that have not yet materialized. Take refs after, not before, sharing.
+Tracked as issue #83.
 
 #### Concurrency and composite values
 
@@ -198,7 +202,7 @@ Shared routines use synchronized global bindings, module state, maps, and runtim
 let dynamic: int[] 
 
 // Operations
-append(dynamic, 10)
+append(ref dynamic, 10)
 length(dynamic)
 ```
 
@@ -242,266 +246,206 @@ Structs are passed by **VALUE**: the callee's instance is independent at any dep
 ---
 ### 2.3 References (`ref`)
 
-#### The `ref` Operator
+A reference is never created or read without `ref` or `*` in the source.
+Three forms, and one shortcut:
 
-The `ref` operator produces an explicit first-class reference value according
-to the operand's type:
+| Form | Meaning |
+|---|---|
+| `ref x` | create a reference to the slot of `x` |
+| `r` | the reference itself (where it points) |
+| `*r` | the referenced value — read it, or write it with `*r = v` |
+| `r.f`, `r[i]` | shortcut for `(*r).f`, `(*r)[i]` — reads and writes |
 
-1. For an addressable operand of type `T`, `ref value` creates a `ref T` that
-   points to that operand's storage.
-2. For an operand whose type is already `ref T`, `ref reference` forwards the
-   existing reference value. Its result remains `ref T`; it does not take the
-   address of the reference variable or create `ref ref T`.
+#### R1. `ref x` creates a reference
 
-The forwarding form is useful when an existing reference crosses a dynamic
-boundary whose signature is not available for contextual conversion.
+`x` must be **addressable**: a local or global variable, a struct field, an
+array element, a map entry, or a captured variable. A non-null literal or a
+temporary (the result of a call whose type is not `ref T`) is not:
 
-#### L-Value Requirement
-Creating a new reference requires an **addressable value** (L-Value). The
-operand must be a variable, a struct field, or an array/map index. A non-reference
-temporary, such as an ordinary function result or a literal, is not
-addressable. Forwarding an expression that already has type `ref T` does not
-create a new reference and therefore does not require a second storage slot.
-
-Captured variables are addressable through their upvalue storage. Non-null
-literals and plain function-result temporaries are not addressable. A function
-result whose declared type is already `ref T` is a reference value and may be
-passed directly. `null` remains the explicit nullable `ref T` value: it is
-accepted without pretending that it owns a storage slot.
-
-**Correct Usage:**
 ```noxy
 let err: Error = Error("msg")
-let r: ref Error = ref err      // OK: 'err' is a variable
-let forwarded: ref Error = ref r // OK: forwards the existing ref Error
+let r: ref Error = ref err          // OK
+let bad: ref Error = ref Error("m") // ERROR: reference argument 'Error("m")' is not addressable
 ```
 
-**Incorrect Usage:**
+If `x` already has type `ref T`, `ref x` is an error — a reference is passed
+as any other value, never re-referenced. There is no `ref ref T`; the
+annotation is rejected by the parser.
+
 ```noxy
-let r: ref Error = ref Error("msg") // ERROR: Cannot take reference of temporary value
+let r: ref int = ref x
+f(ref r)      // ERROR: 'r' is already a reference
+              //   hint: pass 'r' directly, without 'ref'
+f(r)          // OK
 ```
 
-#### Reference Semantics
-The `ref` keyword creates references to addressable values or explicitly
-forwards existing reference values. Noxy unifies reference usage through
-**"Automatic Dereference"** and **"Type-Based Assignment"**.
+#### R2. A `ref T` is never read implicitly
 
-#### 1. Automatic Dereference (Expressions)
-You can use a reference (`ref T`) in expressions just like a normal value. The compiler automatically assumes you want the **value**.
+Wherever the compiler expects a `T` and finds a `ref T`, it is an error, and
+the hint says `*r`. This holds in every position: operands of binary and
+unary operators, `if`/`while` conditions, the collection of `for … in`, an
+index, an argument for a non-`ref` parameter, a `return` for a non-`ref`
+return type, `let x: T = r`, `x = r`, and the right-hand side of `*r = s`.
+
 ```noxy
 let x: int = 10
 let r: ref int = ref x
 
-// 1. Reading (Auto-Dereference)
-// You can use the reference directly to READ the value.
-// The compiler automatically follows the pointer.
-let y: int = r + 1   // Compiler auto-derefs 'r' -> 11
-print(r)             // Prints 10
+let y: int = r + 1     // ERROR: operand of '+' cannot be ref int: a ref is never read implicitly
+                       //   hint: use '*r' to read the referenced value
+let y: int = *r + 1    // OK: 11
+let n: int = r         // ERROR: type mismatch in 'n' declaration: expected int, got ref int
+let n: int = *r        // OK
+if rb then … end       // ERROR (rb: ref bool) — use 'if *rb then'
+for v in ra do … end   // ERROR (ra: ref int[]) — use 'for v in *ra do … end'
 ```
-This applies to both Local Variables and Struct Fields.
 
-Auto-dereference has exactly **two exceptions**, described below: `==`/`!=`
-with a reference operand, and the right-hand side of a plain assignment.
+A parameter or slot typed `any`, and a native without a signature (`print`,
+`to_str`), accept a `ref T` **as a value**: the reference travels. So
+`print(r)`, `to_str(r)` and `f"{r}"` (which is `to_str(r)`) show `<ref …>`;
+write `print(*r)` to see the value. `let v = r` (inferred) gives `v: ref T`.
 
-**Exception 1: `==` and `!=` with a reference operand.** Auto-dereference
-answers "what value is there?", which is the wrong question for equality on
-references — there the questions are about *identity* and *nullity*. In
-`==`/`!=` a reference operand is **never** implicitly dereferenced:
+The natives `length`, `keys`, `slice`, `contains`, and `has_key` also reject
+a `ref` argument — they take a value, never a reference. When the argument's
+type is known, the compiler rejects it statically with the same `*r` hint
+(`argument 1 to 'length': expected a value, got ref int[]`); when it arrives
+through `any`, the same check happens at runtime (`length: argument 1
+expected a value, got ref`, hint `a ref is never read implicitly; use
+'*r'`). `print`, `to_str`, f-strings, the other unsigned natives, and any
+`any` parameter or slot still receive the ref as a value, as above.
 
-- **two references** compare by **slot identity** (§2.2, rule 7);
-- a reference compared against **`null`** asks whether the reference
-  *itself* is null — which keeps `node.next != null` working, and makes a
-  valid reference to a slot that *contains* null distinguishable from a
-  null reference (`r == null` asks about the ref, `*r == null` about the
-  pointed value — two questions that implicit dereference used to conflate);
-- a reference compared against a **plain value** is a compile-time error
-  with a hint — write the read explicitly, as in assignment.
+#### R3. `*r` is the only read and the only write of the referenced value
 
 ```noxy
-let a: int = 1
-let b: int = 1
+let v: int = *r     // read
+*r = 20             // write: x is now 20
+*r = *s             // copy the value s points to into x
+```
+
+`*x` where `x` is statically not a reference is a compile error (`cannot
+dereference int`); when the static type is unknown, the same check happens
+at runtime with the same message. `*r` with `r == null` is a runtime null
+reference error.
+
+#### R4. `.` and `[]` go through the reference
+
+`r.f`, `r[i]`, `r.f = v`, `r[i] = v`, `ref r.f`, `ref r[i]` are shortcuts
+for `(*r).f` and so on, at any depth (`r.f.g`, `r[i].f`), and through an
+`any` base at runtime. This is the language's one shortcut. The index itself
+follows R2: `xs[ri]` with `ri: ref int` is an error — `xs[*ri]`.
+
+```noxy
+func insert(node: ref TreeNode, valor: int)
+    if valor < node.valor then          // '.' goes through node
+        if node.esquerda == null then   // the stored ref, compared to null (R7)
+            let novo: TreeNode = TreeNode(valor, null, null)
+            node.esquerda = ref novo    // rebind of the field (R6)
+        else
+            insert(node.esquerda, valor)  // the stored ref, passed as a value (R5)
+        end
+    end
+end
+```
+
+#### R5. A reference is never created implicitly
+
+A parameter, a constructor field, or a slot typed `ref T` accepts exactly:
+`ref x` (R1); an expression whose static type is already `ref T` (a `ref`
+variable, field, element, map entry, or a call returning `ref T`); or
+`null`. Passing a plain `T` is an error with the hint `use 'ref x'`. The
+rule is the same for user functions, typed `func` values, bare `func`,
+struct constructors, generic instantiations, and builtins:
+
+```noxy
+func checkout(c: ref Cart) -> void … end
+checkout(mine)          // ERROR: argument 1 to 'checkout': expected ref Cart, got Cart
+                        //   hint: use 'ref mine'
+checkout(ref mine)      // OK — and the call site shows that mine may change
+
+append(xs, 1)           // ERROR — hint: use 'ref xs'
+append(ref xs, 1)       // OK
+pop(ref xs)             // OK
+delete(ref m, "k")      // OK
+json_loads(text, ref target)   // OK
+
+func push(p: ref int[]) -> void
+    append(p, 9)        // OK: p is already ref int[] — passed as is
+end
+```
+
+An argument of type `any` is accepted at compile time; the runtime checks
+the parameter mode (`function 'f' argument 1: expected ref int, got int`).
+
+#### R6. Rebind is `=`, update is `*… =`
+
+With `r: ref T`: `r = ref y` rebinds (`r` now points to `y`); `r = v` with
+`v: T` is an error (hint: `*r = v`); `*r = ref y` is an error (hint: `r =
+ref y` to rebind, or `*r = y` to write the value). The same holds for a
+field, element, or map entry typed `ref T`: `x.next = ref n` rebinds;
+`x.next = n` is an error. Rebinding a `ref` parameter changes only the
+callee's reference, never the caller's.
+
+#### R7. `==` and `!=`
+
+Two references compare by **slot identity**; a reference compared with
+`null` asks whether the reference itself is null; a reference compared with
+a plain value is an error (R2) — write `*r == v`.
+
+```noxy
 let ra: ref int = ref a
-let rb: ref int = ref b
 let ra2: ref int = ref a
-
-ra == ra2   // true  — same slot
-ra == rb    // false — different slots, even though both hold 1
-*ra == 1    // true  — explicit dereference reads the pointed value
-ra == 1     // ERROR: cannot compare ref int with int: a ref is never
-            //        implicitly dereferenced in '=='
-            //   hint: use '*ra' to compare the referenced value
-ra == null  // false — the reference itself is valid
-
-node.next != null   // unchanged: asks whether the `ref` field is null
+let rb: ref int = ref b   // b == a == 1
+ra == ra2    // true  — same slot
+ra == rb     // false — different slots
+ra == null   // false — the reference is valid
+*ra == 1     // true  — the values
+ra == 1      // ERROR — hint: use '*ra'
 ```
 
-`addr(ref x)` remains available when you want that identity as a printable
-value rather than a comparison.
+`addr(ref x)` gives the identity as a printable value.
 
-**Exception 2: the right-hand side of a plain assignment.** Assignment is
-where *update* and *rebind* are told apart by the static types of both sides
-(see the summary table below), so around `=` no reference conversion is
-implicit — in either direction. Assigning a `ref T` to a target that expects
-a plain `T` (a variable, an array/map entry, or a struct field) is a
-compile-time error with a hint, not an implicit read:
+#### R8. `null` is a valid `ref T`
+
+It can be stored, passed, returned, compared, and replaced by rebind.
+Writing through it (`*r = v`, `r.f = v`) is a runtime error.
+
+#### R9. Lifetime of a referenced local
+
+`ref x` on a local promotes the slot of `x` to a heap cell (an upvalue). The
+cell lives as long as any reference to it exists — including after the
+function that declared `x` has returned. This is how nodes are allocated;
+there is no `new`:
 
 ```noxy
-let x: int = 10
-let r: ref int = ref x
-let n: int = 0
-
-n = r    // ERROR: type mismatch in assignment to 'n': expected int, got ref int
-         //   hint: use '*r' to read the referenced value
-n = *r   // OK: explicit dereference reads 10
+let novo: Node = Node(v, null)   // a variable: `ref` needs an l-value (R1)
+node.next = ref novo             // `novo` becomes a cell; it outlives this function
 ```
 
-The explicit-update form is different: in `*r = value` the `*` already names
-the target unambiguously, so a reference RHS keeps the ordinary expression
-rule and is read. With `s: ref int`, `*r = s` writes the value `s` points to
-(equivalent to `*r = *s`).
+Cost: one cell allocation per referenced local, and from then on the variable
+takes part in ownership counting; locals that are never referenced stay on
+the stack. `==` between references compares these cells (R7). A closure that
+captures a `ref` to a local and is handed to `spawn`/`spawn_task` shares the
+cell between routines — coordinate, as for globals ([docs/concurrency.md](concurrency.md)).
 
-Note that `let` initialization is *not* an assignment in this sense: a `let`
-creates a fresh slot, so there is nothing to rebind and no ambiguity —
-`let n: int = r` auto-dereferences, like any other expression position
-(including exact call arguments; see §4.2).
+#### Diagnostics
 
-#### 2. Writing (Update vs Rebind)
-The distinction between modifying the *value* and modifying the *pointer* is made explicit by syntax:
-
-**A. Value Update (Explicit `*`)**
-To update the content of the memory pointed to by a reference, you MUST use the dereference operator `*`.
-```noxy
-*r = 20      // DESTROY/UPDATE: Writes 20 into the memory of 'x'
-*box.val = 30 // Writes 30 into the memory pointed to by 'box.val'
-```
-
-**B. Pointer Rebind (Standard `=`)**
-To change the reference itself (make it point to something else), use standard assignment.
-*Note: The type of the RHS must be a Reference (`ref T`).*
-```noxy
-let z: int = 99
-r = ref z    // REBIND: 'r' now points to 'z' (does not affect 'x')
-```
-
-#### 3. Strict Type Safety
-The compiler enforces these rules to prevent ambiguity, and each rejection
-points at the intended fix:
-```noxy
-let n: int = 0
-r = 50       // ERROR: cannot assign int to ref int
-             //   hint: use '*r = ...' to update the referenced value
-n = r        // ERROR: type mismatch in assignment to 'n': expected int, got ref int
-             //   hint: use '*r' to read the referenced value
-n = *r       // OK: explicit dereference
-*r = ref z   // OK: '*' names the target unambiguously, so the reference RHS
-             // is read — writes z's value through r (same as '*r = z')
-```
-
-#### 4. Reference Patterns
-
-These patterns allow Noxy to safely support smart pointers and mutable bindings.
-
-##### Pattern A: Mutable Bindings (Pass-by-Reference)
-
-Functions can modify external variables through references:
-
-```noxy
-func double_it(val: ref int)
-    *val = val * 2  // UPDATE: writes to original variable
-end
-
-func swap(a: ref int, b: ref int)
-    let val_a: int = a  // Read values (auto-deref)
-    let val_b: int = b
-    *a = val_b          // UPDATE: write to address of 'a' using '*'
-    *b = val_a          // UPDATE: write to address of 'b' using '*'
-end
-
-let x: int = 10
-double_it(x)      // exact signature borrows addressable x; x is now 20
-double_it(ref x)  // explicit reference is also valid; x is now 40
-
-let a: int = 100
-let b: int = 200
-swap(ref a, ref b)  // a=200, b=100
-```
-
-> **Note**: This syntax makes swaps safe and explicit. `a = b` would try to rebind the pointer `a` to point to the same place as `b` (if `b` were a reference expression), which is not what you want in a swap.
-
-##### Pattern B: Dynamic Aliases
-
-A local reference can be rebound to point to different variables:
-
-```noxy
-let counter_A: int = 0
-let counter_B: int = 0
-
-let active: ref int = ref counter_A
-
-*active = *active + 1     // Updates counter_A (now 1)
-active = ref counter_B    // REBIND: now points to counter_B
-*active = *active + 1     // Updates counter_B (now 1)
-// Result: counter_A=1, counter_B=1
-```
-
-##### Pattern C: Smart Pointers (Observer Pattern)
-
-Structs with reference fields can dynamically switch their data source:
-
-```noxy
-struct Observer
-    name: string
-    target: ref int
-end
-
-let temperature: int = 20
-let humidity: int = 50
-
-let sensor: Observer = Observer("Main", ref temperature)
-
-// Read through reference
-print(sensor.target)  // 20 (auto-deref)
-
-// UPDATE value
-*sensor.target = 25   // temperature is now 25
-
-// REBIND to different source
-sensor.target = ref humidity  // Now watching humidity
-*sensor.target = 70           // humidity is now 70
-```
-
-##### Summary Table: Type-Based Assignment
-
-| LHS Type | RHS Type | Syntax | Action |
-|----------|----------|--------|--------|
-| `ref T` | `T` | `*r = val` | **UPDATE** – writes into memory |
-| `ref T` | `ref T` | `r = ref x`| **REBIND** – changes pointer |
-| `T` | `T` | `x = val` | Standard assignment |
-| `T` | `ref T` | `x = *r` | **READ** – explicit dereference required; plain `x = r` is a compile error (§2.3, exception 2) |
-
-The field rules apply identically when the assignment **base** is itself a
-reference: with `node: ref Node`, `node.valor = "texto"` is `type mismatch in
-field assignment: expected int, got string`, and `node.proximo = Node(9, null)`
-is `cannot assign Node to ref Node` — the compiler resolves the field through
-the dereferenced base and checks it exactly as it checks `a.valor` /
-`a.proximo` with `a: Node`. For a `ref T` field, array element, or map value
-the error names the two legitimate paths:
-
-```
-hint: to point the field at a new value, bind it to a variable first and use 'x.proximo = ref novo'; to overwrite the referenced value use '*x.proximo = ...'
-```
-
-#### Memory Safety (Captured Variables)
-Noxy ensures memory safety when using `ref`.
-- If you create a `ref` to a **local variable**, that variable is automatically **Captured** (moved to the Heap) by the compiler.
-- Implemented via **Upvalues**, this ensures that the variable survives the end of the function scope.
-
-```noxy
-func create_safe_ref() -> ref int
-    let x: int = 42
-    return ref x // Safe! 'x' is promoted to Heap because it is referenced.
-end
-```
+| Situation | Message | Hint |
+|---|---|---|
+| `ref T` where `T` expected (R2) | `… expected T, got ref T` / `operand of '+' cannot be ref int: a ref is never read implicitly` | `use '*r' to read the referenced value` |
+| `for x in r` | `cannot iterate over ref T[]: a ref is never read implicitly` | `use 'for x in *r'` |
+| `xs[ri]` | `index cannot be ref int: a ref is never read implicitly` | `use '*ri'` |
+| `f(x)` for `ref T` param (R5) | `argument N to 'f': expected ref T, got T` | `use 'ref x'` |
+| `append(xs, v)` | `argument 1 to 'append': expected ref T[], got T[]` | `use 'ref xs'` |
+| `f(41)` for `ref T` param | `argument N to 'f': expected ref T, got int` | `bind the value to a variable and pass 'ref <name>'` |
+| `ref r` with `r: ref T` (R1) | `'r' is already a reference` | `pass 'r' directly, without 'ref'` |
+| `let q: ref ref int` | `SyntaxError: 'ref ref' is not a type` | `a reference is never taken to a reference` |
+| `r = v` (R6) | `cannot assign T to ref T` | `use '*r = …' to update the referenced value` |
+| `*r = ref y` (R6) | `cannot assign ref T to T through '*r'` | `use 'r = ref y' to rebind the reference, or '*r = y' to write the value` |
+| `r == v` (R7) | `cannot compare ref T with T: a ref is never implicitly dereferenced in '=='` | `use '*r' to compare the referenced value` |
+| `*x`, `x: int` (R3) | `cannot dereference int` | — |
+| `length(rx)`, `rx: ref int[]` (R2, static) | `argument 1 to 'length': expected a value, got ref int[]` | `use '*rx' to read the referenced value` |
+| `length(a)` through `any` at runtime (R2) | `length: argument 1 expected a value, got ref` | `a ref is never read implicitly; use '*r'` |
+| `ref a.f` through `any`, slot already ref (runtime) | `slot 'f' already holds a reference` | `pass it directly, without 'ref'` |
 
 ---
 
@@ -560,7 +504,8 @@ length(xs)` is a compile-time error.
 
 A `ref` initializer binds a **borrow**, exactly as the annotated form does:
 `let v = r` with `r: ref T` gives `v: ref T` (the same slot, no copy). To copy
-the value out of a reference, annotate — `let v: T = r` auto-dereferences.
+the value out of a reference, annotate and read: `let v: T = *r` — `let v: T
+= r` is an error (§2.3 R2).
 
 `let x` with neither annotation nor initializer is a syntax error (there is
 nothing to infer); `let x: T` without an initializer keeps the default-value
@@ -674,52 +619,30 @@ end
 
 Calls through exact types are checked during compilation: arity, argument types, `ref` addressability, and return types must match. Exact signatures are invariant; parameter count, parameter types, `ref` modifiers, and return types must be identical. `null` satisfies `ref`, struct, and `any` contracts, but not primitive value or callable contracts. An omitted return annotation on a function declaration or literal means `void`.
 
-When an exact parameter is `ref T`, an addressable expression of type `T` is
-converted contextually at the call site. Both the concise and explicit forms
-are valid:
+A `ref T` parameter takes a reference and nothing else — `ref x`, a value
+that already has type `ref T`, or `null` (§2.3 R5). That is true for exact
+signatures, bare `func`, natives, and plugins alike; there is no contextual
+conversion at any boundary:
 
 ```noxy
 let value: int = 10
-double_it(value)       // exact signature borrows addressable value
-double_it(ref value)   // explicit reference is also valid
-```
+double_it(ref value)   // OK
+double_it(value)       // ERROR — hint: use 'ref value'
 
-This contextual conversion is limited to exact script signatures and public
-native contracts known by the compiler. It never applies at a dynamic
-boundary.
-
-An argument whose static type is already `ref T` — a `ref` variable, a struct
-field, an array element, or a map value declared `ref T` — needs no
-conversion: the stored reference is forwarded as is, **including `null`**,
-exactly as a `ref` variable is (§2.3, rule 2). No reference to the containing
-slot is created, so inside the callee `param == null` is true precisely when
-the stored reference was null, and writing through such a parameter is the
-ordinary null-reference error. The same forwarding applies to every position
-that takes a reference contextually — the explicit form `ref a.field`, a
-constructor argument for a `ref` field (`Node(2, a.next)`), `return ref
-n.field`, `append` into a `(ref T)[]`, and the target of `json_loads`. To
-fill an empty `ref` field, the callee receives the *owner* and rebinds the
-field:
-
-```noxy
 func append_node(node: ref Node, valor: int)
     if node.proximo == null then
-        let novo: Node = Node(valor, null)   // a variable: `ref` needs an L-value
-        node.proximo = ref novo              // REBIND of the owner's field
+        let novo: Node = Node(valor, null)   // a variable: `ref` needs an l-value
+        node.proximo = ref novo              // rebind of the owner's field
     else
-        append_node(node.proximo, valor)     // forwards the stored reference
+        append_node(node.proximo, valor)     // the stored reference, passed as a value
     end
 end
 ```
 
 A slot declared `ref T` always holds a reference or `null`, and the runtime
-never wraps anything else: should a slot hold a raw `T` (which no Noxy program
-can produce), forwarding it is the explicit error `reference slot 'field'
-holds a non-reference value`. Through a base typed `any` the same forwarding
-applies — `ref a.proximo`, `f(a.proximo)`, `json_loads(s, a.proximo)` with
-`a: any` forward the stored reference or `null` exactly as the typed base does
-— and writing a raw `T` into a `ref T` field, element, or map value through
-`any` is the runtime error `cannot assign T to ref T`.
+never wraps anything else. Through a base typed `any`, `a.proximo` reads the
+stored reference (or `null`) exactly as the typed base does; `ref a.proximo`
+on such a slot is the runtime error `slot 'proximo' already holds a reference`.
 
 Bare `func` is the **dynamic callable type**. It guarantees only that the value is callable:
 
@@ -734,9 +657,8 @@ Calls through bare `func` are checked by the runtime because their arity and res
 let callbacks: func[] = [no_arguments, two_arguments]
 ```
 
-Because bare `func` has no exact signature, a reference argument must be
-written explicitly as `ref value`; `dynamic(value)` passes a plain value and
-never infers or manufactures a reference. The same rule applies to untyped
+A reference argument is always written `ref value` (§2.3 R5); through bare
+`func` the runtime checks the mode. The same rule applies to untyped
 native primitives, plugins without signatures, and dynamic module members.
 
 Use parentheses for an array whose elements are exact functions. Without parentheses, the array belongs to the return type:
@@ -758,7 +680,7 @@ When a composite value is passed to a parameter without `ref`, the function's vi
 
 ```noxy
 func modify(arr: int[]) -> void
-    append(arr, 999) // Callee's value only
+    append(ref arr, 999) // Callee's value only
 end
 
 let list: int[] = [1, 2, 3]
@@ -786,7 +708,7 @@ mutate_nested(box)
 ```
 
 #### Pass-by-Reference (`ref`)
-To share the caller's value and let the function mutate it, use `ref` in the parameter type — the only sharing mechanism in the language.
+To share the caller's value and let the function mutate it, use `ref` in the parameter type and `ref` at the call site — the signature and the call both say so.
 
 ```noxy
 func modify(arr: ref int[]) -> void
@@ -794,7 +716,7 @@ func modify(arr: ref int[]) -> void
 end
 
 let list: int[] = [1, 2, 3]
-modify(list)
+modify(ref list)
 // list is now [1, 2, 3, 999]
 ```
 
@@ -904,7 +826,7 @@ struct Stack<T>
 end
 
 func push<T>(s: ref Stack<T>, item: T)
-    append(s.items, item)
+    append(ref s.items, item)
 end
 
 func peek<T>(s: Stack<T>) -> T
@@ -1007,7 +929,7 @@ directions:
 func aplica<A, B>(arr: A[], fn: func(A) -> B) -> B[]
     let out: B[] = []
     for item in arr do
-        append(out, fn(item))
+        append(ref out, fn(item))
     end
     return out
 end
@@ -1219,9 +1141,8 @@ Write the comparison explicitly:
 | `if p then` (struct, array, map, `ref`) | `if p != null then` |
 | `if xs then` (collection, meaning "not empty") | `if length(xs) > 0 then` |
 
-A `ref bool` condition is fine — `if r then` dereferences automatically — but
-`&&`/`||` never dereference, so `r || x` is a compile-time error; write
-`*r || x`.
+A condition of type `ref bool` is an error — write `if *rb then` (§2.3 R2).
+`&&`/`||` follow the same rule.
 
 For a value whose static type is `any`, the check happens at runtime:
 `condition must be bool, got int`.
@@ -1734,8 +1655,8 @@ mismatch with the runtime message plus the two types:
 | `%` | `int % int` | `operands for % must be integers, got float and int` |
 | `<`, `>`, `<=`, `>=` | `int`/`float`, or `string` with `string` | `operands must be numbers or strings, got bytes and bytes` |
 
-`==`/`!=` keep their own rules (§2.3). A `ref T` operand is read as `T`
-(auto-dereference). `any` and untyped values stay on the generic opcode and are
+`==`/`!=` keep their own rules (§2.3). A `ref T` operand is an error — read it
+with `*r` (§2.3 R2). `any` and untyped values stay on the generic opcode and are
 checked at runtime, so the dynamic boundary is unchanged; the bytecode of a
 valid program is identical with or without the check. Inside a generic
 function the check runs per instance, so `soma(true, false)` on
@@ -1875,11 +1796,11 @@ builtin, static type included.
 
 ### Collections
 - `length(arr_or_map) -> int`
-- `append(arr, val)`
-- `pop(arr)`
+- `append(ref arr, val)`
+- `pop(ref arr)`
 - `keys(map)`: Returns array of keys.
 - `has_key(map, key)`: Returns bool.
-- `delete(map, key)`
+- `delete(ref map, key)`
 - `range(stop)`, `range(start, stop)`, `range(start, stop, step) -> int[]`:
   the Python sequence — `stop` is exclusive, a negative `step` counts down,
   an empty interval is `[]` (`range(5)` → `[0, 1, 2, 3, 4]`,
@@ -2220,7 +2141,7 @@ the UTF-8 error in `error`, even when the process exited with code 0.
 ### JSON
 
 `json_dumps`, `json_parse` and `json_loads` are documented in
-[`JSON_SUPPORT.md`](JSON_SUPPORT.md). `json_loads(text, target)` populates an
+[`JSON_SUPPORT.md`](JSON_SUPPORT.md). `json_loads(text, ref target)` populates an
 existing typed target in place and returns `false` (with no partial writes)
 when the payload does not fit. For a slot declared `ref T` **inside** the
 target (array element, struct field, map value): a slot that already holds a
@@ -2230,7 +2151,7 @@ from the referent schema, allocates a fresh heap cell that owns it, and stores
 a reference to that cell — afterwards `let viz: ref T = slot; type(ref viz)`
 is `"ref"` and `*viz` reads the value. A `ref T` field or element passed
 **directly** as the target while it is `null` arrives as `null` (§4.2) and
-`json_loads` returns `false`; pass the owner instead (`json_loads(text, h)`).
+`json_loads` returns `false`; pass the owner instead (`json_loads(text, ref h)`).
 
 ### Strings
 
