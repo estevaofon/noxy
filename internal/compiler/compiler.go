@@ -125,6 +125,14 @@ type Compiler struct {
 	// o que a CLI consulta via Warnings(). O scratch do pass 1 dos genericos
 	// (newPass1Compiler) tem a SUA lista, descartada — o pass 2 reemite.
 	warnings *[]Warning
+
+	// borrowArgDepth > 0 enquanto um argumento de chamada esta sendo compilado
+	// pelo caminho GENERICO (parametro nao-`ref T`, ou callee sem assinatura).
+	// checkBorrowEscape (borrow_scope.go, issue #83) usa isto para separar duas
+	// situacoes que sao o mesmo caminho de codigo: um emprestimo em posicao de
+	// argumento cujo callee nao tem contrato `ref` inspecionavel (R12 check 3)
+	// de um emprestimo que realmente escapa — let, return, store, captura (R11).
+	borrowArgDepth int
 }
 
 type callEmission struct {
@@ -1464,6 +1472,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.PrefixExpression:
 		// Handle 'ref' operator specially - don't compile Right first
 		if n.Operator == "ref" {
+			// R11 (issue #83): este e o caminho de `ref x` em toda posicao que
+			// NAO e argumento de parametro `ref T` — let, rebind, store, return,
+			// canal, captura. Um emprestimo (ref para dentro de conteiner) so e
+			// solido enquanto dura a chamada, entao aqui ele escapa. Etapa 1:
+			// aviso (ver borrow_scope.go).
+			c.checkBorrowEscape(n.Right)
 			element, err := c.compileReferenceArgument(n.Right)
 			if err != nil {
 				return nil, nil, err
@@ -2294,7 +2308,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			}
 
 			// Compile Arg 0 (Channel).
-			_, chType, err := c.Compile(call.Arguments[0])
+			_, chType, err := c.compileCallArgument(call.Arguments[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2315,7 +2329,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			}
 
 			// Compile Arg 1 (Value).
-			_, valType, err := c.Compile(call.Arguments[1])
+			_, valType, err := c.compileCallArgument(call.Arguments[1])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2338,7 +2352,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				return nil, nil, err
 			}
 
-			_, chType, err := c.Compile(call.Arguments[0])
+			_, chType, err := c.compileCallArgument(call.Arguments[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2367,7 +2381,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				return nil, nil, fmt.Errorf("[line %d] addr expects 1 argument", c.currentLine)
 			}
 			// We expect a Reference on the stack (ObjRef), without auto-dereference.
-			_, argType, err := c.Compile(call.Arguments[0])
+			_, argType, err := c.compileCallArgument(call.Arguments[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -2521,7 +2535,11 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		// R2: um argumento `ref T` para parametro T e erro (abaixo, com
 		// hint); para parametro any ou callee sem assinatura o ref passa
 		// como valor (print(r) mostra a referencia).
+		// #83: marca posicao de argumento para checkBorrowEscape distinguir
+		// R12 check 3 (callee sem contrato) de escape de verdade (R11).
+		c.borrowArgDepth++
 		_, argType, err := c.Compile(arg)
+		c.borrowArgDepth--
 		if err != nil {
 			return nil, nil, err
 		}
