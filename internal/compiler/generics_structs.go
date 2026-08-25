@@ -537,8 +537,10 @@ func typeArgumentArityError(line int, name string, want, got int) error {
 // Tipar a variavel do laco nao e cosmetico para genericos: e a unica ancora de
 // inferencia de `identity(v)` dentro de um for-each — sem ela o argumento chega
 // a unificacao como nil e T fica sem binding.
+//
+// A colecao nunca e ref aqui (R2 rejeita antes).
 func forEachElementType(collection ast.NoxyType) ast.NoxyType {
-	switch typed := unwrapRefType(collection).(type) {
+	switch typed := collection.(type) {
 	case *ast.ArrayType:
 		return typed.ElementType
 	case *ast.MapType:

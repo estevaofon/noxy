@@ -48,7 +48,7 @@ mutate_nested(box)
 assert(box.values[0] == 1, "mutate_nested não vaza mais para o chamador (CoW)")
 assert(original_values[0] == 1, "o array original também fica intacto")
 
-replace_by_ref(box)
+replace_by_ref(ref box)
 assert(box.values[0] == 7, "ref continua compartilhando: replace_by_ref altera a original")
 
 // Deep copy manual não é mais necessária: atribuição já é cópia profunda.

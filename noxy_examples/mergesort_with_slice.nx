@@ -28,19 +28,19 @@ func merge(left: int[], right: int[]) -> int[]
 
     while i < length(left) && j < length(right) do
         if left[i] <= right[j] then
-            append(result, left[i])
+            append(ref result, left[i])
             i = i + 1
         else
-            append(result, right[j])
+            append(ref result, right[j])
             j = j + 1
         end
     end
     while i < length(left) do
-        append(result, left[i])
+        append(ref result, left[i])
         i = i + 1
     end
     while j < length(right) do
-        append(result, right[j])
+        append(ref result, right[j])
         j = j + 1 end
     return result
 end

@@ -138,6 +138,16 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 	case *ast.RefType:
 		act, ok := actual.(*ast.RefType)
 		if !ok {
+			// R5 (spec 2026-08-24-explicit-ref): um argumento sem `ref` para
+			// um parametro `ref T` nao e erro de inferencia — e erro de call
+			// site, que compileCallExpression reporta depois da
+			// monomorfizacao (mensagem e hint corretos, com T ja resolvido).
+			// Enquanto T ainda estiver em aberto, unificamos contra o tipo
+			// interno para nao travar a inferencia; ref concreto (sem
+			// parametro de tipo) continua sendo mismatch estrutural aqui.
+			if containsTypeParam(exp.ElementType) {
+				return unify(exp.ElementType, actual, bindings)
+			}
 			return fmt.Errorf("esperava %s, encontrado %s", expected.String(), actual.String())
 		}
 		return unify(exp.ElementType, act.ElementType, bindings)

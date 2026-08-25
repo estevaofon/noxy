@@ -38,8 +38,11 @@ func TestDynamicIndexingAndPropertyErrorsAtRuntime(t *testing.T) {
 		{"nested write with string index", "let a: any = [[1]]\nlet i: any = \"x\"\na[i][0] = 1\n", "array index must be integer"},
 		{"nested write out of bounds", "let a: any = [[1]]\nlet i: any = 5\na[i][0] = 1\n", "array index out of bounds"},
 		{"ref to property of an int", "let x: any = 1\nlet r: any = ref x.foo\n", "Property reference base must be an object"},
-		{"ref to missing property", "let p: any = Point(1, 2)\nlet r: any = ref p.zzz\n", "undefined property 'zzz'"},
-		{"ref to index out of bounds", "let a: any = [1]\nlet i: any = 9\nlet r: any = ref a[i]\n", "Index out of bounds"},
+		// R2 (spec 2026-08-24-explicit-ref): `let r: any = ref ...` nao le
+		// mais implicitamente, entao o '*' explicito e o que forca a
+		// validacao da propriedade/indice no momento da leitura.
+		{"ref to missing property", "let p: any = Point(1, 2)\nlet r: any = *ref p.zzz\n", "undefined property 'zzz'"},
+		{"ref to index out of bounds", "let a: any = [1]\nlet i: any = 9\nlet r: any = *ref a[i]\n", "Index out of bounds"},
 		{"zeros with string size", "let n: any = \"s\"\nlet z: any = zeros(n)\n", "zeros size must be integer"},
 		{"bitor on bool", "let x: any = true\nlet y: any = 1\nlet r: any = x | y\n", "operands for | must be integers or bytes"},
 		{"bitxor on bool", "let x: any = true\nlet y: any = 1\nlet r: any = x ^ y\n", "operands for ^ must be integers or bytes"},
@@ -119,11 +122,11 @@ func TestForLoopOverStringAndBytes(t *testing.T) {
 	got := captureVMSource(t, `
 let chars: string[] = []
 for c in "héllo" do
-    append(chars, c)
+    append(ref chars, c)
 end
 let octets: int[] = []
 for b in b"ab" do
-    append(octets, b)
+    append(ref octets, b)
 end
 test_report([to_str(chars), to_str(octets)])
 `)

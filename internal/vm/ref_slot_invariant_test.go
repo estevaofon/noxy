@@ -53,40 +53,74 @@ func newCorruptingVM(t *testing.T) *VM {
 	return machine
 }
 
+// R1/R5 (Task 6, spec 2026-08-24-explicit-ref) restringiram quando este
+// invariante e checavel por sintaxe legal:
+//   - "base any": `ref d.proximo` continua compilando (o compilador nao
+//     conhece o campo por base dinamica) e continua caindo no fallback de
+//     OP_REF_PROPERTY que consulta RefFields em runtime — mensagem exata
+//     preservada.
+//   - base TIPADA (`a: Node`, campo `proximo: ref Node` estaticamente
+//     conhecido): nao ha mais sintaxe legal que alcance
+//     OP_CONTEXT_REF_PROPERTY/forwardRefSlot aqui. `a.proximo` sem `ref` e
+//     leitura comum (OP_GET_PROPERTY, sem checagem — R5 nao cria ref
+//     implicitamente, entao nao ha mais "argumento contextual"); `ref
+//     a.proximo` e agora erro de COMPILACAO (R1, 'a.proximo' ja e uma
+//     referencia). O caso "dynamic call via bare func" passa pelo boundary
+//     dinamico (`func` bare) que ainda AUDITA o modo em runtime
+//     (validateParameterModes) — mensagem generica, nao mais a especifica
+//     do campo. O caso "base any" (Task 8, spec 2026-08-24-explicit-ref
+//     §5.2) mudou de sentido: `ref d.proximo` agora e sempre erro de R1 em
+//     runtime (schema diz que o campo e ref T, ponto final) — o corpo
+//     corrompido nem chega a ser inspecionado, entao a mensagem e a
+//     generica de "ja guarda uma referencia", nao mais a de valor cru.
 func TestRawValueInRefFieldIsExplicitRuntimeError(t *testing.T) {
-	cases := map[string]string{
-		"argumento contextual": `
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "dynamic call via bare func",
+			src: `
 let a: Node = Node(1, null)
 corrupt_ref_field(a, "proximo", Node(2, null))
-let r: bool = eh_nulo(a.proximo)`,
-		"ref explicito": `
-let a: Node = Node(1, null)
-corrupt_ref_field(a, "proximo", Node(2, null))
-let r: bool = eh_nulo(ref a.proximo)`,
-		"base any": `
+let dynamic: func = eh_nulo
+let r: bool = dynamic(a.proximo)`,
+			want: "function 'eh_nulo' argument 1: expected ref Node, got object",
+		},
+		{
+			name: "base any",
+			src: `
 let a: Node = Node(1, null)
 corrupt_ref_field(a, "proximo", Node(2, null))
 let d: any = a
-let r: bool = eh_nulo(d.proximo)`,
+let r: bool = eh_nulo(ref d.proximo)`,
+			want: "slot 'proximo' already holds a reference",
+		},
 	}
-	for name, src := range cases {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			machine := newCorruptingVM(t)
-			err := interpretVMSource(t, machine, refSlotPrelude+src)
-			if err == nil || !strings.Contains(err.Error(), "reference slot 'proximo' holds a non-reference value") {
+			err := interpretVMSource(t, machine, refSlotPrelude+tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("esperava erro explicito de slot ref com valor cru, veio %v", err)
 			}
 		})
 	}
 }
 
+// Base TIPADA: `arr[0]` sem `ref` e leitura comum agora (R5 nao cria ref
+// implicitamente), sem o check especifico; a auditoria em runtime segue
+// existindo no boundary dinamico (`func` bare — mesmo raciocinio de
+// TestRawValueInRefFieldIsExplicitRuntimeError acima).
 func TestRawValueInRefArrayElementIsExplicitRuntimeError(t *testing.T) {
 	machine := newCorruptingVM(t)
 	err := interpretVMSource(t, machine, refSlotPrelude+`
 let arr: (ref Node)[] = [null]
 corrupt_ref_index(arr, 0, Node(2, null))
-let r: bool = eh_nulo(arr[0])`)
-	if err == nil || !strings.Contains(err.Error(), "reference slot at index 0 holds a non-reference value") {
+let dynamic: func = eh_nulo
+let r: bool = dynamic(arr[0])`)
+	if err == nil || !strings.Contains(err.Error(), "function 'eh_nulo' argument 1: expected ref Node, got object") {
 		t.Fatalf("esperava erro explicito de elemento ref com valor cru, veio %v", err)
 	}
 }
@@ -95,6 +129,8 @@ let r: bool = eh_nulo(arr[0])`)
 // conhece o campo); o runtime consulta RefFields e encaminha como o opcode
 // contextual — `*n = ...` sobre campo nulo e "cannot update null reference",
 // igual a base tipada; campo nao-nulo escreve atraves da ref existente.
+// Task 8 (spec 2026-08-24-explicit-ref §5.2): passar o campo ref T em si
+// (sem `ref`) e a forma sancionada — `ref a.proximo` agora e erro de R1.
 func TestAnyBaseRefFieldForwardsLikeTypedBase(t *testing.T) {
 	err := runTypedFunctionProgramError(t, refSlotPrelude+`
 func preenche(n: ref Node)
@@ -113,9 +149,27 @@ end
 let b: Node = Node(2, null)
 let a: any = Node(1, ref b)
 preenche(a.proximo)
-test_report([b.valor == 7, eh_nulo(a.proximo), eh_nulo(ref a.proximo)])`, []bool{true, false, false})
+test_report([b.valor == 7, eh_nulo(a.proximo)])`, []bool{true, false})
+
+	// Outra face de R1 (Task 8, revisao rodada 1): `ref a.proximo` sobre o
+	// MESMO slot ja apontando nao encaminha mais — erro, mesmo com valor
+	// nao-nulo. Documenta que a linha acima so funciona porque perdeu o
+	// `ref`; com ele, e sempre erro, independente do conteudo do slot.
+	refErr := interpretVMSource(t, New(), refSlotPrelude+`
+let b: Node = Node(2, null)
+let a: any = Node(1, ref b)
+let r: bool = eh_nulo(ref a.proximo)`)
+	if refErr == nil || !strings.Contains(refErr.Error(), "slot 'proximo' already holds a reference") {
+		t.Fatalf("via base any, 'ref a.proximo' sobre slot ja apontando deveria ser erro de R1: %v", refErr)
+	}
 }
 
+// Task 8 (spec 2026-08-24-explicit-ref §5.2): `ref d.child` via base any
+// seria erro de R1 (campo declarado ref T ja e uma referencia); o alvo
+// direto (sem `ref`) e a forma sancionada, e espelha o comportamento de
+// base tipada em TestJSONLoadsDirectNullRefIntSlotReturnsFalse — alvo
+// direto nulo nao da uma localizacao para escrever, entao json_loads
+// devolve false sem tocar o campo.
 func TestAnyBaseNullRefFieldJSONLoadsReturnsFalse(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Holder
@@ -150,10 +204,10 @@ test_report([eh_nulo_int(da[0]), eh_nulo_int(dm["x"])])`, []bool{true, true})
 func TestAnyBasePlainFieldStillReferencesTheSlot(t *testing.T) {
 	requireBoolResults(t, refSlotPrelude+`
 func soma(n: ref int)
-    *n = n + 10
+    *n = *n + 10
 end
 let a: any = Node(1, null)
-soma(a.valor)
+soma(ref a.valor)
 let b: Node = a
 test_report([b.valor == 11])`, []bool{true})
 }
@@ -213,24 +267,43 @@ test_report(type(a.valor))`)
 }
 
 // Valor de map `ref T`: mesmo invariante (encaminha ref/null; cru e erro
-// explicito com `for key "k"`), pela base tipada e pela base `any`.
+// explicito com `for key "k"`). Base TIPADA so alcanca mais o check
+// especifico via boundary dinamico (`func` bare — R5 tornou `m["k"]` sem
+// `ref` uma leitura comum). Base `any` (Task 8, spec 2026-08-24-explicit-ref
+// §5.2): `ref d["k"]` num slot de valor ref T e sempre erro de R1 em
+// runtime, so pelo schema — a corrupcao do valor armazenado nem chega a
+// ser inspecionada, entao a mensagem e a generica de "ja guarda uma
+// referencia".
 func TestRawValueInRefMapValueIsExplicitRuntimeError(t *testing.T) {
-	cases := map[string]string{
-		"base tipada": `
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "base tipada via dynamic call",
+			src: `
 let m: map[string, ref Node] = {"k": null}
 corrupt_ref_map(m, "k", Node(2, null))
-let r: bool = eh_nulo(m["k"])`,
-		"base any": `
+let dynamic: func = eh_nulo
+let r: bool = dynamic(m["k"])`,
+			want: "function 'eh_nulo' argument 1: expected ref Node, got object",
+		},
+		{
+			name: "base any",
+			src: `
 let m: map[string, ref Node] = {"k": null}
 corrupt_ref_map(m, "k", Node(2, null))
 let d: any = m
-let r: bool = eh_nulo(d["k"])`,
+let r: bool = eh_nulo(ref d["k"])`,
+			want: `slot for key "k" already holds a reference`,
+		},
 	}
-	for name, src := range cases {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			machine := newCorruptingVM(t)
-			err := interpretVMSource(t, machine, refSlotPrelude+src)
-			if err == nil || !strings.Contains(err.Error(), `reference slot for key "k" holds a non-reference value`) {
+			err := interpretVMSource(t, machine, refSlotPrelude+tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("esperava erro explicito de valor de map ref com valor cru, veio %v", err)
 			}
 		})
@@ -252,13 +325,13 @@ m["k"] = ref novo
 let v1: ref Node = a.proximo
 let v2: ref Node = arr[0]
 let v3: ref Node = m["k"]
-let depois_ref: bool = type(ref v1) == "ref" && type(ref v2) == "ref" && type(ref v3) == "ref"
+let depois_ref: bool = type(v1) == "ref" && type(v2) == "ref" && type(v3) == "ref"
 a.proximo = null
 arr[0] = null
 m["k"] = null
 let n1: ref Node = a.proximo
 let n2: ref Node = arr[0]
 let n3: ref Node = m["k"]
-let depois_null: bool = type(ref n1) == "null" && type(ref n2) == "null" && type(ref n3) == "null"
+let depois_null: bool = type(n1) == "null" && type(n2) == "null" && type(n3) == "null"
 test_report([depois_ref, depois_null])`, []bool{true, true})
 }

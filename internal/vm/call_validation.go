@@ -45,7 +45,11 @@ func validateParameterModes(name string, params []value.ParamInfo, args []value.
 		if param.IsRef && actual.Type != value.VAL_REF && actual.Type != value.VAL_NULL {
 			return fmt.Errorf("function '%s' argument %d: expected %s, got %s", name, i+1, param.TypeName, runtimeValueMode(actual))
 		}
-		if !param.IsRef && actual.Type == value.VAL_REF {
+		// R2 (spec 2026-08-24-explicit-ref): um parametro `any` recebe o ref
+		// COMO VALOR, igual a print/to_str — nunca ha leitura implicita ali.
+		// So um parametro de tipo concreto recusa VAL_REF, porque nesse caso
+		// o ref precisaria ser lido para virar o valor esperado.
+		if !param.IsRef && actual.Type == value.VAL_REF && param.TypeName != "any" {
 			return fmt.Errorf("function '%s' argument %d: expected %s, got ref", name, i+1, param.TypeName)
 		}
 	}

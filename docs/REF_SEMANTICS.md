@@ -1,155 +1,100 @@
 # Referências em Noxy
 
-Noxy usa `ref T` para representar uma referência de primeira classe a um valor
-do tipo `T`. Leituras fazem dereference automático, mas escrita e rebind usam
-sintaxes distintas. Assim, o tipo declarado de uma variável permanece estável
-mesmo quando seu valor ou o armazenamento referenciado são mutáveis.
+`ref T` é uma referência de primeira classe a um slot que contém um `T`. A
+regra inteira cabe em uma frase: **uma referência nunca é criada nem lida
+sem `ref` ou `*` no código** — e `.`/`[]` são o único atalho. A
+especificação completa (R1–R9, diagnósticos) está em
+[`NOXY_LANGUAGE_SPEC.md` §2.3](NOXY_LANGUAGE_SPEC.md#23-references-ref).
 
-## Resumo
+## As três formas
 
-| Form | Meaning |
+| Escrita | Significado |
 |---|---|
-| `f(value)` where exact parameter is `ref T` | Contextual reference conversion |
-| `ref value` | Create a first-class reference |
-| `*reference = value` | Update referenced storage |
-| `reference = ref other` | Rebind the reference value |
+| `ref x` | cria uma referência para o slot de `x` (variável, campo, índice, entrada de map, capturada) |
+| `r` | a referência em si — para onde aponta |
+| `*r` | o valor apontado: lê em expressão, escreve com `*r = v` |
+| `r.f`, `r[i]` | atalho para `(*r).f`, `(*r)[i]` — leitura e escrita |
 
-## 1. Conversão contextual em chamadas exatas
+```noxy
+let x: int = 10
+let y: int = 20
+let r: ref int = ref x
 
-Quando a assinatura exata de uma função espera `ref T`, uma expressão
-endereçável do tipo `T` é convertida contextualmente em referência:
+let n: int = *r        // le: 10          (`let n: int = r` e erro)
+*r = 20                // escreve em x
+r = ref y              // rebind: r passa a apontar para y
+print(r)               // <ref ...>: a referencia
+print(*r)              // o valor
+```
+
+## Em chamadas
+
+Um parâmetro `ref T` recebe `ref x`, uma expressão que já é `ref T`, ou
+`null`. Nunca um `T` cru — o call site mostra o que pode mudar:
 
 ```noxy
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 
 let answer: int = 41
-increment(answer)       // empréstimo contextual; answer passa a ser 42
-increment(ref answer)   // a referência explícita também é válida
-```
+increment(ref answer)   // answer passa a ser 42
+increment(answer)       // erro: expected ref int, got int — hint: use 'ref answer'
 
-São endereçáveis variáveis locais e globais, campos de structs, slots de arrays
-e maps e variáveis capturadas. Literais não nulos e temporários comuns
-produzidos por funções não são endereçáveis:
+append(ref xs, 1)       // builtins seguem a mesma regra
+pop(ref xs)
+delete(ref m, "k")
+json_loads(texto, ref alvo)
 
-```noxy
-increment(41)          // erro de compilação: not addressable
-increment(make_int())  // erro se make_int() retorna int
-```
-
-Um resultado que já tenha o tipo declarado `ref T` é um valor de referência e
-pode ser passado diretamente. O literal `null` também é aceito como o valor
-nullable explícito de `ref T`; ele não possui nem simula um slot de
-armazenamento.
-
-A conversão contextual só existe quando o compilador conhece a assinatura
-exata, incluindo contratos públicos nativos conhecidos pelo compilador.
-
-## 2. Referências explícitas em fronteiras dinâmicas
-
-`ref value` cria uma referência de primeira classe. Ela pode ser guardada,
-retornada ou passada através de uma fronteira dinâmica.
-
-O tipo bare `func` não contém a assinatura dos parâmetros. Por isso, ele exige
-`ref value` para transportar uma referência; a chamada não infere referências:
-
-```noxy
-let dynamic: func = increment
-let answer: int = 41
-
-dynamic(ref answer) // envia ref int
-dynamic(answer)     // envia int; o runtime rejeita antes de entrar na função
-```
-
-Primitivas nativas sem tipo, plugins sem assinatura e membros de módulo cujo
-tipo exato não é conhecido são fronteiras dinâmicas equivalentes. Também nelas
-a referência deve ser explícita.
-
-Se uma variável já possui tipo `ref T`, a forma explícita encaminha o valor de
-referência existente, sem criar `ref ref T`:
-
-```noxy
-let pointer: ref int = ref answer
-dynamic(ref pointer) // encaminha o mesmo ref int
-```
-
-## 3. Leitura automática
-
-Uma referência usada onde `T` é necessário é lida automaticamente:
-
-```noxy
-let answer: int = 41
-let pointer: ref int = ref answer
-let next: int = pointer + 1
-print(pointer) // 41
-```
-
-O dereference automático vale para expressões e acesso a campos. Ele não muda
-as regras explícitas de escrita.
-
-## 4. Update do armazenamento
-
-`*reference = value` escreve no armazenamento apontado:
-
-```noxy
-func double_it(value: ref int) -> void
-    *value = value * 2
+func push(p: ref int[]) -> void
+    append(p, 9)        // p ja e ref int[]: passa direto, sem `ref`
 end
 ```
 
-Uma atribuição bare a uma variável `ref T` não atualiza o alvo. Portanto,
-`value = value * 2` é inválido: o lado direito é `T`, mas um rebind requer
-`ref T`.
+Não há distinção entre função tipada, `func` bare, construtor, generic ou
+nativo. `ref` sobre algo que já é referência é erro (`'p' is already a
+reference`); não existe `ref ref T`.
 
-Campos e índices do valor referenciado continuam usando a sintaxe normal:
+## Update × rebind
+
+| LHS | RHS | Escrita | Ação |
+|---|---|---|---|
+| `ref T` | `T` | `*r = v` | escreve no slot apontado |
+| `ref T` | `ref T` | `r = ref y` | troca para onde `r` aponta |
+| `T` | `ref T` | `x = *r` | lê (`x = r` é erro) |
+
+`*r = ref y` é erro com hint: `r = ref y` para rebind, ou `*r = y` para
+escrever o valor.
+
+## Comparação
+
+Dois refs comparam **identidade de slot**; `r == null` pergunta se a
+referência é nula; `r == 1` é erro — `*r == 1` compara valores.
+
+## `null`
+
+`null` é valor válido de `ref T`: pode ser guardado, passado, retornado,
+comparado e substituído por rebind. Escrever através de `null` é erro de
+runtime.
+
+## Tempo de vida de uma local referenciada
+
+`ref x` sobre uma local promove o slot de `x` a uma célula no heap. A célula
+vive enquanto houver qualquer referência para ela — inclusive depois de a
+função retornar. É assim que se alocam nós; não há `new`:
 
 ```noxy
-func rename(person: ref Person) -> void
-    person.name = "Noxy"
-end
+let novo: Node = Node(v, null)   // uma variavel: `ref` exige um l-value
+node.next = ref novo             // `novo` vira celula; sobrevive a funcao
 ```
 
-## 5. Rebind da referência
+Custo: uma alocação por local referenciada; locais nunca referenciadas ficam
+na pilha. Uma closure que captura `ref` a uma local e vai para `spawn`
+compartilha a célula entre routines — coordene, como com globais
+([concurrency.md](concurrency.md)).
 
-`reference = ref other` troca o alvo armazenado na variável de referência:
+## Parâmetros comuns e semântica de valor
 
-```noxy
-let first: int = 10
-let second: int = 20
-let pointer: ref int = ref first
-
-pointer = ref second
-*pointer = 21
-```
-
-O rebind de um parâmetro muda apenas o valor de referência local do parâmetro;
-ele não faz rebind da variável de referência mantida pelo chamador.
-
-## 6. `null` e tempo de vida
-
-`null` é um valor válido de `ref T`. Pode ser armazenado, comparado, retornado
-ou substituído por rebind. Leituras por dereference automático propagam
-`null`; tentar atualizar através de `null` é erro de runtime.
-
-Referências podem escapar por retorno, closure, campo ou global. Quando o alvo
-é uma variável local capturada, a VM usa o armazenamento de upvalue para que a
-referência permaneça válida depois que a função criadora retorna.
-
-## 7. Parâmetros comuns e semântica de valor
-
-Parâmetros sem `ref` seguem a semântica de valor de Noxy (0.4.0+): primitivos
-são copiados, e arrays, maps e structs se comportam como cópias profundas
-independentes em qualquer profundidade, implementadas com copy-on-write.
-**`ref` é o único mecanismo de compartilhamento da linguagem** — quando uma
-assinatura não tem `ref`, o chamador tem a garantia de que seus dados não
-serão tocados.
-
-## 8. Refs para dentro de contêineres e copy-on-write
-
-Um `ref` criado para dentro de um contêiner (`ref arr[0]`, campo de struct)
-fixa a identidade daquele contêiner no momento da criação — a base do caminho
-é unicizada nesse instante. Aresta documentada: se o contêiner for copiado
-*depois* da criação do ref (ex.: `let b = a`), uma escrita através do ref
-pré-existente ainda é visível pela cópia que não materializou seu clone.
-Crie refs depois de compartilhar, não antes.
+Sem `ref`, arrays, maps e structs são passados por **valor** — independentes
+em qualquer profundidade (copy-on-write). A assinatura sem `ref` garante que
+o chamador não é tocado; o call site sem `ref` garante o mesmo.

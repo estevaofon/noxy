@@ -55,7 +55,7 @@
             <div class="hero-content">
                 <a href="https://github.com/estevaofon/noxy/blob/main/CHANGELOG.md" class="version-badge"
                     target="_blank">
-                    <span class="version-badge-tag">v0.18.0</span>
+                    <span class="version-badge-tag">v0.19.0</span>
                     Latest release &middot; changelog
                     <i class="fas fa-arrow-right"></i>
                 </a>
@@ -241,9 +241,9 @@ print(a[0])   // 99</code></pre>
                     <h3>Arrays</h3>
                     <pre><code class="language-go">// Dynamic arrays
 let nums: int[] = []
-append(nums, 10)
-append(nums, 20)
-print(length(nums), pop(nums), contains(nums, 10))
+append(ref nums, 10)
+append(ref nums, 20)
+print(length(nums), pop(ref nums), contains(nums, 10))
 
 // Fixed size
 let fixed: int[5] = [1, 2, 3, 4, 5]
@@ -307,7 +307,7 @@ print(add(2, 3), apply(triple, 5))   // 5 15</code></pre>
 end
 
 func push&lt;T&gt;(s: ref Stack&lt;T&gt;, item: T)
-    append(s.items, item)
+    append(ref s.items, item)
 end
 
 func peek&lt;T&gt;(s: Stack&lt;T&gt;) -> T
@@ -357,7 +357,7 @@ func push_back(node: ref Node, value: int)
 end
 
 let head: Node = Node(1, null)
-push_back(head, 2)
+push_back(ref head, 2)
 print(head.next.value)   // 2</code></pre>
                 </div>
                 <div class="syntax-card">
@@ -382,7 +382,7 @@ use sys
 
 print(time.now())            // unix timestamp
 print(length(sys.argv()))    // command-line args
-print(sys.version)           // v0.18.0
+print(sys.version)           // v0.19.0
 
 let user: map[string, any] = {"name": "Ana", "age": 30}
 print(json_dumps(user))      // {"age":30,"name":"Ana"}</code></pre>
@@ -508,11 +508,11 @@ let counter: Counter = Counter([1, 2, 3])
 touch(counter)
 print(counter.hits[0])   // 1 - the copy was mutated, not the original
 
-bump(counter)
+bump(ref counter)
 print(counter.hits[0])   // 2 - ref shares the original
 
 let backup: Counter = counter
-bump(counter)
+bump(ref counter)
 print(backup.hits[0])    // 2 - assignment already copied
 
 print([1, 2] == [1, 2])  // true - composites compare by content</code></pre>
@@ -587,11 +587,11 @@ func in_order(node: ref Node)
 end
 
 let root: Node = Node(50, null, null)
-insert(root, 30)
-insert(root, 70)
-insert(root, 20)
-insert(root, 40)
-in_order(root)   // 20 30 40 50 70</code></pre>
+insert(ref root, 30)
+insert(ref root, 70)
+insert(ref root, 20)
+insert(ref root, 40)
+in_order(ref root)   // 20 30 40 50 70</code></pre>
                 </div>
                 <div class="example-tab" id="linked-list">
                     <h3>Linked List</h3>
@@ -623,9 +623,9 @@ func print_list(node: ref Node)
 end
 
 let list: Node = Node(10, null)
-push_back(list, 20)
-push_back(list, 30)
-print_list(list)   // 10 20 30</code></pre>
+push_back(ref list, 20)
+push_back(ref list, 30)
+print_list(ref list)   // 10 20 30</code></pre>
                 </div>
                 <div class="example-tab" id="hashmap">
                     <h3>HashMap</h3>

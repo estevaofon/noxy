@@ -69,33 +69,39 @@ func (vm *VM) defineCollectionBuiltins() {
 		return value.NewArray(elements), nil
 	})
 
-	vm.DefineNative("length", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("length", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if err := rejectRefArgs("length", args); err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) != 1 {
-			return value.NewInt(0)
+			return value.NewInt(0), nil
 		}
 		arg := args[0]
 		if arg.Type == value.VAL_BYTES {
 			if str, ok := arg.Obj.(string); ok {
-				return value.NewInt(int64(len(str)))
+				return value.NewInt(int64(len(str))), nil
 			}
 		}
 		if arg.Type == value.VAL_OBJ {
 			if str, ok := arg.Obj.(string); ok {
-				return value.NewInt(int64(utf8.RuneCountInString(str)))
+				return value.NewInt(int64(utf8.RuneCountInString(str))), nil
 			}
 			if arr, ok := arg.Obj.(*value.ObjArray); ok {
-				return value.NewInt(int64(len(arr.Elements)))
+				return value.NewInt(int64(len(arr.Elements))), nil
 			}
 			if mp, ok := arg.Obj.(*value.ObjMap); ok {
-				return value.NewInt(int64(mp.Len()))
+				return value.NewInt(int64(mp.Len())), nil
 			}
 		}
-		return value.NewInt(0)
+		return value.NewInt(0), nil
 	})
 
-	vm.DefineNative("keys", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("keys", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if err := rejectRefArgs("keys", args); err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) != 1 {
-			return value.NewArray(nil)
+			return value.NewArray(nil), nil
 		}
 		mapVal := args[0]
 		if mapVal.Type == value.VAL_OBJ {
@@ -109,10 +115,10 @@ func (vm *VM) defineCollectionBuiltins() {
 						keys = append(keys, value.NewString(kStr))
 					}
 				}
-				return value.NewArray(keys)
+				return value.NewArray(keys), nil
 			}
 		}
-		return value.NewArray(nil)
+		return value.NewArray(nil), nil
 	})
 
 	deleteSignature := value.NativeSignature{
@@ -224,9 +230,12 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		return value.NewNull(), nil
 	})
-	vm.DefineNative("slice", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("slice", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if err := rejectRefArgs("slice", args); err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) < 3 {
-			return value.NewNull()
+			return value.NewNull(), nil
 		}
 		seq := args[0]
 		start := int(args[1].Int())
@@ -250,28 +259,28 @@ func (vm *VM) defineCollectionBuiltins() {
 					start = clamp(start, len(str))
 					end = clamp(end, len(str))
 					if start > end {
-						return value.NewString("")
+						return value.NewString(""), nil
 					}
-					return value.NewString(str[start:end])
+					return value.NewString(str[start:end]), nil
 				}
 				runes := []rune(str)
 				start = clamp(start, len(runes))
 				end = clamp(end, len(runes))
 				if start > end {
-					return value.NewString("")
+					return value.NewString(""), nil
 				}
-				return value.NewString(string(runes[start:end]))
+				return value.NewString(string(runes[start:end])), nil
 			}
 			if arr, ok := seq.Obj.(*value.ObjArray); ok {
 				start = clamp(start, len(arr.Elements))
 				end = clamp(end, len(arr.Elements))
 				if start > end {
-					return value.NewArray(nil)
+					return value.NewArray(nil), nil
 				}
 
 				newElems := make([]value.Value, end-start)
 				copy(newElems, arr.Elements[start:end])
-				return value.NewArray(newElems)
+				return value.NewArray(newElems), nil
 			}
 		case value.VAL_BYTES:
 			if str, ok := seq.Obj.(string); ok {
@@ -279,16 +288,19 @@ func (vm *VM) defineCollectionBuiltins() {
 				start = clamp(start, len(str))
 				end = clamp(end, len(str))
 				if start > end {
-					return value.NewBytes("")
+					return value.NewBytes(""), nil
 				}
-				return value.NewBytes(str[start:end])
+				return value.NewBytes(str[start:end]), nil
 			}
 		}
-		return value.NewNull()
+		return value.NewNull(), nil
 	})
-	vm.DefineNative("contains", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("contains", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if err := rejectRefArgs("contains", args); err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) != 2 {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 		arrVal := args[0]
 		target := args[1]
@@ -296,16 +308,19 @@ func (vm *VM) defineCollectionBuiltins() {
 			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
 				for _, el := range arr.Elements {
 					if valuesEqual(el, target) {
-						return value.NewBool(true)
+						return value.NewBool(true), nil
 					}
 				}
 			}
 		}
-		return value.NewBool(false)
+		return value.NewBool(false), nil
 	})
-	vm.DefineNative("has_key", func(args []value.Value) value.Value {
+	vm.DefineContextualNative("has_key", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
+		if err := rejectRefArgs("has_key", args); err != nil {
+			return value.NewNull(), err
+		}
 		if len(args) != 2 {
-			return value.NewBool(false)
+			return value.NewBool(false), nil
 		}
 		mapVal := args[0]
 		keyVal := args[1]
@@ -318,18 +333,18 @@ func (vm *VM) defineCollectionBuiltins() {
 					if str, ok := keyVal.Obj.(string); ok {
 						key = str
 					} else {
-						return value.NewBool(false)
+						return value.NewBool(false), nil
 					}
 				} else {
-					return value.NewBool(false)
+					return value.NewBool(false), nil
 				}
 				_, ok := mapObj.Get(key)
-				return value.NewBool(ok)
+				return value.NewBool(ok), nil
 			}
 		}
-		return value.NewBool(false)
+		return value.NewBool(false), nil
 	})
-	vm.DefineNative("to_bytes", func(args []value.Value) value.Value {
+	vm.defineValueNative("to_bytes", func(args []value.Value) value.Value {
 		if len(args) != 1 {
 			return value.NewBytes("")
 		}

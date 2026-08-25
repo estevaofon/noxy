@@ -13,7 +13,7 @@ let i: int = 0
 while i < 10 do
     i = i + 1
     if i % 2 == 0 then continue end
-    append(impares, i)
+    append(ref impares, i)
 end
 assert(length(impares) == 5, "5 impares")
 assert(impares[4] == 9, "ultimo impar = 9")

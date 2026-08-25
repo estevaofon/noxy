@@ -109,3 +109,20 @@ end`))
 		t.Fatalf("hint de deref nao deveria aparecer quando deref nao conserta: %v", err)
 	}
 }
+
+// R2: `let x: T = r` deixa de ler implicitamente — mesma mensagem e hint
+// da atribuicao.
+func TestLetDeclarationFromRefSuggestsDeref(t *testing.T) {
+	requireDerefReadHint(t, `let x: int = 10
+let r: ref int = ref x
+let m: int = r`, "hint: use '*r' "+derefReadHintText)
+}
+
+// R2: o RHS de `*r = s` tambem nao le.
+func TestDerefAssignmentFromRefRhsSuggestsDeref(t *testing.T) {
+	requireDerefReadHint(t, `let x: int = 10
+let z: int = 99
+let r: ref int = ref x
+let s: ref int = ref z
+*r = s`, "hint: use '*s' "+derefReadHintText)
+}

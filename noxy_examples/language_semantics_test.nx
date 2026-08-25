@@ -160,7 +160,7 @@ end
 // ------------------------------------------------------------
 
 func muta_array(a: int[])
-    append(a, 99)
+    append(ref a, 99)
     a[0] = -1
 end
 
@@ -207,12 +207,12 @@ func test_semantica_de_valor()
     // 5. Guardar num container tambem copia.
     let fonte: int[] = [7]
     let caixa: Interno = Interno(fonte)
-    append(fonte, 8)
+    append(ref fonte, 8)
     check_int(length(caixa.valores), 1, "construtor guarda copia independente")
 
     let acumulado: int[][] = []
     let item: int[] = [1]
-    append(acumulado, item)
+    append(ref acumulado, item)
     item[0] = 500
     check_int(acumulado[0][0], 1, "append guarda copia independente")
 
@@ -227,7 +227,7 @@ func test_semantica_de_valor()
     let ch: any = make_chan(1)
     let enviado: int[] = [1]
     chan_send(ch, enviado)
-    append(enviado, 2)
+    append(ref enviado, 2)
     let recebido: any = chan_recv(ch)
     check_int(length(recebido), 1, "chan_send entrega copia independente")
     check_int(length(enviado), 2, "o remetente mantem o proprio valor")
@@ -242,12 +242,12 @@ func cresce_por_ref(a: ref int[])
 end
 
 func incrementa(v: ref int)
-    *v = v + 1
+    *v = *v + 1
 end
 
 func troca(a: ref int, b: ref int)
-    let va: int = a
-    let vb: int = b
+    let va: int = *a
+    let vb: int = *b
     *a = vb
     *b = va
 end
@@ -257,19 +257,18 @@ func test_ref()
 
     // Parametro ref compartilha o slot do caller.
     let lista: int[] = [1, 2, 3]
-    cresce_por_ref(lista)
+    cresce_por_ref(ref lista)
     check_int(length(lista), 4, "parametro ref muta o valor do caller")
 
-    // Conversao contextual: assinatura exata aceita forma concisa e explicita.
+    // 'ref' e obrigatorio em todo call site com parametro ref (R5).
     let n: int = 1
-    incrementa(n)
     incrementa(ref n)
-    check_int(n, 3, "ref aceita forma concisa e explicita")
+    check_int(n, 2, "ref e obrigatorio no call site")
 
-    // Auto-deref na leitura, '*' obrigatorio na escrita.
+    // Leitura explicita com '*r', escrita explicita com '*r ='.
     let x: int = 10
     let r: ref int = ref x
-    check_int(r + 1, 11, "leitura de ref faz auto-deref")
+    check_int(*r + 1, 11, "leitura de ref exige '*r'")
     *r = 20
     check_int(x, 20, "'*r = v' escreve no slot original")
 
@@ -295,7 +294,7 @@ func test_ref()
     let temperatura: int = 20
     let umidade: int = 50
     let obs: Observador = Observador(ref temperatura)
-    check_int(obs.alvo, 20, "campo ref faz auto-deref na leitura")
+    check_int(*obs.alvo, 20, "campo ref exige leitura explicita com *")
     *obs.alvo = 25
     check_int(temperatura, 25, "'*obs.alvo = v' escreve na origem")
     obs.alvo = ref umidade
@@ -347,7 +346,8 @@ func test_igualdade()
 
     // O mesmo vale para dois refs comparados diretamente: '==' entre dois
     // 'ref T' pergunta "e o MESMO objeto?", nao "tem o mesmo valor?".
-    // Este e o unico ponto da linguagem onde um ref NAO sofre auto-deref.
+    // Um ref nunca e lido implicitamente (spec 2.3 R2): comparar os valores
+    // apontados pede '*rx == *ry'.
     let rx: ref int = ref x
     let ry: ref int = ref y
     let rx2: ref int = ref x
@@ -565,7 +565,7 @@ end
 func aplica_todos<A, B>(arr: A[], fn: func(A) -> B) -> B[]
     let saida: B[] = []
     for item in arr do
-        append(saida, fn(item))
+        append(ref saida, fn(item))
     end
     return saida
 end
@@ -621,11 +621,11 @@ func test_colecoes()
 
     let a: int[] = []
     check_int(length(a), 0, "array dinamico comeca vazio")
-    append(a, 1)
-    append(a, 2)
-    append(a, 3)
+    append(ref a, 1)
+    append(ref a, 2)
+    append(ref a, 3)
     check_int(length(a), 3, "append cresce")
-    check_int(pop(a), 3, "pop devolve o ultimo")
+    check_int(pop(ref a), 3, "pop devolve o ultimo")
     check_int(length(a), 2, "pop encurta")
     check(contains(a, 2), "contains encontra o que ficou")
     check(!contains(a, 3), "contains nao encontra o que saiu")
@@ -639,7 +639,7 @@ func test_colecoes()
     check(has_key(m, "a"), "has_key positivo")
     m["c"] = 3
     check_int(m["c"], 3, "escrita cria a chave")
-    delete(m, "a")
+    delete(ref m, "a")
     check(!has_key(m, "a"), "delete remove a chave")
     check_int(length(keys(m)), 2, "keys reflete o tamanho atual")
 

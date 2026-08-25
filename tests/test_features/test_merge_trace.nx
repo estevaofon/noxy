@@ -10,8 +10,8 @@ let n2: Node = Node(2, null)
 let n3: Node = Node(3, null)
 let n4: Node = Node(4, null)
 
-n1.next = n3
-n2.next = n4
+n1.next = ref n3
+n2.next = ref n4
 
 func merge(l1: ref Node, l2: ref Node, depth: int) -> ref Node
     print("merge depth=" + to_str(depth) + " l1=" + to_str(l1.data) + " l2=" + to_str(l2.data))
@@ -43,6 +43,6 @@ func merge(l1: ref Node, l2: ref Node, depth: int) -> ref Node
 end
 
 print("Calling merge:")
-let result: ref Node = merge(n1, n2, 0)
+let result: ref Node = merge(ref n1, ref n2, 0)
 print("Merge complete!")
 print("Result data: " + to_str(result.data))

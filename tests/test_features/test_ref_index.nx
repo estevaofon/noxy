@@ -8,4 +8,4 @@ func test(arr: ref int[])
 end
 
 let a: int[] = [10, 20]
-test(a)
+test(ref a)

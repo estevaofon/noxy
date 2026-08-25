@@ -10,11 +10,11 @@ func TestStructuralEqualityArrays(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let a: int[]
-    append(a, 1)
-    append(a, 2)
+    append(ref a, 1)
+    append(ref a, 2)
     let b: int[]
-    append(b, 1)
-    append(b, 2)
+    append(ref b, 1)
+    append(ref b, 2)
     if a == b then
         test_report(1)
     else

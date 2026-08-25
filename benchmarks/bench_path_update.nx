@@ -9,7 +9,7 @@ func main()
     let cells: Cell[]
     let i: int = 0
     while i < 2000 do
-        append(cells, Cell(0, 0))
+        append(ref cells, Cell(0, 0))
         i = i + 1
     end
     let round: int = 0

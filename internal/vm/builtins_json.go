@@ -11,7 +11,7 @@ import (
 )
 
 func (vm *VM) defineJSONBuiltins() {
-	vm.DefineNative("json_dumps", func(args []value.Value) value.Value {
+	vm.defineValueNative("json_dumps", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewString("null")
 		}
@@ -23,7 +23,7 @@ func (vm *VM) defineJSONBuiltins() {
 		return value.NewString(string(bytes))
 	})
 
-	vm.DefineNative("json_dumps_result", func(args []value.Value) value.Value {
+	vm.defineValueNative("json_dumps_result", func(args []value.Value) value.Value {
 		if len(args) < 2 {
 			return value.NewNull()
 		}
@@ -53,7 +53,7 @@ func (vm *VM) defineJSONBuiltins() {
 	})
 
 	// json_parse(str) -> Value
-	vm.DefineNative("json_parse", func(args []value.Value) value.Value {
+	vm.defineValueNative("json_parse", func(args []value.Value) value.Value {
 		if len(args) < 1 {
 			return value.NewNull()
 		}

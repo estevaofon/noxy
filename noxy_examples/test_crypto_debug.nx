@@ -72,7 +72,7 @@ func hex_to_bytes(hex_str: string) -> bytes
         let low: int = hex_char_to_int(char2)
         let val: int = (high << 4) | low
         
-        append(result, val)
+        append(ref result, val)
         i = i + 2
     end
     

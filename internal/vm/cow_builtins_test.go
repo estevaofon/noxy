@@ -27,9 +27,9 @@ func newMarkingVM() (*VM, *value.Value) {
 func TestAppendUnicizesSharedTarget(t *testing.T) {
 	machine, original := newMarkingVM()
 	if err := interpretVMSource(t, machine, `let a: int[]
-append(a, 1)
+append(ref a, 1)
 test_mark_shared(a)
-append(a, 2)
+append(ref a, 2)
 `); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
@@ -51,10 +51,10 @@ append(a, 2)
 func TestPopUnicizesSharedTarget(t *testing.T) {
 	machine, original := newMarkingVM()
 	if err := interpretVMSource(t, machine, `let a: int[]
-append(a, 1)
-append(a, 2)
+append(ref a, 1)
+append(ref a, 2)
 test_mark_shared(a)
-pop(a)
+pop(ref a)
 `); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDeleteUnicizesSharedTarget(t *testing.T) {
 	machine, original := newMarkingVM()
 	if err := interpretVMSource(t, machine, `let m: map[string, int] = {"x": 1, "y": 2}
 test_mark_shared(m)
-delete(m, "x")
+delete(ref m, "x")
 `); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
@@ -94,9 +94,9 @@ delete(m, "x")
 func TestAppendMarksInsertedComposite(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `let inner: int[]
-append(inner, 1)
+append(ref inner, 1)
 let outer: int[][]
-append(outer, inner)
+append(ref outer, inner)
 `); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}

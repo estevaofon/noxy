@@ -139,6 +139,8 @@ func (c *Compiler) structOperandName(leftType, rightType ast.NoxyType) (string, 
 	return "", false
 }
 
+// unwrapRefType serve as posicoes que ATRAVESSAM a referencia (R4: base de
+// '.' e '[]', memberType); nao e usado para ler um ref como valor.
 func unwrapRefType(t ast.NoxyType) ast.NoxyType {
 	if ref, ok := t.(*ast.RefType); ok {
 		return ref.ElementType

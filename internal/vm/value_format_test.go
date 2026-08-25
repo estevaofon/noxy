@@ -97,10 +97,26 @@ iprint("sem", "quebra")
 	}
 }
 
-// Formato de referência: `print(r)` com r: ref T mostra o VALOR apontado (o
-// auto-deref do print), não um endereço — é o que o usuário vê ao imprimir
-// um parâmetro `ref` dentro de uma função.
+// Formato de referência (R2, spec 2026-08-24-explicit-ref decisao (a)):
+// `print(r)`/`test_report(r)` com r: ref T mostram a REFERENCIA (`*r` mostra
+// o valor apontado) — um native sem assinatura recebe o ref como valor, sem
+// deref implicito.
 func TestValueStringOfRefShowsPointedValue(t *testing.T) {
+	got := captureVMSource(t, `
+func show(r: ref int) -> void
+    test_report(*r)
+end
+let x: int = 41
+show(ref x)
+`)
+	if got.Type == value.VAL_NULL || got.String() != "41" {
+		t.Fatalf("ref int reportado como %q, want %q", got.String(), "41")
+	}
+}
+
+// A referencia crua (sem deref) reportada por um native sem assinatura
+// mostra a referencia, nao o valor.
+func TestValueStringOfRefShowsReferenceWhenNotDereferenced(t *testing.T) {
 	got := captureVMSource(t, `
 func show(r: ref int) -> void
     test_report(r)
@@ -108,9 +124,7 @@ end
 let x: int = 41
 show(ref x)
 `)
-	// Seja qual for a forma em que o native recebe o argumento (ref
-	// embrulhado ou já resolvido), o texto é o do valor apontado.
-	if got.Type == value.VAL_NULL || got.String() != "41" {
-		t.Fatalf("ref int reportado como %q, want %q", got.String(), "41")
+	if !strings.HasPrefix(got.String(), "<ref") {
+		t.Fatalf("ref int reportado como %q, want prefix <ref", got.String())
 	}
 }

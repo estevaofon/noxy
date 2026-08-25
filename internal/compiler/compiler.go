@@ -413,19 +413,11 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			valType = n.Type
 		}
 
-		// Type Check
-		// Auto-Deref if Value is Reference and Target is NOT Reference
+		// Type Check. R2 (spec 2026-08-24-explicit-ref): `let x: T = r` com
+		// r: ref T NAO le — o hint aponta '*r', como na atribuicao.
 		if n.Type != nil {
-			if refType, isRef := valType.(*ast.RefType); isRef {
-				if _, targetIsRef := n.Type.(*ast.RefType); !targetIsRef {
-					// We have Ref, want Value -> Deref
-					c.emitByte(byte(chunk.OP_DEREF))
-					valType = refType.ElementType
-				}
-			}
-
 			if !c.areTypesCompatible(n.Type, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType))
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s%s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType), c.derefReadHint(n.Type, valType, n.Value))
 			}
 			if err := c.emitRuntimeValueType(n.Type); err != nil {
 				return nil, nil, err
@@ -535,17 +527,21 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// Logic: *ref<T> = T
 			// Check if value type matches the element type of the reference
 
-			// Auto-deref RHS if it is a RefType but we need a Value.
-			if valRef, valIsRef := valType.(*ast.RefType); valIsRef {
-				// If target is value type, dereference the RHS reference.
-				if _, targetIsRef := refT.ElementType.(*ast.RefType); !targetIsRef {
-					c.emitByte(byte(chunk.OP_DEREF))
-					valType = valRef.ElementType
+			// R2/R6 (spec 2026-08-24-explicit-ref): o RHS de `*r = ...` nao
+			// le um ref implicitamente. `*r = ref y` e quase sempre um rebind
+			// escrito no lugar errado — hint com as duas formas legitimas.
+			if _, valIsRef := valType.(*ast.RefType); valIsRef {
+				if prefix, ok := n.Value.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
+					target := prefixExp.Right.String()
+					return nil, nil, fmt.Errorf(
+						"[line %d] cannot assign %s to %s through '*%s'\n  hint: use '%s = ref %s' to rebind the reference, or '*%s = %s' to write the value",
+						c.currentLine, noxyTypeName(valType), noxyTypeName(refT.ElementType), target, target, prefix.Right.String(), target, prefix.Right.String(),
+					)
 				}
 			}
 
 			if !c.areTypesCompatible(refT.ElementType, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s", c.currentLine, refT.ElementType.String(), valType.String())
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s%s", c.currentLine, refT.ElementType.String(), valType.String(), c.derefReadHint(refT.ElementType, valType, n.Value))
 			}
 			if err := c.emitRuntimeValueType(refT.ElementType); err != nil {
 				return nil, nil, err
@@ -728,8 +724,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			if _, ok := idxType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
+			if err := c.rejectRefRead(idxType, indexExp.Index, "index"); err != nil {
+				return nil, nil, err
 			}
 
 			// 3. Compile Value
@@ -1085,8 +1081,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, isRef := idxType.(*ast.RefType); isRef {
-				c.emitByte(byte(chunk.OP_DEREF))
+			if err := c.rejectRefRead(idxType, n.Index, "index"); err != nil {
+				return nil, nil, err
 			}
 			c.emitBytes(byte(op), byte(slot))
 			return c.currentChunk, elem, nil
@@ -1112,14 +1108,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 
-		// Auto-dereference index if Ref
-		if _, ok := idxType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-		}
-
-		// Unwrap RefType in index
-		if ref, ok := idxType.(*ast.RefType); ok {
-			idxType = ref.ElementType
+		// R2: indice ref e erro (hint '*ri').
+		if err := c.rejectRefRead(idxType, n.Index, "index"); err != nil {
+			return nil, nil, err
 		}
 
 		// Index should be int (usually)
@@ -1128,8 +1119,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// return nil, nil, fmt.Errorf("index must be int, got %s", idxType)
 		}
 
-		// perf #66: base estaticamente T[] (ou ref T[], ja dereferenciada
-		// acima) indexa sem despacho dinamico; o VM cai no OP_GET_INDEX
+		// perf #66: base estaticamente T[] (ou ref T[], base atravessada
+		// acima — R4) indexa sem despacho dinamico; o VM cai no OP_GET_INDEX
 		// generico se o container em runtime nao for array.
 		if _, isArray := arrayTypeOf(leftType); isArray {
 			c.emitByte(byte(chunk.OP_GET_INDEX_ARRAY))
@@ -1187,10 +1178,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+			if err := c.rejectRefRead(leftType, n.Left, "operand of '"+n.Operator+"'"); err != nil {
+				return nil, nil, err
+			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_FALSE)
 			c.emitByte(byte(chunk.OP_POP))
 			_, rightType, err := c.Compile(n.Right)
 			if err != nil {
+				return nil, nil, err
+			}
+			if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
 				return nil, nil, err
 			}
 			c.patchJump(endJump)
@@ -1213,10 +1210,16 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
+			if err := c.rejectRefRead(leftType, n.Left, "operand of '"+n.Operator+"'"); err != nil {
+				return nil, nil, err
+			}
 			endJump := c.emitJump(chunk.OP_JUMP_IF_TRUE)
 			c.emitByte(byte(chunk.OP_POP))
 			_, rightType, err := c.Compile(n.Right)
 			if err != nil {
+				return nil, nil, err
+			}
+			if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
 				return nil, nil, err
 			}
 			c.patchJump(endJump)
@@ -1236,12 +1239,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		}
 
 		// Em `==`/`!=` um operando ref NUNCA e dereferenciado
-		// implicitamente (spec §2.3, excecao 1): dois refs chegam inteiros
+		// implicitamente (spec 2026-08-24-explicit-ref, R7): dois refs chegam inteiros
 		// ate OP_EQUAL para comparar IDENTIDADE DE SLOT (§2.2.7), ref vs
 		// null pergunta sobre o PROPRIO ref, e o caso misto estatico
 		// ref vs valor e rejeitado logo abaixo (rejectMixedRefComparison)
-		// com hint para o deref explicito. Todos os demais operadores
-		// seguem dereferenciando neste ponto.
+		// com hint para o deref explicito. Nos demais operadores um ref e
+		// erro (R2).
 		identityComparison := n.Operator == "==" || n.Operator == "!="
 
 		// Superinstrucoes (issue #66, item 3): `local ± K` (resultado int,
@@ -1261,12 +1264,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			if _, ok := leftType.(*ast.RefType); ok && !identityComparison {
-				// Always deref ref types before comparison (including null comparison)
-				// This ensures 'ref Node == null' compares the pointed-to value, not the ref itself
-				c.emitByte(byte(chunk.OP_DEREF))
-				if ref, ok := leftType.(*ast.RefType); ok {
-					leftType = ref.ElementType
+			// R2: operando ref nunca e lido; em `==`/`!=` os refs seguem
+			// inteiros ate OP_EQUAL (identidade de slot, R7) e o caso misto
+			// e rejectMixedRefComparison abaixo.
+			if !identityComparison {
+				if err := c.rejectRefRead(leftType, n.Left, "operand of '"+n.Operator+"'"); err != nil {
+					return nil, nil, err
 				}
 			}
 
@@ -1275,11 +1278,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
-			if _, ok := rightType.(*ast.RefType); ok && !identityComparison {
-				// Always deref ref types before comparison (including null comparison)
-				c.emitByte(byte(chunk.OP_DEREF))
-				if ref, ok := rightType.(*ast.RefType); ok {
-					rightType = ref.ElementType
+			if !identityComparison {
+				if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
+					return nil, nil, err
 				}
 			}
 		}
@@ -1476,12 +1477,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			return nil, nil, err
 		}
 		if n.Operator == "*" {
-			// Deref explicito. Tipo estatico conhecido e nao-ref (inclui any,
-			// que nunca guarda ref) e erro aqui: OP_DEREF em runtime PASSA um
-			// nao-ref adiante sem erro (executor), entao esta e a unica guarda.
-			// Tipo desconhecido (nil) mantem a leniencia: emite OP_DEREF.
+			// Deref explicito. Tipo estatico conhecido, nao-ref e nao-any e
+			// erro aqui, em compilacao. `any` guarda ref sim (R2: toda
+			// posicao any recebe a referencia como valor), entao ele e
+			// tratado como tipo desconhecido: emite OP_DEREF e deixa a
+			// checagem para o executor, que recusa dereferenciar um valor
+			// nao-ref ("cannot dereference <tipo>") e um ref nulo ("cannot
+			// dereference null reference") — os dois lados juntos cobrem R3.
 			ref, isRef := rightType.(*ast.RefType)
-			if !isRef && rightType != nil {
+			if !isRef && rightType != nil && !isAny(rightType) {
 				return nil, nil, fmt.Errorf("[line %d] cannot dereference non-reference value of type %s", c.currentLine, rightType.String())
 			}
 			c.emitByte(byte(chunk.OP_DEREF))
@@ -1490,9 +1494,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 			return c.currentChunk, nil, nil
 		}
-		if ref, ok := rightType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
-			rightType = ref.ElementType
+		if err := c.rejectRefRead(rightType, n.Right, "operand of '"+n.Operator+"'"); err != nil {
+			return nil, nil, err
 		}
 		if n.Operator == "-" {
 			c.emitByte(byte(chunk.OP_NEGATE))
@@ -1549,9 +1552,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if ref, ok := condType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
-				condType = ref.ElementType
+			if err := c.rejectRefRead(condType, n.Condition, "condition"); err != nil {
+				return nil, nil, err
 			}
 			if err := c.checkCondition(condType); err != nil {
 				return nil, nil, err
@@ -1613,9 +1615,8 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err != nil {
 				return nil, nil, err
 			}
-			if ref, ok := condType.(*ast.RefType); ok {
-				c.emitByte(byte(chunk.OP_DEREF))
-				condType = ref.ElementType
+			if err := c.rejectRefRead(condType, n.Condition, "condition"); err != nil {
+				return nil, nil, err
 			}
 			if err := c.checkCondition(condType); err != nil {
 				return nil, nil, err
@@ -1659,6 +1660,15 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		_, colType, err := c.Compile(n.Collection)
 		if err != nil {
 			return nil, nil, err
+		}
+
+		// R2: a colecao de um for-each nunca e um ref (antes compilava e
+		// iterava zero vezes: OP_LEN devolve 0 para VAL_REF).
+		if _, isRef := colType.(*ast.RefType); isRef {
+			return nil, nil, fmt.Errorf(
+				"[line %d] cannot iterate over %s: a ref is never read implicitly\n  hint: use 'for %s in *%s'",
+				c.currentLine, noxyTypeName(colType), n.Identifier, n.Collection.String(),
+			)
 		}
 
 		// Handle Map: transform to keys array
@@ -2135,17 +2145,19 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				n.Token.Line, functionName, noxyTypeName(actual),
 			)
 		}
-		if ref, ok := actual.(*ast.RefType); ok {
-			if _, expectsRef := expected.(*ast.RefType); !expectsRef {
-				c.emitByte(byte(chunk.OP_DEREF))
+		// R2: `return r` com retorno T e erro; `return *r` de composto
+		// preserva o OP_COPY que o antigo return-deref emitia (valor
+		// independente do slot apontado).
+		if prefix, ok := n.ReturnValue.(*ast.PrefixExpression); ok && prefix.Operator == "*" {
+			if _, primitive := expected.(*ast.PrimitiveType); !primitive {
 				c.emitByte(byte(chunk.OP_COPY))
-				actual = ref.ElementType
 			}
 		}
 		if !c.areStrictTypesCompatible(expected, actual) {
 			return nil, nil, fmt.Errorf(
-				"[line %d] return type mismatch in '%s': expected %s, got %s",
+				"[line %d] return type mismatch in '%s': expected %s, got %s%s",
 				n.Token.Line, functionName, expected.String(), noxyTypeName(actual),
+				c.derefReadHint(expected, actual, n.ReturnValue),
 			)
 		}
 		if err := c.emitRuntimeValueType(expected); err != nil {
@@ -2456,15 +2468,26 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	for i, arg := range call.Arguments {
 		if isExact {
 			if expectedRef, ok := funcType.Params[i].(*ast.RefType); ok {
-				actualElement, err := c.compileReferenceArgument(arg)
+				// R5: parametro ref T recebe `ref x`, uma expressao ja ref T,
+				// null, ou any/desconhecido (modo validado em runtime).
+				refArg, err := c.compileRefArgument(arg)
 				if err != nil {
 					return nil, nil, err
+				}
+				if refArg.plain != nil {
+					return nil, nil, fmt.Errorf(
+						"[line %d] argument %d to '%s': expected %s, got %s%s",
+						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), noxyTypeName(refArg.plain), refArgumentHint(arg),
+					)
+				}
+				if !refArg.proven {
+					modesProven = false
 				}
 				if _, isNull := arg.(*ast.NullLiteral); isNull {
 					continue
 				}
-				if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
-					actual := &ast.RefType{ElementType: actualElement}
+				if refArg.element != nil && !c.areStrictTypesCompatible(expectedRef.ElementType, refArg.element) {
+					actual := &ast.RefType{ElementType: refArg.element}
 					return nil, nil, fmt.Errorf(
 						"[line %d] argument %d to '%s': expected %s, got %s",
 						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), actual.String(),
@@ -2495,17 +2518,12 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			return nil, nil, err
 		}
 
+		// R2: um argumento `ref T` para parametro T e erro (abaixo, com
+		// hint); para parametro any ou callee sem assinatura o ref passa
+		// como valor (print(r) mostra a referencia).
 		_, argType, err := c.Compile(arg)
 		if err != nil {
 			return nil, nil, err
-		}
-		explicitReference := false
-		if prefix, ok := arg.(*ast.PrefixExpression); ok {
-			explicitReference = prefix.Operator == "ref"
-		}
-		if ref, ok := argType.(*ast.RefType); ok && !explicitReference {
-			c.emitByte(byte(chunk.OP_DEREF))
-			argType = ref.ElementType
 		}
 		argTypes = append(argTypes, argType)
 		if isExact {
@@ -2517,9 +2535,10 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 		if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
 			return nil, nil, fmt.Errorf(
-				"[line %d] argument %d to '%s': expected %s, got %s",
+				"[line %d] argument %d to '%s': expected %s, got %s%s",
 				c.currentLine, i+1, callableName(call.Function),
 				funcType.Params[i].String(), noxyTypeName(argType),
+				c.derefReadHint(funcType.Params[i], argType, arg),
 			)
 		}
 		if isExact {
@@ -2527,6 +2546,13 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 				return nil, nil, err
 			}
 		}
+	}
+
+	// Task 10a (issue #82): length/keys/slice/contains/has_key sao nativas sem
+	// assinatura — nao passam por compileBuiltinRefArgument/areStrictTypesCompatible
+	// acima (isExact e false para elas), entao um `ref T` estatico so e pego aqui.
+	if err := c.rejectRefArgumentsForValueNatives(call, argTypes); err != nil {
+		return nil, nil, err
 	}
 
 	c.emitCall(len(call.Arguments), emission, modesProven)
@@ -2564,17 +2590,16 @@ func (c *Compiler) compileReferenceArgument(expression ast.Expression) (ast.Noxy
 	return targetType, nil
 }
 
+// compileReferenceArgumentValue emite a CRIACAO de uma referencia para o
+// operando de `ref` (R1): l-value de tipo T -> OP_REF_*. Operando que ja e
+// `ref T` e erro (alreadyReferenceError) — nao existe forwarding: uma
+// expressao ref T e passada como qualquer valor (compileRefArgument).
 func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast.NoxyType, error) {
-	if prefix, ok := expression.(*ast.PrefixExpression); ok && prefix.Operator == "ref" {
-		expression = prefix.Right
-	}
-
 	switch target := expression.(type) {
 	case *ast.Identifier:
 		if slot, declared := c.resolveLocal(target.Value); slot != -1 {
-			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitBytes(byte(chunk.OP_GET_LOCAL), byte(slot))
-				return ref.ElementType, nil
+			if _, ok := declared.(*ast.RefType); ok {
+				return nil, alreadyReferenceError(c.currentLine, target)
 			}
 			// RC: a caixa aberta sobre o slot herda a condicao do slot. Slot
 			// nao-possuidor (hoje, apenas os de tipo `ref`) produz caixa
@@ -2589,18 +2614,16 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 			return declared, nil
 		}
 		if upvalue, declared := c.resolveUpvalue(target.Value); upvalue != -1 {
-			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitBytes(byte(chunk.OP_GET_UPVALUE), byte(upvalue))
-				return ref.ElementType, nil
+			if _, ok := declared.(*ast.RefType); ok {
+				return nil, alreadyReferenceError(c.currentLine, target)
 			}
 			c.emitBytes(byte(chunk.OP_REF_UPVALUE), byte(upvalue))
 			return declared, nil
 		}
 		name := c.makeConstant(value.NewString(target.Value))
 		if declared, ok := c.resolveGlobalType(target.Value); ok {
-			if ref, ok := declared.(*ast.RefType); ok {
-				c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, name)
-				return ref.ElementType, nil
+			if _, ok := declared.(*ast.RefType); ok {
+				return nil, alreadyReferenceError(c.currentLine, target)
 			}
 			c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 			return declared, nil
@@ -2617,9 +2640,8 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		}
 		element := c.memberType(owner, target.Member)
 		name := c.makeConstant(value.NewString(target.Member))
-		if ref, ok := element.(*ast.RefType); ok {
-			c.emitOpWithConstantIndex(chunk.OP_CONTEXT_REF_PROPERTY, name)
-			return ref.ElementType, nil
+		if _, ok := element.(*ast.RefType); ok {
+			return nil, alreadyReferenceError(c.currentLine, target)
 		}
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
 		return element, nil
@@ -2634,10 +2656,9 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := indexType.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_DEREF))
+		if err := c.rejectRefRead(indexType, target.Index, "index"); err != nil {
+			return nil, err
 		}
-		indexType = unwrapRefType(indexType)
 		switch collection := unwrapRefType(container).(type) {
 		case *ast.ArrayType:
 			expected := &ast.PrimitiveType{Name: "int"}
@@ -2655,22 +2676,20 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 				)
 			}
 		}
-		if ref, ok := element.(*ast.RefType); ok {
-			c.emitByte(byte(chunk.OP_CONTEXT_REF_INDEX))
-			return ref.ElementType, nil
+		if _, ok := element.(*ast.RefType); ok {
+			return nil, alreadyReferenceError(c.currentLine, target)
 		}
 		c.emitByte(byte(chunk.OP_REF_INDEX))
 		return element, nil
 	case *ast.NullLiteral:
-		c.emitByte(byte(chunk.OP_NULL))
-		return nil, nil
+		return nil, fmt.Errorf("[line %d] 'null' is not addressable\n  hint: pass null directly, without 'ref'", c.currentLine)
 	case *ast.CallExpression:
 		_, result, err := c.Compile(target)
 		if err != nil {
 			return nil, err
 		}
-		if ref, ok := result.(*ast.RefType); ok {
-			return ref.ElementType, nil
+		if _, ok := result.(*ast.RefType); ok {
+			return nil, alreadyReferenceError(c.currentLine, target)
 		}
 		return nil, fmt.Errorf(
 			"[line %d] reference argument '%s' is not addressable\n  hint: use a variable, property, index, or null",
@@ -2702,8 +2721,8 @@ func (c *Compiler) emitBytes(b1, b2 byte) {
 // emitOpWithConstantIndex emits an opcode whose operand is an index into the
 // constant pool, always as a 16-bit big-endian value. OP_GET_GLOBAL,
 // OP_SET_GLOBAL, OP_GET_PROPERTY, OP_SET_PROPERTY, OP_IMPORT, OP_CLOSURE,
-// OP_REF_GLOBAL, OP_REF_PROPERTY, and OP_CONTEXT_REF_PROPERTY all read a name
-// or function constant this way. A single-byte operand silently truncates
+// OP_REF_GLOBAL, and OP_REF_PROPERTY all read a name or function constant
+// this way. A single-byte operand silently truncates
 // past 255 constants: a chunk with, say, 256 distinct global names truncates
 // index 256 to 0, so OP_GET_GLOBAL reads whatever constant happens to sit at
 // index 0 instead of the one the compiler meant, corrupting variable
@@ -2947,10 +2966,12 @@ func (c *Compiler) tryEmitLocalAddImm(infix *ast.InfixExpression) bool {
 }
 
 // tryEmitLocalPair funde dois operandos que sao locais PLANOS de tipo
-// primitivo em OP_GET_LOCAL_2 (issue #66, item 3). Sem ref: o site do infix
-// emite OP_DEREF para RefType e isso tem de continuar acontecendo pelo caminho
-// normal. Devolve os tipos como resolveLocal os da, para o chamador seguir
-// exatamente como se tivesse compilado os dois operandos.
+// primitivo em OP_GET_LOCAL_2 (issue #66, item 3). Sem ref: um operando
+// `ref T` e REJEITADO pelo caminho normal desde a issue #82 (R2:
+// rejectRefRead, "operand of '+' cannot be ref int"), e o filtro de
+// PrimitiveType aqui ja deixa RefType passar reto para la. Devolve os tipos
+// como resolveLocal os da, para o chamador seguir exatamente como se tivesse
+// compilado os dois operandos.
 func (c *Compiler) tryEmitLocalPair(left, right ast.Expression) (ast.NoxyType, ast.NoxyType, bool) {
 	leftIdent, ok := left.(*ast.Identifier)
 	if !ok {
@@ -3092,8 +3113,8 @@ func referenceSlotAssignmentTypeError(line int, name, slotKind string, expected,
 }
 
 // derefReadHint e o espelho de referenceAssignmentTypeError para a direcao
-// inversa: RHS `ref T` num alvo que espera `T`. Atribuicao nao faz
-// auto-deref (spec §2.3, Type-Based Assignment) — a leitura pede '*'
+// inversa: RHS `ref T` num alvo que espera `T`. Nenhuma posicao le um ref
+// implicitamente (spec 2026-08-24-explicit-ref, R2) — a leitura pede '*'
 // explicito. Devolve "" quando o deref nao consertaria o programa, para o
 // mismatch generico nao sugerir orientacao errada.
 func (c *Compiler) derefReadHint(expected, actual ast.NoxyType, rhs ast.Expression) string {
@@ -3113,8 +3134,8 @@ func (c *Compiler) derefReadHint(expected, actual ast.NoxyType, rhs ast.Expressi
 	return "\n  hint: use '*' to read the referenced value"
 }
 
-// rejectMixedRefComparison aplica a regra "em `==`/`!=` um ref nunca e
-// dereferenciado implicitamente" ao caso misto estatico: exatamente um dos
+// rejectMixedRefComparison aplica R2/R7 (spec 2026-08-24-explicit-ref) ao
+// caso misto estatico de ==/!=: exatamente um dos
 // lados e `ref T` e o outro e um valor de tipo conhecido. Ref vs null
 // pergunta sobre o proprio ref, e `any`/tipo desconhecido e fronteira
 // dinamica (pode carregar um ref em runtime, comparacao de identidade

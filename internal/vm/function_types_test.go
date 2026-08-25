@@ -57,7 +57,7 @@ dynamic(null)`)
 func TestExactCallableReferenceParameterReceivesNullValue(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func accept(value: ref func() -> int) -> void
-    test_report(ref value)
+    test_report(value)
 end
 accept(null)`)
 	if got.Type != value.VAL_NULL {
@@ -104,10 +104,10 @@ test_report(add10(5))`)
 func TestExecutesExactReferenceArgument(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 let answer: int = 41
-increment(answer)
+increment(ref answer)
 test_report(answer)`)
 	testExpectedObject(t, 42, got)
 }
@@ -134,7 +134,7 @@ func fill(parent: ref Node) -> void
 end
 let head: Node = Node(1, null)
 let was_null: bool = is_null(head.next)
-fill(head)
+fill(ref head)
 if was_null then
     test_report(head.next.value)
 else
@@ -162,7 +162,7 @@ fill(head.next)`)
 func TestExplicitReferenceSurvivesBareFunctionCall(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 let dynamic: func = increment
 let answer: int = 41
@@ -174,12 +174,12 @@ test_report(answer)`)
 func TestContextualReferenceUpdatesClosedUpvalue(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 func make_incrementer() -> func() -> int
     let value: int = 40
     return func() -> int
-        increment(value)
+        increment(ref value)
         return value
     end
 end
@@ -200,7 +200,7 @@ end
 let get_reference: func() -> ref int = make_reference_factory()
 let pointer: ref int = get_reference()
 *pointer = 42
-test_report(pointer)`)
+test_report(*pointer)`)
 	testExpectedObject(t, 42, got)
 }
 
@@ -211,7 +211,7 @@ func get_reference() -> ref int
     return ref answer
 end
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 increment(get_reference())
 test_report(answer)`)

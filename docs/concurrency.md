@@ -18,6 +18,23 @@ These guarantees do not make a sequence of operations atomic. For example, `coun
 
 Normal function calls, `spawn`, and `spawn_task` all follow Noxy's value semantics (0.4.0+): an ordinary composite parameter is an independent value at any depth, implemented with copy-on-write — the legacy `spawn` identity exception was removed. Data handed to another routine by argument or channel is therefore race-free by construction. Intentionally shared state (globals, `ref`) still requires explicit coordination; the synchronized runtime foundation does not make compound mutations atomic.
 
+A closure that captures a `ref` to a local shares that local's cell with
+every routine that runs the closure — it is a local only in name:
+
+```noxy
+func main()
+    let counter: int = 0
+    let rc: ref int = ref counter       // counter is now a heap cell
+    let bump: func() -> void = func() -> void
+        *rc = *rc + 1                   // shared with main through rc
+    end
+    spawn(bump)
+    spawn(bump)
+    // *rc is read and written by three routines: coordinate through a
+    // channel, or hand each routine its own value instead.
+end
+```
+
 This foundation does not change the behavior of existing concurrency primitives. It also underpins supervised tasks, described below, without changing detached `spawn`.
 
 ---

@@ -436,22 +436,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "Property reference base must be an object")
 			}
 
-			// Base que o compilador nao conhecia (`any`, struct de outro
-			// modulo): se o campo e declarado `ref T`, comporta como
-			// OP_CONTEXT_REF_PROPERTY — encaminha a ref/null armazenada em vez
-			// de fabricar uma ref para o slot (que deixaria `*n = T` gravar
-			// cru). Spec 2026-08-20-ref-slot-invariant §6.2.
+			// Base que o compilador nao conhecia (any, struct de outro
+			// modulo): campo declarado ref T e erro (R1).
 			if instance, ok := container.Obj.(*value.ObjInstance); ok && instance != nil && instance.Struct.FieldIsRef(name) {
-				stored, exists := instance.Fields[name]
-				if !exists {
-					return vm.runtimeError(c, ip, "undefined property '%s'", name)
-				}
-				forwarded, err := forwardRefSlot(stored, "'"+name+"'")
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				vm.push(forwarded)
-				continue
+				return vm.runtimeError(c, ip, "slot '%s' already holds a reference\n  hint: pass it directly, without 'ref'", name)
 			}
 
 			// Push a reference wrapping the container and property name,
@@ -473,9 +461,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 			// Base que o compilador nao conhecia (`any`): resolve um
 			// eventual ref (como OP_REF_PROPERTY) e, se o array/map esta
-			// etiquetado com elemento/valor `ref T`, espelha
-			// OP_CONTEXT_REF_INDEX por inteiro (encaminha ref/null; chave
-			// ausente le null; valor cru e erro). Spec §6.2.
+			// etiquetado com elemento/valor `ref T`, e erro (R1) — o slot
+			// ja guarda uma referencia, `ref` sobre ele nao encaminha.
 			if container.Type == value.VAL_REF {
 				resolved, err := vm.resolveReferenceValue(container)
 				if err != nil {
@@ -487,36 +474,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				switch collection := container.Obj.(type) {
 				case *value.ObjArray:
 					if arrayElementIsRefSlot(collection) {
-						if idx.Type != value.VAL_INT {
-							return vm.runtimeError(c, ip, "array index must be integer")
-						}
-						arrayIndex := int(idx.Int())
-						if arrayIndex < 0 || arrayIndex >= len(collection.Elements) {
-							return vm.runtimeError(c, ip, "array index out of bounds")
-						}
-						forwarded, err := forwardRefSlot(collection.Elements[arrayIndex], describeRefSlotIndex(idx, false))
-						if err != nil {
-							return vm.runtimeError(c, ip, "%s", err)
-						}
-						vm.push(forwarded)
-						continue
+						return vm.runtimeError(c, ip, "slot %s already holds a reference\n  hint: pass it directly, without 'ref'", describeRefSlotIndex(idx, false))
 					}
 				case *value.ObjMap:
 					if mapValueIsRefSlot(collection) {
-						key, err := referenceMapKey(idx)
-						if err != nil {
-							return vm.runtimeError(c, ip, "%s", err)
-						}
-						stored, found := collection.Get(key)
-						if !found {
-							stored = value.NewNull()
-						}
-						forwarded, err := forwardRefSlot(stored, describeRefSlotIndex(idx, true))
-						if err != nil {
-							return vm.runtimeError(c, ip, "%s", err)
-						}
-						vm.push(forwarded)
-						continue
+						return vm.runtimeError(c, ip, "slot %s already holds a reference\n  hint: pass it directly, without 'ref'", describeRefSlotIndex(idx, true))
 					}
 				}
 			}
@@ -530,6 +492,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				},
 			})
 
+		// nao emitido pelo compilador desde 0.19 (issue #82); mantido para bytecode/testes de bytecode malformado
 		case chunk.OP_CONTEXT_REF_PROPERTY:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
@@ -555,6 +518,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 			vm.push(forwarded)
 
+		// nao emitido pelo compilador desde 0.19 (issue #82); mantido para bytecode/testes de bytecode malformado
 		case chunk.OP_CONTEXT_REF_INDEX:
 			idx := vm.pop()
 			container := vm.pop()
@@ -646,10 +610,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_DEREF:
 			refVal := vm.pop()
 			if refVal.Type == value.VAL_NULL {
-				vm.push(refVal) // Passthrough null
+				// I5 (revisao final #82): ler atraves de um ref nulo e erro,
+				// nao null silencioso — o tipo estatico da posicao promete um
+				// T. Mesma frase de resolveReferenceValue (references.go).
+				return vm.runtimeError(c, ip, "cannot dereference null reference")
 			} else if refVal.Type != value.VAL_REF {
-				// Not a ref - pass through as-is (already dereferenced)
-				vm.push(refVal)
+				// R3 (spec 2026-08-24-explicit-ref): `*x` de nao-ref e erro
+				// tambem em runtime (tipo estatico desconhecido).
+				return vm.runtimeError(c, ip, "cannot dereference %s", runtimeTypeName(refVal))
 			} else {
 				resolved, err := vm.resolveReferenceValue(refVal)
 				if err != nil {
@@ -808,6 +776,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			vm.stackTop--
 		case chunk.OP_LEN:
 			val := vm.pop()
+			if val.Type == value.VAL_REF {
+				// I7 (revisao final #82): OP_LEN e o comprimento da colecao
+				// de um `for ... in`. Um ref chegando aqui so vem pela
+				// fronteira dinamica (o compilador barra o `ref T` estatico);
+				// antes caia no default 0 e o laco nao iterava em silencio.
+				return vm.runtimeError(c, ip, "cannot iterate over a ref: a ref is never read implicitly\n  hint: use '*r'")
+			}
 			if val.Type == value.VAL_OBJ {
 				if arr, ok := val.Obj.(*value.ObjArray); ok {
 					vm.push(value.NewInt(int64(len(arr.Elements))))
@@ -1127,7 +1102,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			b := vm.pop()
 			a := vm.pop()
 			// Em `==`/`!=` um ref NUNCA e dereferenciado implicitamente
-			// (spec §2.3, excecao 1): dois refs comparam identidade de slot
+			// (spec 2026-08-24-explicit-ref, R7): dois refs comparam identidade de slot
 			// (§2.2.7), um ref nulo E o proprio VAL_NULL (entao `r == null`
 			// pergunta sobre o ref, nao sobre o valor apontado — o que
 			// mantem `no.proximo != null` funcionando e torna distinguivel
@@ -1753,13 +1728,13 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 		case chunk.OP_DEREF_MUT:
 			refVal := vm.pop()
+			if refVal.Type == value.VAL_NULL {
+				return vm.runtimeError(c, ip, "cannot write through a null reference")
+			}
 			if refVal.Type != value.VAL_REF {
-				// Tolerância herdada do auto-deref antigo: slots com tipo
-				// estático ref podem conter valores planos (checker leniente
-				// pré-0.4). O valor já foi unicizado no nível anterior da
-				// cadeia MUT — segue adiante como contêiner.
-				vm.push(refVal)
-				continue
+				// R3: slot de tipo estatico ref T guarda ref ou null
+				// (invariante do slot, spec 2026-08-20) — outra coisa e erro.
+				return vm.runtimeError(c, ip, "cannot dereference %s", runtimeTypeName(refVal))
 			}
 			v, err := vm.unicizeThroughRefValue(refVal)
 			if err != nil {
@@ -1832,6 +1807,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			slot := c.Code[ip]
 			ip++
 			refVal := vm.stack[frame.LocalBase+int(slot)]
+			if refVal.Type == value.VAL_NULL {
+				// I5 (revisao final #82): o caminho generico erra no OP_DEREF;
+				// a forma fundida tem de dar a MESMA mensagem.
+				return vm.runtimeError(c, ip, "cannot dereference null reference")
+			}
 			if ref, ok := refVal.Obj.(*value.ObjRef); ok && ref.RefType == value.REF_UPVALUE {
 				if stored, ok := ref.Upvalue.Load(); ok {
 					if arr, ok := stored.Obj.(*value.ObjArray); ok && arr != nil {
@@ -1849,8 +1829,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 				}
 			}
-			// Fallback: GET_LOCAL + OP_DEREF (null e nao-ref passam; ref
-			// resolve) + GET_INDEX.
+			// Fallback: GET_LOCAL + OP_DEREF (nao-ref passa; ref resolve; o
+			// null ja errou acima) + GET_INDEX.
 			container := refVal
 			if refVal.Type == value.VAL_REF {
 				resolved, err := vm.resolveReferenceValue(refVal)
@@ -1944,6 +1924,12 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			ip++
 			localIdx := frame.LocalBase + int(slot)
 			refVal := vm.stack[localIdx]
+			if refVal.Type == value.VAL_NULL {
+				// I5: espelha o OP_DEREF_MUT do caminho generico
+				// (GET_LOCAL_MUT_BORROW + DEREF_MUT), que recusa escrever
+				// atraves de um ref nulo.
+				return vm.runtimeError(c, ip, "cannot write through a null reference")
+			}
 			top := vm.stackTop
 			if ref, ok := refVal.Obj.(*value.ObjRef); ok && ref.RefType == value.REF_UPVALUE {
 				if stored, ok := ref.Upvalue.Load(); ok {

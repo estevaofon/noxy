@@ -317,7 +317,7 @@ sempre — o loop em si é `runREPL(src lineSource, ...)` em `cmd/noxy/main.go`.
 
 ### Documentação
 - `docs/NOXY_LANGUAGE_SPEC.md` - Especificação completa
-- `docs/CONCURRENCY.md` - Sistema de concorrência
+- `docs/concurrency.md` - Sistema de concorrência
 - `docs/PACKAGE_MANAGER.md` - Gerenciador de pacotes
 - `docs/REF_SEMANTICS.md` - Sistema de referências
 
@@ -331,6 +331,16 @@ internal/parser/parser.go      // Parser recursivo
 ### Exemplos
 - `noxy_examples/` - Exemplos funcionais
 - `tests/test_features/` - Testes de features
+
+---
+
+## `ref` nos exemplos e testes
+
+Uma referência nunca é criada nem lida sem `ref` ou `*` (spec §2.3):
+`*r` para ler/escrever o valor, `ref x` em **todo** call site com parâmetro
+`ref T` (builtins inclusos: `append(ref xs, v)`), `r.f`/`r[i]` atravessam.
+Uma expressão que já é `ref T` (parâmetro `ref`, campo `ref`) é passada
+sem `ref`. `print(r)` mostra a referência; `print(*r)` o valor.
 
 ---
 
@@ -413,6 +423,6 @@ contrato é travado por `internal/vm/inline_guard_test.go` — se você mexer em
 ---
 
 **Última Atualização**: 2026-08-22  
-**Versão**: 1.0 (Noxy VM 0.18.0)
+**Versão**: 1.0 (Noxy VM 0.19.0)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*

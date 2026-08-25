@@ -39,7 +39,7 @@ func via_ref(node: ref Node) -> bool
     return eh_nulo(node.proximo)
 end
 let a: Node = Node(1, null)
-test_report([via_ref(a)])`, []bool{true})
+test_report([via_ref(ref a)])`, []bool{true})
 }
 
 // Elemento null de `(ref Node)[]`.

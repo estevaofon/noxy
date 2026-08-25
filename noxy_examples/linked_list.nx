@@ -51,15 +51,15 @@ end
     
 
 let no1: Node = Node(10, null)
-_append(no1, 20)
-_append(no1, 30)
-_append(no1, 40)
-_append(no1, 50)
-_append(no1, 60)
-_append(no1, 70)
-_append(no1, 80)
-_append(no1, 90)
-_append(no1, 100)
+_append(ref no1, 20)
+_append(ref no1, 30)
+_append(ref no1, 40)
+_append(ref no1, 50)
+_append(ref no1, 60)
+_append(ref no1, 70)
+_append(ref no1, 80)
+_append(ref no1, 90)
+_append(ref no1, 100)
 
 func print_list(node: ref Node)
     let current: ref Node = node
@@ -69,10 +69,10 @@ func print_list(node: ref Node)
     end
 end
 
-let v: int = pop(no1)
-pop(no1)
-print_list(no1)
+let v: int = pop(ref no1)
+pop(ref no1)
+print_list(ref no1)
 print("Valor retornado "+to_str(v))
-let z: int = pop_front(no1)
+let z: int = pop_front(ref no1)
 print("Valor retornado "+to_str(z))
-print_list(no1)
+print_list(ref no1)

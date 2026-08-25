@@ -4,7 +4,7 @@ defs["YES"] = "1"
 defs["NO"] = "0"
 defs["YES"] = "true"                    // substitui
 print(defs["YES"], has_key(defs, "MAYBE"), defs["MAYBE"])   // ausente: null
-delete(defs, "NO")
+delete(ref defs, "NO")
 print(length(defs))
 
 // a contagem de palavras da seção 6.5, sem árvore

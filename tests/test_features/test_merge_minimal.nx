@@ -26,5 +26,5 @@ func merge(l1: ref Node, l2: ref Node) -> ref Node
 end
 
 print("Testing merge:")
-let result: ref Node = merge(n1, n2)
+let result: ref Node = merge(ref n1, ref n2)
 print("Done")

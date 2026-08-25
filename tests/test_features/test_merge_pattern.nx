@@ -13,8 +13,8 @@ let n4: Node = Node(4, null)
 // Two separate lists:
 // List 1: n1 -> n3 (1 -> 3)
 // List 2: n2 -> n4 (2 -> 4)
-n1.next = n3
-n2.next = n4
+n1.next = ref n3
+n2.next = ref n4
 
 func merge(l1: ref Node, l2: ref Node) -> ref Node
     print("merge called")
@@ -41,7 +41,7 @@ func merge(l1: ref Node, l2: ref Node) -> ref Node
 end
 
 print("Starting merge test:")
-let result: ref Node = merge(n1, n2)
+let result: ref Node = merge(ref n1, ref n2)
 print("Merge complete!")
 
 // Print result

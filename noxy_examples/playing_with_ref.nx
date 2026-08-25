@@ -13,7 +13,7 @@ let my_wallet: Wallet = Wallet(ref money_in_bank)
 // OLD NOXY: Would silently corrupt the pointer address to 0x0 (NULL), causing crash later.
 // NEW NOXY: Protects you at compile time.
 
-print(fmt("Current Balance (Auto-Deref works!): %v", my_wallet.balance))
+print(fmt("Current Balance (Explicit read with '*'): %v", *my_wallet.balance))
 
 // The Mistake: Assigning a raw number to a reference field
 // Uncomment below to see the protection in action:

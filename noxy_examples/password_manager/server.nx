@@ -153,10 +153,10 @@ func handle_save_password(body: bytes) -> http_parser.HttpResponse
     let created_at: string = time.format(time.now_datetime())
     
     let params: any[]
-    append(params, req.title)
-    append(params, req.username)
-    append(params, encrypted_pass)
-    append(params, created_at)
+    append(ref params, req.title)
+    append(ref params, req.username)
+    append(ref params, encrypted_pass)
+    append(ref params, created_at)
     
     let res: sqlite.ExecResult = sqlite.execute_params(db, "INSERT INTO passwords (title, username, encrypted_password, created_at) VALUES (?, ?, ?, ?)", params)
     
@@ -190,7 +190,7 @@ func handle_list_passwords() -> http_parser.HttpResponse
         let dec_pass: string = decrypt(enc_pass)
         
         let entry: PasswordEntry = PasswordEntry(to_int(id_val), title, username, dec_pass, created_at)
-        append(items, entry)
+        append(ref items, entry)
         
         i = i + 1
     end

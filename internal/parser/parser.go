@@ -549,9 +549,16 @@ func (p *Parser) parseType() ast.NoxyType {
 	// Optional REF - Handle REF here to wrap the result (Ref(Type))
 	// This restores `ref int[]` -> Ref(Array(int)) precedence
 	if p.curToken.Type == token.REF {
+		line, column := p.curToken.Line, p.curToken.Column
 		p.nextToken()
 		elementType := p.parseType()
 		if elementType == nil {
+			return nil
+		}
+		// R1 (spec 2026-08-24-explicit-ref): nao existe ref ref T — cobre
+		// `ref ref int` e `ref (ref int)` (o grupo volta por parseAtomicType).
+		if _, isRef := elementType.(*ast.RefType); isRef {
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: 'ref ref' is not a type\n  hint: a reference is never taken to a reference", line, column))
 			return nil
 		}
 		return &ast.RefType{ElementType: elementType}

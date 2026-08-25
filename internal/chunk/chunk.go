@@ -73,6 +73,7 @@ const (
 	OP_REF_GLOBAL
 	OP_REF_PROPERTY
 	OP_REF_INDEX
+	// OP_CONTEXT_REF_*: nao emitido pelo compilador desde 0.19 (issue #82); mantido para bytecode/testes de bytecode malformado
 	OP_CONTEXT_REF_PROPERTY
 	OP_CONTEXT_REF_INDEX
 	OP_DEREF

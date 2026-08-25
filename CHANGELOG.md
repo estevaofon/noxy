@@ -1,5 +1,91 @@
 # Changelog
 
+## [0.19.0] - 2026-08-25
+
+`ref` explícito (issue #82): uma referência nunca é criada nem lida sem
+`ref` ou `*` no código. `*r` é a única leitura e escrita do valor apontado;
+`ref x` é obrigatório em todo call site com parâmetro `ref T` — funções,
+valores `func`, construtores, generics e builtins (`append(ref xs, v)`);
+`.`/`[]` atravessam a referência e são o único atalho. Somem da linguagem o
+auto-dereference, as exceções 1 e 2 de `==`/`=`, a conversão contextual em
+chamadas exatas e a "forwarding form" (`ref r` com `r` já `ref`). A VM já
+era explícita (aritmética, `==`, `print`, `length` nunca liam um ref); a
+mudança é quase toda no compilador. Spec:
+`docs/superpowers/specs/2026-08-24-explicit-ref-design.md`.
+
+### Changed (BREAKING) — `ref` explícito: `*r` para ler, `ref x` em todo call site (issue #82)
+
+| Antes (0.18) | Agora (0.19) |
+|---|---|
+| `let n: int = r`, `r + 1`, `-r`, `if rb`, `xs[ri]`, `return r`, `g(r)` liam o ref | erro `… expected T, got ref T` / `operand of '+' cannot be ref int: a ref is never read implicitly` — hint `use '*r'` |
+| `for x in r` com `r: ref T[]` compilava e iterava **zero vezes** | erro `cannot iterate over ref T[]` — hint `for x in *r` |
+| `*r = s` lia `s`; `*r = ref z` lia `z` (sem efeito) | `*r = *s`; `*r = ref z` é erro — hint `r = ref z` (rebind) ou `*r = z` |
+| `f(x)` com parâmetro `ref T` emprestava `x` (só em assinatura exata) | erro `argument 1 to 'f': expected ref T, got T` — hint `use 'ref x'`; igual para `func` bare, construtor, generic |
+| `append(xs, v)`, `pop(xs)`, `delete(m, k)`, `json_loads(s, alvo)` emprestavam | `append(ref xs, v)`, `pop(ref xs)`, `delete(ref m, k)`, `json_loads(s, ref alvo)` |
+| `ref r` com `r: ref T` encaminhava (`ref ref T` proibido por construção) | erro `'r' is already a reference` — hint `pass 'r' directly`; `let q: ref ref int` é `SyntaxError` |
+| `print(r)`, `to_str(r)`, `f"{r}"` mostravam o valor | mostram `<ref …>`; `print(*r)` mostra o valor |
+| `*x` com `x` de tipo desconhecido não-ref passava adiante | erro de runtime `cannot dereference int` |
+| `*x` com `x: any` era erro de compilação (`cannot dereference non-reference value of type any`) | compila — `any` guarda ref (R2) — e é checado em runtime: lê o valor apontado, ou erra `cannot dereference int` |
+| `*r` com `r == null` devolvia `null` em silêncio | erro de runtime `cannot dereference null reference` (na escrita, `cannot write through a null reference`), inclusive pelos opcodes fundidos de índice via ref |
+| `guarda(r)` com parâmetro `v: any` falhava em runtime (`expected any, got ref`) | roda: um parâmetro `any` recebe a referência **como valor**, igual a `print`/`to_str` (R2) |
+| `for v in a` com `a: any` guardando um ref iterava **zero vezes** em silêncio | erro de runtime `cannot iterate over a ref: a ref is never read implicitly` — hint `use '*r'` |
+| `ref a.f` via `any` sobre campo `ref T` encaminhava | erro de runtime `slot 'f' already holds a reference` |
+| `length(r)`, `keys(r)`, `slice(r, …)`, `contains(r, …)`, `has_key(r, …)` com `r` ref liam o valor | erro de compilação `argument 1 to 'length': expected a value, got ref int[]` — hint `use '*r'`; em runtime via `any`, `length: argument 1 expected a value, got ref`. Só o **argumento 1** (a coleção) é checado: `contains(ys, r)` sobre `(ref int)[]` e `has_key(m, rk)` continuam valendo (busca por identidade) |
+| `json_dumps(r)`, `base64_encode(r)`, `fmt("%d", r)` e companhia codificavam o texto `<ref …>` em silêncio | erro de compilação `argument N to 'json_dumps': expected a value, got ref int[]` — hint `use '*r'`; em runtime via `any`, `json_dumps: argument 1 expected a value, got ref`. Valem para **todos** os argumentos de `json_dumps`, `json_dumps_result`, `json_parse`, `base64_encode`, `base64_decode`, `hex`, `hex_encode`, `hex_decode`, `base62_encode`, `base62_decode`, `to_bytes`, `fmt`, `crypto_pbkdf2_sha256`, `crypto_aes256_gcm_encrypt` e `crypto_aes256_gcm_decrypt` |
+
+Inalterados: `r == s` (identidade), `r == null`, `r == 1` (erro, hint `*r`),
+`r = 50` (erro, hint `*r = 50`), `x.next = n` (erro), `r.f`/`r[i]`,
+`f(r)`/`f(a.next)`/`f(null)`, `let v = r` → `v: ref T`, generics (`T` não
+liga a `ref X`).
+
+`json_loads(s, x)` com `x: any` compila mas falha em runtime a menos que
+se escreva `ref x` (R5: `any` é validado em runtime). O caminho de
+encaminhamento de uma referência já existente deixa de reemitir
+`OP_MARK_REF_TARGET_TYPE` (a referência foi marcada onde foi criada).
+
+### Added
+
+- Diagnósticos com hint para cada posição de R1/R2/R5/R6 (spec §2.3
+  "Diagnostics"); fixtures em `noxy_examples/type_errors/ref_*.nx`.
+- Spec §2.3 reescrita como R1–R9; R9 documenta o tempo de vida de uma local
+  referenciada (fecha #81); `docs/REF_SEMANTICS.md` reescrito.
+- Spec `docs/superpowers/specs/2026-08-24-explicit-ref-design.md` e plano
+  `docs/superpowers/plans/2026-08-24-explicit-ref.md`.
+
+### Fixed
+
+- `for x in r` com `r: ref T[]` era um laço vazio silencioso (`OP_LEN`
+  devolve 0 para `VAL_REF`); agora é erro de compilação com hint — e, quando
+  o ref chega pela fronteira dinâmica (`a: any`), `OP_LEN` erra em runtime
+  em vez de devolver 0.
+- `*r` com `r == null` seguia adiante com um `null` silencioso onde o tipo
+  estático prometia um `T`; agora erra, e os caminhos fundidos
+  (`OP_GET_REF_LOCAL_INDEX_ARRAY`, `OP_SET_REF_LOCAL_INDEX_ARRAY_NORC`) dão
+  a mesma mensagem do caminho genérico.
+- Um parâmetro `any` recusava em runtime a referência que o compilador
+  deixava passar (R2 diz que `any` a recebe como valor) — `validateParameterModes`
+  só barra `ref` em parâmetro de tipo concreto.
+- `docs/index.html` e `docs/HTTP_SERVER.md` ainda descreviam a conversão
+  automática de 0.18 nos exemplos de `append`/`pop` e de chamada com
+  parâmetro `ref` (todo trecho Noxy do site foi extraído e executado).
+
+### Removed
+
+- Auto-dereference, "Type-Based Assignment" e suas exceções 1 e 2,
+  conversão contextual (§4.2), forwarding form — da spec e do compilador
+  (`compileReferenceArgumentValue` só cria; `compileRefArgument` é o único
+  caminho de argumento `ref`). Os opcodes `OP_CONTEXT_REF_PROPERTY`/`_INDEX`
+  deixam de ser emitidos (os cases na VM ficam).
+- O diagnóstico específico `reference slot at index N holds a non-reference
+  value` deixa de ser alcançável a partir de código com base tipada (só via
+  backdoor de teste; o invariante do slot é garantido nos escritores).
+
+### Follow-ups registrados
+
+- #83 — `ref` para dentro de container tomado antes de uma cópia vaza
+  escrita para a cópia (edge da §2.2).
+- #84 — `ref T` não-nulo por padrão / `ref T?`.
+
 ## [0.18.0] - 2026-08-23
 
 Mecanismo experimental de extensões WASM (issue #78, fase M1): um pacote

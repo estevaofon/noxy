@@ -354,7 +354,7 @@ func TestCallResultCallerDefersUnaffected(t *testing.T) {
 let trilha: string[] = []
 
 func marca(rotulo: string)
-    append(trilha, rotulo)
+    append(ref trilha, rotulo)
 end
 
 func corpo() -> int
@@ -364,7 +364,7 @@ end
 func chamador() -> string
     defer marca("caller-defer")
     let r: any = call_result(corpo)
-    append(trilha, "depois-da-captura")
+    append(ref trilha, "depois-da-captura")
     return to_str(r.ok)
 end
 
@@ -561,7 +561,7 @@ func TestCallResultPanicSkipsPendingNoxyDeferAndReleasesCapturedArgs(t *testing.
 let trilha: string[] = []
 
 func marca(rotulo: string)
-    append(trilha, rotulo)
+    append(ref trilha, rotulo)
 end
 
 func cleanup(m: map[string, int])

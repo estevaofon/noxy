@@ -44,24 +44,22 @@ f(5)
 // primeiro branch do loop de argumentos não intercepta `ref a`; como
 // areStrictTypesCompatible aceita `any` incondicionalmente, isExact
 // permanecia true e OP_CALL_STATIC era emitido — pulando
-// validateParameterModes, que era a única coisa barrando isso. Callee é
-// tipado estaticamente (não `any`), então TestDynamicCallStillValidatesModes
-// (any-typed *callee*) não cobre este caso; aqui é o *parâmetro* que é any.
-func TestStaticCallWithAnyParamStillValidatesRefMode(t *testing.T) {
-	machine := New()
-	err := interpretVMSource(t, machine, `
+// validateParameterModes. O call site continua caindo em OP_CALL (modesProven
+// falso), mas desde a revisao final da issue #82 o que validateParameterModes
+// faz com um ref chegando em parametro `any` mudou: R2 diz que `any` recebe a
+// referencia COMO VALOR (igual a print/to_str), entao a chamada roda e `x`
+// guarda o ref — nao ha leitura implicita nenhuma para barrar.
+func TestStaticCallWithAnyParamTakesRefAsValue(t *testing.T) {
+	got := captureVMSource(t, `
 func f(x: any) -> void
-    print(x)
+    test_report(to_str(x))
 end
 let a: int = 5
 f(ref a)
 `)
-	if err == nil {
-		t.Fatal("passar ref para parametro any deveria falhar em runtime")
-	}
-	const want = "function 'f' argument 1: expected any, got ref"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("mensagem inesperada: got %q, want it to contain %q", err.Error(), want)
+	texto, _ := got.Obj.(string)
+	if !strings.HasPrefix(texto, "<ref") {
+		t.Fatalf("f(ref a) com x: any deveria receber a referencia, obtido %q", texto)
 	}
 }
 

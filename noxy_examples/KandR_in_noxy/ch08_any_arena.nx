@@ -7,7 +7,7 @@ end
 let arena: any[] = []
 
 func store(v: any) -> int
-    append(arena, v)
+    append(ref arena, v)
     return length(arena) - 1
 end
 

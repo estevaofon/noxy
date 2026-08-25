@@ -163,12 +163,12 @@ add(x)`, "expected int, got any"},
 		{"ref", `func set(v: ref int) -> void
     return
 end
-set(1)`, "reference argument '1' is not addressable"},
+set(1)`, "argument 1 to 'set': expected ref int, got int"},
 		{"ref type", `func set(v: ref int) -> void
     return
 end
 let text: string = "x"
-set(text)`, "argument 1 to 'set': expected ref int, got ref string"},
+set(ref text)`, "argument 1 to 'set': expected ref int, got ref string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -198,8 +198,8 @@ func set(v: ref int) -> void
 end
 let value: int = 1
 let values: int[] = [1]
-set(value)
-set(values[0])`)
+set(ref value)
+set(ref values[0])`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ set(values[0])`)
 func TestReferenceValueAssignmentSuggestsDereference(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func increment(value: ref int) -> void
-    value = value + 1
+    value = *value + 1
 end`)
 	if err == nil {
 		t.Fatal("expected reference assignment error")
@@ -228,7 +228,7 @@ func TestReferenceSlotValueAssignmentsSuggestDereference(t *testing.T) {
 			name: "local reference parameter",
 			input: `
 func increment(value: ref int) -> void
-    value = value + 1
+    value = *value + 1
 end`,
 			hints: []string{"use '*value = ...'"},
 		},
@@ -245,7 +245,7 @@ value = 1`,
 			input: `
 func outer(value: ref int) -> void
     func inner() -> void
-        value = value + 1
+        value = *value + 1
     end
 end`,
 			hints: []string{"use '*value = ...'"},
@@ -516,7 +516,7 @@ func TestExactReferenceCallDoesNotTreatAnyAsNull(t *testing.T) {
 func accept(value: ref func() -> int) -> void
 end
 let dynamic: any = null
-accept(dynamic)`)
+accept(ref dynamic)`)
 	if err == nil || !strings.Contains(err.Error(), "expected ref func() -> int, got ref any") {
 		t.Fatalf("error=%v", err)
 	}
@@ -603,12 +603,12 @@ end`)
 func TestExactReferenceCallAcceptsCapturedVariable(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 func increment(value: ref int) -> void
-    *value = value + 1
+    *value = *value + 1
 end
 func make_incrementer() -> func() -> int
     let value: int = 0
     return func() -> int
-        increment(value)
+        increment(ref value)
         return value
     end
 end`)

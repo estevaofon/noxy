@@ -1,0 +1,2 @@
+let xs: int[] = []
+append(xs, 1)

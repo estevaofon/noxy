@@ -62,7 +62,7 @@ func em_falta(ps: Produto[]) -> string[]
     let nomes: string[] = []                  // literal vazio: anotacao obrigatoria
     for p in ps do
         if p.qtd == 0 then
-            append(nomes, p.nome)
+            append(ref nomes, p.nome)
         end
     end
     return nomes

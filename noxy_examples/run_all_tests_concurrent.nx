@@ -123,7 +123,7 @@ func main()
                 if ends_with_nx(current_file) then
                     if !should_ignore(current_file) then
                         // Hacky clean (skip \r in accumulation)
-                        append(files_to_run, current_file)
+                        append(ref files_to_run, current_file)
                     end
                 end
                 current_file = ""
@@ -140,7 +140,7 @@ func main()
     if strlen(current_file) > 0 then
         if ends_with_nx(current_file) then
             if !should_ignore(current_file) then
-                append(files_to_run, current_file)
+                append(ref files_to_run, current_file)
             end
         end
     end
@@ -194,7 +194,7 @@ func main()
                 // FAIL
                 print("  [FAIL] " + strip_result_prefix(res_str))
                 failed = failed + 1
-                append(failed_files, res_str)
+                append(ref failed_files, res_str)
              end
         else
              print("  [ERROR] Invalid result: " + res_str)

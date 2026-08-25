@@ -90,7 +90,7 @@ func TestReferenceTargetMetadataPreservesForwardedReferenceIdentity(t *testing.T
 	source := `
 let value: int = 1
 let forwarded: ref int = ref value
-typed_test(ref forwarded)`
+typed_test(forwarded)`
 	l := lexer.New(source)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -237,8 +237,8 @@ func TestTypedNativeShallowCopiesOrdinaryComposite(t *testing.T) {
 func TestTypedMutatingBuiltinsPreserveSourceSyntax(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let values: int[] = [1]
-append(values, 2)
-let removed: int = pop(values)
+append(ref values, 2)
+let removed: int = pop(ref values)
 test_report(length(values) * 10 + removed)`)
 	testExpectedObject(t, 12, got)
 }
@@ -246,7 +246,7 @@ test_report(length(values) * 10 + removed)`)
 func TestTypedDeleteMutatesCallerMap(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let mapping: map[string, int] = {"a": 1}
-delete(mapping, "a")
+delete(ref mapping, "a")
 test_report(length(keys(mapping)))`)
 	testExpectedObject(t, 0, got)
 }
@@ -254,7 +254,7 @@ test_report(length(keys(mapping)))`)
 func TestTypedJSONLoadsPopulatesCallerTarget(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: map[string, int] = {"old": 0}
-let ok: bool = json_loads("{\"answer\":42}", target)
+let ok: bool = json_loads("{\"answer\":42}", ref target)
 test_report(target["answer"])`)
 	testExpectedObject(t, 42, got)
 }
@@ -262,7 +262,7 @@ test_report(target["answer"])`)
 func TestTypedJSONLoadsPopulatesMapIndexTarget(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let targets: map[string, map[string, int]] = {"slot": {"old": 0}}
-let ok: bool = json_loads("{\"answer\":42}", targets["slot"])
+let ok: bool = json_loads("{\"answer\":42}", ref targets["slot"])
 test_report(targets["slot"]["answer"])`)
 	testExpectedObject(t, 42, got)
 }
@@ -429,7 +429,7 @@ func TestPopulateTargetSupportsCompatibleAndNullScalarReplacement(t *testing.T) 
 func TestTypedJSONLoadsAllowsNonNullAnyTargetToChangeType(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: any = "before"
-json_loads("42", target)
+json_loads("42", ref target)
 test_report(target)`)
 	testExpectedObject(t, 42, got)
 }
@@ -440,7 +440,7 @@ struct Holder
     data: any
 end
 let target: Holder = Holder("before")
-json_loads("{\"data\":42}", target)
+json_loads("{\"data\":42}", ref target)
 test_report(target.data)`)
 	testExpectedObject(t, 42, got)
 }
@@ -448,7 +448,7 @@ test_report(target.data)`)
 func TestTypedJSONLoadsRejectsInvalidArrayElementAtomically(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: int[] = [1, 2]
-let ok: bool = json_loads("[10,\"bad\"]", target)
+let ok: bool = json_loads("[10,\"bad\"]", ref target)
 if ok then
     test_report(999)
 else
@@ -461,7 +461,7 @@ func TestTypedJSONLoadsParsesIntegersExactlyAndRejectsOverflow(t *testing.T) {
 	t.Run("maximum int", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let target: int[] = [1]
-let ok: bool = json_loads("[9223372036854775807]", target)
+let ok: bool = json_loads("[9223372036854775807]", ref target)
 if ok then
     test_report(target[0])
 else
@@ -475,7 +475,7 @@ end`)
 	t.Run("overflow leaves target unchanged", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let target: int[] = [7]
-let ok: bool = json_loads("[9223372036854775808]", target)
+let ok: bool = json_loads("[9223372036854775808]", ref target)
 if ok then
     test_report(999)
 else
@@ -488,7 +488,7 @@ end`)
 func TestTypedJSONLoadsRejectsInvalidMapValueAtomically(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: map[string, int] = {"a": 1, "b": 2}
-let ok: bool = json_loads("{\"a\":10,\"b\":\"bad\"}", target)
+let ok: bool = json_loads("{\"a\":10,\"b\":\"bad\"}", ref target)
 if ok then
     test_report(999)
 else
@@ -500,7 +500,7 @@ end`)
 func TestTypedJSONLoadsPreservesReferenceElementTypeForNullSlot(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: (ref int)[] = [null]
-let ok: bool = json_loads("[\"bad\"]", target)
+let ok: bool = json_loads("[\"bad\"]", ref target)
 if ok then
     test_report(999)
 elif target[0] == null then
@@ -535,17 +535,19 @@ end`)
 func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
 	// Issue #50 Parte 3 (opcao a): slot `ref T` nulo recebe uma CELULA heap
 	// nova com o referente + ref para ela — o analogo de `let novo = T;
-	// slot = ref novo`. A sonda `type(ref viz)` distingue ref ("ref") de
-	// valor cru (erro do marcador); `type(slot)` nao serve (auto-deref).
+	// slot = ref novo`. A sonda `type(viz)` distingue ref ("ref") de valor
+	// cru (erro do marcador); `viz` e ligado a parte para reusar no *viz
+	// abaixo, mas `type(target[0])` tambem devolveria "ref" direto (R2: o
+	// indice nunca e lido implicitamente).
 	t.Run("null ref slot gets a fresh referent cell", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 func le(r: ref int) -> int
-    return r
+    return *r
 end
 let target: (ref int)[] = [null]
-let ok: bool = json_loads("[42]", target)
+let ok: bool = json_loads("[42]", ref target)
 let viz: ref int = target[0]
-if ok && type(ref viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
+if ok && type(viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
     test_report(42)
 else
     test_report(999)
@@ -557,7 +559,7 @@ end`)
 		got := runTypedFunctionProgram(t, `
 let backing: int = 7
 let target: (ref int)[] = [ref backing]
-let ok: bool = json_loads("[null]", target)
+let ok: bool = json_loads("[null]", ref target)
 if ok then
     if target[0] == null then
         test_report(backing)
@@ -573,7 +575,7 @@ end`)
 	t.Run("json null creates reference slot", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let target: (ref int)[] = []
-let ok: bool = json_loads("[null]", target)
+let ok: bool = json_loads("[null]", ref target)
 if ok then
     if target[0] == null then
         test_report(length(target))
@@ -594,7 +596,7 @@ struct Pair
     b: int
 end
 let target: Pair = Pair(1, 2)
-let ok: bool = json_loads("{\"a\":10,\"b\":\"bad\"}", target)
+let ok: bool = json_loads("{\"a\":10,\"b\":\"bad\"}", ref target)
 if ok then
     test_report(999)
 else
@@ -611,7 +613,7 @@ struct Pair
     b: int
 end
 let target: (ref Pair)[] = []
-let ok: bool = json_loads("[{\"a\":1}]", target)
+let ok: bool = json_loads("[{\"a\":1}]", ref target)
 if ok then
     test_report(999)
 else
@@ -627,7 +629,7 @@ struct Pair
     b: int
 end
 let target: (ref Pair)[] = []
-let ok: bool = json_loads("[{\"a\":3,\"b\":4}]", target)
+let ok: bool = json_loads("[{\"a\":3,\"b\":4}]", ref target)
 if ok then
     test_report(target[0].a * 10 + target[0].b)
 else
@@ -643,7 +645,7 @@ struct Pair
     b: int
 end
 let target: Pair = Pair(1, 2)
-let ok: bool = json_loads("{\"a\":3}", target)
+let ok: bool = json_loads("{\"a\":3}", ref target)
 if ok then
     test_report(target.a * 10 + target.b)
 else
@@ -665,7 +667,7 @@ struct Vertex
     value: int
 end
 let target: Vertex = Vertex(1)
-let ok: bool = json_loads("null", target)
+let ok: bool = json_loads("null", ref target)
 if ok then
     if target == null then test_report(1) else test_report(998) end
 else
@@ -679,7 +681,7 @@ struct Vertex
     value: int
 end
 let target: Vertex[] = [Vertex(1)]
-let ok: bool = json_loads("[null]", target)
+let ok: bool = json_loads("[null]", ref target)
 if ok then
     if target[0] == null then test_report(length(target)) else test_report(998) end
 else
@@ -693,7 +695,7 @@ struct Vertex
     value: int
 end
 let target: map[string, Vertex] = {"item": Vertex(1)}
-let ok: bool = json_loads("{\"item\":null}", target)
+let ok: bool = json_loads("{\"item\":null}", ref target)
 if ok then
     if target["item"] == null then test_report(1) else test_report(998) end
 else
@@ -711,7 +713,7 @@ end`,
 func TestTypedJSONLoadsReplacesNonNullAnyComposite(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let target: any = [1]
-let ok: bool = json_loads("42", target)
+let ok: bool = json_loads("42", ref target)
 if ok then
     test_report(target)
 else
@@ -729,7 +731,7 @@ struct Pair
 end
 let target: Pair = Pair(1, 2)
 let alias: ref Pair = ref target
-let ok: bool = json_loads("{\"a\":3,\"b\":4}", target)
+let ok: bool = json_loads("{\"a\":3,\"b\":4}", ref target)
 if ok then
     test_report(alias.a * 10 + alias.b)
 else
@@ -742,7 +744,7 @@ end`)
 		got := runTypedFunctionProgram(t, `
 let target: int[] = [1, 2]
 let alias: ref int[] = ref target
-let ok: bool = json_loads("[3,4]", target)
+let ok: bool = json_loads("[3,4]", ref target)
 if ok then
     test_report(alias[0] * 10 + alias[1])
 else
@@ -792,8 +794,8 @@ func TestTypedMutatingBuiltinResolvesCapturedTarget(t *testing.T) {
 func make_mutator() -> func() -> int
     let values: int[] = [1]
     return func() -> int
-        append(values, 2)
-        let removed: int = pop(values)
+        append(ref values, 2)
+        let removed: int = pop(ref values)
         return length(values) * 10 + removed
     end
 end
@@ -809,8 +811,8 @@ struct Collections
     mapping: map[string, int]
 end
 let collections: Collections = Collections([1], {"a": 1})
-append(collections.values, 2)
-delete(collections.mapping, "a")
+append(ref collections.values, 2)
+delete(ref collections.mapping, "a")
 test_report(length(collections.values) * 10 + length(keys(collections.mapping)))`)
 	testExpectedObject(t, 20, got)
 }
@@ -818,8 +820,8 @@ test_report(length(collections.values) * 10 + length(keys(collections.mapping)))
 func TestTypedMutatingBuiltinResolvesArrayIndexTarget(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let nested: int[][] = [[1]]
-append(nested[0], 2)
-let removed: int = pop(nested[0])
+append(ref nested[0], 2)
+let removed: int = pop(ref nested[0])
 test_report(length(nested[0]) * 10 + removed)`)
 	testExpectedObject(t, 12, got)
 }
@@ -827,8 +829,8 @@ test_report(length(nested[0]) * 10 + removed)`)
 func TestTypedMutatingBuiltinResolvesMapIndexTarget(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let nested: map[string, int[]] = {"values": [1]}
-append(nested["values"], 2)
-let removed: int = pop(nested["values"])
+append(ref nested["values"], 2)
+let removed: int = pop(ref nested["values"])
 test_report(length(nested["values"]) * 10 + removed)`)
 	testExpectedObject(t, 12, got)
 }
@@ -842,8 +844,8 @@ let first: Vertex = Vertex(1)
 let second: Vertex = Vertex(2)
 let existing: ref Vertex = ref second
 let values: (ref Vertex)[] = []
-append(values, ref first)
-append(values, existing)
+append(ref values, ref first)
+append(ref values, existing)
 values[0].value = 41
 values[1].value = 42
 test_report(first.value + second.value)`)
@@ -857,7 +859,7 @@ func TestTypedAppendStoresIndependentCompositeItem(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let item: int[] = [1]
 let values: int[][] = []
-append(values, item)
+append(ref values, item)
 item[0] = 42
 test_report(values[0][0])`)
 	testExpectedObject(t, 1, got)
@@ -957,7 +959,7 @@ test_report(length(values))`)
 let invoke: any = append
 let values: int[] = [1]
 let forwarded: ref int[] = ref values
-invoke(ref forwarded, 2)
+invoke(forwarded, 2)
 test_report(length(values))`)
 		testExpectedObject(t, 2, got)
 	})
@@ -969,7 +971,7 @@ func identity(value: int) -> int
     return value
 end
 let values: (func(int) -> int)[] = [identity]
-append(values, identity)
+append(ref values, identity)
 test_report(length(values))`)
 	testExpectedObject(t, 2, got)
 }
@@ -983,7 +985,7 @@ end
 let invoke: any = append
 let seed: (func(int) -> int)[] = [identity]
 let targets: ((func(int) -> int)[])[] = [seed]
-pop(targets)
+pop(ref targets)
 let wrong: int[] = [1]
 invoke(ref targets, wrong)
 test_report(length(targets))`)
@@ -1000,7 +1002,7 @@ func identity(value: int) -> int
 end
 let invoke: any = append
 let targets: (func(int) -> int)[] = [identity]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, text)
 test_report(length(targets))`)
 		testExpectedObject(t, 0, got)
@@ -1015,11 +1017,11 @@ func wrong_return(value: int) -> string
     return "bad"
 end
 func wrong_mode(value: ref int) -> int
-    return value
+    return *value
 end
 let invoke: any = append
 let targets: (func(int) -> int)[] = [identity]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, wrong_return)
 invoke(ref targets, wrong_mode)
 test_report(length(targets))`)
@@ -1033,7 +1035,7 @@ func identity(value: int) -> int
 end
 let invoke: any = append
 let targets: func[] = [identity]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, identity)
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
@@ -1045,8 +1047,8 @@ func TestTypedAndDynamicAppendValidateChannelElementTypes(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let channel: chan int = make_chan(1)
 let targets: (chan int)[] = [channel]
-pop(targets)
-append(targets, channel)
+pop(ref targets)
+append(ref targets, channel)
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
 	})
@@ -1057,7 +1059,7 @@ let invoke: any = append
 let wrong: chan string = make_chan(1)
 let seed: chan int = make_chan(1)
 let targets: (chan int)[] = [seed]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, wrong)
 test_report(length(targets))`)
 		testExpectedObject(t, 0, got)
@@ -1071,7 +1073,7 @@ let typed: chan int = make_chan(1)
 typed = raw
 let seed: chan int = make_chan(1)
 let targets: (chan int)[] = [seed]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, typed)
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
@@ -1095,7 +1097,7 @@ let raw: any = make_chan(1)
 let channels: (chan int)[] = [raw]
 let seed: (chan int)[] = [make_chan(1)]
 let targets: ((chan int)[])[] = [seed]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, channels)
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
@@ -1105,8 +1107,8 @@ test_report(length(targets))`)
 		got := runTypedFunctionProgram(t, `
 let seed: chan int = make_chan(1)
 let targets: (chan int)[] = [seed]
-pop(targets)
-append(targets, make_chan(1))
+pop(ref targets)
+append(ref targets, make_chan(1))
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
 	})
@@ -1115,12 +1117,12 @@ test_report(length(targets))`)
 		got := runTypedFunctionProgram(t, `
 func store(channel: chan int, targets: ref (chan int)[]) -> void
     let invoke: any = append
-    invoke(ref targets, channel)
+    invoke(targets, channel)
 end
 let seed: chan int = make_chan(1)
 let targets: (chan int)[] = [seed]
-pop(targets)
-store(make_chan(1), targets)
+pop(ref targets)
+store(make_chan(1), ref targets)
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
 	})
@@ -1133,7 +1135,7 @@ end
 let invoke: any = append
 let seed: chan int = make_chan(1)
 let targets: (chan int)[] = [seed]
-pop(targets)
+pop(ref targets)
 invoke(ref targets, create())
 test_report(length(targets))`)
 		testExpectedObject(t, 1, got)
@@ -1207,7 +1209,7 @@ func seed(value: any) -> int return 1 end
 func wrong(value: int) -> int return value end
 let invoke: any = append
 let target: (func(any) -> int)[] = [seed]
-pop(target)
+pop(ref target)
 invoke(ref target, wrong)
 test_report(length(target))`,
 		},
@@ -1218,7 +1220,7 @@ func seed(value: int) -> int return value end
 func wrong(value: any) -> int return 1 end
 let invoke: any = append
 let target: (func(int) -> int)[] = [seed]
-pop(target)
+pop(ref target)
 invoke(ref target, wrong)
 test_report(length(target))`,
 		},
@@ -1229,7 +1231,7 @@ func seed() -> any return 1 end
 func wrong() -> int return 1 end
 let invoke: any = append
 let target: (func() -> any)[] = [seed]
-pop(target)
+pop(ref target)
 invoke(ref target, wrong)
 test_report(length(target))`,
 		},
@@ -1240,7 +1242,7 @@ func seed() -> int return 1 end
 func wrong() -> any return 1 end
 let invoke: any = append
 let target: (func() -> int)[] = [seed]
-pop(target)
+pop(ref target)
 invoke(ref target, wrong)
 test_report(length(target))`,
 		},
@@ -1251,7 +1253,7 @@ func seed(values: int[4]) -> int return length(values) end
 func wrong(values: int[5]) -> int return length(values) end
 let invoke: any = append
 let target: (func(int[4]) -> int)[] = [seed]
-pop(target)
+pop(ref target)
 invoke(ref target, wrong)
 test_report(length(target))`,
 		},
@@ -1268,7 +1270,7 @@ func wrong() -> int[5]
 end
 let invoke: any = append
 let target: (func() -> int[4])[] = [seed]
-pop(target)
+pop(ref target)
 invoke(ref target, wrong)
 test_report(length(target))`,
 		},
@@ -1430,8 +1432,8 @@ func make_box(value: int) -> Box
     return Box(value)
 end
 let makers: (func(int) -> Box)[] = [make_box]
-pop(makers)
-append(makers, Box)
+pop(ref makers)
+append(ref makers, Box)
 test_report(length(makers))`)
 		testExpectedObject(t, 1, got)
 	})
@@ -1448,7 +1450,7 @@ func make_box(value: int) -> Box
     return Box(value)
 end
 let makers: (func(int) -> Box)[] = [make_box]
-pop(makers)
+pop(ref makers)
 let invoke: any = append
 invoke(ref makers, Box)
 invoke(ref makers, Other)
@@ -1533,7 +1535,7 @@ func run() -> int
         value: int
     end
     let makers: (func(int) -> Local)[] = [Local]
-    pop(makers)
+    pop(ref makers)
     let invoke: any = append
     invoke(ref makers, Local)
     invoke(ref makers, Other)
@@ -1569,7 +1571,7 @@ func run() -> int
         return Local(value)
     end
     let makers: (func(int) -> Local)[] = [make_local]
-    pop(makers)
+    pop(ref makers)
     let invoke: any = append
     invoke(ref makers, Local)
     invoke(ref makers, Other)
@@ -1586,7 +1588,7 @@ func run() -> int
         value: int
     end
     let makers: (func(int) -> Item)[] = [Item]
-    pop(makers)
+    pop(ref makers)
     if true then
         struct Item
             value: string
@@ -1636,7 +1638,7 @@ func run() -> int
     let makers: (func(ref Node, int) -> Local)[] = [Local]
     let node: Node = Node(42)
     let target: Local = makers[0](ref node, 1)
-    let ok: bool = json_loads("{\"count\":2}", target)
+    let ok: bool = json_loads("{\"count\":2}", ref target)
     if ok then return target.node.value + target.count else return 0 end
 end
 test_report(run())`)
@@ -1763,7 +1765,7 @@ func TestDynamicAppendUsesDeclaredCollectionSchemas(t *testing.T) {
 let invoke: any = append
 let item: int[4] = [1, 2, 3, 4]
 let target: int[4][] = [item]
-pop(target)
+pop(ref target)
 invoke(ref target, item)
 test_report(length(target))`)
 		testExpectedObject(t, 1, got)
@@ -1782,7 +1784,7 @@ test_report(length(target))`)
 let invoke: any = append
 let seed: int[4] = [1, 2, 3, 4]
 let target: int[4][] = [seed]
-pop(target)
+pop(ref target)
 let item: %s = %s
 invoke(ref target, item)
 test_report(length(target))`, tt.itemType, tt.literal)
@@ -1795,11 +1797,11 @@ test_report(length(target))`, tt.itemType, tt.literal)
 func integer(value: int) -> int return value end
 func text(value: string) -> int return 1 end
 let expected_item: (func(int) -> int)[] = [integer]
-pop(expected_item)
+pop(ref expected_item)
 let target: ((func(int) -> int)[])[] = [expected_item]
-pop(target)
+pop(ref target)
 let wrong: (func(string) -> int)[] = [text]
-pop(wrong)
+pop(ref wrong)
 let invoke: any = append
 invoke(ref target, wrong)
 test_report(length(target))`)
@@ -1810,9 +1812,9 @@ test_report(length(target))`)
 		got := runTypedFunctionProgram(t, `
 func integer(value: int) -> int return value end
 let item: (func(int) -> int)[] = [integer]
-pop(item)
+pop(ref item)
 let target: ((func(int) -> int)[])[] = [item]
-pop(target)
+pop(ref target)
 let invoke: any = append
 invoke(ref target, item)
 test_report(length(target))`)
@@ -1823,7 +1825,7 @@ test_report(length(target))`)
 		got := runTypedFunctionProgram(t, `
 let seed: map[string, int] = {"value": 1}
 let target: map[string, int][] = [seed]
-pop(target)
+pop(ref target)
 let wrong: map[int, string] = {}
 let invoke: any = append
 invoke(ref target, wrong)
@@ -1835,7 +1837,7 @@ test_report(length(target))`)
 		got := runTypedFunctionProgram(t, `
 let seed: map[string, int] = {"value": 1}
 let target: map[string, int][] = [seed]
-pop(target)
+pop(ref target)
 let item: map[string, int] = {}
 let invoke: any = append
 invoke(ref target, item)
@@ -1848,14 +1850,14 @@ func TestCollectionSchemaSurvivesShallowCopyAndMutation(t *testing.T) {
 	t.Run("array", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 func forward(item: int[4], target: ref int[4][]) -> void
-    pop(item)
+    pop(ref item)
     let invoke: any = append
-    invoke(ref target, item)
+    invoke(target, item)
 end
 let item: int[4] = [1, 2, 3, 4]
 let target: int[4][] = [item]
-pop(target)
-forward(item, target)
+pop(ref target)
+forward(item, ref target)
 test_report(length(target) * 10 + length(item))`)
 		testExpectedObject(t, 14, got)
 	})
@@ -1863,14 +1865,14 @@ test_report(length(target) * 10 + length(item))`)
 	t.Run("map", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 func forward(item: map[string, int], target: ref map[string, int][]) -> void
-    delete(item, "value")
+    delete(ref item, "value")
     let invoke: any = append
-    invoke(ref target, item)
+    invoke(target, item)
 end
 let item: map[string, int] = {"value": 1}
 let target: map[string, int][] = [item]
-pop(target)
-forward(item, target)
+pop(ref target)
+forward(item, ref target)
 test_report(length(target) * 10 + length(keys(item)))`)
 		testExpectedObject(t, 11, got)
 	})
@@ -1970,10 +1972,10 @@ func TestTypedJSONLoadsBuildsCollectionRuntimeSchemas(t *testing.T) {
 	t.Run("empty nested array", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let decoded: int[][] = [[1]]
-let ok: bool = json_loads("[[]]", decoded)
+let ok: bool = json_loads("[[]]", ref decoded)
 let seed: int[] = [1]
 let target: int[][] = [seed]
-pop(target)
+pop(ref target)
 let invoke: any = append
 invoke(ref target, decoded[0])
 if ok then test_report(length(target)) else test_report(999) end`)
@@ -1983,10 +1985,10 @@ if ok then test_report(length(target)) else test_report(999) end`)
 	t.Run("empty nested map", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let decoded: map[string, int][] = [{"seed": 1}]
-let ok: bool = json_loads("[{}]", decoded)
+let ok: bool = json_loads("[{}]", ref decoded)
 let seed: map[string, int] = {"seed": 1}
 let target: map[string, int][] = [seed]
-pop(target)
+pop(ref target)
 let invoke: any = append
 invoke(ref target, decoded[0])
 if ok then test_report(length(target)) else test_report(999) end`)
@@ -2005,9 +2007,9 @@ func TestRuntimeValueMarkerPropagatesThroughReferenceWithoutMutatingIt(t *testin
 let typed: ref int[] = unknown_ref()
 let seed: int[] = [1]
 let target: int[][] = [seed]
-pop(target)
+pop(ref target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`,
 		},
 		{
@@ -2018,9 +2020,9 @@ let typed: ref int[] = ref initial
 typed = unknown_ref()
 let seed: int[] = [1]
 let target: int[][] = [seed]
-pop(target)
+pop(ref target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`,
 		},
 	}
@@ -2067,9 +2069,9 @@ test_report(length(target))`,
 let typed: ref map[string, int] = unknown_ref()
 let seed: map[string, int] = {"seed": 1}
 let target: map[string, int][] = [seed]
-pop(target)
+pop(ref target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`
 		l := lexer.New(source)
 		p := parser.New(l)
@@ -2110,9 +2112,9 @@ test_report(length(target))`
 let typed: ref chan int = unknown_ref()
 let seed: chan int = make_chan(1)
 let target: (chan int)[] = [seed]
-pop(target)
+pop(ref target)
 let invoke: any = append
-invoke(ref target, typed)
+invoke(ref target, *typed)
 test_report(length(target))`
 		l := lexer.New(source)
 		p := parser.New(l)
@@ -2346,8 +2348,8 @@ func identity(value: int) -> int
     return value
 end
 let target: func[] = [identity]
-pop(target)
-let ok: bool = json_loads("[42]", target)
+pop(ref target)
+let ok: bool = json_loads("[42]", ref target)
 if ok then test_report(999) else test_report(length(target)) end`)
 		testExpectedObject(t, 0, got)
 	})
@@ -2358,8 +2360,8 @@ func identity(value: int) -> int
     return value
 end
 let target: map[string, func] = {"seed": identity}
-delete(target, "seed")
-let ok: bool = json_loads("{\"item\":42}", target)
+delete(ref target, "seed")
+let ok: bool = json_loads("{\"item\":42}", ref target)
 if ok then test_report(999) else test_report(length(keys(target))) end`)
 		testExpectedObject(t, 0, got)
 	})
@@ -2367,8 +2369,8 @@ if ok then test_report(999) else test_report(length(keys(target))) end`)
 	t.Run("reference callable element", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let target: (ref func)[] = [null]
-pop(target)
-let ok: bool = json_loads("[42]", target)
+pop(ref target)
+let ok: bool = json_loads("[42]", ref target)
 if ok then test_report(999) else test_report(length(target)) end`)
 		testExpectedObject(t, 0, got)
 	})
@@ -2377,8 +2379,8 @@ if ok then test_report(999) else test_report(length(target)) end`)
 		got := runTypedFunctionProgram(t, `
 let channel: chan int = make_chan(1)
 let target: (chan int)[] = [channel]
-pop(target)
-let ok: bool = json_loads("[42]", target)
+pop(ref target)
+let ok: bool = json_loads("[42]", ref target)
 if ok then test_report(999) else test_report(length(target)) end`)
 		testExpectedObject(t, 0, got)
 	})
@@ -2394,7 +2396,7 @@ struct Holder
     callback: func(int) -> int
 end
 let target: Holder = Holder(1, identity)
-let ok: bool = json_loads("{\"version\":2}", target)
+let ok: bool = json_loads("{\"version\":2}", ref target)
 if ok then test_report(target.callback(7)) else test_report(999) end`)
 	testExpectedObject(t, 7, got)
 }
@@ -2437,7 +2439,7 @@ func TestUnrelatedWildcardImportKeepsBuiltinRuntimeContract(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 use sys select *
 let values: int[] = [1]
-append(values, 2)
+append(ref values, 2)
 test_report(length(values))`)
 	testExpectedObject(t, 2, got)
 }
@@ -2455,7 +2457,7 @@ test_report(delete)`)
 func TestBuiltinCallBeforeLaterWildcardImportUsesRuntimeBuiltin(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let mapping: map[string, int] = {"a": 1}
-delete(mapping, "a")
+delete(ref mapping, "a")
 use http_client select *
 test_report(length(keys(mapping)))`)
 	testExpectedObject(t, 0, got)
@@ -2479,7 +2481,7 @@ func unused() -> void
     use http_client select delete
 end
 let mapping: map[string, int] = {"a": 1}
-delete(mapping, "a")
+delete(ref mapping, "a")
 test_report(length(keys(mapping)))`)
 	testExpectedObject(t, 0, got)
 }

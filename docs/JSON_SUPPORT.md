@@ -114,16 +114,17 @@ field, `map[K, ref T]` value — always ends up holding a reference or `null`:
 
 ```noxy
 let target: (ref int)[] = [null]
-json_loads("[42]", target)
+json_loads("[42]", ref target)
 let viz: ref int = target[0]
-print(type(ref viz))   // ref
-print(*viz)            // 42
+print(type(viz))   // ref
+print(*viz)         // 42
 ```
 
 Passing a `null` `ref T` field or element **directly** as the target
-(`json_loads(s, h.child)`) forwards the stored `null`; there is no slot behind
-it, so the call returns `false`. Pass the owner (`json_loads(s, h)`) or point
-the slot first.
+(`json_loads(s, h.child)` — `h.child` is already `ref T`, so no `ref` at the
+call site) forwards the stored `null`; there is no slot behind it, so the
+call returns `false`. Pass the owner instead (`json_loads(s, ref h)`) or
+point the slot first.
 
 ## Type Mapping
 

@@ -21,12 +21,12 @@ func tokenize(s: string)
                 word = word + s[i]
                 i = i + 1
             end
-            append(tokens, word)
+            append(ref tokens, word)
         elif c == "-" && i + 1 < n && s[i + 1] == ">" then
-            append(tokens, "->")
+            append(ref tokens, "->")
             i = i + 2
         else
-            append(tokens, c)
+            append(ref tokens, c)
             i = i + 1
         end
     end

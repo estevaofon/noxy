@@ -7,7 +7,7 @@
 func map_arr<A, B>(arr: A[], fn: func(A) -> B) -> B[]
     let out: B[] = []
     for item in arr do
-        append(out, fn(item))
+        append(ref out, fn(item))
     end
     return out
 end
@@ -16,7 +16,7 @@ func filter<T>(arr: T[], keep: func(T) -> bool) -> T[]
     let out: T[] = []
     for item in arr do
         if keep(item) then
-            append(out, item)
+            append(ref out, item)
         end
     end
     return out

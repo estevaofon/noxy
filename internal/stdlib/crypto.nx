@@ -52,19 +52,19 @@ func sha256(data_input: bytes) -> string
     let L: int = length(data_input)
     let i: int = 0
     while i < L do
-        append(msg, data_input[i])
+        append(ref msg, data_input[i])
         i = i + 1
     end
 
     // Append '1' bit (0x80 byte)
-    append(msg, 0x80)
+    append(ref msg, 0x80)
 
     // Append k '0' bits (k '0'/256 bytes)
     // Mensagem deve ser M.l + 1 + k = 448 mod 512
     // Em bytes: bytes_len + 1 + pad = 56 mod 64
     let current_len: int = length(msg)
     while (current_len % 64) != 56 do
-        append(msg, 0)
+        append(ref msg, 0)
         current_len = length(msg)
     end
 
@@ -78,15 +78,15 @@ func sha256(data_input: bytes) -> string
     let high_bits: int = (bit_len >> 32) & 0xFFFFFFFF
 
     // Append 8 bytes big endian
-    append(msg, (high_bits >> 24) & 0xFF)
-    append(msg, (high_bits >> 16) & 0xFF)
-    append(msg, (high_bits >> 8) & 0xFF)
-    append(msg, high_bits & 0xFF)
+    append(ref msg, (high_bits >> 24) & 0xFF)
+    append(ref msg, (high_bits >> 16) & 0xFF)
+    append(ref msg, (high_bits >> 8) & 0xFF)
+    append(ref msg, high_bits & 0xFF)
     
-    append(msg, (low_bits >> 24) & 0xFF)
-    append(msg, (low_bits >> 16) & 0xFF)
-    append(msg, (low_bits >> 8) & 0xFF)
-    append(msg, low_bits & 0xFF)
+    append(ref msg, (low_bits >> 24) & 0xFF)
+    append(ref msg, (low_bits >> 16) & 0xFF)
+    append(ref msg, (low_bits >> 8) & 0xFF)
+    append(ref msg, low_bits & 0xFF)
 
     // 2. Hash computation
     

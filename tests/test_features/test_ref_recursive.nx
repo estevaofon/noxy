@@ -23,5 +23,5 @@ func recursive_test(node: ref Node) -> ref Node
 end
 
 print("Starting recursive test:")
-let result: ref Node = recursive_test(n1)
+let result: ref Node = recursive_test(ref n1)
 print("Done!")

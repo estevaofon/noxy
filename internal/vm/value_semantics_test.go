@@ -20,7 +20,7 @@ func TestAssignmentIsValueCopy(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     let b: int[] = a
     b[0] = 99
     test_report(a[0])
@@ -34,7 +34,7 @@ func TestReassignmentIsValueCopy(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     let b: int[]
     b = a
     b[0] = 99
@@ -53,7 +53,7 @@ end
 
 func main()
     let a: P[]
-    append(a, P(1))
+    append(ref a, P(1))
     let b: P[] = a
     b[0].x = 99
     test_report(a[0].x)
@@ -71,7 +71,7 @@ end
 
 func main()
     let a: P[]
-    append(a, P(1))
+    append(ref a, P(1))
     let p: P = a[0]
     p.x = 99
     test_report(a[0].x)
@@ -89,7 +89,7 @@ end
 
 func main()
     let a: P[]
-    append(a, P(1))
+    append(ref a, P(1))
     a[0].x = 42
     test_report(a[0].x)
 end
@@ -119,8 +119,8 @@ end
 
 func main()
     let a: int[]
-    append(a, 1)
-    bump(a)
+    append(ref a, 1)
+    bump(ref a)
     test_report(a[0])
 end
 main()
@@ -140,7 +140,7 @@ end
 
 func main()
     let p: P = P(1)
-    poke(p)
+    poke(ref p)
     test_report(p.x)
 end
 main()
@@ -172,7 +172,7 @@ end
 
 func main()
     let a: P[]
-    append(a, P(1))
+    append(ref a, P(1))
     poke(a)
     test_report(a[0].x)
 end
@@ -189,7 +189,7 @@ end
 
 func main()
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     poke(a)
     test_report(a[0])
 end
@@ -219,7 +219,7 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 50 do
-        append(data, i)
+        append(ref data, i)
         i = i + 1
     end
     test_reset_clones()
@@ -323,7 +323,7 @@ func TestChanSendDeliversIndependentValue(t *testing.T) {
 func main()
     let c: any = make_chan(1)
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     chan_send(c, a)
     a[0] = 99
     let b: int[] = chan_recv(c)
@@ -346,7 +346,7 @@ end
 func main()
     let c: any = make_chan(1)
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     spawn(worker, a, c)
     a[0] = 99
     let seen: int = chan_recv(c)
@@ -365,7 +365,7 @@ end
 
 func main()
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     let b: Box = Box(a)
     a[0] = 99
     test_report(b.data[0])
@@ -379,7 +379,7 @@ func TestArrayLiteralElementIsIndependent(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let inner: int[]
-    append(inner, 1)
+    append(ref inner, 1)
     let outer: int[][] = [inner]
     inner[0] = 99
     test_report(outer[0][0])
@@ -399,7 +399,7 @@ end
 
 func run() -> void
     let a: int[]
-    append(a, 1)
+    append(ref a, 1)
     defer observe(a)
     a[0] = 99
 end
@@ -426,7 +426,7 @@ end
 
 func main()
     let a: P[]
-    append(a, P(0))
+    append(ref a, P(0))
     test_reset_clones()
     let i: int = 0
     while i < 100 do

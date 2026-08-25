@@ -30,7 +30,7 @@ func main()
     let expected_sum: int = 0
     
     while i < total_size do
-        append(data, i)
+        append(ref data, i)
         expected_sum = expected_sum + i
         i = i + 1
     end

@@ -10,20 +10,30 @@ func builtinType(name string) ast.NoxyType {
 	return &ast.PrimitiveType{Name: name}
 }
 
+// compileBuiltinValueArgument compila um argumento de VALOR de builtin
+// (item de append, chave de delete, texto de json_loads, limites de range).
+// R2: um `ref T` aqui e devolvido como esta — o chamador rejeita com hint.
 func (c *Compiler) compileBuiltinValueArgument(expression ast.Expression) (ast.NoxyType, error) {
 	_, actual, err := c.Compile(expression)
+	return actual, err
+}
+
+// compileBuiltinRefArgument aplica R5 aos builtins com parametro ref:
+// append/pop/delete (arg 1), json_loads (arg 2), append em (ref T)[] (arg 2).
+// `position` e "argument N to 'nome'"; `expected` e o texto do tipo esperado.
+func (c *Compiler) compileBuiltinRefArgument(arg ast.Expression, position, expected string) (ast.NoxyType, error) {
+	refArg, err := c.compileRefArgument(arg)
 	if err != nil {
 		return nil, err
 	}
-	explicitReference := false
-	if prefix, ok := expression.(*ast.PrefixExpression); ok {
-		explicitReference = prefix.Operator == "ref"
+	// refArg.proven e descartado de proposito: builtins sempre emitem
+	// emitCall(n, emission, false) — nunca OP_CALL_STATIC — entao nao ha
+	// modesProven a alimentar aqui.
+	if refArg.plain != nil {
+		return nil, fmt.Errorf("[line %d] %s: expected %s, got %s%s",
+			c.currentLine, position, expected, noxyTypeName(refArg.plain), refArgumentHint(arg))
 	}
-	if ref, ok := actual.(*ast.RefType); ok && !explicitReference {
-		c.emitByte(byte(chunk.OP_DEREF))
-		return ref.ElementType, nil
-	}
-	return actual, nil
+	return refArg.element, nil
 }
 
 func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmission) (bool, ast.NoxyType, error) {
@@ -64,7 +74,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 
 	switch name {
 	case "append":
-		container, err := c.compileReferenceArgument(call.Arguments[0])
+		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'append'", "ref T[]")
 		if err != nil {
 			return true, nil, err
 		}
@@ -73,11 +83,11 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			return true, nil, fmt.Errorf("[line %d] append expects an array, got %s", c.currentLine, noxyTypeName(container))
 		}
 		if expectedRef, ok := array.ElementType.(*ast.RefType); ok {
-			actualElement, err := c.compileReferenceArgument(call.Arguments[1])
+			actualElement, err := c.compileBuiltinRefArgument(call.Arguments[1], "argument 2 to 'append'", noxyTypeName(array.ElementType))
 			if err != nil {
 				return true, nil, err
 			}
-			if !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
+			if actualElement != nil && !c.areStrictTypesCompatible(expectedRef.ElementType, actualElement) {
 				actual := &ast.RefType{ElementType: actualElement}
 				return true, nil, fmt.Errorf(
 					"[line %d] argument 2 to 'append': expected %s, got %s",
@@ -91,8 +101,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			}
 			if _, explicitRef := item.(*ast.RefType); explicitRef {
 				return true, nil, fmt.Errorf(
-					"[line %d] argument 2 to 'append': expected %s, got %s",
+					"[line %d] argument 2 to 'append': expected %s, got %s%s",
 					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
+					c.derefReadHint(array.ElementType, item, call.Arguments[1]),
 				)
 			}
 			if !c.areStrictTypesCompatible(array.ElementType, item) {
@@ -108,7 +119,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		c.emitCall(2, emission, false)
 		return true, builtinType("void"), nil
 	case "pop":
-		container, err := c.compileReferenceArgument(call.Arguments[0])
+		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'pop'", "ref T[]")
 		if err != nil {
 			return true, nil, err
 		}
@@ -119,7 +130,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		c.emitCall(1, emission, false)
 		return true, array.ElementType, nil
 	case "delete":
-		container, err := c.compileReferenceArgument(call.Arguments[0])
+		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'delete'", "ref map")
 		if err != nil {
 			return true, nil, err
 		}
@@ -133,8 +144,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		}
 		if _, explicitRef := key.(*ast.RefType); explicitRef {
 			return true, nil, fmt.Errorf(
-				"[line %d] argument 2 to 'delete': expected %s, got %s",
+				"[line %d] argument 2 to 'delete': expected %s, got %s%s",
 				c.currentLine, noxyTypeName(mapping.KeyType), noxyTypeName(key),
+				c.derefReadHint(mapping.KeyType, key, call.Arguments[1]),
 			)
 		}
 		if !c.areStrictTypesCompatible(mapping.KeyType, key) {
@@ -156,7 +168,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 				c.currentLine, noxyTypeName(jsonText),
 			)
 		}
-		targetType, err := c.compileReferenceArgument(call.Arguments[1])
+		targetType, err := c.compileBuiltinRefArgument(call.Arguments[1], "argument 2 to 'json_loads'", "ref T")
 		if err != nil {
 			return true, nil, err
 		}

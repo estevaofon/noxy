@@ -1,6 +1,6 @@
 // swap: troca os valores de duas variáveis do chamador
 func swap(px: ref int, py: ref int)
-    let temp: int = px      // lê o valor apontado por px
+    let temp: int = *px     // lê o valor apontado por px (leitura explícita com '*')
     *px = *py               // escreve o valor de *py em *px
     *py = temp
 end
@@ -9,8 +9,10 @@ let a: int = 1
 let b: int = 2
 swap(ref a, ref b)          // como swap(&a, &b) em C
 print(a, b)
-swap(a, b)                  // com assinatura exata, o ref pode ficar implícito
-print(a, b)
+
+// 'ref' é sempre obrigatório no call site (R5): não existe mais forma
+// implícita, nem com assinatura exata. 'swap(a, b)' sem 'ref' agora é
+// erro de compilação: "argument 1 to 'swap': expected ref int, got int".
 
 // a versão sem ref não funciona, pelo mesmo motivo que em C
 func bad_swap(x: int, y: int)

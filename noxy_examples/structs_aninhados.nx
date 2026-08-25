@@ -76,7 +76,7 @@ end
 
 print("")
 print("=== Aplicando aumento de 10% ===")
-dar_aumento(func1, 0.10)
+dar_aumento(ref func1, 0.10)
 print(f"Salário final: {func1.salario}")
 
 // Função que modifica struct aninhado profundo
@@ -87,6 +87,6 @@ end
 
 print("")
 print("=== Mudando endereço ===")
-mudar_endereco(func1, "Rua Nova", 789)
+mudar_endereco(ref func1, "Rua Nova", 789)
 print(f"Novo endereço: {func1.endereco.rua}, {func1.endereco.numero}")
 

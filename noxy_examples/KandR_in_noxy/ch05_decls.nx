@@ -9,7 +9,7 @@ func evens(n: int) -> int[]
     let out: int[] = []
     let i: int = 0
     while i < n do
-        append(out, i * 2)
+        append(ref out, i * 2)
         i = i + 1
     end
     return out

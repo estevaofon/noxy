@@ -21,15 +21,15 @@ end
 // Test simple linking
 print("Before link:")
 print("n1:")
-print_list(n1)
+print_list(ref n1)
 print("n2:")
-print_list(n2)
+print_list(ref n2)
 
 // Link n1 to n2
-n1.next = n2
+n1.next = ref n2
 
 print("After link n1->n2:")
-print_list(n1)
+print_list(ref n1)
 
 // Now test modification via function
 func modify(node: ref Node, new_next: ref Node)
@@ -37,11 +37,11 @@ func modify(node: ref Node, new_next: ref Node)
 end
 
 // Unlink
-modify(n1, null)
+modify(ref n1, null)
 print("After modify(n1, null):")
-print_list(n1)
+print_list(ref n1)
 
 // Link again
-modify(n1, n2)
+modify(ref n1, ref n2)
 print("After modify(n1, n2):")
-print_list(n1)
+print_list(ref n1)

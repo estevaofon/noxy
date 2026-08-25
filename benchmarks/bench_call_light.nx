@@ -9,7 +9,7 @@ func main()
     let data: int[]
     let i: int = 0
     while i < 10000 do
-        append(data, i + 7)
+        append(ref data, i + 7)
         i = i + 1
     end
     let s: int = 0

@@ -14,7 +14,7 @@ end
 
 // Teste 2: Sem ref (só Node)
 func teste_sem_ref(node: ref Node)
-    let local: Node = node
+    let local: Node = *node
     local = Node(888, null)
     print("Dentro (sem ref): local.valor = " + to_str(local.valor))
 end

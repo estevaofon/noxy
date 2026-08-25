@@ -15,7 +15,7 @@ print("Val ID: " + to_str(val.id))
 
 print("Test 3: Append Value")
 let v2: Vertex = Vertex(2)
-append(list, v2)
+append(ref list, v2)
 print("Updated Len: " + to_str(length(list)))
 print("Second ID: " + to_str(list[1].id))
 

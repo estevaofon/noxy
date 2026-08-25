@@ -42,14 +42,14 @@ test_report([
 	}
 }
 
-// O compilador ja dereferencia operandos ref de `<`/`>` (compiler.go, bloco
-// identityComparison); com strings suportadas no executor, `ref string`
-// ordena pelo valor apontado.
-func TestStringOrderingDereferencesRefOperands(t *testing.T) {
+// Um operando ref de `<`/`>` e lido explicitamente com `*` (R2, spec
+// 2026-08-24-explicit-ref); com strings suportadas no executor, `*r` sobre
+// um `ref string` ordena pelo valor apontado.
+func TestStringOrderingReadsDerefRefOperands(t *testing.T) {
 	got := captureVMSource(t, `
 let s: string = "a"
 let r: ref string = ref s
-test_report(r < "b")`)
+test_report(*r < "b")`)
 	if !got.Bool() {
 		t.Fatal("ref string < string deveria comparar o valor apontado")
 	}

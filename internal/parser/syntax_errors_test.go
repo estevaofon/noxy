@@ -88,6 +88,11 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			source: "let x: int =",
 			want:   []string{"SyntaxError: unexpected EOF"},
 		},
+		{
+			name:   "ref of ref type",
+			source: "let q: ref ref int\n",
+			want:   []string{"SyntaxError: 'ref ref' is not a type", "hint: a reference is never taken to a reference"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -16,7 +16,7 @@ func main() -> void
     // In Noxy, maps are generic 'objMap', types are checked at runtime/compile time bounds?
     // Actually, 'populateObj' puts values into the map.
     
-    let success: bool = json_loads(json_str, target_map)
+    let success: bool = json_loads(json_str, ref target_map)
     
     if success then
         print("[PASS] json_loads returned success for map target")
@@ -41,7 +41,7 @@ func main() -> void
     // 'one' should be overwritten by 1 (from json), 'existing' should remain.
     
     print("\nTesting Merge Behavior:")
-    json_loads(json_str, merge_target)
+    json_loads(json_str, ref merge_target)
     
     print(merge_target)
     if merge_target["existing"] == 999 && merge_target["one"] == 1 then
@@ -56,7 +56,7 @@ func main() -> void
     let nested_json: string = "{\"meta\": {\"id\": 123}, \"tags\": [\"a\", \"b\"]}"
     let complex_map: map[string, any] = {}
     
-    json_loads(nested_json, complex_map)
+    json_loads(nested_json, ref complex_map)
     print(complex_map)
     
     // Accessing nested

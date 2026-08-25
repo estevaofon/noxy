@@ -1,4 +1,4 @@
 let a: bool[]
-append(a, true)
+append(ref a, true)
 a[0] = false
 print("ok")

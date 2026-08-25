@@ -6,19 +6,19 @@ end
 // pop(arr)
 
 func push<T>(_stack: ref Stack<T>, value: T) -> void
-    append(_stack.items, value)
+    append(ref _stack.items, value)
     print(_stack.items)
 end
 
 func pop_stack<T>(_stack: ref Stack<T>) -> T
-    return pop(_stack.items)
+    return pop(ref _stack.items)
 end
 
 func print_stack<T>(_stack: Stack<T>) -> T[]
     let reversed_list: T[] = []
     let original_list: T[] = _stack.items
     while length(original_list) >= 1 do
-        append(reversed_list, pop(original_list))
+        append(ref reversed_list, pop(ref original_list))
     end
     return reversed_list
 end

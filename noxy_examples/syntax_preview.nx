@@ -14,8 +14,8 @@ func main() -> void
     let usuarios: Usuario[] = []
     
     // Adicionando elementos
-    append(usuarios, Usuario(1, "Ana", true))
-    append(usuarios, Usuario(2, "Bruno", false))
+    append(ref usuarios, Usuario(1, "Ana", true))
+    append(ref usuarios, Usuario(2, "Bruno", false))
     
     // --- Hashmaps ---
     // Declaração: map[Chave, Valor]

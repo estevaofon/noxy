@@ -1,0 +1,6 @@
+func inc(v: ref int) -> void
+    *v = *v + 1
+end
+let x: int = 1
+let r: ref int = ref x
+inc(ref r)

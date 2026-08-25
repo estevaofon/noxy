@@ -106,7 +106,7 @@ func TestPreparedTaskCallRetainsReferenceIdentity(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `
 func worker(target: ref int) -> int
-    return target
+    return *target
 end`); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func by_value(item: int) -> int
     return item
 end
 func by_ref(item: ref int) -> int
-    return item
+    return *item
 end`); err != nil {
 		t.Fatal(err)
 	}

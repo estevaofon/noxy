@@ -7,26 +7,25 @@ import (
 	"noxy-vm/internal/value"
 )
 
-// Refs como operandos (spec §2.3 e §7): a condição de `while`/`if` com um
-// `ref bool` é dereferenciada automaticamente; um ref no lado DIREITO de um
-// infix e como operando de um unário também é lido (o compilador emite
-// OP_DEREF); `*r = s` com s: ref T grava o valor apontado por s; e um índice
-// que é `ref int` vale como o int apontado tanto em `ref arr[ri]` quanto em
-// `arr[ri] = v`. O perfil mostrou cada um desses caminhos do compilador sem
-// teste Go.
+// Refs como operandos (spec 2026-08-24-explicit-ref, R2/R3): a leitura e
+// sempre `*r`. Estes testes verificam PELO VALOR EM RUNTIME que `*r` em
+// condicao de while/if, como operando de infix e de unario, no RHS de
+// `*r = *s` e como indice (`arr[*ri]`, `ref arr[*ri]`) produz o valor
+// apontado — o compilador nao pode ter deixado passar nenhum OP_DEREF
+// implicito nem ter perdido o explicito.
 
-func TestWhileAndIfConditionsDereferenceRefBool(t *testing.T) {
+func TestWhileAndIfConditionsReadDerefRefBool(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let flag: bool = true
     let rf: ref bool = ref flag
     let n: int = 0
-    while rf do
+    while *rf do
         n = n + 1
         flag = false
     end
     let after: int = 0
-    if rf then
+    if *rf then
         after = 1
     else
         after = 2
@@ -41,15 +40,15 @@ main()
 	}
 }
 
-func TestInfixRightOperandAndUnaryOperandDereferenceRefs(t *testing.T) {
+func TestInfixAndUnaryOperandsReadDerefRefs(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let x: int = 10
     let rx: ref int = ref x
     let flag: bool = false
     let rb: ref bool = ref flag
-    let ints: int[] = [1 + rx, rx + 1, rx * rx, -rx]
-    let bools: bool[] = [5 > rx, rx < 5, !rb]
+    let ints: int[] = [1 + *rx, *rx + 1, *rx * *rx, -*rx]
+    let bools: bool[] = [5 > *rx, *rx < 5, !*rb]
     test_report([to_str(ints), to_str(bools)])
 end
 main()
@@ -66,9 +65,9 @@ main()
 	}
 }
 
-// Spec §2.3: "With s: ref int, *r = s writes the value s points to
-// (equivalent to *r = *s)". É cópia do valor, não aliasing: mudar y depois
-// não alcança x.
+// R2: `*r = *s` copia o valor apontado por s (o RHS `s` sem '*' e erro de
+// compilacao — explicit_read_test.go). E copia, nao aliasing: mudar y
+// depois nao alcanca x.
 func TestDerefAssignmentFromRefRHSCopiesPointedValue(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
@@ -76,7 +75,7 @@ func main()
     let y: int = 3
     let rx: ref int = ref x
     let ry: ref int = ref y
-    *rx = ry
+    *rx = *ry
     let x_after_assign: int = x
     y = 4
     test_report([x_after_assign, x, y])
@@ -89,16 +88,16 @@ main()
 	}
 }
 
-func TestRefIntIndexIsDereferencedInIndexExpressions(t *testing.T) {
+func TestDerefIndexReadsPointedInt(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
     let arr: int[] = [10, 20, 30]
     let i: int = 1
     let ri: ref int = ref i
-    let re: ref int = ref arr[ri]
+    let re: ref int = ref arr[*ri]
     *re = 200
     let after_ref: int = arr[1]
-    arr[ri] = 222
+    arr[*ri] = 222
     test_report([after_ref, arr[0], arr[1], arr[2]])
 end
 main()
@@ -157,5 +156,27 @@ test_report([to_str(length(b)), to_str(m), s, to_str(arr), to_str(f), to_str(ok)
 		if s, ok := cell.Obj.(string); !ok || s != want[i] {
 			t.Fatalf("célula %d: got %s, want %q", i, cell.String(), want[i])
 		}
+	}
+}
+
+// R2: `for x in *r` itera o array apontado. (Antes, `for x in r` compilava
+// e iterava zero vezes: OP_LEN devolve 0 para VAL_REF.)
+func TestForOverDerefRefArrayIteratesPointedArray(t *testing.T) {
+	got := captureVMSource(t, `
+func soma(r: ref int[]) -> int
+    let total: int = 0
+    for x in *r do
+        total = total + x
+    end
+    return total
+end
+func main()
+    let xs: int[] = [1, 2, 3]
+    test_report(soma(ref xs))
+end
+main()
+`)
+	if got.Int() != 6 {
+		t.Fatalf("soma = %s, want 6", got.String())
 	}
 }

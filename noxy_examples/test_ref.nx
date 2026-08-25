@@ -4,5 +4,5 @@ func change(x: ref int)
     *x = 20
 end
 
-change(a)
+change(ref a)
 print(a)

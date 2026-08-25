@@ -1,4 +1,4 @@
-[![noxy 0.18.0](https://img.shields.io/badge/noxy-0.18.0-blue)](CHANGELOG.md)
+[![noxy 0.19.0](https://img.shields.io/badge/noxy-0.19.0-blue)](CHANGELOG.md)
 
 # Noxy
 
@@ -19,20 +19,20 @@ struct Cart
 end
 
 func add_free_gift(c: Cart) -> Cart      // c is a copy: the caller's cart is safe
-    append(c.items, "gift")
+    append(ref c.items, "gift")
     return c
 end
 
 func checkout(c: ref Cart) -> void       // ref: the ONLY way to mutate the caller's value
-    append(c.items, "receipt")
+    append(ref c.items, "receipt")
 end
 
 let mine: Cart = Cart(["book"])
 let yours: Cart = mine                   // a copy, not an alias
-append(yours.items, "pen")
+append(ref yours.items, "pen")
 
 let promo: Cart = add_free_gift(mine)    // mine untouched
-checkout(mine)                           // mine changes — and the signature says so
+checkout(ref mine)                       // mine changes — the signature and the call site say so
 
 print(mine.items)    // [book, receipt]
 print(yours.items)   // [book, pen]
@@ -51,7 +51,9 @@ someone actually writes to it.
 
 **1. Variables are values.** Assigning, passing, or returning a struct, array
 or map gives you an independent value — at any depth. `ref` is the single,
-visible mechanism for sharing, and it is part of the type.
+visible mechanism for sharing, and it is part of the type. It is written at
+the call site too — `push(ref xs)` — so a call that can mutate your value
+looks different from one that cannot.
 
 ```noxy
 func push(xs: int[])       // cannot touch the caller's array
@@ -98,9 +100,10 @@ print(first(["b", "a"]))      // first<string> — no runtime dispatch
 ## What this buys you
 
 - **Concurrency without data races by construction** — data handed to a
-  routine by argument or channel is an independent value. Only `ref` and
-  globals need coordination, and both are visible in the code.
-  ([docs/CONCURRENCY.md](docs/CONCURRENCY.md))
+  routine by argument or channel is an independent value. Only `ref`
+  (including a closure that captures one) and globals need coordination, and
+  all of that is visible in the code.
+  ([docs/concurrency.md](docs/concurrency.md))
 - **Refactoring you can trust** — a function's signature tells you exactly
   what it can mutate and how it can fail.
 - **One rule, everywhere** — file, module, and REPL behave the same.
@@ -125,7 +128,7 @@ Simplicity is sophistication.
 Typing is safety — and the compiler speaks first.
 Dynamic exists, but it is explicit: any says what it is.
 Variables are copies, unless explicitly stated otherwise.
-Sharing is ref. There is no other way.
+Sharing is ref — in the type and at the call site. Closures and globals share by name; nothing else does.
 CoW + ref is one heck of a duo!
 An error is a value, not an exception.
 One rule, everywhere: file, module, REPL.
@@ -145,7 +148,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 - ✅ Dynamic arrays with `append`, `pop`, `contains`
 - ✅ Maps (hashmaps) with literals `{key: value}`
 - ✅ Functions with recursion
-- ✅ Reference system (`ref`)
+- ✅ Explicit references (`ref x` to create, `*r` to read, `ref` at every call site)
 - ✅ F-strings with interpolation
 - ✅ Single and double quote support
 - ✅ Line tracking for debugging
@@ -155,7 +158,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 - ✅ First-class functions
 - ✅ Closures
 - ✅ Generics with zero runtime cost (monomorphization: `func first<T>(arr: T[]) -> T`, `struct Stack<T>`, always inferred from usage)
-- ✅ Concurrency (noxy routines) [docs/CONCURRENCY.md](docs/CONCURRENCY.md)
+- ✅ Concurrency (noxy routines) [docs/concurrency.md](docs/concurrency.md)
 - ✅ Garbage collection
 - ✅ Built-in modules (io, net, http, sqlite)
 - ✅ Package manager (see [docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))
@@ -200,7 +203,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.18.0
+Noxy REPL v0.19.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
@@ -234,8 +237,8 @@ func main()
 
     // Dynamic arrays
     let nums: int[] = []
-    append(nums, 1)
-    append(nums, 2)
+    append(ref nums, 1)
+    append(ref nums, 2)
     print(f"Length: {length(nums)}")
 
     // Maps
@@ -337,10 +340,10 @@ let label = "v" + name     // label: string
 ### Dynamic Arrays
 ```noxy
 let nums: int[] = []
-append(nums, 10)
-append(nums, 20)
+append(ref nums, 10)
+append(ref nums, 20)
 print(length(nums))     // 2
-print(pop(nums))        // 20
+print(pop(ref nums))    // 20
 print(contains(nums, 10)) // true
 ```
 
@@ -374,7 +377,7 @@ struct Stack<T>
 end
 
 func push<T>(s: ref Stack<T>, item: T)
-    append(s.items, item)
+    append(ref s.items, item)
 end
 
 func peek<T>(s: Stack<T>) -> T
@@ -397,8 +400,8 @@ print(peek(ints))  // 20
 | `fmt(format, args...)` | printf-style formatting (`%s`, `%d`, `%.2f`, ...) |
 | `to_str(val)` | Converts to string |
 | `length(arr)` | Length of array/string |
-| `append(arr, val)` | Appends element to array |
-| `pop(arr)` | Removes and returns last element |
+| `append(ref arr, val)` | Appends element to array |
+| `pop(ref arr)` | Removes and returns last element |
 | `contains(arr, val)` | Checks if value exists |
 | `has_key(map, key)` | Checks if key exists in map |
 | `to_bytes(val)` | Converts string/int/array to bytes |

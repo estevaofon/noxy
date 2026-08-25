@@ -65,11 +65,11 @@ func run_simulation(generations: int)
         // ~50% density
         let r: int = random_int(0, 100)
         if r < 50 then
-            append(grid, 1)
+            append(ref grid, 1)
         else
-            append(grid, 0)
+            append(ref grid, 0)
         end
-        append(next_grid, 0)
+        append(ref next_grid, 0)
         i = i + 1
     end
 

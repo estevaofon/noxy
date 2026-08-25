@@ -53,7 +53,7 @@ func TestWhenCaseDiagnostics(t *testing.T) {
 		},
 		{
 			name:   "append to a non-array",
-			source: "let n: int = 1\nappend(n, 2)\n",
+			source: "let n: int = 1\nappend(ref n, 2)\n",
 			want:   "append expects an array, got int",
 		},
 	}
