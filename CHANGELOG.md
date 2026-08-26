@@ -1,5 +1,101 @@
 # Changelog
 
+## [0.20.0] - 2026-08-25
+
+Uma referência para dentro de um contêiner denota um **LUGAR**, não um objeto
+(issue #83). `ref a[i]` / `ref p.x` congelava o `*ObjArray`/`*ObjInstance` do
+instante da criação, e a partir daí a referência só estava certa enquanto
+ninguém mexesse no caminho: quem copiasse a raiz depois recebia a escrita feita
+através do empréstimo (vazamento), e quando o copy-on-write bifurcava o caminho
+o objeto congelado ficava órfão e a escrita sumia. Agora a base é compilada como
+referência ao lugar do pai, recursivamente até um ref de célula
+(`OP_REF_LOCAL`/`_UPVALUE`/`_GLOBAL`), que o CoW não move; na escrita o caminho
+inteiro é re-resolvido, unicizando e gravando o clone de volta em cada nível.
+É a mesma caminhada que a família `*_MUT` já fazia para `a[i].x = v` — o que
+muda é o instante em que ela roda. Spec: §2.3 R10.
+
+### Changed (BREAKING) — o empréstimo é um lugar, resolvido a cada acesso (issue #83)
+
+| Antes (0.19) | Agora (0.20) |
+|---|---|
+| `let c = a` *depois* de `ref a[0]`: a escrita através do empréstimo vazava para `c` | `c` fica isolada — semântica de valor vale independente de quando a cópia foi feita |
+| CoW bifurca o caminho: a escrita através do empréstimo sumia num objeto órfão | a escrita chega no lugar atual (o clone toma o lugar do original dentro do pai, até a raiz) |
+| raiz reatribuída (`arr = [7,7,7]` com `ref arr[0]` vivo): escrita sumia | a escrita chega no lugar atual |
+| entrada de map apagada (`delete(ref m, "a")` com `ref m["a"]` vivo): a escrita **ressuscitava** a chave em silêncio (`mapping.Set` insere) | erro `reference target no longer exists` — e o mesmo quando o lugar apagado está no **meio** do caminho, em vez do sintoma um nível adiante (`Target is not an instance`) |
+| `ref a[0].x == ref b[0].x` com `b = a` ainda compartilhado: `true` (comparava `Container.Obj`, um retrato do instante da criação) | `false` — a identidade de um empréstimo é o **caminho** |
+| `addr(ref a[0].x)` → `<index 0>` (omitia o contêiner; não era identidade nenhuma) | `<prop x of <index 0 of <global a>>>` |
+
+`ObjRef.Base` fica zerado para os `ObjRef` construídos fora do compilador
+(natives, JSON, bytecode de teste), que caem no comportamento antigo via
+`Container`.
+
+### Added
+
+- Spec §2.3 **R10** ("A reference into a container denotes a place"), com linha
+  própria na tabela de diagnósticos.
+- `benchmarks/bench_borrow_path.nx` — não havia benchmark para `ref` **dentro**
+  de contêiner (todos usavam `ref <variável>`, que é outro mecanismo), e foi
+  por isso que uma regressão de ~2x passou batida pela suíte inteira. Raso,
+  fundo e só-escrita.
+- Spec `docs/superpowers/specs/2026-08-25-issue-83-exclusive-access-design.md`
+  (marcada como superada: o desenho estático que ela propunha foi descartado
+  pelo repro G, e o caminho path-based que ela havia descartado é o que
+  consertou) e plano `docs/superpowers/plans/2026-08-25-issue-83-handoff.md`.
+
+### Fixed
+
+- Os **sete** repros do #83 — inclusive o G, o alias num ancestral do
+  contêiner, que nenhuma checagem centrada no contêiner via (`Retain` é por
+  objeto).
+- Caminho que **atravessa** um campo `ref T` (`setit(ref n1.next.data)`, o
+  idioma de lista ligada) morria com `slot 'next' already holds a reference`:
+  o compilador agora vê o nível `ref` antes de emitir e compila aquele nível
+  como valor. Fecha também `ref n1.next.xs[0]`, o mesmo dentro de um parâmetro
+  `ref Node`, e `ref refs[0].data` sobre `(ref Node)[]`.
+- Site de escrita tipado `any` (`func setx(p: any) -> void  p.x = 99 end`
+  chamada com `setx(ref arr[0])`) vazava: `OP_SET_PROPERTY` e
+  `OP_SET_PROPERTY_DEREF` resolviam a referência em modo de **leitura** e
+  mutavam o objeto compartilhado no lugar. Alvo de escrita resolve em modo de
+  escrita.
+- `json_loads` através de referência vazava nos **três** caminhos de população
+  — inclusive com `ref` a um local simples, sem empréstimo nenhum: `populateRef`
+  e `prepareJSONMutation`/`jsonReferenceStorage` mutavam o alvo no lugar sem
+  unicizar. Bug pré-existente de semântica de valor, fechado junto; era o
+  último site de escrita que resolvia referência sem escolher modo.
+
+### Performance
+
+- Empréstimo: **-68% de alocações, -11% de tempo** (`BenchmarkDeepBorrow`,
+  6.232.764 → 5.549.561 ns/op, 58.443 → 18.443 allocs/op). A re-resolução do
+  caminho cobrou caro num caminho que nenhum benchmark media (`ref root.b.c.xs[0]`
+  chegou a +198%); o profile apontou `referenceStorageMode` sozinho em 68,8%
+  das alocações. `referenceSetter` deixa de ser closure — vira struct de valor
+  que descreve onde gravar, não escapa, não aloca (era alocado por nível e por
+  acesso, inclusive na **leitura**, que descarta o setter sem chamá-lo) — e
+  `borrowContainer` coleta a cadeia num array de pilha e desce num laço em vez
+  de recorrer pelo despacho inteiro a cada nível. Duas alternativas medidas e
+  descartadas ficam registradas em comentário no código.
+- A escrita através de empréstimo passa a custar o que a atribuição direta
+  equivalente já custava, e a unicização ansiosa da criação deixa de acontecer.
+
+### Removed
+
+- R11/R12 e `own ref` (protótipos desta mesma sessão, nunca lançados): as duas
+  regras existiam para contornar o bug que agora está consertado na raiz, e
+  mantê-las passaria a significar avisar sobre código **correto** — medido nos
+  próprios repros da spec, e custando uma migração obrigatória de 42 parâmetros
+  no corpus. A superfície da linguagem volta ao que era na 0.19.0.
+
+### Conhecido, não consertado
+
+- Escritas concorrentes através de empréstimos perdem atualizações quando outra
+  routine lê a raiz. O controle — escrita **direta**, sem nenhum `ref` — perde
+  nos dois binários: a corrida é do CoW sob concorrência e é anterior a isto
+  (#86 é a ponta visível). O que mudou é que empréstimos perderam uma imunidade
+  que **era o bug** (escreviam direto no objeto congelado, sem passar pelo CoW)
+  e agora herdam o problema que já existia.
+- #87 — `ch06_keycount_ref.nx` não compila desde o #82.
+
 ## [0.19.0] - 2026-08-25
 
 `ref` explícito (issue #82): uma referência nunca é criada nem lida sem
