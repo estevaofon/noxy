@@ -495,6 +495,23 @@ test_report([[u.idade], [copia.idade]])`)
 		assertIsolatedAndWritten(t, got, []int64{9}, []int64{1})
 	})
 
+	t.Run("campo declarado ref T, populado através dele", func(t *testing.T) {
+		// Caminho separado dos outros dois: prepareJSONMutation desce pelo
+		// campo `ref T` e muta o REFERENTE no lugar (jsonReferenceStorage).
+		got := captureVMSource(t, `struct Inner
+    v: int
+end
+struct Outer
+    r: ref Inner
+end
+let i: Inner = Inner(1)
+let copia: Inner = i
+let o: Outer = Outer(ref i)
+json_loads("{\"r\":{\"v\":9}}", ref o)
+test_report([[i.v], [copia.v]])`)
+		assertIsolatedAndWritten(t, got, []int64{9}, []int64{1})
+	})
+
 	t.Run("empréstimo para dentro de um array", func(t *testing.T) {
 		got := captureVMSource(t, decl+`let arr: U[] = [U("a", 1)]
 let copia: U[] = arr

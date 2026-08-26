@@ -514,9 +514,19 @@ func jsonStoreThrough(vm *VM, target value.Value) jsonSetter {
 }
 
 func jsonReferenceStorage(vm *VM, ref *value.ObjRef) (value.Value, jsonSetter, bool) {
-	stored, exists, store, err := vm.referenceStorage(ref)
+	target := value.Value{Type: value.VAL_REF, Obj: ref}
+	_, exists, store, err := vm.referenceStorageMode(ref, true)
 	if err != nil || !exists || store == nil {
 		return value.Value{}, nil, false
 	}
-	return stored, jsonStoreThrough(vm, value.Value{Type: value.VAL_REF, Obj: ref}), true
+	// Semântica de valor: quem chama muta o referente NO LUGAR. Compartilhado
+	// — `let copia = i` antes do json_loads — a mutação vazava para a cópia.
+	// unicizeThroughRefValue resolve o lugar em modo de escrita, uniciza o
+	// conteúdo e grava o clone de volta, que é a mesma disciplina da família
+	// *_MUT e do populateRef.
+	stored, err := vm.unicizeThroughRefValue(target)
+	if err != nil {
+		return value.Value{}, nil, false
+	}
+	return stored, jsonStoreThrough(vm, target), true
 }
