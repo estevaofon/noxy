@@ -609,6 +609,7 @@ type ObjRef struct {
 	// Zero (Type != VAL_REF) mantém o comportamento antigo via Container: os
 	// ObjRef construídos fora do compilador (natives, JSON, bytecode de teste)
 	// não têm lugar de pai para oferecer.
+	//
 	Base Value
 }
 

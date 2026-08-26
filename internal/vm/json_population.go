@@ -516,7 +516,7 @@ func jsonStoreThrough(vm *VM, target value.Value) jsonSetter {
 func jsonReferenceStorage(vm *VM, ref *value.ObjRef) (value.Value, jsonSetter, bool) {
 	target := value.Value{Type: value.VAL_REF, Obj: ref}
 	_, exists, store, err := vm.referenceStorageMode(ref, true)
-	if err != nil || !exists || store == nil {
+	if err != nil || !exists || !store.valid() {
 		return value.Value{}, nil, false
 	}
 	// Semântica de valor: quem chama muta o referente NO LUGAR. Compartilhado

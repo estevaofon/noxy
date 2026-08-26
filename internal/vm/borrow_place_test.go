@@ -420,6 +420,31 @@ test_report([[a[0].x], [b[0].x]])`)
 		assertIntRows(t, got, [][]int64{{99}, {1}})
 	})
 
+	t.Run("mesma raiz, passos intermediários diferentes", func(t *testing.T) {
+		// `ref a[0].x` e `ref a[1].x` partem da MESMA raiz e têm o MESMO passo
+		// final. Só os passos intermediários os separam — o caso que o
+		// achatamento do caminho quase deixou passar.
+		got := captureVMSource(t, `struct S
+    x: int
+end
+let a: S[] = [S(1), S(2)]
+let r1: ref int = ref a[0].x
+let r2: ref int = ref a[1].x
+*r1 = 99
+test_report([[r1 == r2], [a[0].x], [a[1].x]])`)
+		rows := semArray(t, got)
+		iguais := semArray(t, rows[0])[0]
+		if iguais.Type != value.VAL_BOOL || iguais.Bool() {
+			t.Fatalf("ref a[0].x == ref a[1].x deu %s, want false", iguais.String())
+		}
+		if v := semArray(t, rows[1])[0]; v.Int() != 99 {
+			t.Fatalf("a[0].x = %s, want 99", v.String())
+		}
+		if v := semArray(t, rows[2])[0]; v.Int() != 2 {
+			t.Fatalf("a[1].x = %s, want 2", v.String())
+		}
+	})
+
 	t.Run("== separa os dois, e junta duas referências ao mesmo lugar", func(t *testing.T) {
 		got := captureVMSource(t, `struct S
     x: int
