@@ -224,7 +224,7 @@ func populateObj(vm *VM, currentVal value.Value, data interface{}) bool {
 // store cru de referenceStorage — spec 2026-08-20-ref-slot-invariant §5.3.
 func populateRef(vm *VM, target value.Value, ref *value.ObjRef, data interface{}) bool {
 	currentVal, exists, store, err := vm.referenceStorageMode(ref, true)
-	if err != nil || !exists || store == nil {
+	if err != nil || !exists || !store.valid() {
 		return false
 	}
 	// Semântica de valor: prepareJSONMutation muta o objeto apontado NO LUGAR.

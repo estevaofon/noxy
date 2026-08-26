@@ -21,7 +21,61 @@ func referenceMapKey(index value.Value) (interface{}, error) {
 	}
 }
 
-type referenceSetter func(value.Value)
+// referenceSetter descreve ONDE gravar, em vez de ser uma closure que grava.
+//
+// Perf (issue #83, follow-up): a versão closure era responsável por 68,8% das
+// alocações de um laço que escreve através de um empréstimo — uma por NÍVEL do
+// caminho e por acesso, inclusive na LEITURA, que descarta o setter sem nunca
+// chamá-lo. Como struct de valor, ele não escapa e não aloca; o custo vira
+// alguns campos na pilha.
+//
+// setterNone é o zero, e `valid()` é o que substitui o antigo `store == nil`.
+// Um campo por tipo de alvo. Medi a alternativa de um `target interface{}` só,
+// para encolher o struct: ficou ~10% MAIS LENTA (asserção de tipo no caminho
+// quente vale mais que as palavras economizadas). Fica a versão larga.
+type referenceSetter struct {
+	array    *value.ObjArray
+	mapping  *value.ObjMap
+	instance *value.ObjInstance
+	ptr      *value.Value
+	upvalue  *value.ObjUpvalue
+	globals  *value.GlobalEnvironment
+	key      interface{}
+	name     string
+	index    int
+	kind     setterKind
+}
+
+type setterKind uint8
+
+const (
+	setterNone setterKind = iota
+	setterGlobal
+	setterUpvalue
+	setterPtr
+	setterProperty
+	setterArray
+	setterMap
+)
+
+func (s referenceSetter) valid() bool { return s.kind != setterNone }
+
+func (s referenceSetter) set(updated value.Value) {
+	switch s.kind {
+	case setterGlobal:
+		s.globals.SetLocal(s.name, updated)
+	case setterUpvalue:
+		s.upvalue.Store(updated)
+	case setterPtr:
+		*s.ptr = updated
+	case setterProperty:
+		s.instance.Fields[s.name] = updated
+	case setterArray:
+		s.array.Elements[s.index] = updated
+	case setterMap:
+		s.mapping.Set(s.key, updated)
+	}
+}
 
 func validateReferencedValue(stored value.Value) error {
 	switch stored.Type {
@@ -89,8 +143,57 @@ func (vm *VM) borrowContainer(ref *value.ObjRef, forWrite bool) (value.Value, er
 		// teste): comportamento antigo, o contêiner congelado.
 		return ref.Container, nil
 	}
-	container := ref.Base
-	for depth := 0; ; depth++ {
+	// Coleta a cadeia de lugares até a raiz num array de PILHA, e depois
+	// desce dela para cá. A primeira versão recorria — cada nível passava por
+	// referenceStorageMode inteiro (despacho por RefType, construção de
+	// setter, checagem de unicidade) só para servir de base ao nível
+	// seguinte. Este laço faz o mesmo trabalho útil sem a recursão e sem
+	// alocar: `chain` não escapa.
+	var inline [8]*value.ObjRef
+	chain := inline[:0]
+	cursor := ref
+	for cursor.Base.Type == value.VAL_REF {
+		parent, ok := cursor.Base.Obj.(*value.ObjRef)
+		if !ok || parent == nil {
+			return value.Value{}, fmt.Errorf("invalid reference value")
+		}
+		if len(chain) > maxBorrowPathDepth {
+			return value.Value{}, fmt.Errorf("reference path too deep")
+		}
+		chain = append(chain, parent)
+		cursor = parent
+	}
+	// cursor é a raiz: uma referência de célula. O CoW não move a célula, mas
+	// o CONTEÚDO dela é o primeiro nível do caminho e, numa escrita, precisa
+	// ser unicizado e gravado de volta como qualquer outro nível.
+	root := value.Value{Type: value.VAL_REF, Obj: cursor}
+	var container value.Value
+	var err error
+	if forWrite {
+		container, err = vm.unicizeThroughRefValue(root)
+	} else {
+		container, err = vm.resolveReferenceValue(root)
+	}
+	if err != nil {
+		return value.Value{}, err
+	}
+	// chain[len-1] é a raiz, já resolvida acima. Os demais são os níveis
+	// INTERMEDIÁRIOS, de fora para dentro. O passo final — o que `ref` mesmo
+	// representa — não entra aqui: quem o aplica é referenceStorageMode, que
+	// é quem precisa do setter daquele nível.
+	for i := len(chain) - 2; i >= 0; i-- {
+		if container, err = vm.descend(container, chain[i], forWrite); err != nil {
+			return value.Value{}, err
+		}
+	}
+	return vm.derefPlace(container, forWrite)
+}
+
+// derefPlace resolve um lugar que guarda uma REFERÊNCIA (campo ou elemento
+// declarado `ref T`): o contêiner de verdade é o referente. Mesmo auto-deref
+// que OP_REF_PROPERTY/OP_REF_INDEX já faziam na criação.
+func (vm *VM) derefPlace(container value.Value, forWrite bool) (value.Value, error) {
+	for depth := 0; container.Type == value.VAL_REF; depth++ {
 		if depth > maxBorrowPathDepth {
 			return value.Value{}, fmt.Errorf("reference path too deep")
 		}
@@ -103,13 +206,89 @@ func (vm *VM) borrowContainer(ref *value.ObjRef, forWrite bool) (value.Value, er
 		if err != nil {
 			return value.Value{}, err
 		}
-		// Campo ou elemento declarado `ref T`: o lugar guarda uma referência,
-		// e o contêiner de verdade é o referente. Mesmo auto-deref que
-		// OP_REF_PROPERTY/OP_REF_INDEX já faziam na criação.
-		if container.Type != value.VAL_REF {
-			return container, nil
-		}
 	}
+	return container, nil
+}
+
+// descend desce UM nível do caminho de um empréstimo, direto sobre o contêiner
+// já resolvido do pai.
+//
+// Em modo de ESCRITA o filho é unicizado e o clone gravado de volta no pai aqui
+// mesmo — é essa gravação de volta que torna a caminhada correta (a §1.3 da
+// spec do #83 avisa que unicizar sem gravar de volta perde a escrita num clone
+// anônimo). Em modo de LEITURA nada é unicizado: ler não pode clonar.
+//
+// `step` é o ObjRef daquele nível; só RefType+Name/Index são lidos, nunca a
+// base dele — quem sequencia os níveis é borrowContainer.
+func (vm *VM) descend(container value.Value, step *value.ObjRef, forWrite bool) (value.Value, error) {
+	container, err := vm.derefPlace(container, forWrite)
+	if err != nil {
+		return value.Value{}, err
+	}
+	if container.Type != value.VAL_OBJ {
+		return value.Value{}, fmt.Errorf("Target is not indexable")
+	}
+	if step.RefType == value.REF_PROPERTY {
+		instance, ok := container.Obj.(*value.ObjInstance)
+		if !ok || instance == nil {
+			return value.Value{}, fmt.Errorf("Target is not an instance")
+		}
+		child, ok := instance.Fields[step.Name]
+		if !ok {
+			return value.Value{}, fmt.Errorf("undefined property '%s'", step.Name)
+		}
+		if !forWrite {
+			return child, nil
+		}
+		if unique, changed := vm.unicize(child); changed {
+			value.Retain(unique)
+			instance.Fields[step.Name] = unique
+			value.Release(child)
+			return unique, nil
+		}
+		return child, nil
+	}
+	if array, ok := container.Obj.(*value.ObjArray); ok && array != nil {
+		if step.Index.Type != value.VAL_INT {
+			return value.Value{}, fmt.Errorf("array reference index must be integer")
+		}
+		index := int(step.Index.Int())
+		if index < 0 || index >= len(array.Elements) {
+			return value.Value{}, fmt.Errorf("Index out of bounds")
+		}
+		child := array.Elements[index]
+		if !forWrite {
+			return child, nil
+		}
+		if unique, changed := vm.unicize(child); changed {
+			value.Retain(unique)
+			array.Elements[index] = unique
+			value.Release(child)
+			return unique, nil
+		}
+		return child, nil
+	}
+	if mapping, ok := container.Obj.(*value.ObjMap); ok && mapping != nil {
+		key, err := referenceMapKey(step.Index)
+		if err != nil {
+			return value.Value{}, err
+		}
+		child, exists := mapping.Get(key)
+		if !exists {
+			return value.Value{}, fmt.Errorf("reference target no longer exists")
+		}
+		if !forWrite {
+			return child, nil
+		}
+		if unique, changed := vm.unicize(child); changed {
+			value.Retain(unique)
+			mapping.Set(key, unique)
+			value.Release(child)
+			return unique, nil
+		}
+		return child, nil
+	}
+	return value.Value{}, fmt.Errorf("Target is not indexable")
 }
 
 func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bool, store referenceSetter, err error) {
@@ -121,77 +300,77 @@ func (vm *VM) referenceStorageMode(ref *value.ObjRef, forWrite bool) (stored val
 		if err == nil && exists {
 			if validationErr := validateReferencedValue(stored); validationErr != nil {
 				err = validationErr
-				store = nil
+				store = referenceSetter{}
 			}
 		}
 	}()
 	if ref == nil {
-		return value.Value{}, false, nil, fmt.Errorf("invalid reference value")
+		return value.Value{}, false, referenceSetter{}, fmt.Errorf("invalid reference value")
 	}
 	switch ref.RefType {
 	case value.REF_GLOBAL:
 		if ref.GlobalOwner == nil {
-			return value.Value{}, false, nil, fmt.Errorf("invalid global reference owner")
+			return value.Value{}, false, referenceSetter{}, fmt.Errorf("invalid global reference owner")
 		}
 		stored, ok := ref.GlobalOwner.GetLocal(ref.Name)
 		if !ok {
-			return value.Value{}, false, nil, fmt.Errorf("undefined global variable '%s'", ref.Name)
+			return value.Value{}, false, referenceSetter{}, fmt.Errorf("undefined global variable '%s'", ref.Name)
 		}
-		return stored, true, func(updated value.Value) { ref.GlobalOwner.SetLocal(ref.Name, updated) }, nil
+		return stored, true, referenceSetter{kind: setterGlobal, globals: ref.GlobalOwner, name: ref.Name}, nil
 	case value.REF_UPVALUE:
 		stored, ok := ref.Upvalue.Load()
 		if !ok {
-			return value.Value{}, false, nil, fmt.Errorf("invalid upvalue reference")
+			return value.Value{}, false, referenceSetter{}, fmt.Errorf("invalid upvalue reference")
 		}
-		return stored, true, func(updated value.Value) { ref.Upvalue.Store(updated) }, nil
+		return stored, true, referenceSetter{kind: setterUpvalue, upvalue: ref.Upvalue}, nil
 	case value.REF_PTR:
 		if ref.Ptr == nil {
-			return value.Value{}, false, nil, fmt.Errorf("invalid pointer reference")
+			return value.Value{}, false, referenceSetter{}, fmt.Errorf("invalid pointer reference")
 		}
-		return *ref.Ptr, true, func(updated value.Value) { *ref.Ptr = updated }, nil
+		return *ref.Ptr, true, referenceSetter{kind: setterPtr, ptr: ref.Ptr}, nil
 	case value.REF_PROPERTY:
 		container, err := vm.borrowContainer(ref, forWrite)
 		if err != nil {
-			return value.Value{}, false, nil, err
+			return value.Value{}, false, referenceSetter{}, err
 		}
 		instance, ok := container.Obj.(*value.ObjInstance)
 		if container.Type != value.VAL_OBJ || !ok || instance == nil {
-			return value.Value{}, false, nil, fmt.Errorf("Target is not an instance")
+			return value.Value{}, false, referenceSetter{}, fmt.Errorf("Target is not an instance")
 		}
 		stored, ok := instance.Fields[ref.Name]
 		if !ok {
-			return value.Value{}, false, nil, fmt.Errorf("undefined property '%s'", ref.Name)
+			return value.Value{}, false, referenceSetter{}, fmt.Errorf("undefined property '%s'", ref.Name)
 		}
-		return stored, true, func(updated value.Value) { instance.Fields[ref.Name] = updated }, nil
+		return stored, true, referenceSetter{kind: setterProperty, instance: instance, name: ref.Name}, nil
 	case value.REF_INDEX:
 		container, err := vm.borrowContainer(ref, forWrite)
 		if err != nil {
-			return value.Value{}, false, nil, err
+			return value.Value{}, false, referenceSetter{}, err
 		}
 		if array, ok := container.Obj.(*value.ObjArray); container.Type == value.VAL_OBJ && ok && array != nil {
 			if ref.Index.Type != value.VAL_INT {
-				return value.Value{}, false, nil, fmt.Errorf("array reference index must be integer")
+				return value.Value{}, false, referenceSetter{}, fmt.Errorf("array reference index must be integer")
 			}
 			index := int(ref.Index.Int())
 			if index < 0 || index >= len(array.Elements) {
-				return value.Value{}, false, nil, fmt.Errorf("Index out of bounds")
+				return value.Value{}, false, referenceSetter{}, fmt.Errorf("Index out of bounds")
 			}
-			return array.Elements[index], true, func(updated value.Value) { array.Elements[index] = updated }, nil
+			return array.Elements[index], true, referenceSetter{kind: setterArray, array: array, index: index}, nil
 		}
 		if mapping, ok := container.Obj.(*value.ObjMap); container.Type == value.VAL_OBJ && ok && mapping != nil {
 			key, err := referenceMapKey(ref.Index)
 			if err != nil {
-				return value.Value{}, false, nil, err
+				return value.Value{}, false, referenceSetter{}, err
 			}
 			stored, exists := mapping.Get(key)
 			if !exists {
 				stored = value.NewNull()
 			}
-			return stored, exists, func(updated value.Value) { mapping.Set(key, updated) }, nil
+			return stored, exists, referenceSetter{kind: setterMap, mapping: mapping, key: key}, nil
 		}
-		return value.Value{}, false, nil, fmt.Errorf("Target is not indexable")
+		return value.Value{}, false, referenceSetter{}, fmt.Errorf("Target is not indexable")
 	default:
-		return value.Value{}, false, nil, fmt.Errorf("invalid reference target")
+		return value.Value{}, false, referenceSetter{}, fmt.Errorf("invalid reference target")
 	}
 }
 
@@ -330,7 +509,7 @@ func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error 
 		vm.retargetOwnedSlot(ref, updated)
 		value.Release(stored)
 	}
-	store(updated)
+	store.set(updated)
 	return nil
 }
 
@@ -367,8 +546,8 @@ func borrowBaseAddr(ref *value.ObjRef) string {
 	case value.REF_GLOBAL:
 		return fmt.Sprintf("<global %s>", base.Name)
 	case value.REF_UPVALUE:
-		if address, ok := base.Upvalue.LocationAddress(); ok {
-			return address
+		if location, ok := base.Upvalue.LocationAddress(); ok {
+			return location
 		}
 		return "<invalid upvalue>"
 	case value.REF_PTR:

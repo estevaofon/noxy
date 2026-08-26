@@ -93,7 +93,7 @@ func (vm *VM) unicizeThroughRefValue(refArg value.Value) (value.Value, error) {
 			vm.retargetOwnedSlot(ref, v)
 			value.Release(stored)
 		}
-		store(v)
+		store.set(v)
 	}
 	return v, nil
 }
