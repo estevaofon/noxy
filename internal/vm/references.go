@@ -61,7 +61,62 @@ func extractReferenceValue(input value.Value) (*value.ObjRef, error) {
 	return ref, nil
 }
 
+// maxBorrowPathDepth limita a caminhada de um empréstimo até a raiz. Um
+// caminho real tem a profundidade do lvalue escrito no fonte; o teto só existe
+// para que bytecode malformado (um ref que se aponta) erre em vez de girar.
+const maxBorrowPathDepth = 256
+
+// borrowContainer devolve o contêiner ATUAL de um empréstimo (issue #83).
+//
+// Com Base preenchido, o caminho raiz→contêiner é re-resolvido agora, e não no
+// instante da criação do ref. Em modo de ESCRITA cada nível é unicizado e o
+// clone gravado de volta no lugar do pai (unicizeThroughRefValue), que é o que
+// impede tanto o vazamento — a escrita ia parar num objeto que uma cópia
+// posterior passou a compartilhar — quanto a escrita perdida, em que o CoW já
+// bifurcou o caminho e o objeto congelado ficou órfão.
+//
+// A §1.3 da spec avisa que unicizar o contêiner na escrita é PIOR que o bug:
+// a escrita vai para um clone anônimo e some. O que a torna correta aqui é a
+// GRAVAÇÃO DE VOLTA em cada nível — o clone não é anônimo, ele toma o lugar do
+// original dentro do pai, até a raiz, que é um ref de célula que o CoW não move.
+//
+// Em modo de LEITURA nada é unicizado: só se resolve o lugar. Ler não pode
+// clonar (CloneCountValue não pode subir por causa desta correção), e ler o
+// valor atual do lugar já é o comportamento certo.
+func (vm *VM) borrowContainer(ref *value.ObjRef, forWrite bool) (value.Value, error) {
+	if ref.Base.Type != value.VAL_REF {
+		// ObjRef construído sem lugar de pai (natives, JSON, bytecode de
+		// teste): comportamento antigo, o contêiner congelado.
+		return ref.Container, nil
+	}
+	container := ref.Base
+	for depth := 0; ; depth++ {
+		if depth > maxBorrowPathDepth {
+			return value.Value{}, fmt.Errorf("reference path too deep")
+		}
+		var err error
+		if forWrite {
+			container, err = vm.unicizeThroughRefValue(container)
+		} else {
+			container, err = vm.resolveReferenceValue(container)
+		}
+		if err != nil {
+			return value.Value{}, err
+		}
+		// Campo ou elemento declarado `ref T`: o lugar guarda uma referência,
+		// e o contêiner de verdade é o referente. Mesmo auto-deref que
+		// OP_REF_PROPERTY/OP_REF_INDEX já faziam na criação.
+		if container.Type != value.VAL_REF {
+			return container, nil
+		}
+	}
+}
+
 func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bool, store referenceSetter, err error) {
+	return vm.referenceStorageMode(ref, false)
+}
+
+func (vm *VM) referenceStorageMode(ref *value.ObjRef, forWrite bool) (stored value.Value, exists bool, store referenceSetter, err error) {
 	defer func() {
 		if err == nil && exists {
 			if validationErr := validateReferencedValue(stored); validationErr != nil {
@@ -95,8 +150,12 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 		}
 		return *ref.Ptr, true, func(updated value.Value) { *ref.Ptr = updated }, nil
 	case value.REF_PROPERTY:
-		instance, ok := ref.Container.Obj.(*value.ObjInstance)
-		if ref.Container.Type != value.VAL_OBJ || !ok || instance == nil {
+		container, err := vm.borrowContainer(ref, forWrite)
+		if err != nil {
+			return value.Value{}, false, nil, err
+		}
+		instance, ok := container.Obj.(*value.ObjInstance)
+		if container.Type != value.VAL_OBJ || !ok || instance == nil {
 			return value.Value{}, false, nil, fmt.Errorf("Target is not an instance")
 		}
 		stored, ok := instance.Fields[ref.Name]
@@ -105,7 +164,11 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 		}
 		return stored, true, func(updated value.Value) { instance.Fields[ref.Name] = updated }, nil
 	case value.REF_INDEX:
-		if array, ok := ref.Container.Obj.(*value.ObjArray); ref.Container.Type == value.VAL_OBJ && ok && array != nil {
+		container, err := vm.borrowContainer(ref, forWrite)
+		if err != nil {
+			return value.Value{}, false, nil, err
+		}
+		if array, ok := container.Obj.(*value.ObjArray); container.Type == value.VAL_OBJ && ok && array != nil {
 			if ref.Index.Type != value.VAL_INT {
 				return value.Value{}, false, nil, fmt.Errorf("array reference index must be integer")
 			}
@@ -115,7 +178,7 @@ func (vm *VM) referenceStorage(ref *value.ObjRef) (stored value.Value, exists bo
 			}
 			return array.Elements[index], true, func(updated value.Value) { array.Elements[index] = updated }, nil
 		}
-		if mapping, ok := ref.Container.Obj.(*value.ObjMap); ref.Container.Type == value.VAL_OBJ && ok && mapping != nil {
+		if mapping, ok := container.Obj.(*value.ObjMap); container.Type == value.VAL_OBJ && ok && mapping != nil {
 			key, err := referenceMapKey(ref.Index)
 			if err != nil {
 				return value.Value{}, false, nil, err
@@ -243,9 +306,18 @@ func (vm *VM) storeReferenceValue(input value.Value, updated value.Value) error 
 	if err != nil {
 		return err
 	}
-	stored, _, store, err := vm.referenceStorage(ref)
+	stored, exists, store, err := vm.referenceStorageMode(ref, true)
 	if err != nil {
 		return err
+	}
+	// issue #83: escrever através de uma referência cuja entrada não existe
+	// mais RESSUSCITAVA a chave — `mapping.Set` insere. Um empréstimo denota um
+	// lugar que existia; se o lugar foi apagado durante a vida dele, a escrita
+	// é um acesso conflitante e falha alto, em vez de recriar em silêncio algo
+	// que o programa mandou apagar. Só o ramo de map chega aqui com exists
+	// falso: índice de array fora de faixa e campo inexistente já erram antes.
+	if !exists {
+		return fmt.Errorf("reference target no longer exists")
 	}
 	// RC: funil unico para OP_STORE_REF / OP_STORE_VIA_REF /
 	// OP_SET_PROPERTY_DEREF - retain-antes-de-release em torno da troca. Lugar
@@ -271,4 +343,40 @@ func (vm *VM) resolveReferenceValue(input value.Value) (value.Value, error) {
 		return value.Value{}, err
 	}
 	return vm.lookupReferenceValue(ref)
+}
+
+// borrowBaseAddr descreve o LUGAR do pai de um empréstimo, para `addr` (issue
+// #83). Imprimir o ponteiro de `Container` deixou de ser honesto quando o
+// empréstimo passou a denotar um caminho: aquele campo é o retrato do instante
+// da criação, e dois roots ainda preguiçosamente compartilhados imprimiam o
+// mesmo endereço para lugares diferentes — e, depois de uma escrita, o endereço
+// nomeava o objeto que a CÓPIA ficou possuindo.
+//
+// O caminho é a identidade, então é ele que `addr` mostra:
+//
+//	addr(ref a[0].x)  ->  <prop x of <index 0 of <global a>>>
+func borrowBaseAddr(ref *value.ObjRef) string {
+	if ref.Base.Type != value.VAL_REF {
+		return fmt.Sprintf("%p", ref.Container.Obj)
+	}
+	base, ok := ref.Base.Obj.(*value.ObjRef)
+	if !ok || base == nil {
+		return "<invalid base>"
+	}
+	switch base.RefType {
+	case value.REF_GLOBAL:
+		return fmt.Sprintf("<global %s>", base.Name)
+	case value.REF_UPVALUE:
+		if address, ok := base.Upvalue.LocationAddress(); ok {
+			return address
+		}
+		return "<invalid upvalue>"
+	case value.REF_PTR:
+		return fmt.Sprintf("%p", base.Ptr)
+	case value.REF_PROPERTY:
+		return fmt.Sprintf("<prop %s of %s>", base.Name, borrowBaseAddr(base))
+	case value.REF_INDEX:
+		return fmt.Sprintf("<index %s of %s>", base.Index.String(), borrowBaseAddr(base))
+	}
+	return "<invalid base>"
 }

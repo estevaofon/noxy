@@ -270,10 +270,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					}
 					addrStr = address
 				case value.REF_PROPERTY:
-					containerAddr := fmt.Sprintf("%p", ref.Container.Obj)
-					addrStr = fmt.Sprintf("<prop %s of %s>", ref.Name, containerAddr)
+					addrStr = fmt.Sprintf("<prop %s of %s>", ref.Name, borrowBaseAddr(ref))
 				case value.REF_INDEX:
-					addrStr = fmt.Sprintf("<index %s>", ref.Index.String())
+					addrStr = fmt.Sprintf("<index %s of %s>", ref.Index.String(), borrowBaseAddr(ref))
 				}
 				vm.push(value.NewString(addrStr))
 			} else {
@@ -420,15 +419,22 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			name := nameVal.Obj.(string)
 
 			// Pop Container (Object/Struct)
-			container := vm.pop()
+			base := vm.pop()
 
-			// Auto-dereference if container is a ref
+			// issue #83: quando a base é um LUGAR (VAL_REF), ela é guardada
+			// como tal e o contêiner é re-resolvido na escrita. Congelar o
+			// objeto aqui é o bug: uma cópia feita depois compartilha este
+			// mesmo *ObjInstance, e a escrita através do empréstimo vaza para
+			// ela. A resolução abaixo é só para as checagens de criação.
+			container := base
 			if container.Type == value.VAL_REF {
 				resolved, err := vm.resolveReferenceValue(container)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
 				container = resolved
+			} else {
+				base = value.Value{}
 			}
 
 			// Now check container type
@@ -450,6 +456,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				Obj: &value.ObjRef{
 					RefType:   value.REF_PROPERTY,
 					Container: container,
+					Base:      base,
 					Name:      name,
 				},
 			})
@@ -457,18 +464,22 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_REF_INDEX:
 			// Pop Index, then Container
 			idx := vm.pop()
-			container := vm.pop()
+			base := vm.pop()
 
-			// Base que o compilador nao conhecia (`any`): resolve um
-			// eventual ref (como OP_REF_PROPERTY) e, se o array/map esta
-			// etiquetado com elemento/valor `ref T`, e erro (R1) — o slot
+			// issue #83: base que é um LUGAR fica guardada como lugar; o
+			// contêiner é re-resolvido na escrita (ver OP_REF_PROPERTY). A
+			// resolução aqui serve às checagens de criação: se o array/map
+			// está etiquetado com elemento/valor `ref T`, é erro (R1) — o slot
 			// ja guarda uma referencia, `ref` sobre ele nao encaminha.
+			container := base
 			if container.Type == value.VAL_REF {
 				resolved, err := vm.resolveReferenceValue(container)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
 				container = resolved
+			} else {
+				base = value.Value{}
 			}
 			if container.Type == value.VAL_OBJ {
 				switch collection := container.Obj.(type) {
@@ -488,6 +499,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				Obj: &value.ObjRef{
 					RefType:   value.REF_INDEX,
 					Container: container,
+					Base:      base,
 					Index:     idx,
 				},
 			})
@@ -1476,10 +1488,18 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			val := vm.pop()
 			instanceVal := vm.pop()
 
-			// Auto-dereference if instance is a ref
-
+			// Auto-dereference if instance is a ref.
+			//
+			// issue #83: aqui a referência é ALVO DE ESCRITA, então a
+			// resolução tem de ser em modo de escrita — unicizar o caminho e
+			// gravar os clones de volta. Com `resolveReferenceValue` (modo de
+			// leitura) a mutação ia direto no objeto compartilhado e vazava
+			// numa cópia posterior, que é o bug do #83 chegando por um site de
+			// escrita tipado `any`: `func setx(p: any) -> void  p.x = 99 end`
+			// chamada com `setx(ref arr[0])`. É o caminho dinâmico; via base
+			// tipada o compilador emite a família *_MUT, que já unicizava.
 			if instanceVal.Type == value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(instanceVal)
+				resolved, err := vm.unicizeThroughRefValue(instanceVal)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}
@@ -1530,9 +1550,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			val := vm.pop()
 			instanceVal := vm.pop()
 
-			// Expect Instance (Can be Ref to Instance)
+			// Expect Instance (Can be Ref to Instance). Mesmo motivo do
+			// OP_SET_PROPERTY: alvo de escrita resolve em modo de escrita
+			// (issue #83).
 			if instanceVal.Type == value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(instanceVal)
+				resolved, err := vm.unicizeThroughRefValue(instanceVal)
 				if err != nil {
 					return vm.runtimeError(c, ip, "%s", err)
 				}

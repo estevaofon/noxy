@@ -592,6 +592,24 @@ type ObjRef struct {
 	Upvalue     *ObjUpvalue // For Local (safe, captured)
 	Container   Value       // For Property/Index (Object, Array, Map)
 	Index       Value       // For Index
+	// Base e o LUGAR do contêiner, quando ele é conhecido (issue #83). Um
+	// empréstimo — `ref a[i]`, `ref p.x` — não denota um objeto, denota um
+	// LUGAR dentro de um composto que o copy-on-write pode bifurcar. Congelar
+	// o *ObjArray/*ObjInstance do instante da criação (o campo Container) é o
+	// bug: quem copia depois compartilha aquele objeto, e a escrita através do
+	// empréstimo vaza para a cópia — ou, se o CoW já bifurcou o caminho, cai
+	// num objeto órfão e some.
+	//
+	// Com Base preenchido (um VAL_REF para o lugar do PAI, recursivamente até
+	// um ref de célula — REF_PTR/REF_GLOBAL/REF_UPVALUE, que o CoW não move),
+	// a escrita re-resolve o caminho inteiro no momento em que acontece,
+	// unicizando e gravando o clone de volta em cada nível. É a mesma caminhada
+	// que a família *_MUT já faz para `a[i].x = v`; a diferença é o INSTANTE.
+	//
+	// Zero (Type != VAL_REF) mantém o comportamento antigo via Container: os
+	// ObjRef construídos fora do compilador (natives, JSON, bytecode de teste)
+	// não têm lugar de pai para oferecer.
+	Base Value
 }
 
 func (or *ObjRef) String() string {

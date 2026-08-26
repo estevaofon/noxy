@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"noxy-vm/internal/value"
@@ -65,9 +66,19 @@ func (vm *VM) unicizeThroughRefValue(refArg value.Value) (value.Value, error) {
 	if err != nil {
 		return value.Value{}, err
 	}
-	stored, _, store, err := vm.referenceStorage(ref)
+	// Modo de ESCRITA: preparar para mutar. Se o ref for um empréstimo com
+	// lugar de pai (issue #83), o caminho raiz->contêiner inteiro é unicizado
+	// e gravado de volta antes de o nível de cá ser unicizado.
+	stored, exists, store, err := vm.referenceStorageMode(ref, true)
 	if err != nil {
 		return value.Value{}, err
+	}
+	// O lugar sumiu durante a vida da referência (entrada de map apagada). A
+	// mesma recusa de storeReferenceValue, e aqui ela precisa sair NESTE nível:
+	// sem isso o buraco só aparecia um nível adiante, como "Target is not an
+	// instance" — um erro de tipo, que descreve o sintoma e não a causa.
+	if !exists {
+		return value.Value{}, fmt.Errorf("reference target no longer exists")
 	}
 	v, changed := vm.unicize(stored)
 	if changed {

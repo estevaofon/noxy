@@ -7,6 +7,26 @@ func (vm *VM) readShort() uint16 {
 	return uint16(vm.chunk.Code[vm.ip-2])<<8 | uint16(vm.chunk.Code[vm.ip-1])
 }
 
+// sameBorrowBase decide se dois empréstimos partem do MESMO lugar (issue #83).
+//
+// Comparar `Container.Obj` era fiel enquanto o contêiner era unicizado na
+// criação do ref. Com o empréstimo denotando um lugar, esse campo virou um
+// retrato do instante da criação: dois roots ainda preguiçosamente
+// compartilhados (`let b = a`) dão o MESMO ponteiro, e `ref a[0].x == ref
+// b[0].x` respondia `true` para dois lugares que o próprio programa prova
+// serem diferentes — escrever num deixa o outro intacto.
+//
+// A identidade de um empréstimo é o caminho: o lugar do pai mais o passo. A
+// recursão termina num ref de célula, que se compara por identidade de slot.
+func sameBorrowBase(a, b *value.ObjRef) bool {
+	if a.Base.Type == value.VAL_REF || b.Base.Type == value.VAL_REF {
+		return valuesEqual(a.Base, b.Base)
+	}
+	// Nenhum dos dois tem lugar de pai (ObjRef construído fora do compilador):
+	// resta o contêiner congelado.
+	return a.Container.Obj == b.Container.Obj
+}
+
 func valuesEqual(a, b value.Value) bool {
 	if a.Type == b.Type {
 		switch a.Type {
@@ -103,9 +123,9 @@ func valuesEqual(a, b value.Value) bool {
 			case value.REF_PTR:
 				return ar.Ptr == br.Ptr
 			case value.REF_PROPERTY:
-				return ar.Container.Obj == br.Container.Obj && ar.Name == br.Name
+				return sameBorrowBase(ar, br) && ar.Name == br.Name
 			case value.REF_INDEX:
-				return ar.Container.Obj == br.Container.Obj && valuesEqual(ar.Index, br.Index)
+				return sameBorrowBase(ar, br) && valuesEqual(ar.Index, br.Index)
 			}
 			return false
 		default:

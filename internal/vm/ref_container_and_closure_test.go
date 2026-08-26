@@ -101,8 +101,13 @@ test_report(kinds())
 	if !strings.HasPrefix(texts[1], "<prop x of ") {
 		t.Fatalf("addr(ref p.x) = %q, want prefixo '<prop x of '", texts[1])
 	}
-	if texts[2] != "<index 0>" {
-		t.Fatalf("addr(ref arr[0]) = %q, want <index 0>", texts[2])
+	// issue #83: `addr` de um empréstimo passou a descrever o CAMINHO. O
+	// formato antigo, "<index 0>", não era identidade nenhuma — omitia o
+	// contêiner, então `addr(ref a[0])` e `addr(ref b[0])` eram indistinguíveis
+	// para dois arrays diferentes, que é exatamente o que a spec diz que `addr`
+	// serve para responder ("gives the identity as a printable value").
+	if !strings.HasPrefix(texts[2], "<index 0 of ") {
+		t.Fatalf("addr(ref arr[0]) = %q, want prefixo '<index 0 of '", texts[2])
 	}
 	if texts[3] == "" || strings.HasPrefix(texts[3], "<") {
 		t.Fatalf("addr(ref upvalue) = %q, want endereço da caixa", texts[3])
