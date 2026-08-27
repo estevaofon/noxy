@@ -169,7 +169,7 @@ func (e *nxbEncoder) encodeStruct(obj *value.ObjInstance, depth int) error {
 		if err := e.encodeBlob(nxbString, field); err != nil {
 			return err
 		}
-		if err := e.encode(obj.Fields[field], depth+1); err != nil {
+		if err := e.encode(obj.Field(field), depth+1); err != nil {
 			return err
 		}
 	}

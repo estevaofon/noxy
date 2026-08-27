@@ -406,7 +406,7 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 			return true
 		}
 		for name, fieldSchema := range schema.Fields {
-			field, exists := instance.Fields[name]
+			field, exists := instance.Get(name)
 			if !exists || !vm.walkRuntimeValueType(field, fieldSchema, apply, seen) {
 				return false
 			}

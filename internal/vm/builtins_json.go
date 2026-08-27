@@ -32,23 +32,23 @@ func (vm *VM) defineJSONBuiltins() {
 			return value.NewNull()
 		}
 		result := value.NewInstance(resultType).Obj.(*value.ObjInstance)
-		result.Fields["success"] = value.NewBool(false)
-		result.Fields["data"] = value.NewString("")
-		result.Fields["error"] = value.NewString(errJSONUnsupported.Error())
+		result.MustSet("success", value.NewBool(false))
+		result.MustSet("data", value.NewString(""))
+		result.MustSet("error", value.NewString(errJSONUnsupported.Error()))
 
 		goValue, err := strictJSONValToGo(args[0])
 		if err != nil {
-			result.Fields["error"] = value.NewString(err.Error())
+			result.MustSet("error", value.NewString(err.Error()))
 			return value.Value{Type: value.VAL_OBJ, Obj: result}
 		}
 		encoded, err := json.Marshal(goValue)
 		if err != nil {
-			result.Fields["error"] = value.NewString(err.Error())
+			result.MustSet("error", value.NewString(err.Error()))
 			return value.Value{Type: value.VAL_OBJ, Obj: result}
 		}
-		result.Fields["success"] = value.NewBool(true)
-		result.Fields["data"] = value.NewString(string(encoded))
-		result.Fields["error"] = value.NewString("")
+		result.MustSet("success", value.NewBool(true))
+		result.MustSet("data", value.NewString(string(encoded)))
+		result.MustSet("error", value.NewString(""))
 		return value.Value{Type: value.VAL_OBJ, Obj: result}
 	})
 
@@ -139,9 +139,9 @@ func jsonValToGo(v value.Value) interface{} {
 			return m
 		case *value.ObjInstance:
 			m := make(map[string]interface{})
-			for k, val := range o.Fields {
+			o.Range(func(k string, val value.Value) {
 				m[k] = jsonValToGo(val)
-			}
+			})
 			return m
 		case *value.ObjStruct:
 			return o.Name

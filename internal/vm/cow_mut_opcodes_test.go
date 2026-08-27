@@ -98,7 +98,7 @@ func TestGetPropMutClonesSharedField(t *testing.T) {
 	field := value.NewArray([]value.Value{value.NewInt(5)})
 	structDef := &value.ObjStruct{Name: "Box", Fields: []string{"data"}}
 	inst := value.NewInstance(structDef)
-	inst.Obj.(*value.ObjInstance).Fields["data"] = field
+	inst.Obj.(*value.ObjInstance).MustSet("data", field)
 	// spec §3: dois donos duráveis (o campo da instância, que o construtor
 	// real teria retido, mais um alias qualquer) em vez do bit sticky.
 	shareByOwners(field)
@@ -117,10 +117,10 @@ func TestGetPropMutClonesSharedField(t *testing.T) {
 	}
 
 	instObj := inst.Obj.(*value.ObjInstance)
-	if instObj.Fields["data"].Obj == field.Obj {
+	if instObj.Field("data").Obj == field.Obj {
 		t.Fatal("campo compartilhado deveria ter sido clonado e gravado de volta")
 	}
-	if machine.stack[1].Obj != instObj.Fields["data"].Obj {
+	if machine.stack[1].Obj != instObj.Field("data").Obj {
 		t.Fatal("valor empilhado deve ser o clone gravado no campo")
 	}
 }

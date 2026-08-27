@@ -516,7 +516,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if container.Type != value.VAL_OBJ || !ok || instance == nil {
 				return vm.runtimeError(c, ip, "contextual property reference base must be an instance")
 			}
-			stored, ok := instance.Fields[name]
+			stored, ok := instance.Get(name)
 			if !ok {
 				return vm.runtimeError(c, ip, "undefined property '%s'", name)
 			}
@@ -1463,7 +1463,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
-				val, ok := instance.Fields[name]
+				val, ok := instance.Get(name)
 				if !ok {
 					return vm.runtimeError(c, ip, "undefined property '%s'", name)
 				}
@@ -1518,14 +1518,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// fora da declaracao e o mesmo "undefined property" da leitura
 			// (issue #61 item 2 — antes a escrita criava o campo em silencio).
 			// Via base tipada o compilador ja rejeitou (`unknown field`); aqui
-			// so dispara em fronteira dinamica (`any`). O caminho quente e o
-			// lookup em instance.Fields que a troca abaixo ja fazia; a
-			// declaracao so e consultada quando o nome nao esta na instancia
-			// (native que deixou o campo por preencher, ou nome inexistente).
-			old, exists := instance.Fields[name]
-			if !exists && !instance.Struct.HasField(name) {
+			// so dispara em fronteira dinamica (`any`). O caminho quente e um
+			// lookup no indice SO-LEITURA da declaracao (issue #86: o map por
+			// instancia, que duas routines escreviam, nao existe mais).
+			slot, declared := instance.Struct.FieldIndex(name)
+			if !declared {
 				return vm.runtimeError(c, ip, "undefined property '%s'", name)
 			}
+			old := instance.Slots[slot]
 
 			// Guard do slot ref (spec 2026-08-20-ref-slot-invariant §6.3):
 			// via base tipada o compilador ja rejeitou; aqui so dispara em
@@ -1535,9 +1535,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 			// RC: retain-antes-de-release (campo e dono duravel); Release
-			// em campo inexistente (Value{} zero) e no-op (nao e VAL_OBJ)
+			// em slot null e no-op (nao e VAL_OBJ)
 			value.Retain(val)
-			instance.Fields[name] = val
+			instance.Slots[slot] = val
 			value.Release(old)
 			vm.push(val)
 
@@ -1570,7 +1570,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			}
 
 			// Get Field - EXPECTING REFERENCE
-			fieldVal, ok := instance.Fields[name]
+			fieldVal, ok := instance.Get(name)
 			if !ok {
 				return vm.runtimeError(c, ip, "undefined property '%s'", name)
 			}
@@ -1717,16 +1717,17 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "only instances/maps have properties")
 			}
 			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
-				fieldVal, ok := instance.Fields[name]
+				slot, ok := instance.Struct.FieldIndex(name)
 				if !ok {
 					return vm.runtimeError(c, ip, "undefined property '%s'", name)
 				}
+				fieldVal := instance.Slots[slot]
 				if value.IsShared(fieldVal) {
 					old := fieldVal
 					fieldVal = vm.copyValue(fieldVal)
 					// RC: retain-antes-de-release em torno da troca
 					value.Retain(fieldVal)
-					instance.Fields[name] = fieldVal
+					instance.Slots[slot] = fieldVal
 					value.Release(old)
 				}
 				vm.push(fieldVal)

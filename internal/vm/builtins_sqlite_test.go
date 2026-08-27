@@ -38,8 +38,8 @@ func sqliteTemplate(definition value.Value) value.Value {
 func requireSQLiteExecResult(t *testing.T, got value.Value, definitions sqliteTestDefinitions, ok bool, errorText string) *value.ObjInstance {
 	t.Helper()
 	result := requireBuiltinInstance(t, got, definitions.execResult)
-	assertBuiltinValue(t, result.Fields["ok"], value.NewBool(ok))
-	assertBuiltinValue(t, result.Fields["error"], value.NewString(errorText))
+	assertBuiltinValue(t, result.Field("ok"), value.NewBool(ok))
+	assertBuiltinValue(t, result.Field("error"), value.NewString(errorText))
 	return result
 }
 
@@ -92,8 +92,8 @@ func recordDeferredSQLiteResources(machine *VM, database **DatabaseResource, sta
 		if !databaseOK || !statementOK {
 			return value.NewNull()
 		}
-		*database, _ = machine.shared.Databases.get(int(databaseInstance.Fields["handle"].Int()))
-		*statement, _ = machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
+		*database, _ = machine.shared.Databases.get(int(databaseInstance.Field("handle").Int()))
+		*statement, _ = machine.shared.Statements.get(int(statementInstance.Field("handle").Int()))
 		return value.NewNull()
 	})
 }
@@ -206,7 +206,7 @@ func TestSQLiteHandlesAreSharedAcrossVMs(t *testing.T) {
 		sqliteTemplate(definitions.database),
 	)
 	defer callBuiltin(t, parent, "sqlite_close", database)
-	databaseHandle := int(requireBuiltinInstance(t, database, definitions.database).Fields["handle"].Int())
+	databaseHandle := int(requireBuiltinInstance(t, database, definitions.database).Field("handle").Int())
 	if _, ok := parent.shared.Databases.get(databaseHandle); !ok {
 		t.Fatalf("database handle %d was not published to shared resources", databaseHandle)
 	}
@@ -221,7 +221,7 @@ func TestSQLiteHandlesAreSharedAcrossVMs(t *testing.T) {
 		sqliteTemplate(definitions.statement),
 	)
 	defer callBuiltin(t, parent, "sqlite_finalize", statement)
-	statementHandle := int(requireBuiltinInstance(t, statement, definitions.statement).Fields["handle"].Int())
+	statementHandle := int(requireBuiltinInstance(t, statement, definitions.statement).Field("handle").Int())
 	if _, ok := parent.shared.Statements.get(statementHandle); !ok {
 		t.Fatalf("statement handle %d was not published to shared resources", statementHandle)
 	}
@@ -237,11 +237,11 @@ func TestSQLiteHandlesAreSharedAcrossVMs(t *testing.T) {
 		sqliteTemplate(definitions.queryResult),
 		sqliteTemplate(definitions.row),
 	), definitions.queryResult)
-	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(1))
-	rows := requireBuiltinArray(t, query.Fields["rows"])
+	assertBuiltinValue(t, query.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, query.Field("row_count"), value.NewInt(1))
+	rows := requireBuiltinArray(t, query.Field("rows"))
 	row := requireBuiltinInstance(t, rows.Elements[0], definitions.row)
-	assertBuiltinArray(t, row.Fields["values"], []value.Value{value.NewInt(1), value.NewString("shared")})
+	assertBuiltinArray(t, row.Field("values"), []value.Value{value.NewInt(1), value.NewString("shared")})
 }
 
 func TestSQLiteStatementParametersConcurrent(t *testing.T) {
@@ -259,7 +259,7 @@ func TestSQLiteStatementParametersConcurrent(t *testing.T) {
 		sqliteTemplate(definitions.statement),
 	)
 	defer callBuiltin(t, machine, "sqlite_finalize", statement)
-	statementHandle := int(requireBuiltinInstance(t, statement, definitions.statement).Fields["handle"].Int())
+	statementHandle := int(requireBuiltinInstance(t, statement, definitions.statement).Field("handle").Int())
 	if _, ok := machine.shared.Statements.get(statementHandle); !ok {
 		t.Fatalf("statement handle %d was not published to shared resources", statementHandle)
 	}
@@ -306,8 +306,8 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	databaseTemplate := sqliteTemplate(definitions.database)
 	databaseValue := callBuiltin(t, machine, "sqlite_open", value.NewString(databasePath), databaseTemplate)
 	database := requireBuiltinInstance(t, databaseValue, definitions.database)
-	assertBuiltinValue(t, database.Fields["open"], value.NewBool(true))
-	databaseHandle := int(database.Fields["handle"].Int())
+	assertBuiltinValue(t, database.Field("open"), value.NewBool(true))
+	databaseHandle := int(database.Field("handle").Int())
 	if _, ok := machine.shared.Databases.get(databaseHandle); !ok {
 		t.Fatalf("database handle %d is not registered", databaseHandle)
 	}
@@ -317,7 +317,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 		value.NewString("CREATE TABLE entries (id INTEGER PRIMARY KEY, name TEXT NOT NULL, score REAL NOT NULL)"),
 		sqliteTemplate(definitions.execResult),
 	), definitions, true, "")
-	assertBuiltinValue(t, createResult.Fields["rows_affected"], value.NewInt(0))
+	assertBuiltinValue(t, createResult.Field("rows_affected"), value.NewInt(0))
 
 	paramsResult := requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec_params",
 		databaseValue,
@@ -325,7 +325,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 		value.NewArray([]value.Value{value.NewInt(1), value.NewString("alpha"), value.NewFloat(1.25)}),
 		sqliteTemplate(definitions.execResult),
 	), definitions, true, "")
-	assertBuiltinValue(t, paramsResult.Fields["rows_affected"], value.NewInt(1))
+	assertBuiltinValue(t, paramsResult.Field("rows_affected"), value.NewInt(1))
 
 	statementValue := callBuiltin(t, machine, "sqlite_prepare",
 		databaseValue,
@@ -333,7 +333,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 		sqliteTemplate(definitions.statement),
 	)
 	statement := requireBuiltinInstance(t, statementValue, definitions.statement)
-	statementHandle := int(statement.Fields["handle"].Int())
+	statementHandle := int(statement.Field("handle").Int())
 	statementResource, ok := machine.shared.Statements.get(statementHandle)
 	if !ok {
 		t.Fatalf("statement handle %d is not registered", statementHandle)
@@ -343,7 +343,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_bind_text", statementValue, value.NewInt(2), value.NewString("beta")), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_bind_float", statementValue, value.NewInt(3), value.NewFloat(2.5)), value.NewNull())
 	stepResult := requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_step_exec", statementValue, sqliteTemplate(definitions.execResult)), definitions, true, "")
-	assertBuiltinValue(t, stepResult.Fields["rows_affected"], value.NewInt(1))
+	assertBuiltinValue(t, stepResult.Field("rows_affected"), value.NewInt(1))
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_reset", statementValue), value.NewNull())
 	statementResource.mu.Lock()
@@ -363,11 +363,11 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 		sqliteTemplate(definitions.queryResult),
 		sqliteTemplate(definitions.row),
 	), definitions.queryResult)
-	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, query.Fields["error"], value.NewString(""))
-	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(3))
-	assertBuiltinArray(t, query.Fields["columns"], []value.Value{value.NewString("id"), value.NewString("name"), value.NewString("score")})
-	rows := requireBuiltinArray(t, query.Fields["rows"])
+	assertBuiltinValue(t, query.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, query.Field("error"), value.NewString(""))
+	assertBuiltinValue(t, query.Field("row_count"), value.NewInt(3))
+	assertBuiltinArray(t, query.Field("columns"), []value.Value{value.NewString("id"), value.NewString("name"), value.NewString("score")})
+	rows := requireBuiltinArray(t, query.Field("rows"))
 	wantRows := [][]value.Value{
 		{value.NewInt(1), value.NewString("alpha"), value.NewFloat(1.25)},
 		{value.NewInt(2), value.NewString("beta"), value.NewFloat(2.5)},
@@ -378,7 +378,7 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	}
 	for index, want := range wantRows {
 		row := requireBuiltinInstance(t, rows.Elements[index], definitions.row)
-		assertBuiltinArray(t, row.Fields["values"], want)
+		assertBuiltinArray(t, row.Field("values"), want)
 	}
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_finalize", statementValue), value.NewNull())
@@ -386,13 +386,13 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 		t.Fatalf("finalized statement handle %d remains registered", statementHandle)
 	}
 	invalidStep := requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_step_exec", statementValue, sqliteTemplate(definitions.execResult)), definitions, false, "invalid statement handle")
-	assertBuiltinValue(t, invalidStep.Fields["rows_affected"], value.NewInt(0))
+	assertBuiltinValue(t, invalidStep.Field("rows_affected"), value.NewInt(0))
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_bind_int", statementValue, value.NewInt(1), value.NewInt(99)), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_reset", statementValue), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_finalize", statementValue), value.NewNull())
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_close", databaseValue), value.NewNull())
-	assertBuiltinValue(t, database.Fields["open"], value.NewBool(false))
+	assertBuiltinValue(t, database.Field("open"), value.NewBool(false))
 	if _, ok := machine.shared.Databases.get(databaseHandle); ok {
 		t.Fatalf("closed database handle %d remains registered", databaseHandle)
 	}
@@ -400,9 +400,9 @@ func TestSQLiteBuiltinsTemporaryDatabaseLifecycle(t *testing.T) {
 	requireSQLiteExecResult(t, callBuiltin(t, machine, "sqlite_exec_params", databaseValue, value.NewString("SELECT ?"), value.NewArray([]value.Value{value.NewInt(1)}), sqliteTemplate(definitions.execResult)), definitions, false, "invalid database handle")
 	assertBuiltinValue(t, callBuiltin(t, machine, "sqlite_prepare", databaseValue, value.NewString("SELECT 1"), sqliteTemplate(definitions.statement)), value.NewNull())
 	invalidQuery := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query", databaseValue, value.NewString("SELECT 1"), sqliteTemplate(definitions.queryResult), sqliteTemplate(definitions.row)), definitions.queryResult)
-	assertBuiltinValue(t, invalidQuery.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, invalidQuery.Fields["error"], value.NewString("invalid database handle"))
-	assertBuiltinValue(t, invalidQuery.Fields["row_count"], value.NewInt(0))
+	assertBuiltinValue(t, invalidQuery.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, invalidQuery.Field("error"), value.NewString("invalid database handle"))
+	assertBuiltinValue(t, invalidQuery.Field("row_count"), value.NewInt(0))
 }
 
 func TestSQLiteQueryRejectsInvalidUTF8(t *testing.T) {
@@ -429,7 +429,7 @@ func TestSQLiteQueryRejectsInvalidUTF8(t *testing.T) {
 		value.NewArray([]value.Value{value.NewInt(1), value.NewBytes("hello\xffworld")}),
 		sqliteTemplate(definitions.execResult),
 	), definitions, true, "")
-	assertBuiltinValue(t, insertResult.Fields["rows_affected"], value.NewInt(1))
+	assertBuiltinValue(t, insertResult.Field("rows_affected"), value.NewInt(1))
 
 	query := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query",
 		databaseValue,
@@ -437,11 +437,11 @@ func TestSQLiteQueryRejectsInvalidUTF8(t *testing.T) {
 		sqliteTemplate(definitions.queryResult),
 		sqliteTemplate(definitions.row),
 	), definitions.queryResult)
-	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(0))
-	errorText, ok := query.Fields["error"].Obj.(string)
+	assertBuiltinValue(t, query.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, query.Field("row_count"), value.NewInt(0))
+	errorText, ok := query.Field("error").Obj.(string)
 	if !ok {
-		t.Fatalf("query error field = %#v, want string", query.Fields["error"])
+		t.Fatalf("query error field = %#v, want string", query.Field("error"))
 	}
 	if !strings.Contains(errorText, "UTF-8") {
 		t.Fatalf("query error = %q, want it to mention UTF-8", errorText)
@@ -470,7 +470,7 @@ func TestSQLiteQueryAllowsValidAccentedText(t *testing.T) {
 		value.NewArray([]value.Value{value.NewInt(1), value.NewString("acentuação")}),
 		sqliteTemplate(definitions.execResult),
 	), definitions, true, "")
-	assertBuiltinValue(t, insertResult.Fields["rows_affected"], value.NewInt(1))
+	assertBuiltinValue(t, insertResult.Field("rows_affected"), value.NewInt(1))
 
 	query := requireBuiltinInstance(t, callBuiltin(t, machine, "sqlite_query",
 		databaseValue,
@@ -478,12 +478,12 @@ func TestSQLiteQueryAllowsValidAccentedText(t *testing.T) {
 		sqliteTemplate(definitions.queryResult),
 		sqliteTemplate(definitions.row),
 	), definitions.queryResult)
-	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, query.Fields["error"], value.NewString(""))
-	assertBuiltinValue(t, query.Fields["row_count"], value.NewInt(1))
-	rows := requireBuiltinArray(t, query.Fields["rows"])
+	assertBuiltinValue(t, query.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, query.Field("error"), value.NewString(""))
+	assertBuiltinValue(t, query.Field("row_count"), value.NewInt(1))
+	rows := requireBuiltinArray(t, query.Field("rows"))
 	row := requireBuiltinInstance(t, rows.Elements[0], definitions.row)
-	assertBuiltinArray(t, row.Fields["values"], []value.Value{value.NewInt(1), value.NewString("acentuação")})
+	assertBuiltinArray(t, row.Field("values"), []value.Value{value.NewInt(1), value.NewString("acentuação")})
 }
 
 func TestSQLiteBindsBytesParameterWithoutCorruption(t *testing.T) {
@@ -515,19 +515,19 @@ func TestSQLiteBindsBytesParameterWithoutCorruption(t *testing.T) {
 		sqliteTemplate(definitions.queryResult),
 		sqliteTemplate(definitions.row),
 	), definitions.queryResult)
-	assertBuiltinValue(t, query.Fields["ok"], value.NewBool(true))
+	assertBuiltinValue(t, query.Field("ok"), value.NewBool(true))
 
-	rows, ok := query.Fields["rows"].Obj.(*value.ObjArray)
+	rows, ok := query.Field("rows").Obj.(*value.ObjArray)
 	if !ok || len(rows.Elements) != 1 {
-		t.Fatalf("rows = %#v, want exactly one row", query.Fields["rows"])
+		t.Fatalf("rows = %#v, want exactly one row", query.Field("rows"))
 	}
 	row, ok := rows.Elements[0].Obj.(*value.ObjInstance)
 	if !ok {
 		t.Fatalf("row = %#v, want *ObjInstance", rows.Elements[0])
 	}
-	values, ok := row.Fields["values"].Obj.(*value.ObjArray)
+	values, ok := row.Field("values").Obj.(*value.ObjArray)
 	if !ok || len(values.Elements) != 1 {
-		t.Fatalf("row values = %#v, want exactly one column", row.Fields["values"])
+		t.Fatalf("row values = %#v, want exactly one column", row.Field("values"))
 	}
 	stored, ok := values.Elements[0].Obj.(string)
 	if !ok || stored != "hello" {

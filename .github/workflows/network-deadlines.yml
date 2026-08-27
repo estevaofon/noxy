@@ -24,7 +24,10 @@ jobs:
           cache-dependency-path: go.sum
       - run: go test ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=120s
       # The Go race detector supports the hosted linux/amd64 and windows/amd64 toolchains.
-      - run: go test -race ./internal/vm -run 'Test.*(Network|Net|Socket|Listener|Deadline|Timeout|Poll|Wake|WSA|PendingRead|PendingWrite|PendingAccept|BlockedWrite)' -count=1 -timeout=180s
+      # Package-wide on purpose (issue #86): the name filter used to skip the
+      # test that exposed the ObjInstance data race, so it never ran under -race
+      # in CI. ~30s locally.
+      - run: go test -race ./internal/vm -count=1 -timeout=600s
       - run: go test ./internal/... -count=1
 
   examples:

@@ -45,10 +45,10 @@ func (vm *VM) defineIOBuiltins() {
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
 		machine.shared.fileMetaMu.Lock()
-		inst.Fields["fd"] = value.NewInt(fd)
-		inst.Fields["path"] = value.NewString(path)
-		inst.Fields["mode"] = value.NewString(mode)
-		inst.Fields["open"] = value.NewBool(isOpen)
+		inst.MustSet("fd", value.NewInt(fd))
+		inst.MustSet("path", value.NewString(path))
+		inst.MustSet("mode", value.NewString(mode))
+		inst.MustSet("open", value.NewBool(isOpen))
 		machine.shared.fileMetaMu.Unlock()
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}, nil
 	})
@@ -98,11 +98,11 @@ func (vm *VM) defineIOBuiltins() {
 		}
 
 		result := value.NewInstance(resultStruct).Obj.(*value.ObjInstance)
-		result.Fields["success"] = value.NewBool(false)
-		result.Fields["error"] = value.NewString("File not open")
+		result.MustSet("success", value.NewBool(false))
+		result.MustSet("error", value.NewString("File not open"))
 		handle := fileHandle(machine.shared, inst)
 		if resource, ok := machine.shared.Files.get(handle); ok && resource.stdin {
-			result.Fields["error"] = value.NewString("stdin cannot be closed")
+			result.MustSet("error", value.NewString("stdin cannot be closed"))
 			return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
 		}
 		resource, exists := machine.shared.Files.remove(handle)
@@ -113,11 +113,11 @@ func (vm *VM) defineIOBuiltins() {
 		closeErr := resource.close()
 		markFileClosed(machine.shared, inst)
 		if closeErr != nil {
-			result.Fields["error"] = value.NewString(closeErr.Error())
+			result.MustSet("error", value.NewString(closeErr.Error()))
 			return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
 		}
-		result.Fields["success"] = value.NewBool(true)
-		result.Fields["error"] = value.NewString("")
+		result.MustSet("success", value.NewBool(true))
+		result.MustSet("error", value.NewString(""))
 		return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
 	})
 
@@ -174,9 +174,9 @@ func (vm *VM) defineIOBuiltins() {
 		}
 
 		result := value.NewInstance(resultStruct).Obj.(*value.ObjInstance)
-		result.Fields["success"] = value.NewBool(false)
-		result.Fields["bytes_written"] = value.NewInt(0)
-		result.Fields["error"] = value.NewString("File not open")
+		result.MustSet("success", value.NewBool(false))
+		result.MustSet("bytes_written", value.NewInt(0))
+		result.MustSet("error", value.NewString("File not open"))
 		resource, exists := machine.shared.Files.get(fileHandle(machine.shared, inst))
 		if !exists {
 			return value.Value{Type: value.VAL_OBJ, Obj: result}, nil
@@ -184,11 +184,11 @@ func (vm *VM) defineIOBuiltins() {
 
 		operationResult, used := resource.use(func(file *os.File) value.Value {
 			if resource.stdin {
-				result.Fields["error"] = value.NewString("stdin is read-only")
+				result.MustSet("error", value.NewString("stdin is read-only"))
 				return value.Value{Type: value.VAL_OBJ, Obj: result}
 			}
 			if err := resource.syncCursor(file); err != nil {
-				result.Fields["error"] = value.NewString(err.Error())
+				result.MustSet("error", value.NewString(err.Error()))
 				return value.Value{Type: value.VAL_OBJ, Obj: result}
 			}
 			var written int
@@ -198,13 +198,13 @@ func (vm *VM) defineIOBuiltins() {
 			} else {
 				written, writeErr = file.WriteString(args[1].String())
 			}
-			result.Fields["bytes_written"] = value.NewInt(int64(written))
+			result.MustSet("bytes_written", value.NewInt(int64(written)))
 			if writeErr != nil {
-				result.Fields["error"] = value.NewString(writeErr.Error())
+				result.MustSet("error", value.NewString(writeErr.Error()))
 				return value.Value{Type: value.VAL_OBJ, Obj: result}
 			}
-			result.Fields["success"] = value.NewBool(true)
-			result.Fields["error"] = value.NewString("")
+			result.MustSet("success", value.NewBool(true))
+			result.MustSet("error", value.NewString(""))
 			return value.Value{Type: value.VAL_OBJ, Obj: result}
 		})
 		if !used {
@@ -562,9 +562,9 @@ func (vm *VM) defineIOBuiltins() {
 			isDir = info.IsDir()
 		}
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["exists"] = value.NewBool(exists)
-		inst.Fields["size"] = value.NewInt(size)
-		inst.Fields["is_dir"] = value.NewBool(isDir)
+		inst.MustSet("exists", value.NewBool(exists))
+		inst.MustSet("size", value.NewInt(size))
+		inst.MustSet("is_dir", value.NewBool(isDir))
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 	vm.DefineNative("io_mkdir", func(args []value.Value) value.Value {
@@ -623,10 +623,10 @@ func (vm *VM) defineIOBuiltins() {
 		// dois mutexes.
 		handle := machine.shared.stdinHandle()
 		machine.shared.fileMetaMu.Lock()
-		inst.Fields["fd"] = value.NewInt(int64(handle))
-		inst.Fields["path"] = value.NewString("<stdin>")
-		inst.Fields["mode"] = value.NewString("r")
-		inst.Fields["open"] = value.NewBool(true)
+		inst.MustSet("fd", value.NewInt(int64(handle)))
+		inst.MustSet("path", value.NewString("<stdin>"))
+		inst.MustSet("mode", value.NewString("r"))
+		inst.MustSet("open", value.NewBool(true))
 		machine.shared.fileMetaMu.Unlock()
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}, nil
 	})
@@ -634,14 +634,14 @@ func (vm *VM) defineIOBuiltins() {
 
 func fileHandle(shared *SharedState, instance *value.ObjInstance) int {
 	shared.fileMetaMu.RLock()
-	handle := int(instance.Fields["fd"].Int())
+	handle := int(instance.Field("fd").Int())
 	shared.fileMetaMu.RUnlock()
 	return handle
 }
 
 func markFileClosed(shared *SharedState, instance *value.ObjInstance) {
 	shared.fileMetaMu.Lock()
-	instance.Fields["open"] = value.NewBool(false)
+	instance.MustSet("open", value.NewBool(false))
 	shared.fileMetaMu.Unlock()
 }
 

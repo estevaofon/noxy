@@ -52,7 +52,7 @@ func networkSocketDescriptor(socket value.Value) (int, error) {
 		if object == nil {
 			return 0, fmt.Errorf("invalid socket")
 		}
-		descriptor, exists = object.Fields["fd"]
+		descriptor, exists = object.Get("fd")
 	default:
 		return 0, fmt.Errorf("invalid socket")
 	}

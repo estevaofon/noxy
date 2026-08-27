@@ -89,9 +89,9 @@ func TestStructuralEqualityDifferentStructsNotEqual(t *testing.T) {
 	aDef := &value.ObjStruct{Name: "A", Fields: []string{"x"}}
 	bDef := &value.ObjStruct{Name: "B", Fields: []string{"x"}}
 	a := value.NewInstance(aDef)
-	a.Obj.(*value.ObjInstance).Fields["x"] = value.NewInt(1)
+	a.Obj.(*value.ObjInstance).MustSet("x", value.NewInt(1))
 	b := value.NewInstance(bDef)
-	b.Obj.(*value.ObjInstance).Fields["x"] = value.NewInt(1)
+	b.Obj.(*value.ObjInstance).MustSet("x", value.NewInt(1))
 	if valuesEqual(a, b) {
 		t.Fatal("structs de definições diferentes nunca são iguais")
 	}

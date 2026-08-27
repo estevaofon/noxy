@@ -38,39 +38,39 @@ func openSeekFixture(t *testing.T, machine *VM, path, mode string) value.Value {
 func assertPositionResult(t *testing.T, got, definition value.Value, position int64) {
 	t.Helper()
 	result := requireBuiltinInstance(t, got, definition)
-	assertBuiltinValue(t, result.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, result.Fields["position"], value.NewInt(position))
-	assertBuiltinValue(t, result.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, result.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, result.Field("position"), value.NewInt(position))
+	assertBuiltinValue(t, result.Field("error"), value.NewString(""))
 }
 
 func assertPositionError(t *testing.T, got, definition value.Value, errorText string) {
 	t.Helper()
 	result := requireBuiltinInstance(t, got, definition)
-	assertBuiltinValue(t, result.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, result.Fields["position"], value.NewInt(-1))
+	assertBuiltinValue(t, result.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, result.Field("position"), value.NewInt(-1))
 	if errorText == "" {
-		if result.Fields["error"].String() == "" {
+		if result.Field("error").String() == "" {
 			t.Fatal("error text is empty")
 		}
 		return
 	}
-	assertBuiltinValue(t, result.Fields["error"], value.NewString(errorText))
+	assertBuiltinValue(t, result.Field("error"), value.NewString(errorText))
 }
 
 func assertBytesResult(t *testing.T, got, definition value.Value, data string) {
 	t.Helper()
 	result := requireBuiltinInstance(t, got, definition)
-	assertBuiltinValue(t, result.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, result.Fields["data"], value.NewBytes(data))
-	assertBuiltinValue(t, result.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, result.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, result.Field("data"), value.NewBytes(data))
+	assertBuiltinValue(t, result.Field("error"), value.NewString(""))
 }
 
 func assertBytesError(t *testing.T, got, definition value.Value, errorText string) {
 	t.Helper()
 	result := requireBuiltinInstance(t, got, definition)
-	assertBuiltinValue(t, result.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, result.Fields["data"], value.NewBytes(""))
-	assertBuiltinValue(t, result.Fields["error"], value.NewString(errorText))
+	assertBuiltinValue(t, result.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, result.Field("data"), value.NewBytes(""))
+	assertBuiltinValue(t, result.Field("error"), value.NewString(errorText))
 }
 
 // seek(SEEK_SET/CUR/END) + read_n: le um trecho do meio do arquivo sem ler o
@@ -145,19 +145,19 @@ func TestIOTellIsLogicalAndSeekResetsTheLineReader(t *testing.T) {
 	ioResult := testIOResultDefinition()
 
 	first := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, first.Fields["data"], value.NewString("um"))
+	assertBuiltinValue(t, first.Field("data"), value.NewString("um"))
 	assertPositionResult(t, callBuiltin(t, machine, "io_tell", handle, position), position, 3)
 
 	assertPositionResult(t, callBuiltin(t, machine, "io_seek", handle, value.NewInt(0), value.NewInt(0), position), position, 0)
 	again := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, again.Fields["data"], value.NewString("um"))
+	assertBuiltinValue(t, again.Field("data"), value.NewString("um"))
 	second := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, second.Fields["data"], value.NewString("dois"))
+	assertBuiltinValue(t, second.Field("data"), value.NewString("dois"))
 	assertPositionResult(t, callBuiltin(t, machine, "io_tell", handle, position), position, 8)
 
 	assertPositionResult(t, callBuiltin(t, machine, "io_seek", handle, value.NewInt(8), value.NewInt(0), position), position, 8)
 	third := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, third.Fields["data"], value.NewString("tres"))
+	assertBuiltinValue(t, third.Field("data"), value.NewString("tres"))
 	callBuiltin(t, machine, "io_close", handle)
 }
 
@@ -179,7 +179,7 @@ func TestIOWriteInReadWriteModeWritesAtTheCursorWithoutTruncating(t *testing.T) 
 		assertPositionResult(t, callBuiltin(t, machine, "io_tell", handle, position), position, 6)
 		assertPositionResult(t, callBuiltin(t, machine, "io_seek", handle, value.NewInt(0), value.NewInt(2), position), position, 10)
 		written := requireBuiltinInstance(t, callBuiltin(t, machine, "io_write_result", handle, value.NewBytes("Z"), writeResult), writeResult)
-		assertBuiltinValue(t, written.Fields["bytes_written"], value.NewInt(1))
+		assertBuiltinValue(t, written.Field("bytes_written"), value.NewInt(1))
 		callBuiltin(t, machine, "io_close", handle)
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -194,7 +194,7 @@ func TestIOWriteInReadWriteModeWritesAtTheCursorWithoutTruncating(t *testing.T) 
 		path := writeSeekFixture(t, "lines.txt", "ab\ncd\nef\n")
 		handle := openSeekFixture(t, machine, path, "rw")
 		line := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-		assertBuiltinValue(t, line.Fields["data"], value.NewString("ab"))
+		assertBuiltinValue(t, line.Field("data"), value.NewString("ab"))
 		callBuiltin(t, machine, "io_write", handle, value.NewString("XY"))
 		callBuiltin(t, machine, "io_close", handle)
 		content, err := os.ReadFile(path)
@@ -222,19 +222,19 @@ func TestIOWholeFileReadsStartAtTheLogicalCursor(t *testing.T) {
 	linesResult := value.NewStruct("IOLinesResult", []string{"ok", "data", "error"})
 
 	line := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, line.Fields["data"], value.NewString("um"))
+	assertBuiltinValue(t, line.Field("data"), value.NewString("um"))
 	rest := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read", handle, ioResult), ioResult)
-	assertBuiltinValue(t, rest.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, rest.Fields["data"], value.NewString("dois\ntres\n"))
+	assertBuiltinValue(t, rest.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, rest.Field("data"), value.NewString("dois\ntres\n"))
 	empty := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read", handle, ioResult), ioResult)
-	assertBuiltinValue(t, empty.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, empty.Fields["data"], value.NewString(""))
+	assertBuiltinValue(t, empty.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, empty.Field("data"), value.NewString(""))
 	eof := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, eof.Fields["error"], value.NewString("EOF"))
+	assertBuiltinValue(t, eof.Field("error"), value.NewString("EOF"))
 
 	assertPositionResult(t, callBuiltin(t, machine, "io_seek", handle, value.NewInt(0), value.NewInt(0), position), position, 0)
 	lines := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_lines", handle, linesResult), linesResult)
-	if got := lines.Fields["data"].Obj.(*value.ObjArray).Elements; len(got) != 3 {
+	if got := lines.Field("data").Obj.(*value.ObjArray).Elements; len(got) != 3 {
 		t.Fatalf("read_lines after seek(0) = %d lines, want 3", len(got))
 	}
 

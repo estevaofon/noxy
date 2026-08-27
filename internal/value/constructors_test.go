@@ -45,7 +45,7 @@ func TestNewInstanceWithRetainsCompositeFields(t *testing.T) {
 	if object.Struct != definition {
 		t.Fatal("NewInstanceWith deve apontar para a definicao recebida")
 	}
-	if object.Fields["data"].Obj != data.Obj || !object.Fields["ok"].Bool() {
+	if object.Field("data").Obj != data.Obj || !object.Field("ok").Bool() {
 		t.Fatal("NewInstanceWith deve guardar os campos recebidos")
 	}
 	if got := OwnersCount(instance); got != 0 {
@@ -55,7 +55,7 @@ func TestNewInstanceWithRetainsCompositeFields(t *testing.T) {
 
 func TestNewInstanceWithNilFieldsIsWritable(t *testing.T) {
 	instance := NewInstanceWith(structForTest("x"), nil)
-	instance.Obj.(*ObjInstance).Fields["x"] = NewInt(1) // nao pode entrar em panico (map nil)
+	instance.Obj.(*ObjInstance).MustSet("x", NewInt(1)) // nao pode entrar em panico (slots alocados)
 }
 
 func TestNewArrayRetainsCompositeElementsOnly(t *testing.T) {

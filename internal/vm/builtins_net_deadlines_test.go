@@ -1514,7 +1514,7 @@ func TestNetSetTimeoutAcceptsTypedSocketAndRejectsTypedNil(t *testing.T) {
 	t.Cleanup(func() { machine.shared.Sockets.remove(handle) })
 	definition := &value.ObjStruct{Name: "Socket", Fields: []string{"fd", "addr", "port", "open"}}
 	instance := value.NewInstance(definition)
-	instance.Obj.(*value.ObjInstance).Fields["fd"] = value.NewInt(int64(handle))
+	instance.Obj.(*value.ObjInstance).MustSet("fd", value.NewInt(int64(handle)))
 	if _, err := invokeBuiltin(t, machine, "net_settimeout", instance, value.NewInt(10)); err != nil {
 		t.Fatalf("typed socket: %v", err)
 	}

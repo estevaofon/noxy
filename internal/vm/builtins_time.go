@@ -36,15 +36,15 @@ func (vm *VM) defineTimeBuiltins() {
 
 		t := time.Now()
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["year"] = value.NewInt(int64(t.Year()))
-		inst.Fields["month"] = value.NewInt(int64(t.Month()))
-		inst.Fields["day"] = value.NewInt(int64(t.Day()))
-		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
-		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
-		inst.Fields["second"] = value.NewInt(int64(t.Second()))
-		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
-		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
-		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+		inst.MustSet("year", value.NewInt(int64(t.Year())))
+		inst.MustSet("month", value.NewInt(int64(t.Month())))
+		inst.MustSet("day", value.NewInt(int64(t.Day())))
+		inst.MustSet("hour", value.NewInt(int64(t.Hour())))
+		inst.MustSet("minute", value.NewInt(int64(t.Minute())))
+		inst.MustSet("second", value.NewInt(int64(t.Second())))
+		inst.MustSet("weekday", value.NewInt(int64(t.Weekday())))
+		inst.MustSet("yearday", value.NewInt(int64(t.YearDay())))
+		inst.MustSet("timestamp", value.NewInt(t.Unix()))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -59,12 +59,12 @@ func (vm *VM) defineTimeBuiltins() {
 
 		// Reconstruct time.Time from fields
 		// Minimal fields: year, month, day, hour, minute, second
-		y := int(inst.Fields["year"].Int())
-		m := time.Month(inst.Fields["month"].Int())
-		d := int(inst.Fields["day"].Int())
-		h := int(inst.Fields["hour"].Int())
-		min := int(inst.Fields["minute"].Int())
-		s := int(inst.Fields["second"].Int())
+		y := int(inst.Field("year").Int())
+		m := time.Month(inst.Field("month").Int())
+		d := int(inst.Field("day").Int())
+		h := int(inst.Field("hour").Int())
+		min := int(inst.Field("minute").Int())
+		s := int(inst.Field("second").Int())
 
 		t := time.Date(y, m, d, h, min, s, 0, time.Local)
 		return value.NewString(t.Format("2006-01-02 15:04:05"))
@@ -77,9 +77,9 @@ func (vm *VM) defineTimeBuiltins() {
 		if !ok {
 			return value.NewString("")
 		}
-		y := int(inst.Fields["year"].Int())
-		m := time.Month(inst.Fields["month"].Int())
-		d := int(inst.Fields["day"].Int())
+		y := int(inst.Field("year").Int())
+		m := time.Month(inst.Field("month").Int())
+		d := int(inst.Field("day").Int())
 		t := time.Date(y, m, d, 0, 0, 0, 0, time.Local)
 		return value.NewString(t.Format("2006-01-02"))
 	})
@@ -91,9 +91,9 @@ func (vm *VM) defineTimeBuiltins() {
 		if !ok {
 			return value.NewString("")
 		}
-		h := int(inst.Fields["hour"].Int())
-		min := int(inst.Fields["minute"].Int())
-		s := int(inst.Fields["second"].Int())
+		h := int(inst.Field("hour").Int())
+		min := int(inst.Field("minute").Int())
+		s := int(inst.Field("second").Int())
 		t := time.Date(0, 1, 1, h, min, s, 0, time.Local)
 		return value.NewString(t.Format("15:04:05"))
 	})
@@ -117,15 +117,15 @@ func (vm *VM) defineTimeBuiltins() {
 		t := time.Date(y, m, d, h, min, s, 0, time.Local)
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["year"] = value.NewInt(int64(t.Year()))
-		inst.Fields["month"] = value.NewInt(int64(t.Month()))
-		inst.Fields["day"] = value.NewInt(int64(t.Day()))
-		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
-		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
-		inst.Fields["second"] = value.NewInt(int64(t.Second()))
-		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
-		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
-		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+		inst.MustSet("year", value.NewInt(int64(t.Year())))
+		inst.MustSet("month", value.NewInt(int64(t.Month())))
+		inst.MustSet("day", value.NewInt(int64(t.Day())))
+		inst.MustSet("hour", value.NewInt(int64(t.Hour())))
+		inst.MustSet("minute", value.NewInt(int64(t.Minute())))
+		inst.MustSet("second", value.NewInt(int64(t.Second())))
+		inst.MustSet("weekday", value.NewInt(int64(t.Weekday())))
+		inst.MustSet("yearday", value.NewInt(int64(t.YearDay())))
+		inst.MustSet("timestamp", value.NewInt(t.Unix()))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -138,7 +138,7 @@ func (vm *VM) defineTimeBuiltins() {
 			return value.NewInt(0)
 		}
 
-		val, ok := inst.Fields["timestamp"]
+		val, ok := inst.Get("timestamp")
 		if ok {
 			return val
 		}
@@ -156,15 +156,15 @@ func (vm *VM) defineTimeBuiltins() {
 
 		t := time.Unix(ts, 0)
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["year"] = value.NewInt(int64(t.Year()))
-		inst.Fields["month"] = value.NewInt(int64(t.Month()))
-		inst.Fields["day"] = value.NewInt(int64(t.Day()))
-		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
-		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
-		inst.Fields["second"] = value.NewInt(int64(t.Second()))
-		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
-		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
-		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+		inst.MustSet("year", value.NewInt(int64(t.Year())))
+		inst.MustSet("month", value.NewInt(int64(t.Month())))
+		inst.MustSet("day", value.NewInt(int64(t.Day())))
+		inst.MustSet("hour", value.NewInt(int64(t.Hour())))
+		inst.MustSet("minute", value.NewInt(int64(t.Minute())))
+		inst.MustSet("second", value.NewInt(int64(t.Second())))
+		inst.MustSet("weekday", value.NewInt(int64(t.Weekday())))
+		inst.MustSet("yearday", value.NewInt(int64(t.YearDay())))
+		inst.MustSet("timestamp", value.NewInt(t.Unix()))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -254,12 +254,12 @@ func (vm *VM) defineTimeBuiltins() {
 		}
 		fmtStr := args[1].Obj.(string)
 
-		y := int(inst.Fields["year"].Int())
-		m := time.Month(inst.Fields["month"].Int())
-		d := int(inst.Fields["day"].Int())
-		h := int(inst.Fields["hour"].Int())
-		min := int(inst.Fields["minute"].Int())
-		s := int(inst.Fields["second"].Int())
+		y := int(inst.Field("year").Int())
+		m := time.Month(inst.Field("month").Int())
+		d := int(inst.Field("day").Int())
+		h := int(inst.Field("hour").Int())
+		min := int(inst.Field("minute").Int())
+		s := int(inst.Field("second").Int())
 		// t := time.Date(y, m, d, h, min, s, 0, time.Local) // Unused in this simple implementation
 
 		// Simplified replacement for strftime
@@ -290,15 +290,15 @@ func (vm *VM) defineTimeBuiltins() {
 		}
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["year"] = value.NewInt(int64(t.Year()))
-		inst.Fields["month"] = value.NewInt(int64(t.Month()))
-		inst.Fields["day"] = value.NewInt(int64(t.Day()))
-		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
-		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
-		inst.Fields["second"] = value.NewInt(int64(t.Second()))
-		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
-		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
-		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+		inst.MustSet("year", value.NewInt(int64(t.Year())))
+		inst.MustSet("month", value.NewInt(int64(t.Month())))
+		inst.MustSet("day", value.NewInt(int64(t.Day())))
+		inst.MustSet("hour", value.NewInt(int64(t.Hour())))
+		inst.MustSet("minute", value.NewInt(int64(t.Minute())))
+		inst.MustSet("second", value.NewInt(int64(t.Second())))
+		inst.MustSet("weekday", value.NewInt(int64(t.Weekday())))
+		inst.MustSet("yearday", value.NewInt(int64(t.YearDay())))
+		inst.MustSet("timestamp", value.NewInt(t.Unix()))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -318,15 +318,15 @@ func (vm *VM) defineTimeBuiltins() {
 		}
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["year"] = value.NewInt(int64(t.Year()))
-		inst.Fields["month"] = value.NewInt(int64(t.Month()))
-		inst.Fields["day"] = value.NewInt(int64(t.Day()))
-		inst.Fields["hour"] = value.NewInt(int64(t.Hour()))
-		inst.Fields["minute"] = value.NewInt(int64(t.Minute()))
-		inst.Fields["second"] = value.NewInt(int64(t.Second()))
-		inst.Fields["weekday"] = value.NewInt(int64(t.Weekday()))
-		inst.Fields["yearday"] = value.NewInt(int64(t.YearDay()))
-		inst.Fields["timestamp"] = value.NewInt(t.Unix())
+		inst.MustSet("year", value.NewInt(int64(t.Year())))
+		inst.MustSet("month", value.NewInt(int64(t.Month())))
+		inst.MustSet("day", value.NewInt(int64(t.Day())))
+		inst.MustSet("hour", value.NewInt(int64(t.Hour())))
+		inst.MustSet("minute", value.NewInt(int64(t.Minute())))
+		inst.MustSet("second", value.NewInt(int64(t.Second())))
+		inst.MustSet("weekday", value.NewInt(int64(t.Weekday())))
+		inst.MustSet("yearday", value.NewInt(int64(t.YearDay())))
+		inst.MustSet("timestamp", value.NewInt(t.Unix()))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -368,11 +368,11 @@ func (vm *VM) defineTimeBuiltins() {
 		secs := rem % 60
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["days"] = value.NewInt(days)
-		inst.Fields["hours"] = value.NewInt(hours)
-		inst.Fields["minutes"] = value.NewInt(mins)
-		inst.Fields["seconds"] = value.NewInt(secs)
-		inst.Fields["total_seconds"] = value.NewInt(totalSecs)
+		inst.MustSet("days", value.NewInt(days))
+		inst.MustSet("hours", value.NewInt(hours))
+		inst.MustSet("minutes", value.NewInt(mins))
+		inst.MustSet("seconds", value.NewInt(secs))
+		inst.MustSet("total_seconds", value.NewInt(totalSecs))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})

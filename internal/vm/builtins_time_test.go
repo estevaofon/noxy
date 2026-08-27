@@ -44,7 +44,7 @@ func assertDateTimeFields(t *testing.T, instance *value.ObjInstance, expected ti
 	}
 	for name, want := range fields {
 		t.Run(name, func(t *testing.T) {
-			got, ok := instance.Fields[name]
+			got, ok := instance.Get(name)
 			if !ok {
 				t.Fatalf("missing field %q", name)
 			}
@@ -126,7 +126,7 @@ func TestTimeDurationBuiltin(t *testing.T) {
 		"days": 1, "hours": 1, "minutes": 1, "seconds": 1, "total_seconds": -90061,
 	}
 	for name, want := range expected {
-		assertBuiltinValue(t, instance.Fields[name], value.NewInt(want))
+		assertBuiltinValue(t, instance.Field(name), value.NewInt(want))
 	}
 	assertBuiltinValue(t, callBuiltin(t, machine, "time_diff_duration", value.NewInt(1), value.NewInt(2)), value.NewNull())
 }
@@ -180,7 +180,7 @@ func TestTimeNowBuiltinsReturnStableShapes(t *testing.T) {
 	definition := testDateTimeDefinition()
 	instance := requireBuiltinInstance(t, callBuiltin(t, machine, "time_now_datetime", definition), definition)
 	for _, field := range []string{"year", "month", "day", "hour", "minute", "second", "weekday", "yearday", "timestamp"} {
-		if got, ok := instance.Fields[field]; !ok || got.Type != value.VAL_INT {
+		if got, ok := instance.Get(field); !ok || got.Type != value.VAL_INT {
 			t.Errorf("field %q = %#v, want int", field, got)
 		}
 	}

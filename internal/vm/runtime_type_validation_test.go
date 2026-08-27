@@ -85,10 +85,7 @@ func TestMarkerTrustsAcceptedTagInsideStructField(t *testing.T) {
 		Fields: map[string]*value.RuntimeTypeInfo{"payloads": mapSchema},
 	}
 	definition := &value.ObjStruct{Name: "State", Fields: []string{"payloads"}}
-	instance := value.Value{
-		Type: value.VAL_OBJ,
-		Obj:  &value.ObjInstance{Struct: definition, Fields: map[string]value.Value{"payloads": mapping}},
-	}
+	instance := value.NewInstanceAdopting(definition, []value.Value{mapping}) // RC: move — o teste nao conta donos
 	if !machine.markRuntimeValueType(instance, structSchema) {
 		t.Fatal("marcador varreu map com tag aceita dentro de campo de struct; esperado O(1)")
 	}
@@ -381,10 +378,7 @@ func TestMarkerRejectsRealInstanceOfWrongStructName(t *testing.T) {
 		Fields: map[string]*value.RuntimeTypeInfo{},
 	}
 	otherDefinition := &value.ObjStruct{Name: "SomethingElse", Fields: []string{}}
-	instance := value.Value{
-		Type: value.VAL_OBJ,
-		Obj:  &value.ObjInstance{Struct: otherDefinition, Fields: map[string]value.Value{}},
-	}
+	instance := value.NewInstanceAdopting(otherDefinition, []value.Value{})
 	if machine.markRuntimeValueType(instance, schema) {
 		t.Fatal("uma ObjInstance de struct com nome diferente do esquema deveria continuar rejeitada (caminho nominal intocado)")
 	}

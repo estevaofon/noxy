@@ -165,8 +165,8 @@ func TestJSONDumpsBuiltin(t *testing.T) {
 	setTestMap(mapValue.Obj.(*value.ObjMap), int64(7), value.NewBool(true))
 	definition := value.NewStruct("Point", []string{"x", "label"})
 	instance := value.NewInstance(definition.Obj.(*value.ObjStruct))
-	instance.Obj.(*value.ObjInstance).Fields["x"] = value.NewInt(3)
-	instance.Obj.(*value.ObjInstance).Fields["label"] = value.NewString("p")
+	instance.Obj.(*value.ObjInstance).MustSet("x", value.NewInt(3))
+	instance.Obj.(*value.ObjInstance).MustSet("label", value.NewString("p"))
 
 	tests := []struct {
 		name string
@@ -198,7 +198,7 @@ func TestJSONDumpsResultBuiltinReportsSuccessAndFailure(t *testing.T) {
 	valid := value.NewMap()
 	setTestMap(valid.Obj.(*value.ObjMap), "name", value.NewString("Noxy"))
 	success := callBuiltin(t, machine, "json_dumps_result", valid, resultType)
-	successFields := success.Obj.(*value.ObjInstance).Fields
+	successFields := success.Obj.(*value.ObjInstance).Snapshot()
 	assertBuiltinValue(t, successFields["success"], value.NewBool(true))
 	assertBuiltinValue(t, successFields["data"], value.NewString("{\"name\":\"Noxy\"}"))
 	assertBuiltinValue(t, successFields["error"], value.NewString(""))
@@ -206,7 +206,7 @@ func TestJSONDumpsResultBuiltinReportsSuccessAndFailure(t *testing.T) {
 	invalid := value.NewMap()
 	setTestMap(invalid.Obj.(*value.ObjMap), "raw", value.NewBytes("abc"))
 	failure := callBuiltin(t, machine, "json_dumps_result", invalid, resultType)
-	failureFields := failure.Obj.(*value.ObjInstance).Fields
+	failureFields := failure.Obj.(*value.ObjInstance).Snapshot()
 	assertBuiltinValue(t, failureFields["success"], value.NewBool(false))
 	assertBuiltinValue(t, failureFields["data"], value.NewString(""))
 	if failureFields["error"].String() == "" {
@@ -236,7 +236,7 @@ func TestJSONDumpsResultBuiltinRejectsInvalidStrictValues(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			failure := callBuiltin(t, machine, "json_dumps_result", tt.input, resultType)
-			fields := failure.Obj.(*value.ObjInstance).Fields
+			fields := failure.Obj.(*value.ObjInstance).Snapshot()
 			assertBuiltinValue(t, fields["success"], value.NewBool(false))
 			assertBuiltinValue(t, fields["data"], value.NewString(""))
 			if fields["error"].String() == "" {
@@ -307,7 +307,7 @@ func TestJSONValToGo(t *testing.T) {
 	setTestMap(mapValue.Obj.(*value.ObjMap), int64(7), value.NewBool(true))
 	definition := value.NewStruct("Point", []string{"x"})
 	instance := value.NewInstance(definition.Obj.(*value.ObjStruct))
-	instance.Obj.(*value.ObjInstance).Fields["x"] = value.NewInt(3)
+	instance.Obj.(*value.ObjInstance).MustSet("x", value.NewInt(3))
 
 	tests := []struct {
 		name  string

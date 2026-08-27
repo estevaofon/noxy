@@ -478,6 +478,13 @@ type ObjStruct struct {
 	// nil e valido e barato).
 	RefFields       map[string]bool
 	ConstructorType *RuntimeTypeInfo
+	// index e nome -> posicao do slot em ObjInstance.Slots (a ordem de
+	// Fields). Construido UMA vez por NewStruct/BuildFieldIndex e nunca mais
+	// escrito: e por isso que pode ser lido por N routines sem sincronizacao
+	// — a unica escrita concorrente que existia era no map por INSTANCIA
+	// (issue #86), que deixou de existir. Nil (literal montado a mao em
+	// teste) cai em varredura linear, correta e so mais lenta.
+	index map[string]int
 }
 
 // FieldIsRef informa se o campo foi declarado `ref T` (nil-safe).
@@ -485,22 +492,42 @@ func (os *ObjStruct) FieldIsRef(name string) bool {
 	return os != nil && os.RefFields[name]
 }
 
-// HasField informa se name e um campo DECLARADO do struct (nil-safe). E a
-// fonte de runtime para "este nome existe na declaracao?" — OP_SET_PROPERTY
-// consulta so no caminho frio, quando o nome nao esta em instance.Fields
-// (issue #61 item 2: escrita via `any` num campo inexistente criava a
-// propriedade em silencio). Varredura linear: structs tem poucos campos e o
-// caminho quente (campo presente) nunca chega aqui.
-func (os *ObjStruct) HasField(name string) bool {
-	if os == nil {
-		return false
+// BuildFieldIndex (re)constroi o indice nome -> slot a partir de Fields.
+// Chamar depois de fechar a lista de campos e ANTES de a definicao ser
+// publicada para outra routine.
+func (os *ObjStruct) BuildFieldIndex() {
+	index := make(map[string]int, len(os.Fields))
+	for i, field := range os.Fields {
+		index[field] = i
 	}
-	for _, field := range os.Fields {
+	os.index = index
+}
+
+// FieldIndex devolve o slot do campo DECLARADO name (nil-safe). E a fonte de
+// runtime para "este nome existe na declaracao?" (issue #61 item 2: escrita
+// via `any` num campo inexistente criava a propriedade em silencio) e o
+// caminho QUENTE de OP_GET_PROPERTY/OP_SET_PROPERTY: um lookup num map
+// so-leitura, o mesmo custo do lookup em instance.Fields que existia antes.
+func (os *ObjStruct) FieldIndex(name string) (int, bool) {
+	if os == nil {
+		return 0, false
+	}
+	if os.index != nil {
+		i, ok := os.index[name]
+		return i, ok
+	}
+	for i, field := range os.Fields {
 		if field == name {
-			return true
+			return i, true
 		}
 	}
-	return false
+	return 0, false
+}
+
+// HasField informa se name e um campo DECLARADO do struct (nil-safe).
+func (os *ObjStruct) HasField(name string) bool {
+	_, ok := os.FieldIndex(name)
+	return ok
 }
 
 func (os *ObjStruct) String() string {
@@ -516,10 +543,78 @@ func (os *ObjStruct) Format(f fmt.State, verb rune) {
 	}
 }
 
+// ObjInstance guarda os campos em Slots, um por campo declarado, na ordem de
+// Struct.Fields — nao num map por instancia. Foi o map que a issue #86
+// derrubou: duas routines alcancando a mesma instancia (por `ref`, global,
+// upvalue ou campo `ref` dentro de um valor — #92) batiam em
+// `map[string]Value` cru e o runtime Go morria com `fatal error: concurrent
+// map read and map write`, irrecuperavel. Com slice, struct fica no mesmo
+// status de ObjArray.Elements que concurrency.md ja documenta: uma corrida
+// continua sendo corrida (valor rasgado e possivel; coordene), mas nunca
+// derruba o processo. Slot nao preenchido e null (struct e nominal e de
+// campos fixos, spec §5; so um native em Go deixa slot por preencher).
 type ObjInstance struct {
 	ObjHeader
 	Struct *ObjStruct
-	Fields map[string]Value
+	Slots  []Value
+}
+
+// Get le o campo DECLARADO name; ok=false so para nome fora da declaracao.
+func (oi *ObjInstance) Get(name string) (Value, bool) {
+	i, ok := oi.Struct.FieldIndex(name)
+	if !ok || i >= len(oi.Slots) {
+		return Value{}, false
+	}
+	return oi.Slots[i], true
+}
+
+// Field le o campo name; null para nome fora da declaracao. Para natives e
+// testes, onde o nome e uma constante conhecida.
+func (oi *ObjInstance) Field(name string) Value {
+	if v, ok := oi.Get(name); ok {
+		return v
+	}
+	return NewNull()
+}
+
+// Set escreve o campo DECLARADO name; false para nome fora da declaracao.
+// NAO retem nem solta: a disciplina RC (retain-antes-de-release) e do
+// chamador, como era com a escrita direta no map.
+func (oi *ObjInstance) Set(name string, v Value) bool {
+	i, ok := oi.Struct.FieldIndex(name)
+	if !ok || i >= len(oi.Slots) {
+		return false
+	}
+	oi.Slots[i] = v
+	return true
+}
+
+// MustSet e Set para natives que montam instancias de structs que eles
+// mesmos declararam: nome fora da declaracao e bug no codigo Go, nao erro do
+// programa Noxy — panic com o nome do struct e do campo.
+func (oi *ObjInstance) MustSet(name string, v Value) {
+	if !oi.Set(name, v) {
+		panic(fmt.Sprintf("struct %s has no field %q", oi.Struct.Name, name))
+	}
+}
+
+// Len e o numero de campos declarados (= slots).
+func (oi *ObjInstance) Len() int { return len(oi.Slots) }
+
+// Range percorre os campos em ORDEM DE DECLARACAO.
+func (oi *ObjInstance) Range(fn func(name string, v Value)) {
+	for i, v := range oi.Slots {
+		if i < len(oi.Struct.Fields) {
+			fn(oi.Struct.Fields[i], v)
+		}
+	}
+}
+
+// Snapshot copia os campos para um map novo (caminho frio: JSON, testes).
+func (oi *ObjInstance) Snapshot() map[string]Value {
+	out := make(map[string]Value, len(oi.Slots))
+	oi.Range(func(name string, v Value) { out[name] = v })
+	return out
 }
 
 func (oi *ObjInstance) String() string {
@@ -778,37 +873,53 @@ func NewMapWithData(data map[string]Value) Value {
 }
 
 func NewStruct(name string, fields []string) Value {
-	return Value{Type: VAL_OBJ, kind: objKindNoOwners, Obj: &ObjStruct{Name: name, Fields: fields}}
+	def := &ObjStruct{Name: name, Fields: fields}
+	def.BuildFieldIndex()
+	return Value{Type: VAL_OBJ, kind: objKindNoOwners, Obj: def}
 }
 
-// NewInstance cria uma instancia vazia; quem escreve compostos em Fields
-// depois precisa reter a mao (como calls.go:callPreparedValue faz) ou usar
-// NewInstanceWith.
+// newSlots aloca um slot null por campo declarado.
+func newSlots(def *ObjStruct) []Value {
+	n := 0
+	if def != nil {
+		n = len(def.Fields)
+	}
+	slots := make([]Value, n)
+	for i := range slots {
+		slots[i] = Value{Type: VAL_NULL}
+	}
+	return slots
+}
+
+// NewInstance cria uma instancia com todos os slots null; quem escreve
+// compostos nela depois precisa reter a mao (como calls.go:callPreparedValue
+// faz) ou usar NewInstanceWith.
 func NewInstance(def *ObjStruct) Value {
-	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Fields: make(map[string]Value)}}
+	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Slots: newSlots(def)}}
 }
 
 // NewInstanceWith cria uma instancia ja com os campos dados, retendo cada
 // valor composto — a mesma regra do construtor de struct em bytecode
 // (calls.go:callPreparedValue, "campo e dono duravel"). Escalares e strings
-// sao no-op em Retain. O map recebido passa a pertencer a instancia.
+// sao no-op em Retain. Nome fora da declaracao e bug do chamador (panic).
 func NewInstanceWith(def *ObjStruct, fields map[string]Value) Value {
-	if fields == nil {
-		fields = make(map[string]Value)
-	}
-	for _, field := range fields {
+	inst := NewInstance(def)
+	obj := inst.Obj.(*ObjInstance)
+	for name, field := range fields {
 		Retain(field)
+		obj.MustSet(name, field)
 	}
-	return NewInstanceAdopting(def, fields)
+	return inst
 }
 
-// NewInstanceAdopting cria uma instancia ADOTANDO campos que o chamador JA
+// NewInstanceAdopting cria uma instancia ADOTANDO slots que o chamador JA
 // reteve em nome dela (move): nao retem de novo — o analogo de
 // NewArrayAdopting. Uso restrito aos sites que transferem posse (o clone CoW
 // de instancia em calls.go); qualquer outro uso precisa de comentario
-// `// RC: move` explicando quem reteve.
-func NewInstanceAdopting(def *ObjStruct, fields map[string]Value) Value {
-	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Fields: fields}}
+// `// RC: move` explicando quem reteve. len(slots) tem de ser
+// len(def.Fields).
+func NewInstanceAdopting(def *ObjStruct, slots []Value) Value {
+	return Value{Type: VAL_OBJ, kind: objKindInstance, Obj: &ObjInstance{Struct: def, Slots: slots}}
 }
 
 func NewFunction(name string, arity int, upvalueCount int, params []ParamInfo, chunk interface{}, environment *GlobalEnvironment) Value {

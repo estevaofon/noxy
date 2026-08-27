@@ -113,7 +113,7 @@ func TestMalformedStoredPropertyReferenceWriteIsRuntimeError(t *testing.T) {
 	code := chunk.New()
 	code.FileName = "malformed_property_reference"
 	holder := value.NewInstance(&value.ObjStruct{Name: "Holder", Fields: []string{"pointer"}})
-	holder.Obj.(*value.ObjInstance).Fields["pointer"] = value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"}
+	holder.Obj.(*value.ObjInstance).MustSet("pointer", value.Value{Type: value.VAL_REF, Obj: "not an ObjRef"})
 	holderConstant := code.AddConstant(holder)
 	valueConstant := code.AddConstant(value.NewInt(42))
 	propertyConstant := code.AddConstant(value.NewString("pointer"))
