@@ -96,5 +96,15 @@ compartilha a célula entre routines — coordene, como com globais
 ## Parâmetros comuns e semântica de valor
 
 Sem `ref`, arrays, maps e structs são passados por **valor** — independentes
-em qualquer profundidade (copy-on-write). A assinatura sem `ref` garante que
-o chamador não é tocado; o call site sem `ref` garante o mesmo.
+em qualquer profundidade através dos campos de *valor* (copy-on-write). A
+assinatura sem `ref` garante que o chamador não é tocado através desses
+campos; o call site sem `ref` garante o mesmo.
+
+A fronteira é um campo declarado `ref`: ele é uma aresta compartilhada, e a
+cópia carrega a mesma aresta — `f(caixa)` com `caixa.inner: ref Node` deixa o
+callee escrever em `*caixa.inner`. Isso está escrito no **tipo** (`struct`),
+não na chamada (spec §2.2 regra 6). Para estrutura de dono único (lista,
+árvore), declare o campo sem `ref` — `next: Node` aceita `null` — e mute pelo
+slot: `insert(ref node.next, v)` (spec §5 *Self-Reference*,
+`noxy_examples/bst_owned.nx`). Reserve campo `ref` para compartilhamento de
+verdade: nó com dois pais, `prev`, ponteiro de pai, grafo.

@@ -139,7 +139,7 @@ print(f"Product: {product.name}")</code></pre>
                     </div>
                     <h3>Value Semantics</h3>
                     <p>Arrays, maps and structs are independent values at any depth: assignment, calls, container
-                        reads and channels never alias. Copy-on-write makes the copy free until the first write,
+                        reads and channels never alias — the only shared edge is a field you declared <code>ref</code>. Copy-on-write makes the copy free until the first write,
                         and <code>==</code> compares composites by content.</p>
                 </div>
                 <div class="feature-card">
@@ -486,9 +486,9 @@ print(fmt("Price: %.2f", product.price))</code></pre>
                 </div>
                 <div class="example-tab" id="value-semantics">
                     <h3>Value Semantics</h3>
-                    <p>Arrays, maps and structs are independent values at any depth. <code>ref</code> is the only
-                        way to share storage, and copy-on-write means the copy costs nothing until someone
-                        writes.</p>
+                    <p>Arrays, maps and structs are independent values at any depth. <code>ref</code> — as a parameter
+                        or as a struct field — is the only way to share storage, and copy-on-write means the copy
+                        costs nothing until someone writes.</p>
                     <pre><code class="language-go">struct Counter
     hits: int[]
 end

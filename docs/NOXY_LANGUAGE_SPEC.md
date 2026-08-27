@@ -153,7 +153,9 @@ followed by (an optional sign and) a digit is not part of the literal.
 #### Value Semantics (Copy-on-Write)
 
 Arrays, maps, and structs are composite **values**. Every binding without
-`ref` behaves as an independent deep copy, at any depth:
+`ref` behaves as an independent deep copy, at any depth through every *value*
+field — a field, element or map value declared `ref T` is the one edge a copy
+shares (rule 6):
 
 1. **Assignment copies**: `let b = a` and `x = y` produce independent values.
 2. **Calls copy**: arguments to non-`ref` parameters are independent values —
@@ -170,6 +172,17 @@ Arrays, maps, and structs are composite **values**. Every binding without
    variables by name and globals are shared by name — those are the only
    other places where two names can see one slot, and the only ones that
    need coordination under concurrency (see §2.3 R9).
+   A `ref` **field** (or a `(ref T)[]` element, or a `map[K, ref T]` value)
+   is such a slot edge *inside* a value: copying the container copies the
+   edge, not its target, so the original and every copy reach the same
+   target. A type is **ref-carrying** when any field, element or map value
+   is `ref T` or is itself ref-carrying. Rules 1–5 hold for a ref-carrying
+   value exactly as for any other — the copy is independent through every
+   value field — but the sharing is declared in the *type*, at the struct
+   declaration, and does not appear at the assignment, call site, container
+   read or channel that copies it. To own a nested composite instead of
+   sharing it, declare the field without `ref` (`next: Node`, nullable) —
+   see §5 *Self-Reference* for both idioms.
 7. **`==`/`!=` on composites is structural** (recursive by content). `ref`
    values compare by slot identity and are not dereferenced — both as fields
    nested inside a composite and as the two operands of a direct comparison.
@@ -184,15 +197,9 @@ at the binding site — composites are marked as shared and cloned lazily, one
 level at a time, at the first mutation. Read-only sharing therefore costs
 O(1); programs never observe the difference, only the performance.
 
-One documented edge: a `ref` taken *into* a container (`ref arr[0]`, a `ref`
-field) pins that container's identity at creation time. If the container is
-copied *afterwards*, writes through the pre-existing `ref` are visible to
-copies that have not yet materialized. Take refs after, not before, sharing.
-Tracked as issue #83.
-
 #### Concurrency and composite values
 
-Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Normal calls, `spawn`, and `spawn_task` all follow the value-semantics parameter rules above — the legacy `spawn` identity exception was removed in 0.4.0 — so data handed to another routine by argument or channel is race-free by construction. Concurrent mutation of intentionally shared state (globals, `ref`) still requires coordination through channels or another explicit single-owner protocol.
+Shared routines use synchronized global bindings, module state, maps, and runtime handle registries. An individual binding lookup/update or map operation is safe from the Go runtime's concurrent-map crash, but synchronization is not recursive and does not make a read-modify-write sequence atomic. Normal calls, `spawn`, and `spawn_task` all follow the value-semantics parameter rules above — the legacy `spawn` identity exception was removed in 0.4.0 — so data handed to another routine by argument or channel is race-free by construction — unless its type is ref-carrying (rule 6): a `ref` field travels as a shared edge and needs the same coordination as a `ref` argument. Concurrent mutation of intentionally shared state (globals, `ref` — as argument or as field) still requires coordination through channels or another explicit single-owner protocol.
 
 #### Arrays (Dynamic and Fixed)
 
@@ -213,7 +220,7 @@ let zeroed: int[100] = zeros(100)
 ```
 
 **Pass-by-Value Behavior**:
-Arrays are passed by **VALUE**: the callee's array is independent at any depth (copy-on-write). Use `ref` when the function must modify the caller's array.
+Arrays are passed by **VALUE**: the callee's array is independent at any depth through value elements (copy-on-write; a `(ref T)[]` element is a shared edge — §2.2 rule 6). Use `ref` when the function must modify the caller's array.
 
 #### Maps (Hashmaps)
 
@@ -224,7 +231,7 @@ scores["Bob"] = 50
 ```
 
 **Pass-by-Value Behavior**:
-Maps are passed by **VALUE**: the callee's map is independent at any depth (copy-on-write). Use `ref` when the function must modify the caller's map.
+Maps are passed by **VALUE**: the callee's map is independent at any depth through value entries (copy-on-write; a `map[K, ref T]` value is a shared edge — §2.2 rule 6). Use `ref` when the function must modify the caller's map.
 
 **Iteration order is undefined**: a map is backed by a Go map, so `for k in m`,
 `keys(m)` and printing a map may produce a different order on each run and
@@ -241,7 +248,7 @@ end
 ```
 
 **Pass-by-Value Behavior**:
-Structs are passed by **VALUE**: the callee's instance is independent at any depth (copy-on-write), including nested composite fields. Use `ref` when the function must modify the caller's original instance.
+Structs are passed by **VALUE**: the callee's instance is independent at any depth through value fields (copy-on-write), including nested composite fields declared without `ref`. A field declared `ref T` is a shared edge: the callee's copy reaches the caller's target (§2.2 rule 6). Use `ref` when the function must modify the caller's original instance.
 
 ---
 ### 2.3 References (`ref`)
@@ -741,11 +748,11 @@ Exact function types may also appear in parameters, returns, struct fields, map 
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 
-Noxy uses **Pass-by-Value** by default. Primitive values are copied directly. Composite values (arrays, maps, and structs) behave as independent deep copies at any depth, implemented with copy-on-write (see §2.2).
+Noxy uses **Pass-by-Value** by default. Primitive values are copied directly. Composite values (arrays, maps, and structs) behave as independent deep copies at any depth through value fields, implemented with copy-on-write (see §2.2); a field declared `ref T` is the one edge a copy shares (§2.2 rule 6).
 
 #### Pass-by-Value (Default)
 
-When a composite value is passed to a parameter without `ref`, the function's view is fully independent of the caller's — mutating it at any depth never affects the caller:
+When a composite value is passed to a parameter without `ref`, the function's view is independent of the caller's through every value field — mutating it at any depth never affects the caller:
 
 ```noxy
 func modify(arr: int[]) -> void
@@ -774,6 +781,32 @@ let box: Box = Box(values)
 mutate_nested(box)
 // box.values is still [1, 2]
 // values is still [1, 2]
+```
+
+The boundary of that independence is a field declared `ref`. The sharing is
+written in the struct declaration, not in the signature or at the call site:
+
+```noxy
+struct Node
+    value: int
+    next: ref Node
+end
+
+struct Holder
+    inner: ref Node      // Holder is ref-carrying (§2.2 rule 6)
+end
+
+func touch(h: Holder) -> void
+    h.inner.value = 777  // writes through the shared edge
+end
+
+let target: Node = Node(1, null)
+let holder: Holder = Holder(ref target)
+
+touch(holder)
+// target.value is now 777: the callee's copy of `holder` holds the same
+// `ref` — `Holder` declared that. With `inner: Node` instead, target.value
+// would still be 1.
 ```
 
 #### Pass-by-Reference (`ref`)
@@ -815,7 +848,50 @@ typed base (`unknown field`), and at runtime through a dynamic one
 `d.zzz = 1`). No path adds a field to an instance.
 
 ### Self-Reference
-Structs can reference themselves using `ref`.
+
+A struct may contain its own type in two ways, and they mean different things.
+
+**Ownership — a field without `ref`.** A struct-typed field accepts `null`
+(§3), so a recursive structure with a single owner per node — a list, a tree —
+needs no `ref` in its declaration. The children are values: copying a node
+copies the whole subtree (copy-on-write, so the copy is lazy), and a callee
+that receives a node by value cannot reach the caller's tree. In-place
+mutation goes through a `ref` to the *slot* (§2.3 R1, R10):
+
+```noxy
+struct TreeNode
+    valor: int
+    esquerda: TreeNode      // owned, nullable
+    direita: TreeNode
+end
+
+func insert(node: ref TreeNode, v: int) -> void
+    if *node == null then
+        *node = TreeNode(v, null, null)
+        return
+    end
+    if v < node.valor then
+        insert(ref node.esquerda, v)
+    else
+        insert(ref node.direita, v)
+    end
+end
+
+let raiz: TreeNode = null
+insert(ref raiz, 50)
+insert(ref raiz, 30)
+let copia: TreeNode = raiz
+copia.esquerda.valor = 999    // raiz.esquerda.valor is still 30
+```
+
+`noxy_examples/bst_owned.nx` is the reference program for this idiom. Its
+cost today is the nested borrow (`ref node.esquerda` inside a recursion) —
+tracked as issue #93; prefer it whenever the structure has one owner per node.
+
+**Sharing — a field declared `ref`.** When a node must be reachable from more
+than one place — a node with two parents, a doubly linked list (`prev`), a
+parent pointer, a graph with shared edges — the field is declared `ref` and
+the struct becomes *ref-carrying* (§2.2 rule 6):
 
 ```noxy
 struct Node
@@ -826,7 +902,12 @@ end
 
 A `ref` field is filled by rebinding it to a variable (`let novo: Node = ...;
 node.next = ref novo`) or cleared with `null`; assigning a raw `Node` to it is
-a compile error whether `node` is a `Node` or a `ref Node` (§2.3, §4.2).
+a compile error whether `node` is a `Node` or a `ref Node` (§2.3, §4.2). The
+sharing is the point of such a field, and it travels with every copy of the
+container: `let b = a`, `f(a)` with `f(x: Node)`, `arr[i]`, `chan_send` all
+hand out a value whose `next` reaches the *same* node — the copy is
+independent through its value fields and shares through its `ref` fields.
+That is declared once, in the struct, and not repeated at the call site.
 
 A struct may also reference itself through an **array field without `ref`**:
 value semantics without `ref` cannot form a cycle, so no `ref` is needed to
@@ -1967,7 +2048,7 @@ Task completion is published exactly once and can be awaited consistently by mul
 
 Timeout is local and non-terminal: it does not cancel the worker, consume the result, or mutate the task. Completion is preferred whenever it is observably available at the deadline. A wait that returns `"timeout"` may therefore be followed by a later wait that returns `"ok"` or `"error"`.
 
-Supervised tasks share globals, module state, runtime resources, closure environments, and the VM configuration. Ordinary composite arguments follow value semantics (independent at any depth, copy-on-write) and `ref` arguments retain reference identity. Intentionally shared state — globals, `ref`, closure upvalues — still requires explicit concurrency coordination.
+Supervised tasks share globals, module state, runtime resources, closure environments, and the VM configuration. Ordinary composite arguments follow value semantics (independent through value fields, copy-on-write; a ref-carrying argument shares its `ref` targets — §2.2 rule 6) and `ref` arguments retain reference identity. Intentionally shared state — globals, `ref` (as argument or as field), closure upvalues — still requires explicit concurrency coordination.
 
 ---
 
@@ -2477,8 +2558,8 @@ register, roll back, poison, or close the resource again.
 - **Heap-Backed Composite Types**: Objects (`struct`, `array`, `map`) are allocated on the heap.
     - **Variables**: Store a pointer to the heap object; sharing is managed by the copy-on-write runtime.
     - **Assignment**: Assigning a composite behaves as an independent deep copy (cloned lazily on first mutation).
-    - **Function Calls**: A parameter without `ref` receives an independent value at any depth (copy-on-write).
-    - **Reference Parameters**: A parameter declared with `ref` shares the caller's slot — the only sharing mechanism.
+    - **Function Calls**: A parameter without `ref` receives an independent value at any depth through value fields (copy-on-write); a `ref` field inside it is a shared edge (§2.2 rule 6).
+    - **Reference Parameters**: A parameter declared with `ref` shares the caller's slot — `ref`, as parameter or as field, is the only sharing mechanism.
 
 ### Call and operand stacks
 

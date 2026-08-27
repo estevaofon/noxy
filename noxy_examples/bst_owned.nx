@@ -1,0 +1,213 @@
+// Estruturas recursivas por POSSE — sem nenhum campo `ref` (spec §5 Self-Reference).
+//
+// Um campo de struct aceita `null`, então lista e árvore de dono único não
+// precisam de `ref` na declaração: os filhos são valores. A cópia é
+// independente em qualquer profundidade e um callee que recebe o nó por valor
+// não alcança a árvore do chamador. A mutação in-place vai pelo `ref` ao SLOT
+// (`insert(ref node.esquerda, v)`), não por um campo `ref`.
+//
+// Contraste com bst.nx / linked_list.nx, onde `esquerda: ref TreeNode` é uma
+// aresta compartilhada e toda cópia alcança os mesmos filhos (spec §2.2 regra 6).
+// Motivação: issue #92. Custo do empréstimo aninhado: issue #93.
+
+let total: int = 0
+let failures: int = 0
+
+func check(condicao: bool, nome: string)
+    total = total + 1
+    if condicao then
+        return
+    end
+    failures = failures + 1
+    print("  FALHOU: " + nome)
+end
+
+func check_int(obtido: int, esperado: int, nome: string)
+    check(obtido == esperado, nome + " (esperado " + to_str(esperado) + ", obtido " + to_str(obtido) + ")")
+end
+
+// ------------------------------------------------------------
+// Árvore binária de busca com filhos por posse
+// ------------------------------------------------------------
+
+struct TreeNode
+    valor: int
+    esquerda: TreeNode      // posse, nulável — sem ref
+    direita: TreeNode
+end
+
+func insert(node: ref TreeNode, v: int) -> void
+    if *node == null then
+        *node = TreeNode(v, null, null)
+        return
+    end
+    if v < node.valor then
+        insert(ref node.esquerda, v)
+    else
+        insert(ref node.direita, v)
+    end
+end
+
+func height(node: ref TreeNode) -> int
+    if *node == null then
+        return 0
+    end
+    let l: int = height(ref node.esquerda)
+    let r: int = height(ref node.direita)
+    if l > r then
+        return l + 1
+    end
+    return r + 1
+end
+
+func count(node: TreeNode) -> int         // POR VALOR
+    if node == null then
+        return 0
+    end
+    return 1 + count(node.esquerda) + count(node.direita)
+end
+
+// Callee por valor que muta o que recebeu: não pode vazar para o chamador.
+func soma_mutando(node: TreeNode) -> int
+    if node == null then
+        return 0
+    end
+    node.valor = node.valor + 1000
+    return node.valor + soma_mutando(node.esquerda) + soma_mutando(node.direita)
+end
+
+// ------------------------------------------------------------
+// Lista encadeada generic por posse
+// ------------------------------------------------------------
+
+struct GNode<T>
+    value: T,
+    next: GNode<T>
+end
+
+func push_back<T>(node: ref GNode<T>, v: T) -> void
+    if *node == null then
+        *node = GNode(v, null)
+        return
+    end
+    push_back(ref node.next, v)
+end
+
+func remove_first<T>(node: ref GNode<T>, v: T) -> bool
+    if *node == null then
+        return false
+    end
+    if node.value == v then
+        *node = node.next          // o nó seguinte toma o lugar
+        return true
+    end
+    return remove_first(ref node.next, v)
+end
+
+func list_sum(node: GNode<int>) -> int
+    if node == null then
+        return 0
+    end
+    return node.value + list_sum(node.next)
+end
+
+// ------------------------------------------------------------
+// Fronteira de routine: Box por posse não compartilha nada com o worker
+// ------------------------------------------------------------
+
+struct Cell
+    value: int
+    next: Cell
+end
+
+struct Box
+    tag: string
+    inner: Cell         // posse — com `inner: ref Cell` o worker escreveria no chamador
+end
+
+func worker(b: Box) -> int
+    let i: int = 0
+    while i < 2000 do
+        b.inner.value = b.inner.value + 1
+        i = i + 1
+    end
+    return b.inner.value
+end
+
+func main() -> void
+    print("=== bst_owned: estruturas recursivas por posse ===")
+
+    // --- BST ---
+    let raiz: TreeNode = null
+    insert(ref raiz, 50)
+    insert(ref raiz, 30)
+    insert(ref raiz, 70)
+    insert(ref raiz, 20)
+    insert(ref raiz, 40)
+    check_int(height(ref raiz), 3, "altura")
+    check_int(count(raiz), 5, "contagem por valor")
+
+    let copia: TreeNode = raiz
+    copia.esquerda.valor = 999
+    check_int(raiz.esquerda.valor, 30, "copia independente em profundidade")
+    check_int(copia.esquerda.valor, 999, "copia recebeu a escrita")
+
+    let s: int = soma_mutando(raiz)
+    check_int(s, 5210, "callee por valor mutou a propria copia")
+    check_int(raiz.valor, 50, "callee por valor nao vazou (raiz)")
+    check_int(raiz.esquerda.valor, 30, "callee por valor nao vazou (filho)")
+
+    // subárvore lida por valor e mutada: não afeta a árvore
+    let sub: TreeNode = raiz.esquerda
+    sub.valor = -1
+    insert(ref sub, 35)
+    check_int(raiz.esquerda.valor, 30, "subarvore por valor e independente")
+    check_int(count(raiz), 5, "insercao na subarvore copiada nao entra na arvore")
+
+    // dois refs ao mesmo slot escrevem no mesmo lugar
+    let r1: ref TreeNode = ref raiz.direita
+    let r2: ref TreeNode = ref raiz.direita
+    r1.valor = 71
+    check_int(r2.valor, 71, "dois refs ao mesmo slot")
+    check_int(raiz.direita.valor, 71, "escrita pelo ref chega na arvore")
+
+    // --- lista generic ---
+    let head: GNode<int> = null
+    push_back(ref head, 1)
+    push_back(ref head, 2)
+    push_back(ref head, 3)
+    push_back(ref head, 4)
+    check_int(list_sum(head), 10, "lista generic por posse")
+
+    let snapshot: GNode<int> = head
+    check(remove_first(ref head, 2), "remocao no meio")
+    check(remove_first(ref head, 1), "remocao na cabeca")
+    check(remove_first(ref head, 4), "remocao no fim")
+    check(!remove_first(ref head, 99), "remocao de ausente")
+    check_int(list_sum(head), 3, "lista apos remocoes")
+    check_int(list_sum(snapshot), 10, "snapshot tomado antes das remocoes e independente")
+
+    // --- spawn_task com Box por posse ---
+    let alvo: Cell = Cell(1, null)
+    let caixa: Box = Box("a", alvo)
+    let t1: any = spawn_task(worker, caixa)
+    let t2: any = spawn_task(worker, caixa)
+    let e1: any = task_await(t1)
+    let e2: any = task_await(t2)
+    check(e1["status"] == "ok" && e2["status"] == "ok", "workers terminaram")
+    check_int(e1["value"], 2001, "worker 1 viu so a propria copia")
+    check_int(e2["value"], 2001, "worker 2 viu so a propria copia")
+    check_int(alvo.value, 1, "alvo intocado pelos workers")
+    check_int(caixa.inner.value, 1, "caixa intocada pelos workers")
+
+    print("Asercoes: " + to_str(total))
+    print("Passaram: " + to_str(total - failures))
+    print("Falharam: " + to_str(failures))
+    if failures > 0 then
+        print("=== FALHOU ===")
+        exit(1)
+    end
+    print("=== OK ===")
+end
+
+main()
