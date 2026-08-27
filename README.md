@@ -50,10 +50,12 @@ someone actually writes to it.
 ## Three rules
 
 **1. Variables are values.** Assigning, passing, or returning a struct, array
-or map gives you an independent value — at any depth. `ref` is the single,
-visible mechanism for sharing, and it is part of the type. It is written at
-the call site too — `push(ref xs)` — so a call that can mutate your value
-looks different from one that cannot.
+or map gives you an independent value — at any depth, through every field
+that is not `ref`. `ref` is the single, visible mechanism for sharing, and it
+is part of the type: written at the call site — `push(ref xs)` — so a call
+that can mutate your value looks different from one that cannot; or written
+in a struct declaration — `next: ref Node` — so a value that shares says so
+in its type.
 
 ```noxy
 func push(xs: int[])       // cannot touch the caller's array

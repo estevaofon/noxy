@@ -1,5 +1,9 @@
 // Binary Search Tree (BST) - Árvore Binária de Busca
 // Algoritmo clássico que testa structs com múltiplas referências
+//
+// Campos `ref` são arestas COMPARTILHADAS: toda cópia de um TreeNode alcança os
+// mesmos filhos (spec §2.2 regra 6). Para uma árvore de dono único com
+// semântica de valor completa, veja bst_owned.nx (campos sem `ref`).
 
 struct TreeNode
     valor: int

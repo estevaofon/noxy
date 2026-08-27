@@ -16,7 +16,7 @@ Individual global-binding and map operations are synchronized and do not crash t
 
 These guarantees do not make a sequence of operations atomic. For example, `counter = counter + 1` is still a separate read and write. Likewise, arrays, structs, and composite values nested inside a map or global binding are not recursively synchronized. Coordinate compound operations and mutation of nested composite values with channels (or another explicit single-owner protocol).
 
-Normal function calls, `spawn`, and `spawn_task` all follow Noxy's value semantics (0.4.0+): an ordinary composite parameter is an independent value at any depth, implemented with copy-on-write — the legacy `spawn` identity exception was removed. Data handed to another routine by argument or channel is therefore race-free by construction. Intentionally shared state (globals, `ref`) still requires explicit coordination; the synchronized runtime foundation does not make compound mutations atomic.
+Normal function calls, `spawn`, and `spawn_task` all follow Noxy's value semantics (0.4.0+): an ordinary composite parameter is an independent value at any depth, implemented with copy-on-write — the legacy `spawn` identity exception was removed. Data handed to another routine by argument or channel is therefore race-free by construction — unless its type is *ref-carrying* (a field, element or map value declared `ref T`; spec §2.2 rule 6): a `ref` field travels with the copy as a shared edge, exactly like a `ref` argument, and the sharing is declared in the struct, not at the `spawn`. Intentionally shared state (globals, `ref` — as argument or as field) still requires explicit coordination; the synchronized runtime foundation does not make compound mutations atomic.
 
 A closure that captures a `ref` to a local shares that local's cell with
 every routine that runs the closure — it is a local only in name:
@@ -96,7 +96,7 @@ An error map contains `kind`, `message`, and `stack`. `kind` is `"runtime"` for 
 
 A timeout is non-terminal: it never cancels the worker, consumes its outcome, or changes the task. If completion is observable at the deadline, completion wins over timeout. A later or repeated wait therefore observes the same terminal outcome. Envelopes and error maps are fresh on every wait so their mutation cannot alter the private outcome, while a successful composite `value` preserves its original identity rather than being deep-copied.
 
-Supervised tasks share global/module runtime state and use the normal parameter rules: ordinary composite parameters are independent values at any depth (copy-on-write), while `ref` parameters and closure upvalues preserve shared identity. Coordinate concurrent access to intentionally shared state (globals, refs, upvalues) with channels or another explicit ownership protocol.
+Supervised tasks share global/module runtime state and use the normal parameter rules: ordinary composite parameters are independent values through every value field (copy-on-write), while `ref` parameters, `ref` fields and closure upvalues preserve shared identity. Coordinate concurrent access to intentionally shared state (globals, refs, upvalues) with channels or another explicit ownership protocol.
 
 The original `spawn` API remains detached for compatibility. Choose `spawn_task` only when the caller needs structured completion, replayable results, or failures it can inspect.
 
