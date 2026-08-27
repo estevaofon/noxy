@@ -17,8 +17,8 @@ func pool_alloc<T>(p: ref Pool<T>, v: T) -> int
         p.next[i] = -1
         return i
     end
-    append(p.items, v)                  // sem slots livres: cresce
-    append(p.next, -1)
+    append(ref p.items, v)                  // sem slots livres: cresce
+    append(ref p.next, -1)
     return length(p.items) - 1
 end
 
