@@ -69,7 +69,7 @@ func (s referenceSetter) set(updated value.Value) {
 	case setterPtr:
 		*s.ptr = updated
 	case setterProperty:
-		s.instance.Fields[s.name] = updated
+		s.instance.MustSet(s.name, updated)
 	case setterArray:
 		s.array.Elements[s.index] = updated
 	case setterMap:
@@ -233,7 +233,7 @@ func (vm *VM) descend(container value.Value, step *value.ObjRef, forWrite bool) 
 		if !ok || instance == nil {
 			return value.Value{}, fmt.Errorf("Target is not an instance")
 		}
-		child, ok := instance.Fields[step.Name]
+		child, ok := instance.Get(step.Name)
 		if !ok {
 			return value.Value{}, fmt.Errorf("undefined property '%s'", step.Name)
 		}
@@ -242,7 +242,7 @@ func (vm *VM) descend(container value.Value, step *value.ObjRef, forWrite bool) 
 		}
 		if unique, changed := vm.unicize(child); changed {
 			value.Retain(unique)
-			instance.Fields[step.Name] = unique
+			instance.MustSet(step.Name, unique)
 			value.Release(child)
 			return unique, nil
 		}
@@ -337,7 +337,7 @@ func (vm *VM) referenceStorageMode(ref *value.ObjRef, forWrite bool) (stored val
 		if container.Type != value.VAL_OBJ || !ok || instance == nil {
 			return value.Value{}, false, referenceSetter{}, fmt.Errorf("Target is not an instance")
 		}
-		stored, ok := instance.Fields[ref.Name]
+		stored, ok := instance.Get(ref.Name)
 		if !ok {
 			return value.Value{}, false, referenceSetter{}, fmt.Errorf("undefined property '%s'", ref.Name)
 		}

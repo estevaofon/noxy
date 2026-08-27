@@ -19,8 +19,8 @@ func testFileDefinition() value.Value {
 func assertIOErrorResult(t *testing.T, got, definition value.Value) {
 	t.Helper()
 	result := requireBuiltinInstance(t, got, definition)
-	assertBuiltinValue(t, result.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, result.Fields["error"], value.NewString("File not open"))
+	assertBuiltinValue(t, result.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, result.Field("error"), value.NewString("File not open"))
 }
 
 func testIOWriteResultDefinition() value.Value {
@@ -127,7 +127,7 @@ func TestFileHandleIsUsableAcrossSharedVMs(t *testing.T) {
 	fileType := testFileDefinition()
 	handle := callBuiltin(t, parent, "io_open", value.NewString(path), value.NewString("w"), fileType)
 	defer callBuiltin(t, parent, "io_close", handle)
-	fd := int(requireBuiltinInstance(t, handle, fileType).Fields["fd"].Int())
+	fd := int(requireBuiltinInstance(t, handle, fileType).Field("fd").Int())
 	if _, ok := parent.shared.Files.get(fd); !ok {
 		t.Fatalf("file handle %d was not published to shared resources", fd)
 	}
@@ -181,8 +181,8 @@ func TestFileCloseInterruptsBlockedReadWithoutRegistryDeadlock(t *testing.T) {
 	fileType := testFileDefinition()
 	handleValue := value.NewInstance(fileType.Obj.(*value.ObjStruct))
 	instance := handleValue.Obj.(*value.ObjInstance)
-	instance.Fields["fd"] = value.NewInt(int64(handle))
-	instance.Fields["open"] = value.NewBool(true)
+	instance.MustSet("fd", value.NewInt(int64(handle)))
+	instance.MustSet("open", value.NewBool(true))
 	closeNative := requireBuiltin(t, machine, "io_close")
 	readStarted := make(chan struct{})
 	readDone := make(chan error, 1)
@@ -212,7 +212,7 @@ func TestFileCloseInterruptsBlockedReadWithoutRegistryDeadlock(t *testing.T) {
 	if _, ok := machine.shared.Files.get(handle); ok {
 		t.Fatal("closed file handle remains in shared resources")
 	}
-	assertBuiltinValue(t, instance.Fields["open"], value.NewBool(false))
+	assertBuiltinValue(t, instance.Field("open"), value.NewBool(false))
 
 	select {
 	case readErr := <-readDone:
@@ -236,11 +236,11 @@ func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
 	contents := "Noxy 🐍"
 
 	success := requireBuiltinInstance(t, callBuiltin(t, machine, "io_write_result", handleValue, value.NewString(contents), resultDefinition), resultDefinition)
-	assertBuiltinValue(t, success.Fields["success"], value.NewBool(true))
-	assertBuiltinValue(t, success.Fields["bytes_written"], value.NewInt(int64(len([]byte(contents)))))
-	assertBuiltinValue(t, success.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, success.Field("success"), value.NewBool(true))
+	assertBuiltinValue(t, success.Field("bytes_written"), value.NewInt(int64(len([]byte(contents)))))
+	assertBuiltinValue(t, success.Field("error"), value.NewString(""))
 
-	fd := int(handle.Fields["fd"].Int())
+	fd := int(handle.Field("fd").Int())
 	resource, ok := machine.shared.Files.get(fd)
 	if !ok {
 		t.Fatalf("open file descriptor %d is absent from shared resources", fd)
@@ -250,9 +250,9 @@ func TestIOWriteResultReportsSuccessAndFailure(t *testing.T) {
 	}
 
 	failure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_write_result", handleValue, value.NewString("ignored"), resultDefinition), resultDefinition)
-	assertBuiltinValue(t, failure.Fields["success"], value.NewBool(false))
-	assertBuiltinValue(t, failure.Fields["bytes_written"], value.NewInt(0))
-	if failure.Fields["error"].String() == "" {
+	assertBuiltinValue(t, failure.Field("success"), value.NewBool(false))
+	assertBuiltinValue(t, failure.Field("bytes_written"), value.NewInt(0))
+	if failure.Field("error").String() == "" {
 		t.Fatal("failed write returned an empty error")
 	}
 }
@@ -268,19 +268,19 @@ func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
 	resultDefinition := testIOCloseResultDefinition()
 
 	success := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", handleValue, resultDefinition), resultDefinition)
-	assertBuiltinValue(t, success.Fields["success"], value.NewBool(true))
-	assertBuiltinValue(t, success.Fields["error"], value.NewString(""))
-	assertBuiltinValue(t, handle.Fields["open"], value.NewBool(false))
+	assertBuiltinValue(t, success.Field("success"), value.NewBool(true))
+	assertBuiltinValue(t, success.Field("error"), value.NewString(""))
+	assertBuiltinValue(t, handle.Field("open"), value.NewBool(false))
 
 	failure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", handleValue, resultDefinition), resultDefinition)
-	assertBuiltinValue(t, failure.Fields["success"], value.NewBool(false))
-	if failure.Fields["error"].String() == "" {
+	assertBuiltinValue(t, failure.Field("success"), value.NewBool(false))
+	if failure.Field("error").String() == "" {
 		t.Fatal("failed close returned an empty error")
 	}
 
 	failedHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("a"), fileDefinition)
 	failedHandle := requireBuiltinInstance(t, failedHandleValue, fileDefinition)
-	failedFD := int(failedHandle.Fields["fd"].Int())
+	failedFD := int(failedHandle.Field("fd").Int())
 	failedResource, ok := machine.shared.Files.get(failedFD)
 	if !ok {
 		t.Fatalf("open file descriptor %d is absent from shared resources", failedFD)
@@ -289,11 +289,11 @@ func TestIOCloseResultReportsSuccessAndFailure(t *testing.T) {
 		t.Fatalf("close underlying file: %v", err)
 	}
 	underlyingFailure := requireBuiltinInstance(t, callBuiltin(t, machine, "io_close_result", failedHandleValue, resultDefinition), resultDefinition)
-	assertBuiltinValue(t, underlyingFailure.Fields["success"], value.NewBool(false))
-	if underlyingFailure.Fields["error"].String() == "" {
+	assertBuiltinValue(t, underlyingFailure.Field("success"), value.NewBool(false))
+	if underlyingFailure.Field("error").String() == "" {
 		t.Fatal("underlying close failure returned an empty error")
 	}
-	assertBuiltinValue(t, failedHandle.Fields["open"], value.NewBool(false))
+	assertBuiltinValue(t, failedHandle.Field("open"), value.NewBool(false))
 	if _, ok := machine.shared.Files.get(failedFD); ok {
 		t.Fatalf("failed close descriptor %d remains in shared resources", failedFD)
 	}
@@ -313,14 +313,14 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	fileDefinition := testFileDefinition()
 	writeHandleValue := callBuiltin(t, machine, "io_open", value.NewString(path), value.NewString("w"), fileDefinition)
 	writeHandle := requireBuiltinInstance(t, writeHandleValue, fileDefinition)
-	assertBuiltinValue(t, writeHandle.Fields["open"], value.NewBool(true))
-	writeFD := int(writeHandle.Fields["fd"].Int())
+	assertBuiltinValue(t, writeHandle.Field("open"), value.NewBool(true))
+	writeFD := int(writeHandle.Field("fd").Int())
 	if _, ok := machine.shared.Files.get(writeFD); !ok {
 		t.Fatalf("open file descriptor %d is absent from shared resources", writeFD)
 	}
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_write", writeHandleValue, value.NewBytes(contents)), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_close", writeHandleValue), value.NewNull())
-	assertBuiltinValue(t, writeHandle.Fields["open"], value.NewBool(false))
+	assertBuiltinValue(t, writeHandle.Field("open"), value.NewBool(false))
 	if _, ok := machine.shared.Files.get(writeFD); ok {
 		t.Fatalf("closed file descriptor %d remains in shared resources", writeFD)
 	}
@@ -332,56 +332,56 @@ func TestIOBuiltinsUseTemporaryFilesAndInvalidateHandles(t *testing.T) {
 	ioLinesDefinition := value.NewStruct("IOLinesResult", []string{"ok", "data", "error"})
 
 	textResult := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read", readHandleValue, ioResultDefinition), ioResultDefinition)
-	assertBuiltinValue(t, textResult.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, textResult.Fields["data"], value.NewString(contents))
-	assertBuiltinValue(t, textResult.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, textResult.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, textResult.Field("data"), value.NewString(contents))
+	assertBuiltinValue(t, textResult.Field("error"), value.NewString(""))
 
 	// 0.12.0: as leituras "inteiras" partem do cursor, que io_read deixou no
 	// fim — rebobina antes de ler de novo pelo mesmo handle.
 	ioPositionDefinition := value.NewStruct("IOPositionResult", []string{"ok", "position", "error"})
 	rewound := requireBuiltinInstance(t, callBuiltin(t, machine, "io_seek", readHandleValue, value.NewInt(0), value.NewInt(0), ioPositionDefinition), ioPositionDefinition)
-	assertBuiltinValue(t, rewound.Fields["position"], value.NewInt(0))
+	assertBuiltinValue(t, rewound.Field("position"), value.NewInt(0))
 	bytesResult := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_bytes", readHandleValue, ioBytesDefinition), ioBytesDefinition)
-	assertBuiltinValue(t, bytesResult.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, bytesResult.Fields["data"], value.NewBytes(contents))
-	assertBuiltinValue(t, bytesResult.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, bytesResult.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, bytesResult.Field("data"), value.NewBytes(contents))
+	assertBuiltinValue(t, bytesResult.Field("error"), value.NewString(""))
 
 	callBuiltin(t, machine, "io_seek", readHandleValue, value.NewInt(0), value.NewInt(0), ioPositionDefinition)
 	linesResult := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_lines", readHandleValue, ioLinesDefinition), ioLinesDefinition)
-	assertBuiltinValue(t, linesResult.Fields["ok"], value.NewBool(true))
-	assertBuiltinArray(t, linesResult.Fields["data"], []value.Value{
+	assertBuiltinValue(t, linesResult.Field("ok"), value.NewBool(true))
+	assertBuiltinArray(t, linesResult.Field("data"), []value.Value{
 		value.NewString("alpha"), value.NewString("beta"),
 	})
-	assertBuiltinValue(t, linesResult.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, linesResult.Field("error"), value.NewString(""))
 
 	fileInfoDefinition := value.NewStruct("FileInfo", []string{"exists", "size", "is_dir"})
 	fileInfo := requireBuiltinInstance(t, callBuiltin(t, machine, "io_stat", value.NewString(path), fileInfoDefinition), fileInfoDefinition)
-	assertBuiltinValue(t, fileInfo.Fields["exists"], value.NewBool(true))
-	assertBuiltinValue(t, fileInfo.Fields["size"], value.NewInt(int64(len(contents))))
-	assertBuiltinValue(t, fileInfo.Fields["is_dir"], value.NewBool(false))
+	assertBuiltinValue(t, fileInfo.Field("exists"), value.NewBool(true))
+	assertBuiltinValue(t, fileInfo.Field("size"), value.NewInt(int64(len(contents))))
+	assertBuiltinValue(t, fileInfo.Field("is_dir"), value.NewBool(false))
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_close", readHandleValue), value.NewNull())
-	assertBuiltinValue(t, readHandle.Fields["open"], value.NewBool(false))
+	assertBuiltinValue(t, readHandle.Field("open"), value.NewBool(false))
 	assertIOErrorResult(t, callBuiltin(t, machine, "io_read", readHandleValue, ioResultDefinition), ioResultDefinition)
 	assertIOErrorResult(t, callBuiltin(t, machine, "io_read_bytes", readHandleValue, ioBytesDefinition), ioBytesDefinition)
 	assertIOErrorResult(t, callBuiltin(t, machine, "io_read_lines", readHandleValue, ioLinesDefinition), ioLinesDefinition)
 
 	unknownHandleValue := value.NewInstance(fileDefinition.Obj.(*value.ObjStruct))
 	unknownHandle := unknownHandleValue.Obj.(*value.ObjInstance)
-	unknownHandle.Fields["fd"] = value.NewInt(987654321)
-	unknownHandle.Fields["open"] = value.NewBool(true)
+	unknownHandle.MustSet("fd", value.NewInt(987654321))
+	unknownHandle.MustSet("open", value.NewBool(true))
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_write", unknownHandleValue, value.NewString("ignored")), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_close", unknownHandleValue), value.NewNull())
-	assertBuiltinValue(t, unknownHandle.Fields["open"], value.NewBool(true))
+	assertBuiltinValue(t, unknownHandle.Field("open"), value.NewBool(true))
 	assertIOErrorResult(t, callBuiltin(t, machine, "io_read", unknownHandleValue, ioResultDefinition), ioResultDefinition)
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_exists", value.NewString(path)), value.NewBool(true))
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_remove", value.NewString(path)), value.NewBool(true))
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_exists", value.NewString(path)), value.NewBool(false))
 	missingInfo := requireBuiltinInstance(t, callBuiltin(t, machine, "io_stat", value.NewString(path), fileInfoDefinition), fileInfoDefinition)
-	assertBuiltinValue(t, missingInfo.Fields["exists"], value.NewBool(false))
-	assertBuiltinValue(t, missingInfo.Fields["size"], value.NewInt(0))
-	assertBuiltinValue(t, missingInfo.Fields["is_dir"], value.NewBool(false))
+	assertBuiltinValue(t, missingInfo.Field("exists"), value.NewBool(false))
+	assertBuiltinValue(t, missingInfo.Field("size"), value.NewInt(0))
+	assertBuiltinValue(t, missingInfo.Field("is_dir"), value.NewBool(false))
 }
 
 func TestIOReadRejectsInvalidUTF8(t *testing.T) {
@@ -464,12 +464,12 @@ func TestIOReadLineIsIncrementalWithExplicitEOF(t *testing.T) {
 	ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
 	for _, want := range []string{"um", "dois", "", "tres"} {
 		result := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-		assertBuiltinValue(t, result.Fields["ok"], value.NewBool(true))
-		assertBuiltinValue(t, result.Fields["data"], value.NewString(want))
+		assertBuiltinValue(t, result.Field("ok"), value.NewBool(true))
+		assertBuiltinValue(t, result.Field("data"), value.NewString(want))
 	}
 	eof := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, eof.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, eof.Fields["error"], value.NewString("EOF"))
+	assertBuiltinValue(t, eof.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, eof.Field("error"), value.NewString("EOF"))
 	callBuiltin(t, machine, "io_close", handle)
 	assertIOErrorResult(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
 }
@@ -487,10 +487,10 @@ func TestIOListDirAndRename(t *testing.T) {
 	}
 	linesDef := value.NewStruct("IOLinesResult", []string{"ok", "data", "error"})
 	listed := requireBuiltinInstance(t, callBuiltin(t, machine, "io_list_dir", value.NewString(root), linesDef), linesDef)
-	assertBuiltinValue(t, listed.Fields["ok"], value.NewBool(true))
-	assertBuiltinArray(t, listed.Fields["data"], []value.Value{value.NewString("a.txt"), value.NewString("b.txt"), value.NewString("sub")})
+	assertBuiltinValue(t, listed.Field("ok"), value.NewBool(true))
+	assertBuiltinArray(t, listed.Field("data"), []value.Value{value.NewString("a.txt"), value.NewString("b.txt"), value.NewString("sub")})
 	missing := requireBuiltinInstance(t, callBuiltin(t, machine, "io_list_dir", value.NewString(filepath.Join(root, "nope")), linesDef), linesDef)
-	assertBuiltinValue(t, missing.Fields["ok"], value.NewBool(false))
+	assertBuiltinValue(t, missing.Field("ok"), value.NewBool(false))
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_rename", value.NewString(filepath.Join(root, "a.txt")), value.NewString(filepath.Join(root, "c.txt"))), value.NewBool(true))
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_exists", value.NewString(filepath.Join(root, "c.txt"))), value.NewBool(true))
 	assertBuiltinValue(t, callBuiltin(t, machine, "io_rename", value.NewString(filepath.Join(root, "nope.txt")), value.NewString(filepath.Join(root, "d.txt"))), value.NewBool(false))
@@ -621,16 +621,16 @@ func TestWholeFileReadDiscardsTheLineReader(t *testing.T) {
 	ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
 
 	first := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, first.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, first.Fields["data"], value.NewString("um"))
+	assertBuiltinValue(t, first.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, first.Field("data"), value.NewString("um"))
 
 	whole := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read", handle, ioResult), ioResult)
-	assertBuiltinValue(t, whole.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, whole.Fields["data"], value.NewString(strings.TrimPrefix(contents, "um\n")))
+	assertBuiltinValue(t, whole.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, whole.Field("data"), value.NewString(strings.TrimPrefix(contents, "um\n")))
 
 	eof := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handle, ioResult), ioResult)
-	assertBuiltinValue(t, eof.Fields["ok"], value.NewBool(false))
-	assertBuiltinValue(t, eof.Fields["error"], value.NewString("EOF"))
+	assertBuiltinValue(t, eof.Field("ok"), value.NewBool(false))
+	assertBuiltinValue(t, eof.Field("error"), value.NewString("EOF"))
 	callBuiltin(t, machine, "io_close", handle)
 }
 
@@ -640,18 +640,18 @@ func TestIOCloseLeavesStdinRegisteredAndUsable(t *testing.T) {
 		fileDefinition := testFileDefinition()
 		handleValue := callBuiltin(t, machine, "io_stdin", fileDefinition)
 		handle := requireBuiltinInstance(t, handleValue, fileDefinition)
-		fd := int(handle.Fields["fd"].Int())
+		fd := int(handle.Field("fd").Int())
 
 		callBuiltin(t, machine, "io_close", handleValue)
 		if _, ok := machine.shared.Files.get(fd); !ok {
 			t.Fatal("io.close removed the stdin resource from the registry")
 		}
-		assertBuiltinValue(t, handle.Fields["open"], value.NewBool(true))
+		assertBuiltinValue(t, handle.Field("open"), value.NewBool(true))
 
 		ioResult := value.NewStruct("IOResult", []string{"ok", "data", "error"})
 		line := requireBuiltinInstance(t, callBuiltin(t, machine, "io_read_line", handleValue, ioResult), ioResult)
-		assertBuiltinValue(t, line.Fields["ok"], value.NewBool(true))
-		assertBuiltinValue(t, line.Fields["data"], value.NewString("linha"))
+		assertBuiltinValue(t, line.Field("ok"), value.NewBool(true))
+		assertBuiltinValue(t, line.Field("data"), value.NewString("linha"))
 	})
 }
 
@@ -700,10 +700,10 @@ func TestConcurrentInputAndStdinReadLineShareOneBuffer(t *testing.T) {
 					break
 				}
 				result, ok := got.Obj.(*value.ObjInstance)
-				if !ok || !result.Fields["ok"].Bool() {
+				if !ok || !result.Field("ok").Bool() {
 					break
 				}
-				line, _ := result.Fields["data"].Obj.(string)
+				line, _ := result.Field("data").Obj.(string)
 				lines = append(lines, line)
 			}
 			collected <- lines

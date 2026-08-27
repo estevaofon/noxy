@@ -91,7 +91,7 @@ func TestUnicizeInstanceMarksFields(t *testing.T) {
 	inner := value.NewArray([]value.Value{value.NewInt(1)})
 	structDef := &value.ObjStruct{Name: "Box", Fields: []string{"data"}}
 	inst := value.NewInstance(structDef)
-	inst.Obj.(*value.ObjInstance).Fields["data"] = inner
+	inst.Obj.(*value.ObjInstance).MustSet("data", inner)
 	// dono durável do campo (o construtor real faria isso — Task 5).
 	value.Retain(inner)
 	// spec §3: "compartilhado" agora é Owners > 1, não o bit sticky.
@@ -104,7 +104,7 @@ func TestUnicizeInstanceMarksFields(t *testing.T) {
 	if !value.IsShared(inner) {
 		t.Fatal("campos compostos do clone devem ganhar um dono (ficam compartilhados)")
 	}
-	if v.Obj.(*value.ObjInstance).Fields["data"].Obj != inner.Obj {
+	if v.Obj.(*value.ObjInstance).Field("data").Obj != inner.Obj {
 		t.Fatal("clone raso de instância deve compartilhar os campos (mesmo ponteiro)")
 	}
 }

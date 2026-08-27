@@ -152,8 +152,8 @@ func TestStringsSplitBuiltin(t *testing.T) {
 			if instance.Struct != splitResult.Obj.(*value.ObjStruct) {
 				t.Fatal("split result does not use the supplied struct definition")
 			}
-			assertBuiltinValue(t, instance.Fields["count"], value.NewInt(int64(len(tt.wantParts))))
-			parts := requireBuiltinArray(t, instance.Fields["parts"])
+			assertBuiltinValue(t, instance.Field("count"), value.NewInt(int64(len(tt.wantParts))))
+			parts := requireBuiltinArray(t, instance.Field("parts"))
 			if len(parts.Elements) != len(tt.wantParts) {
 				t.Fatalf("part count = %d, want %d", len(parts.Elements), len(tt.wantParts))
 			}

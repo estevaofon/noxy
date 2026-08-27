@@ -40,14 +40,14 @@ func TestSafeSystemBuiltinsPreserveProcessStateContracts(t *testing.T) {
 	// path the field must be present and empty.
 	environmentDefinition := value.NewStruct("EnvResult", []string{"value", "ok", "error"})
 	before := requireBuiltinInstance(t, callBuiltin(t, machine, "sys_getenv", value.NewString(environmentKey), environmentDefinition), environmentDefinition)
-	assertBuiltinValue(t, before.Fields["value"], value.NewString("before"))
-	assertBuiltinValue(t, before.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, before.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, before.Field("value"), value.NewString("before"))
+	assertBuiltinValue(t, before.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, before.Field("error"), value.NewString(""))
 	assertBuiltinValue(t, callBuiltin(t, machine, "sys_setenv", value.NewString(environmentKey), value.NewString("after")), value.NewBool(true))
 	after := requireBuiltinInstance(t, callBuiltin(t, machine, "sys_getenv", value.NewString(environmentKey), environmentDefinition), environmentDefinition)
-	assertBuiltinValue(t, after.Fields["value"], value.NewString("after"))
-	assertBuiltinValue(t, after.Fields["ok"], value.NewBool(true))
-	assertBuiltinValue(t, after.Fields["error"], value.NewString(""))
+	assertBuiltinValue(t, after.Field("value"), value.NewString("after"))
+	assertBuiltinValue(t, after.Field("ok"), value.NewBool(true))
+	assertBuiltinValue(t, after.Field("error"), value.NewString(""))
 
 	arguments := requireBuiltinArray(t, callBuiltin(t, machine, "sys_argv"))
 	if len(arguments.Elements) != len(os.Args) {

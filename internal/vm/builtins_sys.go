@@ -118,10 +118,10 @@ func (vm *VM) defineSystemBuiltins() {
 		}
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["exit_code"] = value.NewInt(int64(exitCode))
-		inst.Fields["output"] = value.NewString(outputStr)
-		inst.Fields["ok"] = value.NewBool(okVal)
-		inst.Fields["error"] = value.NewString("")
+		inst.MustSet("exit_code", value.NewInt(int64(exitCode)))
+		inst.MustSet("output", value.NewString(outputStr))
+		inst.MustSet("ok", value.NewBool(okVal))
+		inst.MustSet("error", value.NewString(""))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -183,10 +183,10 @@ func (vm *VM) defineSystemBuiltins() {
 		}
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["exit_code"] = value.NewInt(int64(exitCode))
-		inst.Fields["output"] = value.NewString(outputField)
-		inst.Fields["ok"] = value.NewBool(okVal)
-		inst.Fields["error"] = value.NewString(errMsg)
+		inst.MustSet("exit_code", value.NewInt(int64(exitCode)))
+		inst.MustSet("output", value.NewString(outputField))
+		inst.MustSet("ok", value.NewBool(okVal))
+		inst.MustSet("error", value.NewString(errMsg))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
@@ -321,9 +321,9 @@ func (vm *VM) defineSystemBuiltins() {
 		}
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
-		inst.Fields["value"] = value.NewString(valueField)
-		inst.Fields["ok"] = value.NewBool(okVal)
-		inst.Fields["error"] = value.NewString(errMsg)
+		inst.MustSet("value", value.NewString(valueField))
+		inst.MustSet("ok", value.NewBool(okVal))
+		inst.MustSet("error", value.NewString(errMsg))
 
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})

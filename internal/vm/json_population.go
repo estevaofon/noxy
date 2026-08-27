@@ -234,32 +234,31 @@ func prepareJSONStructMutation(vm *VM, instance *value.ObjInstance, schema *valu
 	if !ok || instance.Struct == nil {
 		return nil, false
 	}
-	newFields := make(map[string]value.Value, len(instance.Fields))
-	for name, field := range instance.Fields {
-		newFields[name] = field
-	}
+	newSlots := make([]value.Value, len(instance.Slots))
+	copy(newSlots, instance.Slots)
 	commits := make([]jsonCommit, 0, len(instance.Struct.Fields))
 	for _, fieldName := range instance.Struct.Fields {
 		dataValue, exists := dataMap[fieldName]
 		if !exists {
 			continue
 		}
-		current, exists := instance.Fields[fieldName]
-		if !exists {
+		slot, declared := instance.Struct.FieldIndex(fieldName)
+		if !declared || slot >= len(instance.Slots) {
 			return nil, false
 		}
+		current := instance.Slots[slot]
 		var fieldSchema *value.RuntimeTypeInfo
 		if schema != nil {
 			fieldSchema = schema.Fields[fieldName]
 		} else if instance.Struct.JSONDynamicFields[fieldName] {
 			fieldSchema = &value.RuntimeTypeInfo{Kind: value.TYPE_ANY}
 		}
-		name := fieldName
+		index := slot
 		previous := current
 		commit, ok := prepareJSONMutation(vm, current, fieldSchema, dataValue, func(updated value.Value) {
 			// RC: troca de ocupante do campo — retain-novo antes de release-velho
 			value.Retain(updated)
-			newFields[name] = updated
+			newSlots[index] = updated
 			value.Release(previous)
 		})
 		if !ok {
@@ -271,7 +270,7 @@ func prepareJSONStructMutation(vm *VM, instance *value.ObjInstance, schema *valu
 		for _, commit := range commits {
 			commit()
 		}
-		instance.Fields = newFields
+		instance.Slots = newSlots
 	}, true
 }
 
@@ -373,8 +372,9 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			Fields:            fieldNames,
 			JSONDynamicFields: make(map[string]bool),
 		}
+		definition.BuildFieldIndex()
 		instance := value.NewInstance(definition)
-		fields := instance.Obj.(*value.ObjInstance).Fields
+		built := instance.Obj.(*value.ObjInstance)
 		for _, name := range fieldNames {
 			if schema.Fields[name] != nil && schema.Fields[name].Kind == value.TYPE_ANY {
 				definition.JSONDynamicFields[name] = true
@@ -396,9 +396,9 @@ func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value
 			if !ok {
 				return value.Value{}, false
 			}
-			fields[name] = created
+			built.MustSet(name, created)
 		}
-		for _, created := range fields {
+		for _, created := range built.Slots {
 			value.Retain(created) // RC: campo e dono duravel (espelha o construtor)
 		}
 		return instance, true

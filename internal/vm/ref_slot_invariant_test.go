@@ -34,7 +34,7 @@ func newCorruptingVM(t *testing.T) *VM {
 	})
 	machine.DefineNative("corrupt_ref_field", func(args []value.Value) value.Value {
 		instance := args[0].Obj.(*value.ObjInstance)
-		instance.Fields[args[1].Obj.(string)] = args[2]
+		instance.MustSet(args[1].Obj.(string), args[2])
 		return value.NewNull()
 	})
 	machine.DefineNative("corrupt_ref_index", func(args []value.Value) value.Value {

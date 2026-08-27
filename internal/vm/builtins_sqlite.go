@@ -34,8 +34,8 @@ func (vm *VM) defineSQLiteBuiltins() {
 		})
 
 		instance := value.NewInstance(structInst.Struct).Obj.(*value.ObjInstance)
-		instance.Fields["handle"] = value.NewInt(int64(handle))
-		instance.Fields["open"] = value.NewBool(open)
+		instance.MustSet("handle", value.NewInt(int64(handle)))
+		instance.MustSet("open", value.NewBool(open))
 		return value.Value{Type: value.VAL_OBJ, Obj: instance}, nil
 	})
 
@@ -52,7 +52,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 			return value.NewNull(), nil
 		}
 
-		resource, exists := machine.shared.Databases.remove(int(databaseInstance.Fields["handle"].Int()))
+		resource, exists := machine.shared.Databases.remove(int(databaseInstance.Field("handle").Int()))
 		if exists {
 			resource.stateMu.Lock()
 			database := resource.database
@@ -61,7 +61,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 			if database != nil {
 				_ = database.Close()
 			}
-			databaseInstance.Fields["open"] = value.NewBool(false)
+			databaseInstance.MustSet("open", value.NewBool(false))
 		}
 		return value.NewNull(), nil
 	})
@@ -154,7 +154,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 			parameters: make(map[int]interface{}),
 		})
 		instance := value.NewInstance(statementTemplate.Struct).Obj.(*value.ObjInstance)
-		instance.Fields["handle"] = value.NewInt(int64(handle))
+		instance.MustSet("handle", value.NewInt(int64(handle)))
 		return value.Value{Type: value.VAL_OBJ, Obj: instance}, nil
 	})
 
@@ -206,7 +206,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 			return value.NewNull(), nil
 		}
 
-		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
+		resource, exists := machine.shared.Statements.get(int(statementInstance.Field("handle").Int()))
 		if !exists {
 			return sqliteExecError(resultTemplate.Struct, "invalid statement handle"), nil
 		}
@@ -245,7 +245,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 		if !ok {
 			return value.NewNull(), nil
 		}
-		resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
+		resource, exists := machine.shared.Statements.get(int(statementInstance.Field("handle").Int()))
 		if exists {
 			resource.mu.Lock()
 			if !resource.closed && resource.statement != nil {
@@ -268,7 +268,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 		if !ok {
 			return value.NewNull(), nil
 		}
-		resource, exists := machine.shared.Statements.remove(int(statementInstance.Fields["handle"].Int()))
+		resource, exists := machine.shared.Statements.remove(int(statementInstance.Field("handle").Int()))
 		if !exists {
 			return value.NewNull(), nil
 		}
@@ -356,7 +356,7 @@ func (vm *VM) defineSQLiteBuiltins() {
 }
 
 func sqliteDatabase(machine *VM, instance *value.ObjInstance) (*sql.DB, bool) {
-	resource, ok := machine.shared.Databases.get(int(instance.Fields["handle"].Int()))
+	resource, ok := machine.shared.Databases.get(int(instance.Field("handle").Int()))
 	if !ok {
 		return nil, false
 	}
@@ -373,7 +373,7 @@ func bindSQLiteParameter(machine *VM, args []value.Value, parameter interface{})
 	if !ok {
 		return value.NewNull()
 	}
-	resource, exists := machine.shared.Statements.get(int(statementInstance.Fields["handle"].Int()))
+	resource, exists := machine.shared.Statements.get(int(statementInstance.Field("handle").Int()))
 	if !exists {
 		return value.NewNull()
 	}
@@ -421,19 +421,19 @@ func sqliteExecResult(definition *value.ObjStruct, result sql.Result, err error)
 	rowsAffected, _ := result.RowsAffected()
 	lastInsertID, _ := result.LastInsertId()
 	instance := value.NewInstance(definition).Obj.(*value.ObjInstance)
-	instance.Fields["ok"] = value.NewBool(true)
-	instance.Fields["error"] = value.NewString("")
-	instance.Fields["rows_affected"] = value.NewInt(rowsAffected)
-	instance.Fields["last_insert_id"] = value.NewInt(lastInsertID)
+	instance.MustSet("ok", value.NewBool(true))
+	instance.MustSet("error", value.NewString(""))
+	instance.MustSet("rows_affected", value.NewInt(rowsAffected))
+	instance.MustSet("last_insert_id", value.NewInt(lastInsertID))
 	return value.Value{Type: value.VAL_OBJ, Obj: instance}
 }
 
 func sqliteExecError(definition *value.ObjStruct, errorText string) value.Value {
 	instance := value.NewInstance(definition).Obj.(*value.ObjInstance)
-	instance.Fields["ok"] = value.NewBool(false)
-	instance.Fields["error"] = value.NewString(errorText)
-	instance.Fields["rows_affected"] = value.NewInt(0)
-	instance.Fields["last_insert_id"] = value.NewInt(0)
+	instance.MustSet("ok", value.NewBool(false))
+	instance.MustSet("error", value.NewString(errorText))
+	instance.MustSet("rows_affected", value.NewInt(0))
+	instance.MustSet("last_insert_id", value.NewInt(0))
 	return value.Value{Type: value.VAL_OBJ, Obj: instance}
 }
 

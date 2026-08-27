@@ -87,12 +87,11 @@ func valuesEqual(a, b value.Value) bool {
 				if ao == bo {
 					return true
 				}
-				if ao.Struct != bo.Struct || len(ao.Fields) != len(bo.Fields) {
+				if ao.Struct != bo.Struct || len(ao.Slots) != len(bo.Slots) {
 					return false
 				}
-				for k, av := range ao.Fields {
-					bv, ok := bo.Fields[k]
-					if !ok || !valuesEqual(av, bv) {
+				for i, av := range ao.Slots {
+					if !valuesEqual(av, bo.Slots[i]) {
 						return false
 					}
 				}

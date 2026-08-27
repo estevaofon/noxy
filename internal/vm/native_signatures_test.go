@@ -297,7 +297,7 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 	machine := New()
 	missingEnvironment := value.NewGlobalEnvironment(nil)
 	instance := value.NewInstance(&value.ObjStruct{Name: "Holder", Fields: []string{"known"}})
-	instance.Obj.(*value.ObjInstance).Fields["known"] = value.NewInt(1)
+	instance.Obj.(*value.ObjInstance).MustSet("known", value.NewInt(1))
 	tests := []struct {
 		name string
 		ref  *value.ObjRef
@@ -364,14 +364,14 @@ func TestPopulateTargetRejectsInvalidReferences(t *testing.T) {
 
 func TestPopulateTargetPropagatesNestedObjectFailure(t *testing.T) {
 	inner := value.NewInstance(&value.ObjStruct{Name: "Inner", Fields: []string{"name"}})
-	inner.Obj.(*value.ObjInstance).Fields["name"] = value.NewString("keep")
+	inner.Obj.(*value.ObjInstance).MustSet("name", value.NewString("keep"))
 	outer := value.NewInstance(&value.ObjStruct{Name: "Outer", Fields: []string{"inner"}})
-	outer.Obj.(*value.ObjInstance).Fields["inner"] = inner
+	outer.Obj.(*value.ObjInstance).MustSet("inner", inner)
 
 	if populateTarget(New(), outer, map[string]interface{}{"inner": []interface{}{}}) {
 		t.Fatal("nested object population failure reported success")
 	}
-	got := inner.Obj.(*value.ObjInstance).Fields["name"]
+	got := inner.Obj.(*value.ObjInstance).Field("name")
 	if got.Type != value.VAL_OBJ || got.Obj != "keep" {
 		t.Fatalf("nested field=%v, want unchanged string", got)
 	}
@@ -756,9 +756,9 @@ end`)
 
 func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {
 	outer := value.NewInstance(&value.ObjStruct{Name: "Outer", Fields: []string{"items", "metadata"}})
-	fields := outer.Obj.(*value.ObjInstance).Fields
-	fields["items"] = value.NewArray(nil)
-	fields["metadata"] = value.NewMap()
+	fields := outer.Obj.(*value.ObjInstance)
+	fields.MustSet("items", value.NewArray(nil))
+	fields.MustSet("metadata", value.NewMap())
 
 	data := map[string]interface{}{
 		"items":    []interface{}{float64(42)},
@@ -767,13 +767,13 @@ func TestPopulateTargetRetainsCompatibleCompositeFields(t *testing.T) {
 	if !populateTarget(New(), outer, data) {
 		t.Fatal("compatible composite fields were rejected")
 	}
-	items := fields["items"].Obj.(*value.ObjArray)
+	items := fields.Field("items").Obj.(*value.ObjArray)
 	if len(items.Elements) != 1 || items.Elements[0].Type != value.VAL_INT || items.Elements[0].Int() != 42 {
-		t.Fatalf("items=%v, want [42]", fields["items"])
+		t.Fatalf("items=%v, want [42]", fields.Field("items"))
 	}
-	metadata := fields["metadata"].Obj.(*value.ObjMap)
+	metadata := fields.Field("metadata").Obj.(*value.ObjMap)
 	if got := requireTestMapValue(t, metadata, "answer"); got.Type != value.VAL_INT || got.Int() != 42 {
-		t.Fatalf("metadata=%v, want answer=42", fields["metadata"])
+		t.Fatalf("metadata=%v, want answer=42", fields.Field("metadata"))
 	}
 }
 

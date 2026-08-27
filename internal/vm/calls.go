@@ -83,7 +83,7 @@ func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk
 			for i := 0; i < argCount; i++ {
 				arg := vm.peek(argCount - 1 - i)
 				value.Retain(arg) // RC: campo e dono duravel
-				instObj.Fields[structDef.Fields[i]] = arg
+				instObj.Slots[i] = arg // arity == len(Fields), checado acima
 			}
 			vm.stackTop -= argCount + 1
 			vm.push(instance)
@@ -190,12 +190,12 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		return copied
 	case *value.ObjInstance:
 		cloneCount.Add(1)
-		newFields := make(map[string]value.Value)
-		for k, val := range obj.Fields {
+		newSlots := make([]value.Value, len(obj.Slots))
+		for i, val := range obj.Slots {
 			value.Retain(val) // RC: filho ganha dono duravel no clone
-			newFields[k] = val
+			newSlots[i] = val
 		}
-		return value.NewInstanceAdopting(obj.Struct, newFields) // RC: move — retidos acima
+		return value.NewInstanceAdopting(obj.Struct, newSlots) // RC: move — retidos acima
 	default:
 		return v
 	}

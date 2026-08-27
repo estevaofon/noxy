@@ -152,7 +152,7 @@ func TestOwnersOfReachesHeaderWithAndWithoutKindHint(t *testing.T) {
 func TestNewInstanceAdoptingDoesNotRetainAgain(t *testing.T) {
 	child := NewArray(nil)
 	Retain(child) // o chamador ja reteve em nome da instancia
-	inst := NewInstanceAdopting(&ObjStruct{Name: "P"}, map[string]Value{"a": child})
+	inst := NewInstanceAdopting(&ObjStruct{Name: "P", Fields: []string{"a"}}, []Value{child})
 	if got := OwnersCount(child); got != 1 {
 		t.Fatalf("NewInstanceAdopting nao pode reter de novo: Owners=%d, esperado 1", got)
 	}
