@@ -4,11 +4,11 @@ struct Stack<T>
 end
 
 func push<T>(s: ref Stack<T>, item: T)
-    append(s.items, item)
+    append(ref s.items, item)
 end
 
 func take<T>(s: ref Stack<T>) -> T
-    return pop(s.items)
+    return pop(ref s.items)
 end
 
 let ints: Stack<int> = Stack([])        // T = int, pela anotação

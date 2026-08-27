@@ -21,7 +21,7 @@ let NKEYS: int = length(keytab)
 // getword: extrai a próxima palavra de text a partir de *pos; "" no fim
 func getword(text: string, pos: ref int) -> string
     let n: int = length(text)
-    let i: int = pos
+    let i: int = *pos
     while i < n && !is_alpha(text[i]) && text[i] != "_" do
         i = i + 1                   // pula o que não é letra
     end

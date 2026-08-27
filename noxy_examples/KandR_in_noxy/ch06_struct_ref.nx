@@ -9,7 +9,7 @@ print(pp.x, pp.y)                   // o acesso a campos dispensa o -> de C
 pp.x = 7                            // escreve no original através da referência
 print(origin.x)
 
-let copy: Point = pp                // let lê através da ref: copia o struct
+let copy: Point = *pp               // let lê através da ref: copia o struct
 copy.y = 99
 print(origin.y, copy.y)
 
