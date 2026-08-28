@@ -1,4 +1,6 @@
 
+use sys select exit
+
 print("--- TESTE DE TIPOS COM FMT (%T) ---")
 
 // 1. Arrays

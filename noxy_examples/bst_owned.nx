@@ -10,6 +10,8 @@
 // aresta compartilhada e toda cópia alcança os mesmos filhos (spec §2.2 regra 6).
 // Motivação: issue #92. Custo do empréstimo aninhado: issue #93.
 
+use sys select exit
+
 let total: int = 0
 let failures: int = 0
 

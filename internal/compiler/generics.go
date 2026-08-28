@@ -285,6 +285,7 @@ func (c *Compiler) newPass1Compiler() *Compiler {
 	}
 	scratch := NewWithStateAndRoot(globalsCopy, structsCopy, c.FileName, c.moduleRoot)
 	scratch.moduleName = c.moduleName
+	scratch.knownGlobals = c.knownGlobals
 	scratch.generics = c.registryOrInit()
 	scratch.instances = c.instancesOrInit()
 	// discoveryState() (nao c.moduleDiscovery cru): o pass 1 tem de

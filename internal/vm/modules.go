@@ -203,6 +203,10 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 		compilerPath = source.Name
 	}
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), compilerPath, vm.Config.RootPath)
+	// Issue #47 parte 3: o modulo enxerga os nativos ja registrados na raiz
+	// (inclusive os da extensao carregada logo acima) e os que o proprio
+	// modulo registra via sys_load_plugin.
+	c.SetKnownGlobals(append(vm.GlobalNames(), compiler.PluginNativeNames(program)...))
 	code, _, err := c.Compile(program)
 	// Aviso do compilador de um modulo carregado em runtime e diagnostico
 	// da VM: os.Stderr (AGENTS.md E.6), nunca stdout (issue #61 item 3).

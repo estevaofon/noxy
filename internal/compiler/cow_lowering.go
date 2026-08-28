@@ -36,6 +36,9 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 			c.emitBytes(byte(chunk.OP_GET_UPVALUE_MUT), byte(arg))
 			t = upvalueType
 		} else {
+			if !c.globalIsKnown(n.Value) {
+				return nil, false, c.undefinedGlobalError(n.Value)
+			}
 			nameConstant := c.makeConstant(value.NewString(n.Value))
 			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL_MUT, nameConstant)
 			t = c.globals[n.Value] // pode ser nil (desconhecido/any)

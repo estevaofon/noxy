@@ -127,6 +127,11 @@ type Compiler struct {
 	// para o REPL fazer o merge apos sucesso.
 	sessionBindings       map[string]GlobalDecl
 	programBindingsByKind map[string]GlobalDecl
+	// knownGlobals: nomes que o embutidor garante existir em runtime
+	// (nativos, extensoes, plugins) — ver known_globals.go. nil = check de
+	// global inexistente desligado. Compartilhado (mesmo mapa) pela arvore
+	// de compiladores: NewChild, newPass1Compiler.
+	knownGlobals map[string]struct{}
 	// warnings e a lista de avisos COMPARTILHADA pela arvore de compiladores
 	// (raiz + NewChild): ponteiro, como generics/instances, para que o aviso
 	// emitido dentro de um corpo de funcao suba ate o compilador raiz, que e
@@ -201,6 +206,7 @@ func NewChild(parent *Compiler) *Compiler {
 	c := &Compiler{
 		enclosing:        parent,
 		warnings:         parent.warnings,
+		knownGlobals:     parent.knownGlobals,
 		currentChunk:     chunk.New(),
 		locals:           []Local{},
 		globals:          childGlobals,
@@ -720,6 +726,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if err := c.emitRuntimeValueType(globalType); err != nil {
 						return nil, nil, err
 					}
+				} else if !c.globalIsKnown(ident.Value) {
+					// Issue #47 parte 3: `x = v` sem `let` criava o global em
+					// runtime (OP_SET_GLOBAL define incondicionalmente).
+					return nil, nil, c.undeclaredAssignmentError(ident.Value)
 				}
 				nameConstant := c.makeConstant(value.NewString(ident.Value))
 				c.emitOpWithConstantIndex(chunk.OP_SET_GLOBAL, nameConstant)
@@ -1197,6 +1207,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// aqui sem checagem extra.
 			if err := c.rejectBareGenericTemplateIdentifier(n); err != nil {
 				return nil, nil, err
+			}
+			if !c.globalIsKnown(n.Value) {
+				return nil, nil, c.undefinedGlobalError(n.Value)
 			}
 			nameConstant := c.makeConstant(value.NewString(n.Value))
 			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
@@ -2663,6 +2676,9 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 			}
 			c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 			return declared, nil
+		}
+		if !c.globalIsKnown(target.Value) {
+			return nil, c.undefinedGlobalError(target.Value)
 		}
 		c.emitOpWithConstantIndex(chunk.OP_REF_GLOBAL, name)
 		return nil, nil

@@ -60,6 +60,20 @@ func (environment *GlobalEnvironment) LocalSnapshot() map[string]Value {
 	return result
 }
 
+// LocalNames devolve os nomes vinculados NESTE ambiente (sem os pais) — a
+// VM expoe os do ambiente raiz ao compilador (GlobalNames) para o check de
+// global inexistente (issue #47 parte 3).
+func (environment *GlobalEnvironment) LocalNames() []string {
+	snapshot := environment.local.snapshot()
+	names := make([]string, 0, len(snapshot))
+	for key := range snapshot {
+		if name, ok := key.(string); ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (environment *GlobalEnvironment) ReplaceLocal(values map[string]Value) {
 	replacement := make(map[interface{}]Value, len(values))
 	for name, item := range values {

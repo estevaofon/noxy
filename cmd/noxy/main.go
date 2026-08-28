@@ -337,6 +337,7 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 		c := compiler.NewWithState(replGlobals, replStructs, "REPL")
 		c.SetGenericState(replGenerics)
 		c.SetSessionBindings(replBindings)
+		c.SetKnownGlobals(append(machine.GlobalNames(), compiler.PluginNativeNames(program)...))
 		c.SetModuleState(replModules)
 		chunk, _, err := c.Compile(program)
 		// Avisos do compilador sao diagnostico: diagOut, nunca stdout
@@ -396,7 +397,11 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		return 1
 	}
 
+	// A VM nasce antes do compilador: seus nativos sao os globais que o
+	// check de global inexistente (issue #47 parte 3) garante existir.
+	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
+	c.SetKnownGlobals(append(machine.GlobalNames(), compiler.PluginNativeNames(program)...))
 	chunk, _, err := c.Compile(program)
 	// Avisos do compilador sao diagnostico: diagOut, nunca stdout (issue
 	// #61 item 3). Saem mesmo quando a compilacao falha depois.
@@ -414,7 +419,6 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		fmt.Printf("\nExecution:\n")
 	}
 
-	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Fprintf(diagOut, "Runtime error: %s\n", err)
 		var advised *vm.AdvisedError
