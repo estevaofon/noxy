@@ -2,11 +2,19 @@
 //
 // Mostra a diferença entre as duas formas de conversão numérica em Noxy:
 //   to_int(v)          - estrita: levanta erro de runtime se não conseguir converter
-//   to_int_result(v)   - recuperável: nunca levanta, devolve um IntResult{ok, value, error}
+//   to_int_result(v)   - recuperável: nunca levanta, devolve errors.Result<int>
 //
-// Regra de uso: to_int é para valores que JÁ deveriam ser numéricos (um bug se não forem).
-// to_int_result é para entrada não confiável (arquivo, variável de ambiente, rede, usuário).
+// Regra de uso (spec §7): to_int é para valores que JÁ deveriam ser numéricos
+// (um bug se não forem). to_int_result é para entrada não confiável (arquivo,
+// variável de ambiente, rede, usuário). Desde 0.22.0 (issue #105):
+//   - `if r.ok then` estreita r.value de int? para int;
+//   - `try` propaga a falha numa função que também devolve Result<T>;
+//   - a falha é um valor (r.failure.message), nunca uma exceção.
+//
+// Este arquivo derruba o script DE PROPÓSITO no final (seção 4), por isso
+// fica fora do corpus (run_all_tests_concurrent.nx).
 
+use errors select *
 use convert select *
 
 print("=== 1. to_int: conversões bem-sucedidas ===")
@@ -18,20 +26,22 @@ print("to_int(5.9)    = " + to_str(to_int(5.9)) + "   // trunca em direção a z
 print("to_int(-5.9)   = " + to_str(to_int(-5.9)) + "  // trunca em direção a zero")
 
 print("")
-print("=== 2. to_int_result: nunca levanta, sempre devolve um struct ===")
+print("=== 2. to_int_result: nunca levanta, sempre devolve um Result<int> ===")
 print("")
 
-let ok_case: IntResult = to_int_result("8080")
-print("to_int_result(\"8080\")")
-print("  ok=" + to_str(ok_case.ok) + " value=" + to_str(ok_case.value) + " error=[" + ok_case.error + "]")
+func mostra(entrada: string) -> void
+    let r = to_int_result(entrada)              // Result<int>
+    print("to_int_result(\"" + entrada + "\")")
+    if r.ok then
+        print("  ok=true  value=" + to_str(r.value))          // r.value: int aqui
+    else
+        print("  ok=false value=null failure=[" + r.failure.message + "]")
+    end
+end
 
-let bad_case: IntResult = to_int_result("notaport")
-print("to_int_result(\"notaport\")")
-print("  ok=" + to_str(bad_case.ok) + " value=" + to_str(bad_case.value) + " error=[" + bad_case.error + "]")
-
-let overflow_case: IntResult = to_int_result("99999999999999999999")
-print("to_int_result(\"99999999999999999999\")   // estoura int64")
-print("  ok=" + to_str(overflow_case.ok) + " value=" + to_str(overflow_case.value) + " error=[" + overflow_case.error + "]")
+mostra("8080")
+mostra("notaport")
+mostra("99999999999999999999")   // estoura int64
 
 print("")
 print("=== 3. Padrão real: ler uma porta de configuração não confiável ===")
@@ -40,18 +50,24 @@ print("")
 // Simula valores que poderiam vir de getenv("PORT").value — string, pode ou não ser numérica.
 let candidatos: string[] = ["3000", "abc", "-1", "65535"]
 
+// Validação como dado: a conversão E a faixa devolvem Result<int>. `try`
+// faz a falha da conversão sair daqui com a mesma mensagem, sem if manual.
+func porta_valida(raw: string) -> Result<int>
+    let porta: int = try to_int_result(raw)
+    if porta <= 0 || porta > 65535 then
+        return Err("fora do intervalo de portas")
+    end
+    return Ok(porta)
+end
+
 func resolve_port(raw: string, default_port: int) -> int
-    let parsed: IntResult = to_int_result(raw)
-    if !parsed.ok then
-        print("  \"" + raw + "\" -> inválido (" + parsed.error + "), usando padrão " + to_str(default_port))
-        return default_port
+    let r = porta_valida(raw)
+    if r.ok then
+        print("  \"" + raw + "\" -> porta " + to_str(r.value))
+        return r.value
     end
-    if parsed.value <= 0 || parsed.value > 65535 then
-        print("  \"" + raw + "\" -> fora do intervalo de portas, usando padrão " + to_str(default_port))
-        return default_port
-    end
-    print("  \"" + raw + "\" -> porta " + to_str(parsed.value))
-    return parsed.value
+    print("  \"" + raw + "\" -> inválido (" + r.failure.message + "), usando padrão " + to_str(default_port))
+    return default_port
 end
 
 let i: int = 0

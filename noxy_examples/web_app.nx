@@ -146,7 +146,7 @@ func handle_request(raw_json: string) -> Response
                 let m: map = body_map // Cast
                 if has_key(m, "name") then req.name = m["name"] end
                 if has_key(m, "age") then
-                    let parsed_age: IntResult = to_int_result(m["age"])
+                    let parsed_age = to_int_result(m["age"])   // Result<int>
                     if parsed_age.ok then
                         req.age = parsed_age.value
                     end

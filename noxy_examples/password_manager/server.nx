@@ -201,7 +201,7 @@ func handle_list_passwords() -> http_parser.HttpResponse
 end
 
 func handle_delete_password(id_str: string) -> http_parser.HttpResponse
-    let parsed_id: IntResult = to_int_result(id_str)
+    let parsed_id = to_int_result(id_str)   // Result<int>: `!ok ||` estreita value no operando direito e depois do return
     if !parsed_id.ok || parsed_id.value <= 0 then
         return http_server.response_error(400, "Invalid ID")
     end

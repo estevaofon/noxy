@@ -1,39 +1,57 @@
-struct Result
-    is_ok: bool      // true = Ok, false = Err
-    value: int       // valor quando sucesso
-    error: string     // nome do erro quando falha
-end
+// safe_division.nx — divisão segura com o Result<T> da stdlib (spec §7).
+//
+// Antes (ate 0.21) este exemplo declarava o proprio `struct Result` com
+// `is_ok`/`value`/`error` e as funcoes `Ok`/`Err` por conta propria. Desde
+// 0.22.0 (issue #105) existe UM `Result<T>` em `errors`, generico:
+//
+//   - `Ok(v)` / `Err(msg)` constroem; `if r.ok then` estreita `r.value` de
+//     `int?` para `int` — nenhum teste extra no caminho feliz;
+//   - `try expr` propaga a falha: numa funcao que devolve Result<V>, um
+//     Result<U> com ok=false vira `return` imediato da mesma Failure;
+//   - a falha continua sendo um VALOR: nada e lancado, nada desenrola pilha.
+//
+// Saida esperada:
+//   10 / 0 = Erro: DIVISION_BY_ZERO
+//   10 / 2 = 5
+//   media(10, 20, 5) = 3
+//   media(10, 20, 0) = Erro: DIVISION_BY_ZERO
 
-func Ok(value: int) -> Result
-    return Result(true, value, "")
-end
+use errors select *
 
-func Err(error_name: string) -> Result
-    return Result(false, 0, error_name)
-end
-
-// Divisão Segura:
-
-func safe_divide(a: int, b: int) -> Result
+func safe_divide(a: int, b: int) -> Result<int>
     if b == 0 then
         return Err("DIVISION_BY_ZERO")
     end
     return Ok(a / b)
 end
 
-func is_ok(result: Result) -> bool
-    return result.is_ok
+// Dois `try`: se qualquer divisao falhar, `media` devolve essa falha ao
+// chamador sem escrever `if !r.ok then return Fail(r.failure) end` duas vezes.
+func media(a: int, b: int, divisor: int) -> Result<int>
+    let x: int = try safe_divide(a, divisor)
+    let y: int = try safe_divide(b, divisor)
+    return Ok((x + y) / 2)
 end
 
-func test_division(a: int, b: int)
-    let result: Result = safe_divide(a, b)
-    if is_ok(result) then
-        print(f"{a} / {b}" + " = " + to_str(result.value))
+func test_division(a: int, b: int) -> void
+    let result = safe_divide(a, b)          // Result<int>
+    if result.ok then
+        print(f"{a} / {b} = " + to_str(result.value))     // result.value: int aqui
     else
-        print(f"{a} / {b}" + " = Erro: " + result.error)
+        print(f"{a} / {b} = Erro: " + result.failure.message)
     end
 end
 
-// Testes
-test_division(10, 0)  // Divisão por zero
-test_division(10, 2)  // Divisão válida
+func test_media(a: int, b: int, divisor: int) -> void
+    let m = media(a, b, divisor)
+    if m.ok then
+        print(f"media({a}, {b}, {divisor}) = " + to_str(m.value))
+    else
+        print(f"media({a}, {b}, {divisor}) = Erro: " + m.failure.message)
+    end
+end
+
+test_division(10, 0)   // divisao por zero
+test_division(10, 2)   // divisao valida
+test_media(10, 20, 5)  // as duas divisoes dao certo
+test_media(10, 20, 0)  // a primeira falha: `try` devolve a Failure de safe_divide

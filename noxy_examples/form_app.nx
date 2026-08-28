@@ -119,7 +119,7 @@ let host: string = "0.0.0.0"
 
 let port_env: EnvResult = getenv("PORT")
 if port_env.ok then
-    let parsed_port: IntResult = to_int_result(port_env.value)
+    let parsed_port = to_int_result(port_env.value)   // Result<int>
     if parsed_port.ok && parsed_port.value > 0 then
         port = parsed_port.value
     else
@@ -130,17 +130,12 @@ end
 print("Binding to " + host + ":" + to_str(port))
 let server: HttpServer = new_server(host, port)
 
-if start(server) then
+// API atual de http_server: bind_server + serve com o handler (o laco de
+// poll/send antigo — start/server_poll/server_send — nao existe mais; o
+// check de global inexistente da 0.22.0 e que acusou a chamada morta).
+if bind_server(ref server) then
     print("Server running. Open http://localhost:8080")
-    
-    while true do
-        let event: RequestEvent = server_poll(server)
-        
-        if event.type == "REQUEST" then
-            let resp: HttpResponse = handle_request(event.request)
-            server_send(server, event.client_index, resp)
-        end
-    end
+    serve(ref server, handle_request)
 else
     print("Failed to start server")
 end
