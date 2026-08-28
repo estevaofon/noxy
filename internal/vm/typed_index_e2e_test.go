@@ -244,12 +244,16 @@ func TestTypedIndexRefErrorsMatchGenericPath(t *testing.T) {
 	cases := []struct{ name, typed, dynamic, wantTyped, wantDynamic string }{
 		{"leitura fora da faixa via ref", "func f(d: ref int[]) -> int\n    let i: int = 5\n    return d[i]\nend\nlet a: int[] = [1]\nprint(f(ref a))\n", "func f(d: any) -> any\n    let i: int = 5\n    return d[i]\nend\nlet a: any = [1]\nprint(f(a))\n", "array index out of bounds", "array index out of bounds"},
 		{"escrita fora da faixa via ref", "func f(d: ref int[]) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: int[] = [1]\nf(ref a)\n", "func f(d: any) -> void\n    let i: int = 5\n    d[i] = 2\nend\nlet a: any = [1]\nf(a)\n", "array index out of bounds", "array index out of bounds"},
-		{"ref null leitura", "func f(d: ref int[]) -> int\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "func f(d: any) -> any\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "cannot dereference null reference", "cannot index non-array/map/bytes"},
-		{"ref null escrita", "func f(d: ref int[]) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "func f(d: any) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "cannot write through a null reference", "cannot set index on non-array/map"},
+		// Spec §2.4: um `ref int[]` nunca e null — `f(null)` e erro de
+		// COMPILACAO (com o hint do `?`), e pela fronteira `any` o marcador
+		// rejeita o null antes do corpo. O deref/escrita de ref nula de I5
+		// deixou de ser alcancavel num `ref int[]` tipado.
+		{"ref null leitura", "func f(d: ref int[]) -> int\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "func f(d: any) -> any\n    let i: int = 0\n    return d[i]\nend\nprint(f(null))\n", "expected ref int[], got null\n  hint: declare the parameter as 'ref int[]?' to accept null", "cannot index non-array/map/bytes"},
+		{"ref null escrita", "func f(d: ref int[]) -> void\n    let i: int = 0\n    d[i] = 1\nend\nlet a: any = null\nf(a)\n", "func f(d: any) -> void\n    let i: int = 0\n    d[i] = 1\nend\nf(null)\n", "expected ref int[], got null", "cannot set index on non-array/map"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			typedErr := interpretVMSource(t, New(), tc.typed)
+			typedErr := interpretOrCompileErr(t, New(), tc.typed)
 			dynErr := interpretVMSource(t, New(), tc.dynamic)
 			if typedErr == nil || !strings.Contains(typedErr.Error(), tc.wantTyped) {
 				t.Fatalf("tipado: esperava %q, obtido %v", tc.wantTyped, typedErr)

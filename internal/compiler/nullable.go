@@ -48,6 +48,10 @@ func asRefType(t ast.NoxyType) (*ast.RefType, bool) {
 // nullMismatchHint acrescenta ao mismatch "expected T, got T?" o motivo:
 // o valor pode ser null e precisa ser testado antes.
 func (c *Compiler) nullMismatchHint(expected, actual ast.NoxyType, expr ast.Expression) string {
+	// Fase 2: `null` num T nu — a solucao e declarar o slot como T?.
+	if isNullType(actual) && expected != nil && !c.acceptsNull(expected) && nullableAlternative(expected) {
+		return fmt.Sprintf("\n  hint: declare it as '%s' to allow null", (&ast.NullableType{ElementType: expected}).String())
+	}
 	if !isNullable(actual) || isNullable(expected) || isAny(expected) {
 		return ""
 	}

@@ -180,7 +180,7 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 				return nil, false
 			}
 			info.Params[i] = paramInfo
-			_, info.ParamIsRef[i] = param.(*ast.RefType)
+			_, info.ParamIsRef[i] = asRefType(param)
 		}
 		result := normalizeReturnType(typed.Return)
 		returnInfo, ok := c.runtimeTypeInfoWithStructs(result, structs, origin)

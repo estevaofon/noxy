@@ -37,9 +37,9 @@ func TestRefNullComparisonAsksAboutTheRefItself(t *testing.T) {
 struct Ponto
     x: int
 end
-let vazio: Ponto = null
-let rv: ref Ponto = ref vazio
-let nulo: ref Ponto = null
+let vazio: Ponto? = null
+let rv: ref (Ponto?) = ref vazio
+let nulo: ref Ponto? = null
 test_report([
     rv == null,
     rv != null,
@@ -54,12 +54,12 @@ func TestLinkedListTraversalUnchanged(t *testing.T) {
 	got := captureVMSource(t, `
 struct Node
     value: int,
-    next: ref Node
+    next: ref Node?
 end
 let n2: Node = Node(2, null)
 let n1: Node = Node(1, ref n2)
 let soma: int = 0
-let cur: ref Node = ref n1
+let cur: ref Node? = ref n1
 while cur != null do
     soma = soma + cur.value
     cur = cur.next

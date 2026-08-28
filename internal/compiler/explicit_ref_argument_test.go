@@ -31,7 +31,7 @@ func TestRefParameterLiteralArgumentIsError(t *testing.T) {
 func TestRefParameterAcceptsRefForms(t *testing.T) {
 	requireCompiles(t, refParamPrelude+`struct Node
     valor: int
-    next: ref Node
+    next: ref Node?
 end
 func avanca(n: ref Node) -> void
     return
@@ -45,9 +45,10 @@ let r: ref int = ref x
 let nd: Node = Node(1, null)
 inc(ref x)
 inc(r)
-inc(null)
 inc(acha())
-avanca(nd.next)
+if nd.next != null then
+    avanca(nd.next)
+end
 avanca(ref nd)`)
 }
 
@@ -67,7 +68,7 @@ end
 let t: int = 20
 let o: Obs = Obs(t)`, "argument 1 to 'Obs': expected ref int, got int", "hint: use 'ref t'")
 	requireCompiles(t, `struct Obs
-    alvo: ref int
+    alvo: ref int?
 end
 let t: int = 20
 let o: Obs = Obs(ref t)
@@ -99,7 +100,7 @@ func TestRefOfRefIsError(t *testing.T) {
 let r: ref int = ref x
 inc(ref r)`, "'r' is already a reference", "hint: pass 'r' directly, without 'ref'")
 	requireCompileError(t, `struct Node
-    next: ref Node
+    next: ref Node?
 end
 func f(n: ref Node) -> void
     return

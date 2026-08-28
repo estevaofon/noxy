@@ -78,7 +78,7 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 	}
 
 	if tp, ok := expected.(*ast.TypeParamType); ok {
-		if _, isRef := actual.(*ast.RefType); isRef {
+		if _, isRef := asRefType(actual); isRef {
 			return fmt.Errorf("%s não pode ser um tipo ref (tentativa de bindar %s)", tp.Name, actual.String())
 		}
 		if isAny(actual) || isNullType(actual) {

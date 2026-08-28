@@ -47,13 +47,13 @@ end`)
 func TestJSONLoadsNewStructFieldIsOwnedByInstance(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
 struct Outer
-    inner: Pair
+    inner: Pair?
 end
 let o: Outer = Outer(null)
 let ok: bool = json_loads("{\"inner\":{\"a\":1,\"b\":2}}", ref o)
-let p: Pair = o.inner
-p.a = 99
-if ok then
+if ok && o.inner != null then
+    let p: Pair = o.inner
+    p.a = 99
     test_report(o.inner.a)
 else
     test_report(999)
@@ -98,12 +98,12 @@ end`)
 
 func TestJSONLoadsThroughRefIntoVariableRetains(t *testing.T) {
 	got := runTypedFunctionProgram(t, jsonRCPrelude+`
-let backing: Pair = null
-let t: (ref Pair)[] = [ref backing]
+let backing: Pair? = null
+let t: (ref (Pair?))[] = [ref backing]
 let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", ref t)
-let p: Pair = backing
-p.a = 99
-if ok then
+if ok && backing != null then
+    let p: Pair = backing
+    p.a = 99
     test_report(backing.a)
 else
     test_report(999)

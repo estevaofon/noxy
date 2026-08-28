@@ -29,9 +29,10 @@ func (c *Compiler) rejectRefRead(t ast.NoxyType, expr ast.Expression, where stri
 
 // refArgument e o resultado de compileRefArgument.
 type refArgument struct {
-	element ast.NoxyType // tipo apontado; nil para null ou tipo desconhecido
-	plain   ast.NoxyType // != nil quando o argumento e um valor T conhecido (R5 violada)
-	proven  bool         // modo provado em compilacao (false: any/desconhecido -> validateParameterModes)
+	element  ast.NoxyType // tipo apontado; nil para null ou tipo desconhecido
+	plain    ast.NoxyType // != nil quando o argumento e um valor T conhecido (R5 violada)
+	proven   bool         // modo provado em compilacao (false: any/desconhecido -> validateParameterModes)
+	nullable bool         // o argumento e um `ref T?` (spec §2.4): so cabe num parametro `ref T?`
 }
 
 // compileRefArgument compila um argumento destinado a um parametro ou slot
@@ -52,8 +53,8 @@ func (c *Compiler) compileRefArgument(arg ast.Expression) (refArgument, error) {
 	if err != nil {
 		return refArgument{}, err
 	}
-	if ref, ok := actual.(*ast.RefType); ok {
-		return refArgument{element: ref.ElementType, proven: true}, nil
+	if ref, ok := asRefType(actual); ok {
+		return refArgument{element: ref.ElementType, proven: true, nullable: isNullable(actual)}, nil
 	}
 	if isNullType(actual) {
 		return refArgument{proven: true}, nil
@@ -197,7 +198,7 @@ func (c *Compiler) rejectRefArgumentsForValueNatives(call *ast.CallExpression, a
 		return nil
 	}
 	for i, argType := range argTypes {
-		if _, isRef := argType.(*ast.RefType); !isRef {
+		if _, isRef := asRefType(argType); !isRef {
 			continue
 		}
 		if !spec.checksArg(i) {

@@ -45,7 +45,7 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 	// final de um passo INTERMEDIÁRIO do caminho, onde atravessar um campo ref
 	// é legal e é como toda estrutura ligada do Noxy é percorrida.
 	if declared, known := c.lvalueStaticType(expr); known {
-		if refType, isRef := declared.(*ast.RefType); isRef {
+		if refType, isRef := asRefType(declared); isRef {
 			if _, _, err := c.Compile(expr); err != nil {
 				return nil, err
 			}
@@ -61,6 +61,12 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 
 	case *ast.MemberAccessExpression:
 		owner, err := c.compileBorrowBase(n.Left)
+		if err != nil {
+			return nil, err
+		}
+		// Spec §2.4: base `T?` ou `ref (T?)` — aplica o narrowing e recusa
+		// a leitura sem teste, em vez de devolver `ref any` em silencio.
+		owner, err = c.narrowBorrowOwner(n.Left, owner)
 		if err != nil {
 			return nil, err
 		}

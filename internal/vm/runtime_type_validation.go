@@ -30,7 +30,8 @@ func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool 
 		return vm.runtimeValueMatchesType(item, elementType)
 	}
 	if item.Type == value.VAL_NULL {
-		return true
+		// Spec §2.4 fase 2: null so entra em elemento `(ref T)?`.
+		return elementType.Nullable
 	}
 	if item.Type != value.VAL_REF || elementType.Element == nil {
 		return false
@@ -110,9 +111,9 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		return true
 	}
 	if actual.Type == value.VAL_NULL {
-		// Espelho de acceptsNull (compilador): T? aceita null; ref e struct
-		// nus ainda aceitam na fase 1 (saem na fase 2 do issue #105).
-		return expected.Nullable || expected.Kind == value.TYPE_NULL || expected.Kind == value.TYPE_REF || expected.Kind == value.TYPE_STRUCT
+		// Espelho de acceptsNull (compilador, spec §2.4 fase 2): null so
+		// entra em T? e null — nunca em struct ou ref nus (any ja saiu acima).
+		return expected.Nullable || expected.Kind == value.TYPE_NULL
 	}
 	if expected.Nullable {
 		expected = withoutNullable(expected)
@@ -330,7 +331,7 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		return true
 	}
 	if actual.Type == value.VAL_NULL {
-		return schema.Nullable || schema.Kind == value.TYPE_NULL || schema.Kind == value.TYPE_REF || schema.Kind == value.TYPE_STRUCT
+		return schema.Nullable || schema.Kind == value.TYPE_NULL
 	}
 	if schema.Nullable {
 		schema = withoutNullable(schema)
@@ -393,7 +394,8 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 			return false
 		}
 		if resolved.Type == value.VAL_NULL {
-			return true
+			// O slot apontado so guarda null se for `T?` (ou any).
+			return schema.Element.Nullable || schema.Element.Kind == value.TYPE_ANY
 		}
 		return vm.walkRuntimeValueType(resolved, schema.Element, apply, seen)
 	case value.TYPE_STRUCT:

@@ -1187,7 +1187,7 @@ func TestRefLocalBindingIsBorrowNotOwner(t *testing.T) {
 	src := `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -1201,8 +1201,11 @@ end
 
 func pop(node: ref Node) -> int
     let current: ref Node = node
-    while current.proximo.proximo != null do
+    while current.proximo != null && current.proximo.proximo != null do
         current = current.proximo
+    end
+    if current.proximo == null then
+        return -1
     end
     let valor: int = current.proximo.valor
     current.proximo = null
@@ -1210,9 +1213,9 @@ func pop(node: ref Node) -> int
 end
 
 func count(node: ref Node) -> int
-    let n: int = 0
+    let n: int = 1
     let current: ref Node = node
-    while current != null do
+    while current.proximo != null do
         n = n + 1
         current = current.proximo
     end
@@ -1255,7 +1258,7 @@ func TestRefGlobalAndCapturedRefLocalAreBorrows(t *testing.T) {
 	src := `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -1268,9 +1271,9 @@ func _append(node: ref Node, valor: int)
 end
 
 func count(node: ref Node) -> int
-    let n: int = 0
+    let n: int = 1
     let cur: ref Node = node
-    while cur != null do
+    while cur.proximo != null do
         n = n + 1
         cur = cur.proximo
     end
@@ -1278,9 +1281,11 @@ func count(node: ref Node) -> int
 end
 
 func make_dropper(node: ref Node) -> func() -> int
-    let u: ref Node = node.proximo
+    let u: ref Node? = node.proximo
     return func() -> int
-        u.proximo = null
+        if u != null then
+            u.proximo = null
+        end
         return 1
     end
 end
@@ -1288,8 +1293,10 @@ end
 let head_a: Node = Node(0, null)
 _append(ref head_a, 20)
 _append(ref head_a, 30)
-let g: ref Node = head_a.proximo
-g.proximo = null
+let g: ref Node? = head_a.proximo
+if g != null then
+    g.proximo = null
+end
 
 let head_b: Node = Node(0, null)
 _append(ref head_b, 20)
@@ -1345,7 +1352,7 @@ func TestCapturedAndBorrowedRefSlotsNeverReleaseWhatTheyDoNotOwn(t *testing.T) {
 	src := `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -1359,20 +1366,31 @@ end
 
 // A: rebind do upvalue ref (OP_SET_UPVALUE sobre caixa emprestada).
 func repro_a(head: ref Node) -> int
+    if head.proximo == null then
+        return -1
+    end
     let second: Node = *head.proximo
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
-        u = u.proximo
+        if u.proximo != null then
+            u = u.proximo
+        end
         return 1
     end
     let ignored: int = f()
     second.valor = 99
+    if head.proximo == null then
+        return -2
+    end
     return head.proximo.valor
 end
 
 // B: mutacao atraves do upvalue ref (OP_GET_UPVALUE_MUT sobre caixa
 // emprestada).
 func repro_b(head: ref Node) -> int
+    if head.proximo == null then
+        return -1
+    end
     let second: Node = *head.proximo
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
@@ -1381,15 +1399,24 @@ func repro_b(head: ref Node) -> int
     end
     let ignored: int = f()
     second.valor = 99
+    if head.proximo == null then
+        return -2
+    end
     return head.proximo.valor
 end
 
 // C: mutacao atraves de um local ref emprestado (OP_GET_LOCAL_MUT).
 func repro_c(head: ref Node) -> int
+    if head.proximo == null then
+        return -1
+    end
     let second: Node = *head.proximo
     let u: ref Node = head.proximo
     u.valor = 77
     second.valor = 99
+    if head.proximo == null then
+        return -2
+    end
     return head.proximo.valor
 end
 
@@ -1443,7 +1470,7 @@ func TestBorrowedUpvalueRebindKeepsOwnersOfSharedNode(t *testing.T) {
 	src := `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -1456,14 +1483,25 @@ func _append(node: ref Node, valor: int)
 end
 
 func run(head: ref Node) -> int
+    if head.proximo == null then
+        return -1
+    end
     let second: Node = *head.proximo
     probe_before(*head.proximo)
+    if head.proximo == null then
+        return -2
+    end
     let u: ref Node = head.proximo
     let f: func() -> int = func() -> int
-        u = u.proximo
+        if u.proximo != null then
+            u = u.proximo
+        end
         return 1
     end
     let ignored: int = f()
+    if head.proximo == null then
+        return -3
+    end
     probe_after(*head.proximo)
     return 1
 end
@@ -1579,7 +1617,7 @@ func TestBorrowConditionIsStaticNotInferredFromOwnedList(t *testing.T) {
 	src := `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -1592,20 +1630,33 @@ func _append(node: ref Node, valor: int)
 end
 
 func get_second(h: ref Node) -> Node
+    if h.proximo == null then
+        return Node(-1, null)
+    end
     return *h.proximo
 end
 
+func second_valor(h: ref Node) -> int
+    if h.proximo == null then
+        return -2
+    end
+    return h.proximo.valor
+end
+
 // (a) slot POSSUIDO que estava null na captura, escrito de dentro da closure
-// por OP_SET_UPVALUE. A caixa possui: o retain e devido.
+// por OP_SET_UPVALUE. A caixa possui: o retain e devido. (Spec §2.4: o slot
+// que comeca em null e Node?.)
 func repro_e(head: ref Node) -> int
-    let picked: Node = null
+    let picked: Node? = null
     let f: func() -> int = func() -> int
         picked = get_second(head)
         return 1
     end
     let ignored: int = f()
-    picked.valor = 99
-    return head.proximo.valor
+    if picked != null then
+        picked.valor = 99
+    end
+    return second_valor(head)
 end
 
 // (a2) controle: mesmo cenario com o slot ja composto na captura (entrada em
@@ -1618,35 +1669,41 @@ func repro_e2(head: ref Node) -> int
     end
     let ignored: int = f()
     picked.valor = 99
-    return head.proximo.valor
+    return second_valor(head)
 end
 
 // (b) reuso de indice de slot entre blocos irmaos: o primeiro bloco registra o
 // indice em frame.Owned, o segundo reaproveita o MESMO indice para um
 // emprestimo (let u: ref Node).
 func repro_f(head: ref Node) -> int
+    if head.proximo == null then
+        return -1
+    end
     let second: Node = *head.proximo
     if 1 == 1 then
         let dead: Node = Node(7, null)
         let touch: int = dead.valor
     end
-    if 1 == 1 then
+    if head.proximo != null then
         let u: ref Node = head.proximo
         u.valor = 77
     end
     second.valor = 99
-    return head.proximo.valor
+    return second_valor(head)
 end
 
 // (b2) controle: sem o bloco irmao morto, o indice nunca foi possuido.
 func repro_f2(head: ref Node) -> int
+    if head.proximo == null then
+        return -1
+    end
     let second: Node = *head.proximo
-    if 1 == 1 then
+    if head.proximo != null then
         let u: ref Node = head.proximo
         u.valor = 77
     end
     second.valor = 99
-    return head.proximo.valor
+    return second_valor(head)
 end
 
 func main()
@@ -1727,7 +1784,7 @@ func TestRefWriteToUniquelyOwnedNodeMutatesInPlace(t *testing.T) {
 	src := `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -1740,32 +1797,55 @@ func _append(node: ref Node, valor: int)
 end
 
 func get_second(h: ref Node) -> Node
+    if h.proximo == null then
+        return Node(-1, null)
+    end
     return *h.proximo
 end
 
-func setit(n: ref Node, v: Node)
+func setit(n: ref (Node?), v: Node)
     *n = v
 end
 
 func sum_list(head: ref Node) -> int
-    let total: int = 0
+    let total: int = head.valor
     let cur: ref Node = head
-    while cur != null do
-        total = total + cur.valor
+    while cur.proximo != null do
         cur = cur.proximo
+        total = total + cur.valor
     end
     return total
 end
 
+// Spec §2.4: o slot que comeca em null e Node?; head.proximo e re-testado
+// antes de cada sonda porque toda chamada apaga o fato de um caminho com raiz
+// ref.
 func run(head: ref Node) -> int
-    let x: Node = null
+    let x: Node? = null
+    if head.proximo == null then
+        return -1
+    end
     probe_p1(*head.proximo)
     setit(ref x, get_second(head))
+    if head.proximo == null then
+        return -2
+    end
     probe_p2(*head.proximo)
-    x.valor = 99
+    if x != null then
+        x.valor = 99
+    end
+    if head.proximo == null then
+        return -3
+    end
     probe_p3(*head.proximo)
+    if head.proximo == null then
+        return -4
+    end
     let u: ref Node = head.proximo
     u.valor = 77
+    if head.proximo == null then
+        return -5
+    end
     probe_p4(*head.proximo)
     return sum_list(head)
 end
@@ -2461,7 +2541,7 @@ func n1_build()
     let y: Box = Box(1)
     ga = [y]
     gb = [y]
-    let z: Box = y
+    let z: Box? = y
     z = null
 end
 
@@ -2479,7 +2559,7 @@ func n2_build()
     gb = [y]
     let i: int = 0
     while i < 3 do
-        let z: Box = y
+        let z: Box? = y
         z = null
         i = i + 1
     end
@@ -2491,8 +2571,9 @@ func n2() -> int
     return gb[0].v
 end
 
-// N3: variavel de for-each rebindada para null.
-func n3_build(arr: Box[])
+// N3: variavel de for-each rebindada para null (spec §2.4: o elemento e
+// Box? para o rebind para null ser legal).
+func n3_build(arr: Box?[])
     for item in arr do
         item = null
     end
@@ -2502,7 +2583,7 @@ func n3() -> int
     let y: Box = Box(1)
     ga = [y]
     gb = [y]
-    let arr: Box[] = [y, y, y]
+    let arr: Box?[] = [y, y, y]
     n3_build(arr)
     ga[0].v = 55
     return gb[0].v

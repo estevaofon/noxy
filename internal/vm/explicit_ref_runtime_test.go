@@ -80,7 +80,7 @@ func TestRefOfRefSlotThroughAnyIsError(t *testing.T) {
 	err := interpretVMSource(t, New(), `
 struct Node
     valor: int
-    next: ref Node
+    next: ref Node?
 end
 func toca(n: ref Node) -> void
     return
@@ -244,10 +244,23 @@ main()
 // null adiante e o programa seguia com um valor nulo silencioso onde o tipo
 // estatico prometia um T.
 func TestDerefOfNullRefIsRuntimeError(t *testing.T) {
+	// Spec §2.4: no caminho tipado o null so cabe num `ref int?`, e a
+	// leitura sem teste e erro de COMPILACAO; o null so chega ao OP_DEREF
+	// pela fronteira dinamica (`any`).
+	compileErr := interpretOrCompileErr(t, New(), `
+func main()
+    let r: ref int? = null
+    let n: int = *r
+end
+main()
+`)
+	if compileErr == nil || !strings.Contains(compileErr.Error(), "'r' may be null; test it first") {
+		t.Fatalf("err = %v, want \"'r' may be null; test it first\"", compileErr)
+	}
 	err := interpretVMSource(t, New(), `
 func main()
-    let r: ref int = null
-    let n: int = *r
+    let a: any = null
+    let n: int = *a
 end
 main()
 `)
@@ -256,15 +269,17 @@ main()
 	}
 }
 
-// I5, caminho do parametro: `ref T` recebendo null continua sendo um valor
-// legitimo de passagem; so a LEITURA erra.
+// I5, caminho do parametro: um null vindo por `any` ainda entra num `ref T`
+// na fronteira dinamica; so a LEITURA erra. (No caminho tipado `le(null)` e
+// erro de compilacao — spec §2.4.)
 func TestDerefOfNullRefParameterIsRuntimeError(t *testing.T) {
 	err := interpretVMSource(t, New(), `
 func le(r: ref int) -> int
     return *r
 end
 func main()
-    let n: int = le(null)
+    let a: any = null
+    let n: int = le(a)
 end
 main()
 `)
@@ -278,7 +293,7 @@ main()
 func TestNullRefComparisonStillWorks(t *testing.T) {
 	got := captureVMSource(t, `
 func main()
-    let r: ref int = null
+    let r: ref int? = null
     let x: int = 1
     let s: ref int = ref x
     test_report([r == null, s == null])

@@ -290,17 +290,18 @@ let s: string = h.c
 
 // --- null em campo de struct de modulo ----------------------------------
 
-// `null` e aceito onde um struct e esperado (acceptsNull); o nome do struct
-// pode ser qualificado (`io.File`) ou traduzido (`mod_a.Inner`) — a checagem
-// resolve pela declaracao, nao por nome simples em c.structs.
+// `null` e aceito onde um struct ANULAVEL e esperado (spec §2.4); o nome do
+// struct pode ser qualificado (`io.File?`) — e, no campo traduzido de modulo
+// (`mod_a.Inner`, nao anulavel), o erro nomeia o tipo traduzido com o hint
+// `mod_a.Inner?`: a checagem resolve pela declaracao, nao por nome simples.
 func TestNullAssignableToQualifiedAndTranslatedStructFields(t *testing.T) {
 	_, err := compileFunctionSource(t, `use io
 struct A
-    f: io.File
+    f: io.File?
 end
 let a: A = A(io.stdin())
 a.f = null
-let g: io.File = null
+let g: io.File? = null
 `)
 	requireNoError(t, err)
 	err = compileSourceAtRoot(t, modARoot(t), `use mod_a
@@ -310,7 +311,7 @@ end
 let w: W = W(mod_a.make(5))
 w.o.i = null
 `)
-	requireNoError(t, err)
+	requireErrorMentions(t, err, "expected mod_a.Inner, got null", "hint: declare it as 'mod_a.Inner?' to allow null")
 }
 
 // --- escrita e ref -------------------------------------------------------

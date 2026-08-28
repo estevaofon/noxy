@@ -378,7 +378,7 @@ func unifyBidirectional(expected, actual ast.NoxyType, callerBindings, argBindin
 // (argumento 2)"). Com fmt.Errorf, a passada bidirecional de
 // compileGenericCallSite ficava permanentemente fora dessa atribuição.
 func bindTypeParam(bindings map[string]ast.NoxyType, name string, value ast.NoxyType) error {
-	if _, isRef := value.(*ast.RefType); isRef {
+	if _, isRef := asRefType(value); isRef {
 		return fmt.Errorf("%s não pode ser um tipo ref (tentativa de bindar %s)", name, value.String())
 	}
 	if isAny(value) || isNullType(value) {

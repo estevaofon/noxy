@@ -39,9 +39,11 @@ main()
 }
 
 // I5 (revisao final #82): ler atraves de um ref nulo passou de null
-// silencioso a erro de runtime, tambem no topo do programa.
+// silencioso a erro de runtime, tambem no topo do programa. (Spec §2.4: o
+// null so alcanca o OP_DEREF pela fronteira `any` — no caminho tipado a
+// leitura de um `ref int?` sem teste e erro de compilacao.)
 func TestDerefOfNullRefErrorsAtTopLevel(t *testing.T) {
-	err := interpretVMSource(t, New(), "let r: ref int = null\nprint(*r)\n")
+	err := interpretVMSource(t, New(), "let a: any = null\nprint(*a)\n")
 	if err == nil || !strings.Contains(err.Error(), "cannot dereference null reference") {
 		t.Fatalf("*null: err = %v, want 'cannot dereference null reference'", err)
 	}
@@ -134,17 +136,27 @@ test_report(outer())
 	}
 }
 
-// `let p: Point` e `let r: ref int` sem inicializador começam em null — os
-// tipos que o checador aceita como nuláveis. (`let f: func` e `let c: chan
-// int` sem inicializador são erro de compilação desde a issue #61 item 1:
-// esses tipos não têm default; ver internal/compiler/let_default_init_test.go.)
-func TestDefaultInitializationOfStructAndRefIsNull(t *testing.T) {
+// Spec §2.4 (issue #105): `let p: Point` e `let r: ref int` sem inicializador
+// deixaram de existir — struct e ref nus nunca são null, e o checador pede o
+// inicializador ou o `?`. Só `Point?`, `ref int?` e `any` começam em null.
+// (`let f: func` e `let c: chan int` já eram erro desde a issue #61 item 1;
+// ver internal/compiler/let_default_init_test.go.)
+func TestDefaultInitializationRequiresNullableForStructAndRef(t *testing.T) {
+	for _, tc := range []struct{ decl, want string }{
+		{"let p: Point", "variable 'p' needs an initializer: Point has no default value"},
+		{"let r: ref int", "variable 'r' needs an initializer: ref int has no default value"},
+	} {
+		err := interpretOrCompileErr(t, New(), "struct Point\n    x: int\nend\n"+tc.decl+"\n")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: err = %v, want %q", tc.decl, err, tc.want)
+		}
+	}
 	got := captureVMSource(t, `
 struct Point
     x: int
 end
-let p: Point
-let r: ref int
+let p: Point?
+let r: ref int?
 let a: any
 test_report([to_str(p), to_str(r), to_str(a)])
 `)

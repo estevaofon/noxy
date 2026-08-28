@@ -37,7 +37,7 @@ func reportedInts(t *testing.T, got value.Value, want int) []int64 {
 func TestRefFieldIsASharedEdgeAcrossCopies(t *testing.T) {
 	const program = `struct Node
     value: int
-    next: ref Node
+    next: ref Node?
 end
 struct Holder
     tag: string
@@ -78,23 +78,26 @@ test_report([after_copy, after_call, holder.inner.value, copia.inner.value])`
 // A copia de uma arvore e independente em profundidade e o callee por valor
 // nao alcanca a arvore do chamador — e o mesmo vale para o struct generic.
 func TestOwnedRecursiveFieldsKeepValueSemantics(t *testing.T) {
+	// Spec §2.4: filhos por posse sao `TreeNode?` e o slot emprestado e
+	// `ref (TreeNode?)`; `(*node).valor` porque o membro atraves de
+	// `ref (T?)` ainda nao consulta o fato `*node != null`.
 	got := reportedInts(t, captureVMSource(t, `struct TreeNode
     valor: int
-    esquerda: TreeNode
-    direita: TreeNode
+    esquerda: TreeNode?
+    direita: TreeNode?
 end
-func insert(node: ref TreeNode, v: int) -> void
+func insert(node: ref (TreeNode?), v: int) -> void
     if *node == null then
         *node = TreeNode(v, null, null)
         return
     end
-    if v < node.valor then
+    if v < (*node).valor then
         insert(ref node.esquerda, v)
     else
         insert(ref node.direita, v)
     end
 end
-func bump(node: TreeNode) -> int
+func bump(node: TreeNode?) -> int
     if node == null then
         return 0
     end
@@ -103,28 +106,50 @@ func bump(node: TreeNode) -> int
 end
 struct GNode<T>
     value: T,
-    next: GNode<T>
+    next: GNode<T>?
 end
-func push_back<T>(node: ref GNode<T>, v: T) -> void
+func push_back<T>(node: ref (GNode<T>?), v: T) -> void
     if *node == null then
         *node = GNode(v, null)
         return
     end
     push_back(ref node.next, v)
 end
-let raiz: TreeNode = null
+func left_of(t: TreeNode?) -> int
+    if t != null && t.esquerda != null then
+        return t.esquerda.valor
+    end
+    return -1
+end
+func root_of(t: TreeNode?) -> int
+    if t != null then
+        return t.valor
+    end
+    return -1
+end
+func second_of(l: GNode<int>?) -> int
+    if l != null && l.next != null then
+        return l.next.value
+    end
+    return -1
+end
+let raiz: TreeNode? = null
 insert(ref raiz, 50)
 insert(ref raiz, 30)
 insert(ref raiz, 70)
-let copia: TreeNode = raiz
-copia.esquerda.valor = 999
+let copia: TreeNode? = raiz
+if copia != null && copia.esquerda != null then
+    copia.esquerda.valor = 999
+end
 let bumped: int = bump(raiz)
-let head: GNode<int> = null
+let head: GNode<int>? = null
 push_back(ref head, 1)
 push_back(ref head, 2)
-let lcopia: GNode<int> = head
-lcopia.next.value = 99
-test_report([raiz.esquerda.valor, copia.esquerda.valor, bumped, raiz.valor, head.next.value, lcopia.next.value])`), 6)
+let lcopia: GNode<int>? = head
+if lcopia != null && lcopia.next != null then
+    lcopia.next.value = 99
+end
+test_report([left_of(raiz), left_of(copia), bumped, root_of(raiz), second_of(head), second_of(lcopia)])`), 6)
 	want := []int64{30, 999, 3150, 50, 2, 99}
 	for i := range want {
 		if got[i] != want[i] {

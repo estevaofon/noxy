@@ -499,7 +499,7 @@ end`)
 
 func TestTypedJSONLoadsPreservesReferenceElementTypeForNullSlot(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
-let target: (ref int)[] = [null]
+let target: (ref int)?[] = [null]
 let ok: bool = json_loads("[\"bad\"]", ref target)
 if ok then
     test_report(999)
@@ -520,7 +520,7 @@ end`)
 func TestTypedJSONLoadsIntoNullRefAnyFieldReturnsFalse(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Holder
-    child: ref any
+    child: ref any?
 end
 let h: Holder = Holder(null)
 let ok: bool = json_loads("{\"a\": 1}", h.child)
@@ -541,13 +541,16 @@ func TestTypedJSONLoadsAcceptsCompatibleReferenceElementPayloads(t *testing.T) {
 	// indice nunca e lido implicitamente).
 	t.Run("null ref slot gets a fresh referent cell", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
-func le(r: ref int) -> int
-    return *r
+func le(r: ref int?) -> int
+    if r != null then
+        return *r
+    end
+    return -1
 end
-let target: (ref int)[] = [null]
+let target: (ref int)?[] = [null]
 let ok: bool = json_loads("[42]", ref target)
-let viz: ref int = target[0]
-if ok && type(viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
+let viz: ref int? = target[0]
+if ok && viz != null && type(viz) == "ref" && *viz == 42 && le(target[0]) == 42 then
     test_report(42)
 else
     test_report(999)
@@ -558,7 +561,7 @@ end`)
 	t.Run("json null clears reference slot", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let backing: int = 7
-let target: (ref int)[] = [ref backing]
+let target: (ref int)?[] = [ref backing]
 let ok: bool = json_loads("[null]", ref target)
 if ok then
     if target[0] == null then
@@ -655,6 +658,7 @@ end`)
 	})
 }
 
+// Spec §2.4 fase 2: o null do documento so entra em slot anulavel (T?).
 func TestTypedJSONLoadsAcceptsNullForStructSchema(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -666,7 +670,7 @@ func TestTypedJSONLoadsAcceptsNullForStructSchema(t *testing.T) {
 struct Vertex
     value: int
 end
-let target: Vertex = Vertex(1)
+let target: Vertex? = Vertex(1)
 let ok: bool = json_loads("null", ref target)
 if ok then
     if target == null then test_report(1) else test_report(998) end
@@ -680,7 +684,7 @@ end`,
 struct Vertex
     value: int
 end
-let target: Vertex[] = [Vertex(1)]
+let target: Vertex?[] = [Vertex(1)]
 let ok: bool = json_loads("[null]", ref target)
 if ok then
     if target[0] == null then test_report(length(target)) else test_report(998) end
@@ -694,7 +698,7 @@ end`,
 struct Vertex
     value: int
 end
-let target: map[string, Vertex] = {"item": Vertex(1)}
+let target: map[string, Vertex?] = {"item": Vertex(1)}
 let ok: bool = json_loads("{\"item\":null}", ref target)
 if ok then
     if target["item"] == null then test_report(1) else test_report(998) end
@@ -948,7 +952,7 @@ test_report(item.value)`)
 	t.Run("accept null reference element", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
 let invoke: any = append
-let values: (ref int)[] = []
+let values: (ref int)?[] = []
 invoke(ref values, null)
 test_report(length(values))`)
 		testExpectedObject(t, 1, got)
@@ -1479,9 +1483,9 @@ test_report(made.node.value)`)
 		got := runTypedFunctionProgram(t, `
 struct Node
     value: int
-    next: ref Node
+    next: ref Node?
 end
-let makers: (func(int, ref Node) -> Node)[] = [Node]
+let makers: (func(int, ref Node?) -> Node)[] = [Node]
 let made: Node = makers[0](42, null)
 test_report(made.value)`)
 		testExpectedObject(t, 42, got)
@@ -1706,12 +1710,14 @@ test_report(made.node.value)`)
 	})
 
 	t.Run("valid null ref", func(t *testing.T) {
+		// Spec §2.4: so um campo `ref Node?` aceita null, tambem na
+		// construcao dinamica.
 		got := runTypedFunctionProgram(t, `
 struct Node
     value: int
 end
 struct Holder
-    node: ref Node
+    node: ref Node?
 end
 let dynamic: func = Holder
 let made: any = dynamic(null)
@@ -2368,7 +2374,7 @@ if ok then test_report(999) else test_report(length(keys(target))) end`)
 
 	t.Run("reference callable element", func(t *testing.T) {
 		got := runTypedFunctionProgram(t, `
-let target: (ref func)[] = [null]
+let target: (ref func)?[] = [null]
 pop(ref target)
 let ok: bool = json_loads("[42]", ref target)
 if ok then test_report(999) else test_report(length(target)) end`)
@@ -2404,7 +2410,7 @@ if ok then test_report(target.callback(7)) else test_report(999) end`)
 func TestDynamicAppendRejectsMalformedReferenceItemWithoutMutation(t *testing.T) {
 	source := `
 let invoke: any = append
-let values: (ref int)[] = []
+let values: (ref int)?[] = []
 invoke(ref values, malformed_ref())
 test_report(length(values))`
 	l := lexer.New(source)
@@ -2566,17 +2572,44 @@ test_report(length(values))`,
 	}
 }
 
+// Spec §2.4: o campo que guarda null e `ref int[]?`, e o null armazenado
+// continua sendo encaminhado como null — nunca vira ref para o slot. Um
+// `ref int[]?` nao entra num parametro `ref int[]` sem teste (erro de
+// compilacao); pela base `any` o marcador de runtime rejeita o null na
+// fronteira; e um parametro `ref int[]?` recebe o null como null.
 func TestContextualReferenceCallPreservesStoredNullReference(t *testing.T) {
-	got := runTypedFunctionProgram(t, `
+	const prelude = `
 struct Holder
-    values: ref int[]
+    values: ref int[]?
 end
 let holder: Holder = Holder(null)
+`
+	compileErr := interpretOrCompileErr(t, New(), prelude+`
 func push(target: ref int[]) -> void
     append(target, 2)
 end
-push(holder.values)
-test_report(42)`)
+push(holder.values)`)
+	if compileErr == nil || !strings.Contains(compileErr.Error(), "expected ref int[], got ref int[]?") || !strings.Contains(compileErr.Error(), "'holder.values' may be null") {
+		t.Fatalf("typed forwarding of a nullable ref field must be a compile error, got %v", compileErr)
+	}
+	runtimeErr := runTypedFunctionProgramError(t, prelude+`
+func push(target: ref int[]) -> void
+    append(target, 2)
+end
+let dyn: any = holder
+push(dyn.values)`)
+	if runtimeErr == nil || !strings.Contains(runtimeErr.Error(), "expected ref int[], got null") {
+		t.Fatalf("null forwarded through any into ref int[] must fail at the boundary, got %v", runtimeErr)
+	}
+	got := runTypedFunctionProgram(t, prelude+`
+func eh_nulo(target: ref int[]?) -> bool
+    return target == null
+end
+if eh_nulo(holder.values) then
+    test_report(42)
+else
+    test_report(0)
+end`)
 	testExpectedObject(t, 42, got)
 }
 
@@ -2593,10 +2626,10 @@ func TestContextualReferenceCallsForwardNullIndexSlots(t *testing.T) {
 		{
 			name: "array index",
 			source: `
-func eh_nulo(target: ref int) -> bool
+func eh_nulo(target: ref int?) -> bool
     return target == null
 end
-let stored: (ref int)[] = [null]
+let stored: (ref int)?[] = [null]
 if eh_nulo(stored[0]) then
     test_report(42)
 else
@@ -2606,10 +2639,10 @@ end`,
 		{
 			name: "map index",
 			source: `
-func eh_nulo(target: ref int) -> bool
+func eh_nulo(target: ref int?) -> bool
     return target == null
 end
-let stored: map[string, ref int] = {"answer": null}
+let stored: map[string, (ref int)?] = {"answer": null}
 if eh_nulo(stored["answer"]) then
     test_report(42)
 else
@@ -2629,6 +2662,9 @@ end`,
 // slot por tras para preencher. Vale para elemento null de array, valor null
 // de map e chave ausente de map (que le como null); para preencher, o
 // chamador escreve no dono: `stored[0] = ref novo` / `m["k"] = ref novo`.
+// Spec §2.4: o elemento/valor `(ref int)?` nao entra num `ref int` sem teste
+// — o null so e encaminhado pela base `any`; a chave ausente le como `ref
+// int` e continua encaminhando direto.
 func TestWritingThroughForwardedNullIndexSlotIsRuntimeError(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2640,8 +2676,9 @@ func TestWritingThroughForwardedNullIndexSlotIsRuntimeError(t *testing.T) {
 func fill(target: ref int) -> void
     *target = 42
 end
-let stored: (ref int)[] = [null]
-fill(stored[0])`,
+let stored: (ref int)?[] = [null]
+let dyn: any = stored
+fill(dyn[0])`,
 		},
 		{
 			name: "map null value",
@@ -2649,8 +2686,9 @@ fill(stored[0])`,
 func fill(target: ref int) -> void
     *target = 42
 end
-let stored: map[string, ref int] = {"answer": null}
-fill(stored["answer"])`,
+let stored: map[string, (ref int)?] = {"answer": null}
+let dyn: any = stored
+fill(dyn["answer"])`,
 		},
 		{
 			name: "map missing key",

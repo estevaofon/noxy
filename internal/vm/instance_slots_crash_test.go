@@ -25,7 +25,7 @@ import (
 func TestInstanceFieldsRaceDoesNotCrashRuntime(t *testing.T) {
 	got := captureVMSource(t, `struct Node
     value: int
-    next: ref Node
+    next: ref Node?
 end
 struct Box
     tag: string

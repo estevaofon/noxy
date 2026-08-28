@@ -27,12 +27,12 @@ end`)
 func TestJSONLoadsNullRefFieldViaOwnerGetsCell(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Holder
-    child: ref int
+    child: ref int?
 end
 let h: Holder = Holder(null)
 let ok: bool = json_loads("{\"child\": 5}", ref h)
-let viz: ref int = h.child
-if ok && type(viz) == "ref" && *viz == 5 then
+let viz: ref int? = h.child
+if ok && viz != null && type(viz) == "ref" && *viz == 5 then
     test_report(5)
 else
     test_report(999)
@@ -57,7 +57,7 @@ end`)
 func TestJSONLoadsDirectNullRefIntSlotReturnsFalse(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Holder
-    child: ref int
+    child: ref int?
 end
 let h: Holder = Holder(null)
 let ok: bool = json_loads("5", h.child)
@@ -78,10 +78,10 @@ struct Pair
     a: int
     b: int
 end
-let m: map[string, ref Pair] = {"k": null}
+let m: map[string, (ref Pair)?] = {"k": null}
 let ok: bool = json_loads("{\"k\":{\"a\":1,\"b\":2}}", ref m)
-let viz: ref Pair = m["k"]
-if ok && type(viz) == "ref" && viz.a * 10 + viz.b == 12 then
+let viz: ref Pair? = m["k"]
+if ok && viz != null && type(viz) == "ref" && viz.a * 10 + viz.b == 12 then
     test_report(12)
 else
     test_report(999)
@@ -124,13 +124,18 @@ struct Pair
     a: int
     b: int
 end
-let target: (ref Pair)[] = [null]
+let target: (ref Pair)?[] = [null]
 let ok: bool = json_loads("[{\"a\":1,\"b\":2}]", ref target)
-let copia: Pair = *target[0]
-copia.a = 99
-let viz: ref Pair = target[0]
-if ok && viz.a == 1 then
-    test_report(1)
+let slot: ref Pair? = target[0]
+if ok && slot != null then
+    let copia: Pair = *slot
+    copia.a = 99
+    let viz: ref Pair? = target[0]
+    if viz != null && viz.a == 1 then
+        test_report(1)
+    else
+        test_report(999)
+    end
 else
     test_report(999)
 end`)

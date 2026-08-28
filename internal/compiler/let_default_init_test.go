@@ -25,6 +25,9 @@ func TestLetWithoutInitializerRejectsTypesWithoutDefault(t *testing.T) {
 		// um array de canais — sem default como qualquer chan.
 		{"chan of arrays", "let c: chan int[]\n", "c", "chan int[]", "let c: chan int[] = ..."},
 		{"inside a function body", "func f()\n    let c: chan int\nend\n", "c", "chan int", "let c: chan int = ..."},
+		// Spec §2.4 fase 2 (issue #105): struct e ref nus nunca sao null.
+		{"struct", "struct P\n    x: int\nend\nlet p: P\n", "p", "P", "let p: P = ...' or declare it as 'P?"},
+		{"ref", "let r: ref int\n", "r", "ref int", "let r: ref int = ...' or declare it as 'ref int?"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,8 +45,8 @@ func TestLetWithoutInitializerRejectsTypesWithoutDefault(t *testing.T) {
 
 func TestLetWithoutInitializerUsesTypeDefault(t *testing.T) {
 	cases := []struct{ name, src string }{
-		{"struct is null", "struct P\n    x: int\nend\nlet p: P\n"},
-		{"ref is null", "let r: ref int\n"},
+		{"nullable struct is null", "struct P\n    x: int\nend\nlet p: P?\n"},
+		{"nullable ref is null", "let r: ref int?\n"},
 		{"any is null", "let a: any\n"},
 		{"scalars", "let n: int\nlet f: float\nlet b: bool\nlet s: string\nlet by: bytes\n"},
 		{"containers are empty", "let xs: int[]\nlet m: map[string, int]\n"},

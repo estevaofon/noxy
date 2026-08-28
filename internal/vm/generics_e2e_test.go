@@ -100,7 +100,7 @@ struct Caixa<T>
     valor: T
 end
 let vazias: Caixa<int>[] = []
-let semInit: Caixa<int>
+let semInit: Caixa<int>?
 func conta(cs: Caixa<int>[]) -> int
     return length(cs)
 end
@@ -113,11 +113,13 @@ func TestGenericStructSelfReference(t *testing.T) {
 	got := captureVMSource(t, `
 struct Node<T>
     value: T,
-    next: ref Node<T>
+    next: ref Node<T>?
 end
 let n2: Node<int> = Node(2, null)
 let n1: Node<int> = Node(1, ref n2)
-test_report(n1.next.value)
+if n1.next != null then
+    test_report(n1.next.value)
+end
 `)
 	expectInt(t, got, 2, "lista ligada generica")
 }

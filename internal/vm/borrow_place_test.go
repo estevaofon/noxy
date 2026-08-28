@@ -43,14 +43,16 @@ test_report([copia, arr])`)
 	})
 
 	t.Run("B: o empréstimo escapa por dentro do chamado", func(t *testing.T) {
-		got := captureVMSource(t, `let g: ref int = null
+		got := captureVMSource(t, `let g: ref int? = null
 func keep(r: ref int) -> void
     g = r
 end
 let arr: int[] = [1, 2, 3]
 keep(ref arr[0])
 let copia: int[] = arr
-*g = 999
+if g != null then
+    *g = 999
+end
 test_report([copia, arr])`)
 		assertIsolatedAndWritten(t, got, []int64{1, 2, 3}, []int64{999, 2, 3})
 	})
@@ -358,14 +360,16 @@ func TestBorrowPathCrossesRefTypedField(t *testing.T) {
 	t.Run("campo ref intermediário", func(t *testing.T) {
 		got := captureVMSource(t, `struct Node
     data: int,
-    next: ref Node
+    next: ref Node?
 end
 let n2: Node = Node(2, null)
 let n1: Node = Node(1, ref n2)
 func setit(p: ref int) -> void
     *p = 99
 end
-setit(ref n1.next.data)
+if n1.next != null then
+    setit(ref n1.next.data)
+end
 test_report([[n2.data]])`)
 		assertIntRows(t, got, [][]int64{{99}})
 	})
@@ -373,14 +377,16 @@ test_report([[n2.data]])`)
 	t.Run("campo ref intermediário seguido de índice", func(t *testing.T) {
 		got := captureVMSource(t, `struct Node
     xs: int[],
-    next: ref Node
+    next: ref Node?
 end
 let n2: Node = Node([10, 20], null)
 let n1: Node = Node([1, 2], ref n2)
 func setit(p: ref int) -> void
     *p = 99
 end
-setit(ref n1.next.xs[0])
+if n1.next != null then
+    setit(ref n1.next.xs[0])
+end
 test_report([n2.xs])`)
 		assertIntRows(t, got, [][]int64{{99, 20}})
 	})
@@ -388,7 +394,7 @@ test_report([n2.xs])`)
 	t.Run("elemento de (ref T)[] como base", func(t *testing.T) {
 		got := captureVMSource(t, `struct Node
     data: int,
-    next: ref Node
+    next: ref Node?
 end
 let n2: Node = Node(2, null)
 let refs: (ref Node)[] = [ref n2]
@@ -571,12 +577,16 @@ f(ref m["k"].x)`)
 // caminhada não tem teto porque a cadeia não pode ciclar (ver maxRefHopDepth).
 func TestBorrowPlacePathDepthIsData(t *testing.T) {
 	t.Run("BST por posse com 300 chaves ordenadas (> 256): um nível de Base por chamada", func(t *testing.T) {
+		// Spec §2.4: os filhos por posse sao `TreeNode?` e o slot emprestado e
+		// `ref (TreeNode?)`; `if *node == null then return` estreita `*node`.
+		// O fato morre na primeira chamada (o slot e compartilhado por ref),
+		// entao o segundo emprestimo re-testa.
 		got := captureVMSource(t, `struct TreeNode
     valor: int
-    esquerda: TreeNode
-    direita: TreeNode
+    esquerda: TreeNode?
+    direita: TreeNode?
 end
-func insert(node: ref TreeNode, v: int) -> void
+func insert(node: ref (TreeNode?), v: int) -> void
     if *node == null then
         *node = TreeNode(v, null, null)
         return
@@ -587,13 +597,18 @@ func insert(node: ref TreeNode, v: int) -> void
         insert(ref node.direita, v)
     end
 end
-func count(node: ref TreeNode) -> int
+func count(node: ref (TreeNode?)) -> int
     if *node == null then
         return 0
     end
-    return 1 + count(ref node.esquerda) + count(ref node.direita)
+    let l: int = count(ref node.esquerda)
+    let r: int = 0
+    if *node != null then
+        r = count(ref node.direita)
+    end
+    return 1 + l + r
 end
-let raiz: TreeNode = null
+let raiz: TreeNode? = null
 let i: int = 0
 while i < 300 do
     insert(ref raiz, i)
@@ -604,23 +619,32 @@ test_report(count(ref raiz))`)
 	})
 
 	t.Run("lista por posse com 1000 nós: um nível de Base por rebinding, sem recursão", func(t *testing.T) {
+		// `next_slot` devolve o emprestimo do slot `prox` depois de provar
+		// que o no existe (spec §2.4); a cadeia de Base continua crescendo um
+		// nivel por rebinding.
 		got := captureVMSource(t, `struct Node
     valor: int
-    prox: Node
+    prox: Node?
 end
-let head: Node = null
-let r: ref Node = ref head
+func next_slot(n: ref (Node?)) -> ref (Node?)
+    if *n == null then
+        return n
+    end
+    return ref n.prox
+end
+let head: Node? = null
+let r: ref (Node?) = ref head
 let i: int = 0
 while i < 1000 do
     *r = Node(i, null)
-    r = ref r.prox
+    r = next_slot(r)
     i = i + 1
 end
 let n: int = 0
-let c: ref Node = ref head
+let c: ref (Node?) = ref head
 while *c != null do
-    n = n + c.valor
-    c = ref c.prox
+    n = n + (*c).valor
+    c = next_slot(c)
 end
 test_report(n)`)
 		assertReportedInt(t, got, 499500)

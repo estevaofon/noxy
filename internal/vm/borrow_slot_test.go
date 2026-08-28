@@ -80,10 +80,10 @@ func TestBorrowSlotDeepOwnedTreeMatches(t *testing.T) {
 	got := captureVMSource(t, `
 struct TreeNode
     valor: int
-    esquerda: TreeNode
-    direita: TreeNode
+    esquerda: TreeNode?
+    direita: TreeNode?
 end
-func insert(node: ref TreeNode, v: int) -> void
+func insert(node: ref (TreeNode?), v: int) -> void
     if *node == null then
         *node = TreeNode(v, null, null)
         return
@@ -94,13 +94,19 @@ func insert(node: ref TreeNode, v: int) -> void
         insert(ref node.direita, v)
     end
 end
-func soma(node: ref TreeNode) -> int
+func soma(node: ref (TreeNode?)) -> int
     if *node == null then
         return 0
     end
-    return node.valor + soma(ref node.esquerda) + soma(ref node.direita)
+    let v: int = node.valor
+    let l: int = soma(ref node.esquerda)
+    let r: int = 0
+    if *node != null then
+        r = soma(ref node.direita)
+    end
+    return v + l + r
 end
-let raiz: TreeNode = null
+let raiz: TreeNode? = null
 let seed: int = 12345
 let i: int = 0
 while i < 500 do
@@ -108,7 +114,7 @@ while i < 500 do
     insert(ref raiz, seed % 1000)
     i = i + 1
 end
-let copia: TreeNode = raiz
+let copia: TreeNode? = raiz
 insert(ref raiz, 5000)
 test_report([to_str(soma(ref raiz) - soma(ref copia))])
 `)

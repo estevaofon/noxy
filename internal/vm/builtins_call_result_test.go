@@ -15,7 +15,7 @@ use errors select *
 
 let f: Failure = Failure("runtime", "boom", "st", [])
 let nested: Failure = Failure("runtime", "outer", "st", [f])
-let r: CallResult = CallResult(true, 42, null)
+let r: CallResult = CallResult(true, 42, f)
 test_report(nested.causes[0].message + "|" + to_str(r.ok) + "|" + to_str(r.value))
 `
 	reported := captureVMSource(t, source)
@@ -40,10 +40,10 @@ struct P
     x: int
 end
 
-let a: CallResult = call_result(dobro, 21)
-let b: CallResult = call_result(to_int, "5")
-let c: CallResult = call_result(P, 7)
-let d: CallResult = call_result(nada)
+let a: any = call_result(dobro, 21)
+let b: any = call_result(to_int, "5")
+let c: any = call_result(P, 7)
+let d: any = call_result(nada)
 let inst: any = c.value
 test_report(to_str(a.ok) + "|" + to_str(a.value) + "|" + to_str(b.value) + "|" + to_str(inst.x) + "|" + to_str(d.ok) + "|" + to_str(d.value == null) + "|" + to_str(a.failure == null))
 `

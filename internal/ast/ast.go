@@ -143,9 +143,15 @@ func (nt *NullableType) String() string {
 	if nt.ElementType == nil {
 		return "any"
 	}
-	switch nt.ElementType.(type) {
+	switch elem := nt.ElementType.(type) {
 	case *FunctionType, *ChanType:
 		return "(" + nt.ElementType.String() + ")?"
+	case *RefType:
+		// `ref func() -> int?` leria o `?` no retorno: parentesear.
+		switch elem.ElementType.(type) {
+		case *FunctionType, *ChanType:
+			return "(" + nt.ElementType.String() + ")?"
+		}
 	}
 	return nt.ElementType.String() + "?"
 }

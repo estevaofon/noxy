@@ -198,7 +198,7 @@ func TestRefTypedFieldWriteUsesSlotIndex(t *testing.T) {
 	ops := functionOpcodes(t, `
 struct Node
     v: int
-    next: ref Node
+    next: ref Node?
 end
 func f(a: Node, b: Node) -> void
     a.next = ref b

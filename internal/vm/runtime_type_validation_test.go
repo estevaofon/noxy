@@ -145,14 +145,18 @@ func failureStructSchema() *value.RuntimeTypeInfo {
 	return schema
 }
 
+// O campo composto `failure` é `Failure?` (spec §2.4): o envelope de sucesso
+// carrega null nele, e só um slot anulável aceita null no marcador.
 func callResultStructSchema() *value.RuntimeTypeInfo {
+	failure := failureStructSchema()
+	failure.Nullable = true
 	return &value.RuntimeTypeInfo{
 		Kind: value.TYPE_STRUCT,
 		Name: "CallResult",
 		Fields: map[string]*value.RuntimeTypeInfo{
 			"ok":      {Kind: value.TYPE_BOOL},
 			"value":   {Kind: value.TYPE_ANY},
-			"failure": failureStructSchema(),
+			"failure": failure,
 		},
 	}
 }
@@ -197,11 +201,30 @@ func TestMarkerRejectsMapWithWrongFieldType(t *testing.T) {
 	}
 }
 
-// (a)+(b) fim a fim, com o struct real `CallResult` do módulo `errors` (o
-// mesmo cujo campo `failure: Failure` aninha `causes: Failure[]` e por isso
-// dispara o marcador em runtime — diferente de IntResult). Um native de teste
-// próprio produz o map dinamicamente, sem depender do native call_result: o
-// mecanismo sob teste é genérico, não específico à feature call_result.
+// Réplica local do par Failure/CallResult do módulo `errors` com o campo
+// composto anulável (`failure: Failure?`, spec §2.4): o envelope de sucesso
+// carrega `failure: null`, e só um slot `T?` aceita null no marcador. É o
+// mesmo desenho que dispara o marcador em runtime (`causes: Failure[]`
+// autorreferente) sem depender do módulo, que está sendo redesenhado.
+const nullableCallResultDecls = `
+struct Failure
+    kind: string
+    message: string
+    stack: string
+    causes: Failure[]
+end
+struct CallResult
+    ok: bool
+    value: any
+    failure: Failure?
+end
+`
+
+// (a)+(b) fim a fim, com um struct `CallResult` cujo campo `failure:
+// Failure?` aninha `causes: Failure[]` e por isso dispara o marcador em
+// runtime — diferente de IntResult. Um native de teste próprio produz o map
+// dinamicamente, sem depender do native call_result: o mecanismo sob teste é
+// genérico, não específico à feature call_result.
 func TestLetStructAnnotationOverDynamicMapEnvelope(t *testing.T) {
 	machine := New()
 	machine.DefineNative("__test_dynamic_envelope_ok", func(args []value.Value) value.Value {
@@ -218,8 +241,7 @@ func TestLetStructAnnotationOverDynamicMapEnvelope(t *testing.T) {
 		}
 		return value.NewNull()
 	})
-	source := `
-use errors select *
+	source := nullableCallResultDecls + `
 let r: CallResult = __test_dynamic_envelope_ok()
 test_report(to_str(r.ok) + "|" + to_str(r.value))
 `
@@ -278,8 +300,7 @@ func TestLetStructAnnotationIgnoresExtraMapKeys(t *testing.T) {
 		}
 		return value.NewNull()
 	})
-	source := `
-use errors select *
+	source := nullableCallResultDecls + `
 let r: CallResult = __test_dynamic_envelope_extra()
 test_report(to_str(r.ok) + "|" + to_str(r.value) + "|" + to_str(r.extra))
 `

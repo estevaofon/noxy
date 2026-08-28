@@ -40,22 +40,12 @@ func isNullType(t ast.NoxyType) bool {
 	return ok && p.Name == "null"
 }
 
+// acceptsNull (spec §2.4, issue #105 fase 2): null so entra em `T?`, `any`
+// (o buraco dinamico declarado) e no proprio tipo null. Struct e `ref` nus
+// NUNCA sao null — o precedente de chan/func (§3) estendido a eles. O
+// espelho de runtime e runtimeValueMatchesType/walkRuntimeValueType (VM).
 func (c *Compiler) acceptsNull(t ast.NoxyType) bool {
-	if isAny(t) || isNullType(t) || isNullable(t) {
-		return true
-	}
-	if _, ok := t.(*ast.RefType); ok {
-		return true
-	}
-	primitive, ok := t.(*ast.PrimitiveType)
-	if !ok {
-		return false
-	}
-	// Pela DECLARACAO, nao por nome simples em c.structs: o nome pode ser
-	// qualificado (`io.File`) ou traduzido de um campo de struct de modulo
-	// (`mod_a.Inner` — memberType), e `a.f = null` / `w.o.i = null` tem de
-	// valer igual para os tres (#58).
-	return c.structDeclaration(primitive.Name) != nil
+	return isAny(t) || isNullType(t) || isNullable(t)
 }
 
 func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool) bool {

@@ -82,7 +82,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		if !ok {
 			return true, nil, fmt.Errorf("[line %d] append expects an array, got %s", c.currentLine, noxyTypeName(container))
 		}
-		if expectedRef, ok := array.ElementType.(*ast.RefType); ok {
+		if expectedRef, ok := asRefType(array.ElementType); ok {
 			actualElement, err := c.compileBuiltinRefArgument(call.Arguments[1], "argument 2 to 'append'", noxyTypeName(array.ElementType))
 			if err != nil {
 				return true, nil, err
@@ -99,7 +99,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			if err != nil {
 				return true, nil, err
 			}
-			if _, explicitRef := item.(*ast.RefType); explicitRef {
+			if _, explicitRef := asRefType(item); explicitRef {
 				return true, nil, fmt.Errorf(
 					"[line %d] argument 2 to 'append': expected %s, got %s%s",
 					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
@@ -142,7 +142,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		if err != nil {
 			return true, nil, err
 		}
-		if _, explicitRef := key.(*ast.RefType); explicitRef {
+		if _, explicitRef := asRefType(key); explicitRef {
 			return true, nil, fmt.Errorf(
 				"[line %d] argument 2 to 'delete': expected %s, got %s%s",
 				c.currentLine, noxyTypeName(mapping.KeyType), noxyTypeName(key),

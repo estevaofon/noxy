@@ -301,6 +301,30 @@ func statementTerminates(statement ast.Statement) bool {
 	return false
 }
 
+// narrowBorrowOwner aplica o narrowing ao dono de um emprestimo `ref base.f`
+// cujo tipo ja veio atravessado (compileBorrowBase devolve o elemento de um
+// `ref`): tenta o fato da chave e, se a base e `ref (T?)`, o fato de `*chave`.
+// Sem fato, o erro nomeia `*base` quando a nulidade e do slot apontado.
+func (c *Compiler) narrowBorrowOwner(base ast.Expression, owner ast.NoxyType) (ast.NoxyType, error) {
+	key, stable := stableKey(base)
+	if stable {
+		owner = c.narrowType(key, owner)
+		if isNullable(owner) {
+			owner = c.narrowType("*"+key, owner)
+		}
+	}
+	if !isNullable(owner) {
+		return owner, nil
+	}
+	baseType, err := c.typeOfDiscardedExpression(base)
+	if err == nil {
+		if _, viaRef := asRefType(baseType); viaRef && !isNullable(baseType) {
+			return nil, c.mayBeNullError(&ast.PrefixExpression{Operator: "*", Right: base}, owner)
+		}
+	}
+	return nil, c.mayBeNullError(base, owner)
+}
+
 // mayBeNullError e o diagnostico de leitura atraves de um `T?` sem teste.
 func (c *Compiler) mayBeNullError(expr ast.Expression, t ast.NoxyType) error {
 	if key, ok := stableKey(expr); ok {
