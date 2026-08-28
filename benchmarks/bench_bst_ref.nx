@@ -1,0 +1,42 @@
+// Gemeo de bench_bst_owned.nx com filhos `ref TreeNode`: cada no e uma celula
+// promovida a heap, e o acesso nao caminha o caminho do emprestimo (issue #93).
+struct TreeNode
+    valor: int
+    esquerda: ref TreeNode
+    direita: ref TreeNode
+end
+func insert(node: ref TreeNode, v: int) -> void
+    if v < node.valor then
+        if node.esquerda == null then
+            let novo: TreeNode = TreeNode(v, null, null)
+            node.esquerda = ref novo
+        else
+            insert(node.esquerda, v)
+        end
+    else
+        if node.direita == null then
+            let novo: TreeNode = TreeNode(v, null, null)
+            node.direita = ref novo
+        else
+            insert(node.direita, v)
+        end
+    end
+end
+func count(node: ref TreeNode) -> int
+    if node == null then
+        return 0
+    end
+    return 1 + count(node.esquerda) + count(node.direita)
+end
+func main() -> void
+    let raiz: TreeNode = TreeNode(500000, null, null)
+    let seed: int = 12345
+    let i: int = 0
+    while i < 20000 do
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        insert(ref raiz, seed % 1000000)
+        i = i + 1
+    end
+    print(f"CHECKSUM:{count(ref raiz)}")
+end
+main()

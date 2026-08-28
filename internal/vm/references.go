@@ -69,7 +69,7 @@ func (s referenceSetter) set(updated value.Value) {
 	case setterPtr:
 		*s.ptr = updated
 	case setterProperty:
-		s.instance.MustSet(s.name, updated)
+		s.instance.Slots[s.index] = updated // indice validado por fieldSlotOf em referenceStorageMode
 	case setterArray:
 		s.array.Elements[s.index] = updated
 	case setterMap:
@@ -87,6 +87,32 @@ func validateReferencedValue(stored value.Value) error {
 	}
 	if stored.Obj == nil {
 		return fmt.Errorf("invalid referenced object")
+	}
+	// Caminho comum sem reflect (issue #93b): os payloads que a VM guarda em
+	// Obj no caminho quente. Ponteiro tipado nil cai no reflect abaixo, que e
+	// quem o reporta.
+	switch stored.Type {
+	case value.VAL_OBJ:
+		switch o := stored.Obj.(type) {
+		case *value.ObjInstance:
+			if o != nil {
+				return nil
+			}
+		case *value.ObjArray:
+			if o != nil {
+				return nil
+			}
+		case *value.ObjMap:
+			if o != nil {
+				return nil
+			}
+		case string:
+			return nil
+		}
+	case value.VAL_REF:
+		if o, ok := stored.Obj.(*value.ObjRef); ok && o != nil {
+			return nil
+		}
 	}
 	object := reflect.ValueOf(stored.Obj)
 	switch object.Kind() {
@@ -229,9 +255,11 @@ func (vm *VM) derefPlace(container value.Value, forWrite bool) (value.Value, err
 // `step` é o ObjRef daquele nível; só RefType+Name/Index são lidos, nunca a
 // base dele — quem sequencia os níveis é borrowContainer.
 func (vm *VM) descend(container value.Value, step *value.ObjRef, forWrite bool) (value.Value, error) {
-	container, err := vm.derefPlace(container, forWrite)
-	if err != nil {
-		return value.Value{}, err
+	if container.Type == value.VAL_REF {
+		var err error
+		if container, err = vm.derefPlace(container, forWrite); err != nil {
+			return value.Value{}, err
+		}
 	}
 	if container.Type != value.VAL_OBJ {
 		return value.Value{}, fmt.Errorf("Target is not indexable")
@@ -241,16 +269,17 @@ func (vm *VM) descend(container value.Value, step *value.ObjRef, forWrite bool) 
 		if !ok || instance == nil {
 			return value.Value{}, fmt.Errorf("Target is not an instance")
 		}
-		child, ok := instance.Get(step.Name)
-		if !ok {
+		slot := fieldSlotOf(instance, step)
+		if slot < 0 {
 			return value.Value{}, fmt.Errorf("undefined property '%s'", step.Name)
 		}
+		child := instance.Slots[slot]
 		if !forWrite {
 			return child, nil
 		}
 		if unique, changed := vm.unicize(child); changed {
 			value.Retain(unique)
-			instance.MustSet(step.Name, unique)
+			instance.Slots[slot] = unique
 			value.Release(child)
 			return unique, nil
 		}
@@ -345,11 +374,11 @@ func (vm *VM) referenceStorageMode(ref *value.ObjRef, forWrite bool) (stored val
 		if container.Type != value.VAL_OBJ || !ok || instance == nil {
 			return value.Value{}, false, referenceSetter{}, fmt.Errorf("Target is not an instance")
 		}
-		stored, ok := instance.Get(ref.Name)
-		if !ok {
+		slot := fieldSlotOf(instance, ref)
+		if slot < 0 {
 			return value.Value{}, false, referenceSetter{}, fmt.Errorf("undefined property '%s'", ref.Name)
 		}
-		return stored, true, referenceSetter{kind: setterProperty, instance: instance, name: ref.Name}, nil
+		return instance.Slots[slot], true, referenceSetter{kind: setterProperty, instance: instance, name: ref.Name, index: slot}, nil
 	case value.REF_INDEX:
 		container, err := vm.borrowContainer(ref, forWrite)
 		if err != nil {
@@ -566,4 +595,20 @@ func borrowBaseAddr(ref *value.ObjRef) string {
 		return fmt.Sprintf("<index %s of %s>", base.Index.String(), borrowBaseAddr(base))
 	}
 	return "<invalid base>"
+}
+
+// fieldSlotOf devolve o indice do campo de um REF_PROPERTY na instancia que
+// esta no lugar AGORA, ou -1 se ela nao tem o campo. ref.Slot e a dica
+// resolvida na criacao (OP_REF_PROPERTY, issue #93b): vale quando a definicao
+// da instancia tem esse nome nesse slot — nao vale para definicoes montadas
+// pelo json_loads (ordem alfabetica) nem para ObjRef montado a mao (Slot
+// zero), que caem no FieldIndex por nome, como antes.
+func fieldSlotOf(instance *value.ObjInstance, ref *value.ObjRef) int {
+	if s := ref.Slot; s >= 0 && s < len(instance.Slots) && s < len(instance.Struct.Fields) && instance.Struct.Fields[s] == ref.Name {
+		return s
+	}
+	if s, ok := instance.Struct.FieldIndex(ref.Name); ok && s < len(instance.Slots) {
+		return s
+	}
+	return -1
 }

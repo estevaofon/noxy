@@ -451,6 +451,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Push a reference wrapping the container and property name,
 			// so a later dereference or assignment can resolve this field.
 
+			// issue #93b: o indice do campo e resolvido UMA vez, aqui; descend e
+			// referenceStorageMode conferem `Fields[Slot] == Name` antes de usar.
+			slot := 0
+			if instance, ok := container.Obj.(*value.ObjInstance); ok && instance != nil {
+				if i, ok := instance.Struct.FieldIndex(name); ok {
+					slot = i
+				}
+			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -458,6 +466,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					Container: container,
 					Base:      base,
 					Name:      name,
+					Slot:      slot,
 				},
 			})
 
