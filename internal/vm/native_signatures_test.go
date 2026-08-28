@@ -2492,13 +2492,10 @@ func TestWildcardWrapperFirstAndCachedLoadsExposeImportedBinding(t *testing.T) {
 		source string
 	}{
 		{name: "first load", source: "use http select *\ntest_report(delete)"},
-		{name: "cached load", source: `
-use http
-func delete(left: int, right: int) -> int
-    return left + right
-end
-use http select *
-test_report(delete)`},
+		// Issue #47 parte 2: a variante com `func delete` do usuario entre os
+		// dois `use` virou colisao de nome (erro de compilacao, ver
+		// TestCachedWildcardWrapperCollidesWithUserBinding no compilador).
+		{name: "cached load", source: "use http\nuse http select *\ntest_report(delete)"},
 	}
 
 	for _, tt := range tests {

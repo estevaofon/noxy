@@ -119,6 +119,14 @@ type Compiler struct {
 	// programLets acumula os `let` top-level da compilacao corrente
 	// (preenchido pelo predeclare) para o REPL ler via ProgramLets.
 	programLets map[string]int
+	// sessionBindings generaliza sessionLets para todas as especies de nome
+	// global (issue #47 parte 2): variable, function, struct, import. O
+	// predeclare checa colisoes entre especies contra ele; redefinir uma
+	// FUNCAO por outra funcao entre linhas continua permitido (iteracao no
+	// REPL). programBindingsByKind e o que a compilacao corrente declarou,
+	// para o REPL fazer o merge apos sucesso.
+	sessionBindings       map[string]GlobalDecl
+	programBindingsByKind map[string]GlobalDecl
 	// warnings e a lista de avisos COMPARTILHADA pela arvore de compiladores
 	// (raiz + NewChild): ponteiro, como generics/instances, para que o aviso
 	// emitido dentro de um corpo de funcao suba ate o compilador raiz, que e
@@ -230,6 +238,26 @@ func (c *Compiler) SetSessionLets(m map[string]int) {
 // o REPL faz o merge para a sessao somente apos sucesso.
 func (c *Compiler) ProgramLets() map[string]int {
 	return c.programLets
+}
+
+// GlobalDecl e a especie e a linha de um nome declarado no escopo global:
+// Kind e "variable" | "function" | "struct" | "import".
+type GlobalDecl struct {
+	Kind string
+	Line int
+}
+
+// SetSessionBindings arma a checagem de colisao de nomes entre linhas de uma
+// sessao interativa, para todas as especies (issue #47 parte 2). O REPL
+// registra via ProgramBindings apos cada linha compilar com sucesso.
+func (c *Compiler) SetSessionBindings(m map[string]GlobalDecl) {
+	c.sessionBindings = m
+}
+
+// ProgramBindings devolve os nomes globais declarados pela ultima
+// compilacao, com especie e linha.
+func (c *Compiler) ProgramBindings() map[string]GlobalDecl {
+	return c.programBindingsByKind
 }
 
 // ModuleState e o estado de modulos de uma sessao interativa (REPL): os

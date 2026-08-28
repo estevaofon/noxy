@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"fmt"
+	"strings"
+
 	"noxy-vm/internal/ast"
 )
 
@@ -252,20 +254,89 @@ func commonInferredType(left, right ast.NoxyType) ast.NoxyType {
 	return &ast.PrimitiveType{Name: "any"}
 }
 
+// declareGlobalName registra `name` no namespace global unico do Program
+// (issue #47 parte 2) e acusa colisao com qualquer especie ja declarada —
+// neste Program (declared) ou em linha anterior da sessao (sessionBindings).
+// Mensagens que ja eram contrato (let x let, func x func) nao mudam;
+// import x import nunca colide (re-importar e idempotente); func x func
+// entre linhas de sessao e permitido (iteracao no REPL).
+func (c *Compiler) declareGlobalName(declared map[string]GlobalDecl, name, kind string, line int) error {
+	if prev, ok := declared[name]; ok && !(kind == "import" && prev.Kind == "import") {
+		switch {
+		case kind == "variable" && prev.Kind == "variable":
+			return fmt.Errorf(
+				"[line %d] variable '%s' redeclared in this scope (previous declaration at line %d); hint: to update the value, use '%s = ...' without 'let'",
+				line, name, prev.Line, name)
+		case kind == "function" && prev.Kind == "function":
+			return fmt.Errorf("[line %d] duplicate function '%s'", line, name)
+		default:
+			return fmt.Errorf("[line %d] '%s' redeclared in this scope (previous declaration as %s at line %d)", line, name, prev.Kind, prev.Line)
+		}
+	}
+	if prev, ok := c.sessionBindings[name]; ok && !(kind == "import" && prev.Kind == "import") && !(kind == "function" && prev.Kind == "function") {
+		if kind == "variable" && prev.Kind == "variable" {
+			return fmt.Errorf(
+				"[line %d] variable '%s' redeclared in this scope (previously declared in this session); hint: to update the value, use '%s = ...' without 'let'",
+				line, name, name)
+		}
+		return fmt.Errorf("[line %d] '%s' redeclared in this scope (previously declared as %s in this session)", line, name, prev.Kind)
+	}
+	if kind == "variable" && c.sessionLets != nil {
+		if _, duplicate := c.sessionLets[name]; duplicate {
+			return fmt.Errorf(
+				"[line %d] variable '%s' redeclared in this scope (previously declared in this session); hint: to update the value, use '%s = ...' without 'let'",
+				line, name, name)
+		}
+	}
+	declared[name] = GlobalDecl{Kind: kind, Line: line}
+	if c.programBindingsByKind == nil {
+		c.programBindingsByKind = make(map[string]GlobalDecl)
+	}
+	c.programBindingsByKind[name] = GlobalDecl{Kind: kind, Line: line}
+	return nil
+}
+
+// importedNames devolve os nomes que um `use` vincula no escopo do
+// importador: os seletores, todos os exports (select *) ou o alias/ultimo
+// segmento do modulo (forma namespace).
+func (c *Compiler) importedNames(declaration *ast.UseStmt) []string {
+	switch {
+	case declaration.SelectAll:
+		exports, _ := c.discoverModuleExports(declaration.Module)
+		names := make([]string, 0, len(exports))
+		for name := range exports {
+			names = append(names, name)
+		}
+		return names
+	case len(declaration.Selectors) > 0:
+		return declaration.Selectors
+	default:
+		name := declaration.Alias
+		if name == "" {
+			parts := strings.Split(declaration.Module, ".")
+			name = parts[len(parts)-1]
+		}
+		return []string{name}
+	}
+}
+
 func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
-	seen := make(map[string]struct{})
-	letSeen := make(map[string]int)
+	declared := make(map[string]GlobalDecl)
 	for _, statement := range statements {
 		switch declaration := statement.(type) {
 		case *ast.UseStmt:
+			for _, name := range c.importedNames(declaration) {
+				if err := c.declareGlobalName(declared, name, "import", declaration.Token.Line); err != nil {
+					return err
+				}
+			}
 			if err := c.predeclareImport(declaration); err != nil {
 				return err
 			}
 		case *ast.FunctionStatement:
-			if _, duplicate := seen[declaration.Name]; duplicate {
-				return fmt.Errorf("[line %d] duplicate function '%s'", declaration.Token.Line, declaration.Name)
+			if err := c.declareGlobalName(declared, declaration.Name, "function", declaration.Token.Line); err != nil {
+				return err
 			}
-			seen[declaration.Name] = struct{}{}
 			// Genericos (§5): um template NAO tem tipo concreto — seus params
 			// carregam TypeParamType. Registra-lo aqui o copiaria para
 			// c.programBindings, e applyProgramBindings o injetaria de volta em
@@ -289,22 +360,12 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 		case *ast.LetStmt:
 			// Mesma regra do check local do LetStmt (compiler.go): dois `let`
 			// do mesmo nome no MESMO escopo global e redeclaracao — dentro de
-			// um Program via letSeen, entre linhas do REPL via sessionLets
-			// (spec §3: a sessao se comporta como um arquivo digitado linha a
-			// linha). letSeen e por chamada; sessionLets e so leitura aqui.
-			if prevLine, duplicate := letSeen[declaration.Name.Value]; duplicate {
-				return fmt.Errorf(
-					"[line %d] variable '%s' redeclared in this scope (previous declaration at line %d); hint: to update the value, use '%s = ...' without 'let'",
-					declaration.Token.Line, declaration.Name.Value, prevLine, declaration.Name.Value)
+			// um Program via declared, entre linhas do REPL via sessionLets/
+			// sessionBindings (spec §3: a sessao se comporta como um arquivo
+			// digitado linha a linha).
+			if err := c.declareGlobalName(declared, declaration.Name.Value, "variable", declaration.Token.Line); err != nil {
+				return err
 			}
-			if c.sessionLets != nil {
-				if _, duplicate := c.sessionLets[declaration.Name.Value]; duplicate {
-					return fmt.Errorf(
-						"[line %d] variable '%s' redeclared in this scope (previously declared in this session); hint: to update the value, use '%s = ...' without 'let'",
-						declaration.Token.Line, declaration.Name.Value, declaration.Name.Value)
-				}
-			}
-			letSeen[declaration.Name.Value] = declaration.Token.Line
 			if c.programLets == nil {
 				c.programLets = make(map[string]int)
 			}
@@ -316,6 +377,9 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 			declaration.Type = resolved
 			c.globals[declaration.Name.Value] = declaration.Type
 		case *ast.StructStatement:
+			if err := c.declareGlobalName(declared, declaration.Name, "struct", declaration.Token.Line); err != nil {
+				return err
+			}
 			// Mesma regra do template de funcao: o construtor de um struct
 			// generico nao tem assinatura concreta antes da substituicao.
 			if len(declaration.TypeParams) > 0 {
