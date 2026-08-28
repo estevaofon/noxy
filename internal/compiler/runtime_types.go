@@ -213,6 +213,20 @@ func (c *Compiler) checkSignatureTypes(name string, params []*ast.Parameter, ret
 	if name != "" {
 		prefix = fmt.Sprintf("function '%s' ", name)
 	}
+	// Parametro duplicado (issue #47 parte 1): sem este check o segundo `x`
+	// sombreia o primeiro em resolveLocal e o primeiro argumento fica
+	// inalcancavel para sempre, em silencio.
+	display := name
+	if display == "" {
+		display = "<anonymous>"
+	}
+	seen := make(map[string]struct{}, len(params))
+	for _, param := range params {
+		if _, dup := seen[param.Name]; dup {
+			return fmt.Errorf("[line %d] duplicate parameter '%s' in function '%s'", line, param.Name, display)
+		}
+		seen[param.Name] = struct{}{}
+	}
 	for _, param := range params {
 		if err := c.checkDeclaredType(param.Type, line, fmt.Sprintf("%sparameter '%s'", prefix, param.Name)); err != nil {
 			return err

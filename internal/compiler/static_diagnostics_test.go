@@ -13,6 +13,16 @@ import (
 func TestStaticDiagnosticsAreReportedWithTheirExactMessage(t *testing.T) {
 	cases := []struct{ name, source, want string }{
 		{
+			name:   "duplicate parameter",
+			source: "func f(x: int, x: int) -> int\n    return x\nend\n",
+			want:   "[line 1] duplicate parameter 'x' in function 'f'",
+		},
+		{
+			name:   "duplicate parameter in function literal",
+			source: "let g: func(int, int) -> int = func(a: int, a: int) -> int\n    return a\nend\n",
+			want:   "duplicate parameter 'a' in function '<anonymous>'",
+		},
+		{
 			name:   "&& with non-bool operand",
 			source: "if 1 && true then print(1) end\n",
 			want:   "logical operators require boolean operands, got int and bool",
