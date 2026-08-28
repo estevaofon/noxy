@@ -428,7 +428,7 @@ func parse(text: string) -> int
 end
 
 // call_result turns a runtime failure into data
-let r: CallResult = call_result(parse, "abc")
+let r = call_result(parse, "abc")   // r: Result&lt;int&gt;
 if r.ok then
     print(r.value)
 else
@@ -686,34 +686,36 @@ print(get("missing"))   // (empty)</code></pre>
                 </div>
                 <div class="example-tab" id="safe-division">
                     <h3>Safe Division</h3>
-                    <p>Result pattern for operations whose failure is an expected outcome: the result struct
-                        carries an <code>ok</code> flag the caller must branch on.</p>
-                    <pre><code class="language-go">struct Result
-    is_ok: bool
-    value: int
-    error: string
-end
+                    <p>Result pattern for operations whose failure is an expected outcome: the stdlib
+                        <code>Result&lt;T&gt;</code> carries an <code>ok</code> flag the caller must branch on
+                        (the branch narrows <code>value</code> to <code>T</code>), and <code>try</code>
+                        propagates a failure to the caller.</p>
+                    <pre><code class="language-go">use errors select *
 
-func Ok(value: int) -> Result
-    return Result(true, value, "")
-end
-
-func Err(error_name: string) -> Result
-    return Result(false, 0, error_name)
-end
-
-func safe_divide(a: int, b: int) -> Result
+func safe_divide(a: int, b: int) -> Result&lt;int&gt;
     if b == 0 then
         return Err("DIVISION_BY_ZERO")
     end
     return Ok(a / b)
 end
 
-let result: Result = safe_divide(10, 0)
-if result.is_ok then
-    print(f"Result: {result.value}")
+// try: if a step fails, average returns that same Failure
+func average(a: int, b: int, divisor: int) -> Result&lt;int&gt;
+    let x: int = try safe_divide(a, divisor)
+    let y: int = try safe_divide(b, divisor)
+    return Ok((x + y) / 2)
+end
+
+let result = safe_divide(10, 0)        // Result&lt;int&gt;
+if result.ok then
+    print(f"Result: {result.value}")   // value narrowed to int here
 else
-    print(f"Error: {result.error}")
+    print(f"Error: {result.failure.message}")
+end
+
+let avg = average(10, 20, 0)
+if !avg.ok then
+    print(f"Error: {avg.failure.message}")   // the Failure from safe_divide
 end</code></pre>
                 </div>
                 <div class="example-tab" id="closures">

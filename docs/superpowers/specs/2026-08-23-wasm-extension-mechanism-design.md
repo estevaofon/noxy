@@ -206,7 +206,10 @@ rationale is recorded:
   validation) reject them. The wrapper `.nx` idiom already in use — have the
   native fill a wrapper-constructed instance, or annotate the map
   structurally — carries over. This is a known, already-documented seam, not
-  a new one.
+  a new one. *(Later note, 0.22.0 — issue #105: the `call_result` envelope is
+  now a genuine `errors.Result<T>` instance, not a struct-shaped map; the seam
+  described here remains for maps returned by natives — spec §7,
+  "Representation".)*
 
 **Extension-held state** stays inside the guest instance, behind an integer
 id the guest mints, wrapped in a struct by the `.nx` wrapper:

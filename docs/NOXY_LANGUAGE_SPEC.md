@@ -2174,10 +2174,11 @@ The core builtins have static return types where the result never varies —
 `keys(map[K, V]) -> K[]`, `slice` (same type as its first argument) — so a
 value of theirs is checked like any other expression (`let s: string =
 length(xs)` is a compile error) and can initialize an inferred `let` (§3).
-The others (`json_parse`, `task_await`, `call_result`, `make_chan`, ...) are
-dynamic-boundary builtins: their result is `any` or untyped and needs an
-annotation. A function the program declares with a builtin's name shadows the
-builtin, static type included.
+`call_result` is typed by its callee (`errors.Result<R>`, §7). The others
+(`json_parse`, `task_await`, `make_chan`, ...) are dynamic-boundary builtins:
+their result is `any` or untyped and needs an annotation. A function the
+program declares with a builtin's name shadows the builtin, static type
+included.
 
 ### Collections
 - `length(arr_or_map) -> int`
@@ -2229,8 +2230,8 @@ let back: bytes = hex_decode(hex)   // b"Hello"
 ### Type inspection
 
 `type(v: any) -> string` returns the runtime type name of a value. Its main
-use is inspecting `any` values at dynamic boundaries (`call_result` and
-`task_await` envelopes, JSON, channel payloads). The names:
+use is inspecting `any` values at dynamic boundaries (`task_await`
+envelopes, JSON, channel payloads). The names:
 
 | Value | `type(v)` |
 |-------|-----------|
@@ -2256,8 +2257,9 @@ print(type(null))       // null
 ```
 
 `type` reports the runtime representation, not the static annotation: a
-`call_result` envelope reports `"map"` (its physical shape at the dynamic
-boundary), and any value bound to `any` reports what it actually is. The
+`call_result` envelope reports `"Result<int>"` (it is a genuine
+`errors.Result<int>` instance — the struct-instance row above — never
+`"map"`), and any value bound to `any` reports what it actually is. The
 `%T` verb of `fmt` uses the same table.
 
 ### Concurrency and Supervised Tasks

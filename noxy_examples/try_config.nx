@@ -2,17 +2,27 @@
 //
 // Cada nivel que antes repetia `if r.ok == false then return … end` a mao
 // escreve `try`: em sucesso vale o valor; em falha a funcao corrente
-// devolve a MESMA Failure ao chamador. Saida esperada:
+// devolve a MESMA Failure ao chamador. O payload aqui e uma struct de tres
+// campos: dentro de `if r.ok then`, `r.value` e um Config e os campos saem
+// direto (`r.value.host`); `let c: Config = r.value` copia a struct inteira;
+// e num `try` o Config sai como valor comum, sem `.value`. Saida esperada:
 //
-//   porta = 8080
+//   host = localhost, porta = 8080, timeout = 30
+//   url = http://localhost:8080
 //   falhou: cannot convert string "oitenta" to int
+//   falhou: esperava host:porta:timeout, veio "localhost:8080"
 //   falhou: config vazia
+//   url("localhost:8080:30") = http://localhost:8080
+//   url("localhost:8080:x") falhou: cannot convert string "x" to int
 
 use errors select *
 use convert select *
+use strings select split, SplitResult
 
 struct Config
+    host: string
     porta: int
+    timeout: int
 end
 
 // Uma "leitura" que pode falhar como dado: texto vazio nao e config.
@@ -23,20 +33,53 @@ func le_texto(texto: string) -> Result<string>
     return Ok(texto)
 end
 
+// "host:porta:timeout" em tres partes — o T do Result tambem pode ser array.
+func separa(texto: string) -> Result<string[]>
+    let sp = split(texto, ":")
+    if sp.count != 3 then
+        return Err("esperava host:porta:timeout, veio \"" + texto + "\"")
+    end
+    return Ok(sp.parts)
+end
+
 func le_config(texto: string) -> Result<Config>
-    let bruto: string = try le_texto(texto)     // Result<string> -> string, ou retorna a falha
-    let porta: int = try to_int_result(bruto)   // Result<int> -> int, ou retorna a falha
-    return Ok(Config(porta))
+    let bruto: string = try le_texto(texto)         // Result<string> -> string, ou retorna a falha
+    let partes: string[] = try separa(bruto)        // Result<string[]> -> string[]
+    let porta: int = try to_int_result(partes[1])   // Result<int> -> int
+    let timeout: int = try to_int_result(partes[2])
+    return Ok(Config(partes[0], porta, timeout))
+end
+
+// O Config sai do try como valor comum: nenhum `.value`, nenhum teste de null.
+func url(texto: string) -> Result<string>
+    let c: Config = try le_config(texto)
+    return Ok("http://" + c.host + ":" + to_str(c.porta))
 end
 
 func mostra(r: Result<Config>) -> void
     if r.ok then
-        print("porta = " + to_str(r.value.porta))
+        // r.value estreitado de Config? para Config: campos direto...
+        print("host = " + r.value.host + ", porta = " + to_str(r.value.porta) + ", timeout = " + to_str(r.value.timeout))
+        // ...ou a struct inteira de uma vez
+        let c: Config = r.value
+        print("url = http://" + c.host + ":" + to_str(c.porta))
     else
         print("falhou: " + r.failure.message)
     end
 end
 
-mostra(le_config("8080"))
-mostra(le_config("oitenta"))
+func mostra_url(texto: string) -> void
+    let r = url(texto)
+    if r.ok then
+        print("url(\"" + texto + "\") = " + r.value)
+    else
+        print("url(\"" + texto + "\") falhou: " + r.failure.message)
+    end
+end
+
+mostra(le_config("localhost:8080:30"))
+mostra(le_config("localhost:oitenta:30"))
+mostra(le_config("localhost:8080"))
 mostra(le_config(""))
+mostra_url("localhost:8080:30")
+mostra_url("localhost:8080:x")
