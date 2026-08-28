@@ -1,4 +1,4 @@
-use array_utils select *
+// `slice` e builtin tipado: slice(int[], inicio, fim) -> int[].
 
 func merge_sort(arr: int[]) -> int[]
     if length(arr) <= 1 then
@@ -6,17 +6,8 @@ func merge_sort(arr: int[]) -> int[]
     end
 
     let mid: int = length(arr) / 2
-    // `slice` (array_utils) e declarada `any` (curry dinamico) — com o
-    // predeclare tipado de imports (spec §8) seu retorno estatico tambem e
-    // `any`, e passar isso direto para um parametro `int[]` falha a checagem
-    // estrita de argumento (areStrictTypesCompatible rejeita `any` -> tipo
-    // concreto). Um `let` intermediario com anotacao concreta usa a checagem
-    // permissiva de `let` (areTypesCompatible aceita `any` e emite guarda em
-    // runtime), equivalente a um cast checado.
-    let left_slice: int[] = slice(arr, 0, mid)
-    let right_slice: int[] = slice(arr, mid, length(arr))
-    let left: int[] = merge_sort(left_slice)
-    let right: int[] = merge_sort(right_slice)
+    let left: int[] = merge_sort(slice(arr, 0, mid))
+    let right: int[] = merge_sort(slice(arr, mid, length(arr)))
 
     return merge(left, right)
 end

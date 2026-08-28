@@ -63,7 +63,7 @@ func TestKnownNativeAndPluginNamesCompile(t *testing.T) {
 }
 
 func TestNamespaceImportAndStdlibNamesAreKnown(t *testing.T) {
-	if err := compileKnown(t, "use strings\nuse array_utils select slice\nprint(strings.upper(\"a\"))\nprint(slice)\n", "strings_upper", "slice"); err != nil {
+	if err := compileKnown(t, "use strings\nuse sys select os\nprint(strings.to_upper(\"a\"))\nprint(os)\n", "strings_to_upper", "sys_os"); err != nil {
 		t.Fatalf("imports must be known: %v", err)
 	}
 }

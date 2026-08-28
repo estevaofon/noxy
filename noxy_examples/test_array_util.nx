@@ -1,4 +1,4 @@
-use array_utils select *
+// slice e range sao builtins do runtime (o modulo array_utils foi removido).
 
 let nums: int[] = [10, 20, 30, 40, 50]
 let fatia: int[] = slice(nums, 1, 4)
@@ -14,7 +14,7 @@ print(range(0, 10, 2))
 print("\nRange(10, 0, -1):")
 print(range(10, 0, -1))
 
-// range é builtin do runtime (não vem de array_utils): 1, 2 ou 3 argumentos
+// range aceita 1, 2 ou 3 argumentos
 print("\nRange(5):")
 print(range(5))
 

@@ -2289,26 +2289,36 @@ func TestConcurrentReferenceTargetMetadataPublication(t *testing.T) {
 	}
 }
 
-func TestArrayUtilsSlicePreservesGenericCollectionRuntimeSchema(t *testing.T) {
+// array_utils.slice (modulo removido) era um curry dinamico sobre o builtin:
+// o nativo entrava como `any` e o resultado voltava por uma closure tipada
+// `any`, entao o `let` anotado so passava se slice preservasse o schema de
+// runtime do array. O curry e reproduzido aqui para manter a cobertura do
+// caminho dinamico; o caminho estatico (`slice(values, 0, 1)` direto) tem o
+// tipo de retorno inferido pelo compilador e nao passa pela validacao.
+func TestSliceThroughAnyPreservesGenericCollectionRuntimeSchema(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
-use array_utils
 struct Node
     value: int
 end
+func wrap(native_slice: any) -> func(any, int, int) -> any
+    return func(array: any, start: int, _end: int) -> any
+        return native_slice(array, start, _end)
+    end
+end
+let dyn_slice: any = wrap(slice)
 let node: Node = Node(1)
 let values: (ref Node)[] = [ref node]
-let sliced: (ref Node)[] = array_utils.slice(values, 0, 1)
+let sliced: (ref Node)[] = dyn_slice(values, 0, 1)
 test_report(length(sliced))`)
 	testExpectedObject(t, 1, got)
 }
 
-func TestArrayUtilsWildcardExportsRemainStableAcrossModuleCache(t *testing.T) {
+func TestWildcardExportsRemainStableAcrossModuleCache(t *testing.T) {
 	source := `
-use array_utils select *
-let numbers: int[] = [1, 2, 3]
-let sliced: int[] = slice(numbers, 1, 3)
-let generated: int[] = range(1, 4, 1)
-test_report(length(sliced) * 10 + length(generated))`
+use strings select *
+let shout: string = to_upper("abc")
+let parts: SplitResult = split("a,b,c", ",")
+test_report(length(shout) * 10 + parts.count)`
 	l := lexer.New(source)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -2331,19 +2341,19 @@ test_report(length(sliced) * 10 + length(generated))`
 			t.Fatalf("iteration %d: %v", i+1, err)
 		}
 	}
-	if len(results) != 2 || results[0] != 23 || results[1] != 23 {
-		t.Fatalf("wildcard first/cache results=%v, want [23 23]", results)
+	if len(results) != 2 || results[0] != 33 || results[1] != 33 {
+		t.Fatalf("wildcard first/cache results=%v, want [33 33]", results)
 	}
-	module, ok := machine.GetModule("array_utils")
+	module, ok := machine.GetModule("strings")
 	if !ok {
-		t.Fatal("array_utils was not cached")
+		t.Fatal("strings was not cached")
 	}
 	exports := module.Obj.(*value.ObjMap).Snapshot()
-	if _, ok := exports["slice"]; !ok {
-		t.Fatal("array_utils omitted slice export")
+	if _, ok := exports["to_upper"]; !ok {
+		t.Fatal("strings omitted to_upper export")
 	}
-	if _, ok := exports["native_slice"]; ok {
-		t.Fatal("array_utils leaked closure capture as a public export")
+	if _, ok := exports["strings_to_upper"]; ok {
+		t.Fatal("strings leaked the raw native as a public export")
 	}
 }
 
