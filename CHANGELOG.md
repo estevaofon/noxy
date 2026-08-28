@@ -1,6 +1,5 @@
 # Changelog
 
-
 ## [0.21.0] - 2026-08-28
 
 Campos de struct por **índice**, dos dois lados. A instância guarda os campos
