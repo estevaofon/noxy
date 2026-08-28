@@ -451,7 +451,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// r: ref T NAO le — o hint aponta '*r', como na atribuicao.
 		if n.Type != nil {
 			if !c.areTypesCompatible(n.Type, valType) {
-				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s%s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType), c.derefReadHint(n.Type, valType, n.Value))
+				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s%s%s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType), c.derefReadHint(n.Type, valType, n.Value), c.nullMismatchHint(n.Type, valType, n.Value))
 			}
 			if err := c.emitRuntimeValueType(n.Type); err != nil {
 				return nil, nil, err
@@ -3245,6 +3245,16 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if isNullType(actual) {
 		return c.acceptsNull(expected)
 	}
+	// Nulidade (spec §2.4): T? aceita T, T? e null; T (nao-any) nao aceita T?.
+	if expectedElem, ok := nonNull(expected); ok {
+		if actualElem, ok := nonNull(actual); ok {
+			return c.areTypesCompatible(expectedElem, actualElem)
+		}
+		return c.areTypesCompatible(expectedElem, actual)
+	}
+	if isNullable(actual) {
+		return isAny(expected)
+	}
 	if isBareFunctionType(expected) {
 		return isCallableType(actual)
 	}
@@ -3302,6 +3312,9 @@ func (c *Compiler) typesEquivalent(a, b ast.NoxyType) bool {
 		return ok && c.typesEquivalent(x.KeyType, y.KeyType) && c.typesEquivalent(x.ValueType, y.ValueType)
 	case *ast.RefType:
 		y, ok := b.(*ast.RefType)
+		return ok && c.typesEquivalent(x.ElementType, y.ElementType)
+	case *ast.NullableType:
+		y, ok := b.(*ast.NullableType)
 		return ok && c.typesEquivalent(x.ElementType, y.ElementType)
 	case *ast.ChanType:
 		y, ok := b.(*ast.ChanType)
@@ -3387,6 +3400,8 @@ func stripTypeQualifiers(t ast.NoxyType) {
 		stripTypeQualifiers(x.KeyType)
 		stripTypeQualifiers(x.ValueType)
 	case *ast.RefType:
+		stripTypeQualifiers(x.ElementType)
+	case *ast.NullableType:
 		stripTypeQualifiers(x.ElementType)
 	case *ast.ChanType:
 		stripTypeQualifiers(x.ElementType)

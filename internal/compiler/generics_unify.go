@@ -152,6 +152,16 @@ func unify(expected, actual ast.NoxyType, bindings map[string]ast.NoxyType) erro
 		}
 		return unify(exp.ElementType, act.ElementType, bindings)
 
+	case *ast.NullableType:
+		// T? casa com X, X? e null (spec §2.4); null nao binda nada.
+		if isNullType(actual) {
+			return nil
+		}
+		if act, ok := actual.(*ast.NullableType); ok {
+			return unify(exp.ElementType, act.ElementType, bindings)
+		}
+		return unify(exp.ElementType, actual, bindings)
+
 	case *ast.ChanType:
 		act, ok := actual.(*ast.ChanType)
 		if !ok {
@@ -213,6 +223,8 @@ func containsTypeParam(t ast.NoxyType) bool {
 	case *ast.MapType:
 		return containsTypeParam(n.KeyType) || containsTypeParam(n.ValueType)
 	case *ast.RefType:
+		return containsTypeParam(n.ElementType)
+	case *ast.NullableType:
 		return containsTypeParam(n.ElementType)
 	case *ast.ChanType:
 		return containsTypeParam(n.ElementType)

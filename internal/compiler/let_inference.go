@@ -96,6 +96,11 @@ func incompleteTypeReason(t ast.NoxyType) string {
 			return "part of its type is not known"
 		}
 		return incompleteTypeReason(typed.ElementType)
+	case *ast.NullableType:
+		if typed.ElementType == nil {
+			return "part of its type is not known"
+		}
+		return incompleteTypeReason(typed.ElementType)
 	case *ast.ChanType:
 		if typed.ElementType == nil {
 			return "part of its type is not known"
@@ -119,6 +124,8 @@ func normalizeInferredType(t ast.NoxyType) ast.NoxyType {
 		return &ast.MapType{KeyType: normalizeInferredType(typed.KeyType), ValueType: normalizeInferredType(typed.ValueType)}
 	case *ast.RefType:
 		return &ast.RefType{ElementType: normalizeInferredType(typed.ElementType)}
+	case *ast.NullableType:
+		return nullable(normalizeInferredType(typed.ElementType))
 	case *ast.ChanType:
 		return &ast.ChanType{ElementType: normalizeInferredType(typed.ElementType)}
 	}

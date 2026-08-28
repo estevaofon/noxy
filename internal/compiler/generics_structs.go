@@ -100,6 +100,13 @@ func (c *Compiler) resolveAnnotation(t ast.NoxyType, line int) (ast.NoxyType, er
 		}
 		return &ast.RefType{ElementType: element}, nil
 
+	case *ast.NullableType:
+		element, err := c.resolveAnnotation(n.ElementType, line)
+		if err != nil {
+			return nil, err
+		}
+		return nullable(element), nil
+
 	case *ast.ChanType:
 		element, err := c.resolveAnnotation(n.ElementType, line)
 		if err != nil {
@@ -140,6 +147,8 @@ func needsAnnotationResolution(t ast.NoxyType) bool {
 	case *ast.MapType:
 		return needsAnnotationResolution(n.KeyType) || needsAnnotationResolution(n.ValueType)
 	case *ast.RefType:
+		return needsAnnotationResolution(n.ElementType)
+	case *ast.NullableType:
 		return needsAnnotationResolution(n.ElementType)
 	case *ast.ChanType:
 		return needsAnnotationResolution(n.ElementType)
@@ -456,6 +465,8 @@ func (c *Compiler) expandInstanceNames(t ast.NoxyType) ast.NoxyType {
 		}
 	case *ast.RefType:
 		return &ast.RefType{ElementType: c.expandInstanceNames(n.ElementType)}
+	case *ast.NullableType:
+		return &ast.NullableType{ElementType: c.expandInstanceNames(n.ElementType)}
 	case *ast.ChanType:
 		return &ast.ChanType{ElementType: c.expandInstanceNames(n.ElementType)}
 	case *ast.FunctionType:
@@ -502,6 +513,8 @@ func containsGenericType(t ast.NoxyType) bool {
 	case *ast.MapType:
 		return containsGenericType(n.KeyType) || containsGenericType(n.ValueType)
 	case *ast.RefType:
+		return containsGenericType(n.ElementType)
+	case *ast.NullableType:
 		return containsGenericType(n.ElementType)
 	case *ast.ChanType:
 		return containsGenericType(n.ElementType)

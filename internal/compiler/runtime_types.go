@@ -50,6 +50,8 @@ func (c *Compiler) requiresRuntimeValueType(t ast.NoxyType, visiting map[*ast.St
 		return true
 	case *ast.RefType:
 		return c.requiresRuntimeValueType(typed.ElementType, visiting, origin)
+	case *ast.NullableType:
+		return c.requiresRuntimeValueType(typed.ElementType, visiting, origin)
 	case *ast.FunctionType:
 		// Callable signatures carry their own immutable runtime schema. Channels
 		// named by that signature are not values embedded in the callable object.
@@ -150,6 +152,16 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 			return nil, false
 		}
 		return &value.RuntimeTypeInfo{Kind: value.TYPE_REF, Element: element}, true
+	case *ast.NullableType:
+		// Copia rasa com a flag: o schema do elemento pode ser memoizado
+		// (structs) e nao pode ser mutado no lugar.
+		element, ok := c.runtimeTypeInfoWithStructs(typed.ElementType, structs, origin)
+		if !ok {
+			return nil, false
+		}
+		info := *element
+		info.Nullable = true
+		return &info, true
 	case *ast.ChanType:
 		element, ok := c.runtimeTypeInfoWithStructs(typed.ElementType, structs, origin)
 		if !ok {
@@ -311,6 +323,8 @@ func firstUnknownTypeName(t ast.NoxyType, resolves func(string) bool) (string, b
 		}
 		return firstUnknownTypeName(typed.ValueType, resolves)
 	case *ast.RefType:
+		return firstUnknownTypeName(typed.ElementType, resolves)
+	case *ast.NullableType:
 		return firstUnknownTypeName(typed.ElementType, resolves)
 	case *ast.ChanType:
 		return firstUnknownTypeName(typed.ElementType, resolves)

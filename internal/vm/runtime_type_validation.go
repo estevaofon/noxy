@@ -110,7 +110,12 @@ func (vm *VM) runtimeValueMatchesType(actual value.Value, expected *value.Runtim
 		return true
 	}
 	if actual.Type == value.VAL_NULL {
-		return expected.Kind == value.TYPE_NULL || expected.Kind == value.TYPE_REF || expected.Kind == value.TYPE_STRUCT
+		// Espelho de acceptsNull (compilador): T? aceita null; ref e struct
+		// nus ainda aceitam na fase 1 (saem na fase 2 do issue #105).
+		return expected.Nullable || expected.Kind == value.TYPE_NULL || expected.Kind == value.TYPE_REF || expected.Kind == value.TYPE_STRUCT
+	}
+	if expected.Nullable {
+		expected = withoutNullable(expected)
 	}
 	switch expected.Kind {
 	case value.TYPE_NULL:
@@ -292,6 +297,14 @@ type runtimeValueTypePair struct {
 // complete value graph compatible. It never replaces a conflicting marker or
 // changes the identity of the marked value.
 func (vm *VM) markRuntimeValueType(actual value.Value, schema *value.RuntimeTypeInfo) bool {
+	// Slot `T?` (spec §2.4): null e aceito; um valor nao-nulo e marcado com
+	// o schema de T — a nulidade e do slot, nao do objeto.
+	if schema != nil && schema.Nullable {
+		if actual.Type == value.VAL_NULL {
+			return true
+		}
+		schema = withoutNullable(schema)
+	}
 	if !runtimeTypeComplete(schema, make(map[*value.RuntimeTypeInfo]bool)) {
 		return false
 	}
@@ -299,6 +312,14 @@ func (vm *VM) markRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		return false
 	}
 	return vm.walkRuntimeValueType(actual, schema, true, make(map[runtimeValueTypePair]bool))
+}
+
+// withoutNullable devolve o schema de T para um schema de T? (copia rasa;
+// o original pode ser memoizado e nao e mutado).
+func withoutNullable(schema *value.RuntimeTypeInfo) *value.RuntimeTypeInfo {
+	copied := *schema
+	copied.Nullable = false
+	return &copied
 }
 
 func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeTypeInfo, apply bool, seen map[runtimeValueTypePair]bool) bool {
@@ -309,7 +330,10 @@ func (vm *VM) walkRuntimeValueType(actual value.Value, schema *value.RuntimeType
 		return true
 	}
 	if actual.Type == value.VAL_NULL {
-		return schema.Kind == value.TYPE_NULL || schema.Kind == value.TYPE_REF || schema.Kind == value.TYPE_STRUCT
+		return schema.Nullable || schema.Kind == value.TYPE_NULL || schema.Kind == value.TYPE_REF || schema.Kind == value.TYPE_STRUCT
+	}
+	if schema.Nullable {
+		schema = withoutNullable(schema)
 	}
 	switch schema.Kind {
 	case value.TYPE_ARRAY:

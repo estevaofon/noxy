@@ -317,6 +317,16 @@ func unifyBidirectional(expected, actual ast.NoxyType, callerBindings, argBindin
 		}
 		return unifyBidirectional(exp.ElementType, act.ElementType, callerBindings, argBindings)
 
+	case *ast.NullableType:
+		// T? casa com X, X? e null (spec §2.4); null nao binda nada.
+		if isNullType(actual) {
+			return nil
+		}
+		if act, ok := actual.(*ast.NullableType); ok {
+			return unifyBidirectional(exp.ElementType, act.ElementType, callerBindings, argBindings)
+		}
+		return unifyBidirectional(exp.ElementType, actual, callerBindings, argBindings)
+
 	case *ast.ChanType:
 		act, ok := actual.(*ast.ChanType)
 		if !ok {

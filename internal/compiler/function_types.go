@@ -41,7 +41,7 @@ func isNullType(t ast.NoxyType) bool {
 }
 
 func (c *Compiler) acceptsNull(t ast.NoxyType) bool {
-	if isAny(t) || isNullType(t) {
+	if isAny(t) || isNullType(t) || isNullable(t) {
 		return true
 	}
 	if _, ok := t.(*ast.RefType); ok {
@@ -92,6 +92,8 @@ func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool
 	case *ast.ChanType:
 		return c.containsCallableType(typed.ElementType, visiting)
 	case *ast.RefType:
+		return c.containsCallableType(typed.ElementType, visiting)
+	case *ast.NullableType:
 		return c.containsCallableType(typed.ElementType, visiting)
 	default:
 		return false
@@ -181,6 +183,9 @@ func sameExactType(left, right ast.NoxyType) bool {
 	case *ast.RefType:
 		r, ok := right.(*ast.RefType)
 		return ok && sameExactType(l.ElementType, r.ElementType)
+	case *ast.NullableType:
+		r, ok := right.(*ast.NullableType)
+		return ok && sameExactType(l.ElementType, r.ElementType)
 	case *ast.FunctionType:
 		r, ok := right.(*ast.FunctionType)
 		if !ok || len(l.Params) != len(r.Params) || !sameExactType(l.Return, r.Return) {
@@ -209,6 +214,16 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 	}
 	if isNullType(actual) {
 		return c.acceptsNull(expected)
+	}
+	// Nulidade (spec §2.4): T? aceita T, T? e null; T nao aceita T?.
+	if expectedElem, ok := nonNull(expected); ok {
+		if actualElem, ok := nonNull(actual); ok {
+			return c.areStrictTypesCompatible(expectedElem, actualElem)
+		}
+		return c.areStrictTypesCompatible(expectedElem, actual)
+	}
+	if isNullable(actual) {
+		return false
 	}
 	if isAny(actual) {
 		return false

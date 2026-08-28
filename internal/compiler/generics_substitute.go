@@ -48,6 +48,9 @@ func substituteType(t ast.NoxyType, b map[string]ast.NoxyType) ast.NoxyType {
 		return &ast.MapType{KeyType: substituteType(n.KeyType, b), ValueType: substituteType(n.ValueType, b)}
 	case *ast.RefType:
 		return &ast.RefType{ElementType: substituteType(n.ElementType, b)}
+	case *ast.NullableType:
+		// `T?` com T = X? normaliza para X? (nullable e idempotente).
+		return nullable(substituteType(n.ElementType, b))
 	case *ast.ChanType:
 		return &ast.ChanType{ElementType: substituteType(n.ElementType, b)}
 	case *ast.FunctionType:
