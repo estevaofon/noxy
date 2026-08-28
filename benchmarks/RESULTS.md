@@ -3,6 +3,59 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## develop (2a627bc) × campo de struct por índice — issue #96 (perf/issue-96-struct-field-index, 79af956)
+
+**Data:** 2026-08-28 · Windows 11 · Intel Core 7 150U · pwsh 7.6.5 · protocolo
+intercalado, mediana de 9. Máquina sem `go test` nem build durante o A/B.
+Dados brutos e perfis em
+[`results/2026-08-28-issue-96-struct-field-index-raw.md`](results/2026-08-28-issue-96-struct-field-index-raw.md).
+Spec: `docs/superpowers/specs/2026-08-28-vm-perf-issue-96-struct-field-index-design.md`.
+
+O que mudou: quando o tipo estático da base é um struct do programa, o
+compilador resolve `p.x` para o índice de slot (posição na declaração — a
+ordem dos `Slots` desde o #95) e emite `OP_GET_FIELD` / `OP_SET_FIELD` /
+`OP_GET_FIELD_MUT` com operando `[idx u8][nome u16]`. O nome vai junto porque
+`json_loads` monta definições de struct em ordem alfabética e essas instâncias
+entram em contêineres tipados: o caminho rápido confere `Fields[idx] == nome`
+(comparação de string curta) e cai no funil por nome quando não bate. Base
+`any`, módulos e `ref p.x` inalterados; `OP_SET_FIELD` é statement e só chama
+`Retain`/`Release` quando um dos lados pode ter contador. Os `case` por nome
+passaram a chamar os mesmos métodos que os fallbacks (`field_ops.go`).
+
+**Verificação completa:** `go test ./...` verde; `go test -race ./internal/vm`
+verde; **corpus 180/180**; **diff de saída base × head: 149 iguais, 0
+divergentes**; sem a guarda, o teste da instância JSON reordenada falha.
+
+### Headline — base × head (`interleaved_compare.ps1 -Runs 9`)
+
+| bench | base_ms | head_ms | delta | veredito |
+|---|---|---|---|---|
+| bench_path_update | 238,8 | 160,7 | **−32,7 %** | ✅ `cells[i].hits = cells[i].hits + 1`: sem hash de campo, sem `Retain`/`Release` de `int` |
+| bench_struct_records | 145,9 | 136,1 | **−6,7 %** | ✅ só as leituras; 47 % do bench é a validação do construtor (cache do PR #70 nunca chegou a `develop` — follow-up) |
+| bench_share_mutate | 111,9 | 109,7 | −2,0 % | ✅ gate CoW |
+| bench_conway | 1212,1 | 1196,3 | −1,3 % | ✅ gate CoW (≤ +5 %) |
+| bench_map_churn | 210,2 | 208,7 | −0,7 % | ➖ ruído |
+| bench_bubblesort | 659,8 | 655,6 | −0,6 % | ➖ ruído |
+| bench_generic_vs_hand | 419,7 | 420,6 | +0,2 % | ✅ sentinela de `run()`: sem regressão de codegen |
+| bench_call_ref | 995,5 | 999,5 | +0,4 % | ➖ ruído |
+| bench_call_readonly | 448,3 | 450,9 | +0,6 % | ➖ ruído |
+| bench_spawn_sum | 411,6 | 414,7 | +0,8 % | ➖ ruído |
+| bench_typed_call_map | 27,6 | 28,4 | +2,9 % | ➖ piso¹ (gate CoW ok) |
+| bench_call_light | 27,0 | 27,0 | 0 % | ➖ piso¹ |
+| bench_value_call_mutate | 27,9 | 27,8 | −0,4 % | ➖ piso¹ |
+
+¹ ~27 ms com piso de processo ~10 ms: não decidem nada. `bench_borrow_path` e
+`bench_hash31_bytes` foram pulados pelo guard de `CHECKSUM:` (nenhum dos dois
+binários imprime a linha — pré-existente).
+
+### Perfil (`--cpuprofile`, carga ×10/×15)
+
+`bench_path_update`: `FieldIndex` 15,2 % cum (`mapaccess2_faststr` 14,2 %,
+`aeshashbody` 4,3 %) e `Retain`+`Release` 10 % na base → **ausentes** no head;
+sobra `IsShared` da cadeia `_MUT` (16 %) e `memeqbody` 2,8 % (a guarda).
+`bench_struct_records`: hashing de campo ausente no head; o topo continua
+`validateStructConstructorArguments` (46,9 % cum), fora do escopo.
+
 ## v0.15.1 (c1cc12a) × protocolo de chamada — v0.15.2 (perf/issue-66-call-protocol, 868d435)
 
 **Data:** 2026-08-22 · Windows 11 · Intel Core 7 150U (mesma máquina do item
