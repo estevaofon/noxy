@@ -882,9 +882,13 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			}
 
 			// Field Name
-			nameConst := c.makeConstant(value.NewString(memberExp.Member))
-			c.emitOpWithConstantIndex(chunk.OP_SET_PROPERTY, nameConst)
-			c.emitByte(byte(chunk.OP_POP))
+			if idx, ok := c.fieldSlot(leftType, memberExp.Member); ok {
+				c.emitFieldOp(chunk.OP_SET_FIELD, idx, memberExp.Member)
+			} else {
+				nameConst := c.makeConstant(value.NewString(memberExp.Member))
+				c.emitOpWithConstantIndex(chunk.OP_SET_PROPERTY, nameConst)
+				c.emitByte(byte(chunk.OP_POP))
+			}
 
 		} else {
 			return nil, nil, fmt.Errorf("[line %d] assignment target not supported yet", c.currentLine)
@@ -988,8 +992,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			leftType = ref.ElementType
 		}
 
-		nameConst := c.makeConstant(value.NewString(n.Member))
-		c.emitOpWithConstantIndex(chunk.OP_GET_PROPERTY, nameConst)
+		if idx, ok := c.fieldSlot(leftType, n.Member); ok {
+			c.emitFieldOp(chunk.OP_GET_FIELD, idx, n.Member)
+		} else {
+			nameConst := c.makeConstant(value.NewString(n.Member))
+			c.emitOpWithConstantIndex(chunk.OP_GET_PROPERTY, nameConst)
+		}
 
 		// RESOLVE FIELD TYPE: memberType resolve o dono pela declaracao que
 		// designa (`File` e `io.File` igual) e devolve o tipo do campo ja na

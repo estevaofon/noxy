@@ -61,6 +61,9 @@ func collectOpcodes(t *testing.T, code *chunk.Chunk) map[chunk.OpCode]int {
 				chunk.OP_MARK_REF_TARGET_TYPE, chunk.OP_MARK_RUNTIME_VALUE_TYPE,
 				chunk.OP_SET_GLOBAL_BORROW:
 				offset += 2
+			case chunk.OP_GET_FIELD, chunk.OP_SET_FIELD, chunk.OP_GET_FIELD_MUT:
+				// perf issue #96: [idx u8][nome u16]
+				offset += 3
 			case chunk.OP_CLOSURE:
 				// [const_index] [upvalue_count] ([is_local, index])*
 				if offset+1 < len(c.Code) {
