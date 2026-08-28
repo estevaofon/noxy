@@ -37,7 +37,7 @@ end
 // getword: extrai a próxima palavra de text a partir de *pos; "" no fim
 func getword(text: string, pos: ref int) -> string
     let n: int = length(text)
-    let i: int = pos
+    let i: int = *pos
     while i < n && !is_alpha(text[i]) do
         i = i + 1
     end
