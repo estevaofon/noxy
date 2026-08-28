@@ -115,10 +115,21 @@ func extractReferenceValue(input value.Value) (*value.ObjRef, error) {
 	return ref, nil
 }
 
-// maxBorrowPathDepth limita a caminhada de um empréstimo até a raiz. Um
-// caminho real tem a profundidade do lvalue escrito no fonte; o teto só existe
-// para que bytecode malformado (um ref que se aponta) erre em vez de girar.
-const maxBorrowPathDepth = 256
+// maxRefHopDepth limita derefPlace: quantos refs em sequência um LUGAR pode
+// guardar antes de chegar ao contêiner de verdade. Um lugar declarado `ref T`
+// guarda um ref cujo referente é um valor, então o laço dá uma volta só; o
+// teto é o backstop para um lugar `any` cujo ref aponte para outro lugar `any`
+// — um ciclo assim erra em vez de girar.
+//
+// A cadeia de Base (borrowContainer) NÃO tem teto (issue #93a). A profundidade
+// dela é dos DADOS, não do bytecode: `insert(ref node.esquerda, v)` recursivo
+// ou `r = ref r.prox` num laço encadeiam um nível por passo, e uma lista por
+// posse tem quantos nós o programa quiser — o teto de 256 que havia aqui
+// (justificado por "um caminho real tem a profundidade do lvalue escrito no
+// fonte", verdade até a #83) matava uma BST degenerada com ~256 nós. E a
+// cadeia não pode ciclar: Base é preenchido uma vez, na criação, com um ref
+// que já existia, e nunca reatribuído — cada nó é mais novo que o seu Base.
+const maxRefHopDepth = 256
 
 // borrowContainer devolve o contêiner ATUAL de um empréstimo (issue #83).
 //
@@ -157,9 +168,6 @@ func (vm *VM) borrowContainer(ref *value.ObjRef, forWrite bool) (value.Value, er
 		if !ok || parent == nil {
 			return value.Value{}, fmt.Errorf("invalid reference value")
 		}
-		if len(chain) > maxBorrowPathDepth {
-			return value.Value{}, fmt.Errorf("reference path too deep")
-		}
 		chain = append(chain, parent)
 		cursor = parent
 	}
@@ -194,7 +202,7 @@ func (vm *VM) borrowContainer(ref *value.ObjRef, forWrite bool) (value.Value, er
 // que OP_REF_PROPERTY/OP_REF_INDEX já faziam na criação.
 func (vm *VM) derefPlace(container value.Value, forWrite bool) (value.Value, error) {
 	for depth := 0; container.Type == value.VAL_REF; depth++ {
-		if depth > maxBorrowPathDepth {
+		if depth > maxRefHopDepth {
 			return value.Value{}, fmt.Errorf("reference path too deep")
 		}
 		var err error
