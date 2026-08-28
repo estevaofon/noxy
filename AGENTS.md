@@ -36,7 +36,14 @@ x = 100       // ✓ OK
 x = 3.14      // ✗ ERRO
 let y = 42    // tipo inferido do RHS (int) — igualmente estável (spec §3, issue #41)
 y = "a"       // ✗ ERRO
+let p: Point = null   // ✗ ERRO — struct e ref nus nunca sao null (spec §2.4, issue #105)
+let q: Point? = null  // ✓ `T?` e a unica grafia de nulidade; leia so apos `if q != null then`
 ```
+
+Erros como dado: `errors.Result<T>` (`Ok`/`Err`/`Fail`), `if r.ok then`
+estreita `r.value`, `try expr` propaga a falha numa funcao que devolve
+`Result` (spec §7). Nomes globais resolvem em compilacao (`undefined global`)
+e o escopo global e um namespace so (let/func/struct/import colidem).
 
 ### 2. Pipeline de Compilação
 Sempre execute após modificações:

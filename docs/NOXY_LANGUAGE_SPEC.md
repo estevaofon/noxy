@@ -48,7 +48,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 | Category | Keywords |
 |----------|----------|
 | Declarations | `let`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in`, `defer`, `when`, `case`, `default` |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in`, `defer`, `when`, `case`, `default`, `try` |
 | Types | `int`, `float`, `string`, `bool`, `void`, `ref`, `bytes`, `func` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
@@ -76,6 +76,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 | `,` | Separator for parameters and elements |
 | `:` | Separator for types in declarations |
 | `.` | Access struct fields or module members |
+| `?` | Type suffix: `T?` is `T` or `null` (§2.4) |
 
 ---
 
@@ -91,6 +92,9 @@ while the value stored in it may be mutable.
 1. **The type of a variable is defined at declaration and cannot be changed.**
 2. Attempts to assign a value of a different type result in a compilation error.
 3. There is no implicit conversion between types (except where explicitly documented).
+4. **`null` is not a value of any type but `T?`, `any` and `null` itself.** A
+   bare struct, `ref T`, array or primitive never holds `null`; a slot that
+   may be empty says so in its type, with the `?` suffix (§2.4).
 
 ```noxy
 let x: int = 42
@@ -181,8 +185,8 @@ shares (rule 6):
    value field — but the sharing is declared in the *type*, at the struct
    declaration, and does not appear at the assignment, call site, container
    read or channel that copies it. To own a nested composite instead of
-   sharing it, declare the field without `ref` (`next: Node`, nullable) —
-   see §5 *Self-Reference* for both idioms.
+   sharing it, declare the field without `ref` (`next: Node?`, nullable
+   because the list ends) — see §5 *Self-Reference* for both idioms.
 7. **`==`/`!=` on composites is structural** (recursive by content). `ref`
    values compare by slot identity and are not dereferenced — both as fields
    nested inside a composite and as the two operands of a direct comparison.
@@ -424,10 +428,22 @@ ra == 1      // ERROR — hint: use '*ra'
 
 `addr(ref x)` gives the identity as a printable value.
 
-#### R8. `null` is a valid `ref T`
+#### R8. `null` is a valid `ref T?` — and only there
 
-It can be stored, passed, returned, compared, and replaced by rebind.
-Writing through it (`*r = v`, `r.f = v`) is a runtime error.
+A reference that may be absent is declared `ref T?` (a *nullable
+reference*, §2.4): it can be stored, passed, returned, compared with `null`
+and replaced by rebind. A bare `ref T` is never `null` — `let r: ref int =
+null`, `f(null)` for `n: ref Node`, `Node(1, null)` for a field `next: ref
+Node` are compile errors with the hint `declare it as 'ref T?' to allow
+null`. Reading or writing through a `ref T?` (`*r`, `r.f`, `*r = v`) requires
+a null test first (`'r' may be null; test it first`); inside `if r != null
+then … end` the reference is `ref T`. The runtime errors `cannot dereference
+null reference` / `cannot write through a null reference` remain only for
+references that arrive through `any`.
+
+`ref (T?)` is the other shape: a non-null reference to a slot whose *value*
+may be null (`ref raiz` with `raiz: TreeNode?`); `*r` is `T?` and is tested
+the same way. The two are distinct types and never convert into each other.
 
 #### R9. Lifetime of a referenced local
 
@@ -525,6 +541,117 @@ reference whose entry no longer exists is an error, in the spirit of the Zen —
 
 ---
 
+### 2.4 Nullable types (`T?`)
+
+`T?` is the type "`T` or `null`". It is the **only** spelling of nullability,
+and it is a suffix that binds looser than `ref` and than `[]`:
+
+| Written | Meaning |
+|---|---|
+| `Node?` | a `Node` value, or `null` |
+| `ref Node?` | a *nullable reference*: the reference itself may be `null` (§2.3 R8) |
+| `ref (Node?)` | a non-null reference to a slot whose value may be `null` |
+| `Node?[]` | an array of nullable nodes; `Node[]?` is a nullable array |
+| `(func(int) -> int)?`, `(ref func() -> int)?` | callables need the parentheses — `func() -> int?` reads the `?` on the return type |
+
+`T??`, `any?` and `void?` are syntax errors (`any` already admits `null`).
+
+**The five rules** (the model is Kotlin's null safety, which Dart 2.12+
+follows as well):
+
+1. A bare `T` is never `null`; `T?` may be. Every position that today spells
+   a type — `let`, parameter, return, field, element, map value, `chan`
+   payload — takes either.
+2. A struct or `ref` variable without an initializer is an error unless it
+   is `T?` (§3).
+3. `null` where a `T` is expected is a compile error, with the fix in the
+   hint: `expected Point, got null` / `hint: declare it as 'Point?' to allow
+   null`; for a parameter, `hint: declare the parameter as 'ref Node?' to
+   accept null`. A `T?` where a `T` is expected is a compile error too:
+   `expected Point, got Point?` / `hint: 'p' may be null; test it first`.
+4. Reading *through* a `T?` without a test is a compile error: `p.x`, `*r`,
+   `r.f`, `xs[i]`, `for v in xs`, `if b then` on a nullable operand all
+   report `'p' may be null; test it first` / `hint: use 'if p != null then
+   ... end'`. A nullable that is not a stable expression (`busca(xs, 1).x`)
+   gets `bind it with 'let' and test for null`.
+5. A null test **narrows**: inside the branch where the test proved the
+   value present, the expression has type `T`.
+
+```noxy
+struct Node
+    valor: int
+    prox: Node?               // owned list: the chain ends
+end
+
+func busca(xs: Node[], k: int) -> Node?     // may not find: the type says so
+    for n in xs do
+        if n.valor == k then
+            return n
+        end
+    end
+    return null
+end
+
+let achado = busca(lista, 7)               // inferred: Node?
+print(achado.valor)                        // ERROR: 'achado' may be null; test it first
+
+if achado != null then
+    print(achado.valor)                    // ✓ achado: Node in this branch
+end
+
+if achado == null then
+    return -1
+end
+print(achado.valor)                        // ✓ the null branch returned, so achado: Node from here on
+
+let total: int = 0
+let atual: Node? = inicio
+while atual != null do                     // ✓ the loop body sees atual: Node
+    total = total + atual.valor
+    atual = atual.prox                     // the assignment ends the narrowing for the rest of the body
+end
+```
+
+**What narrows.** A *stable expression*: an identifier, `*r`, or a member
+chain `a.b.c`. Facts come from `e != null` (true branch), `e == null` (false
+branch, and after the `if` when the true branch ends in `return`, `break`,
+`continue` or `exit`), the right operand of `&&`/`||` seeing the left one
+(`p != null && p.x > 0`), the body of `while e != null do`, and `if r.ok then`
+on an `errors.Result<T>` (which narrows `r.value`, §7). A `ref x` taken on a
+narrowed `x: T?` is a `ref T`.
+
+**What ends a narrowing.** An assignment to the expression or to a prefix of
+its path (`p = q`, `no = …` for `no.prox`); any call, for a path whose root
+is a `ref`-typed variable, a global, an upvalue, a captured local or a local
+whose address was taken with `ref` — someone else may reach it during the
+call; a write through a reference (`*r = v`, `r.f = v`), which drops every
+member-path fact; and entering a loop whose body assigns the root. A path
+rooted at a plain value local survives calls: value semantics (§2.2)
+guarantee nobody outside the frame can reach it. When a fact is lost, test
+again or bind first (`let n = no.prox` then `if n != null then … end`).
+Facts never survive into a different function: a closure body starts with
+none.
+
+**Generics and modules.** A type parameter `T` may bind a nullable type
+(`first(ps)` with `ps: Node?[]` returns `Node?`); it still cannot bind a
+`ref` (§6.5). A field `value: T?` instantiated with `T = X?` is `X?`, not
+`X??`. `T?` travels through module signatures and struct fields like any
+other type.
+
+**Runtime mirror.** The dynamic boundary (§4.2) enforces the same rule: a
+`null` arriving through `any` into a `Point`, `ref int` or `int[]` slot is a
+runtime error (`expected Point, got null` / `hint: declare the slot as
+'Point?' to allow null`); into a `T?` slot it is accepted. `json_loads` fills
+a JSON `null` only into a nullable field or element.
+
+**Not narrowed by design.** Fields of a struct value read after a call
+through a `ref` root, map lookups (`m["k"]`), array elements (`xs[i]`) and
+call results are not stable expressions; bind them to a `let` first. `any`
+is untouched by all of this: it holds `null` and every other value, and its
+reads are checked at runtime as before.
+
+---
+
 ## 3. Variable Declarations
 
 ```noxy
@@ -600,16 +727,19 @@ that type, and the REPL infers line by line (`>>> let x = 10`).
 | `int`, `float`, `bool`, `string`, `bytes` | `0`, `0.0`, `false`, `""`, `b""` |
 | `T[]`, `map[K, V]` | `[]`, `{}` (empty) |
 | `T[N]` | `N` copies of `T`'s default — so `T` must have one |
-| struct, `ref T`, `any` | `null` (the types that accept `null`, §2.3, §5) |
+| `T?`, `any` | `null` (the types that accept `null`, §2.4) |
 
-`chan T` and function types (`func`, `func(A) -> R`) have **no default**:
-`null` is not a value of those types (`let c: chan int = null` is a type
-error), so a declaration without an initializer is a compile-time error —
-give the value up front:
+Struct types, `ref T`, `chan T` and function types (`func`, `func(A) -> R`)
+have **no default**: `null` is not a value of those types (`let p: Point =
+null`, `let c: chan int = null` are type errors), so a declaration without
+an initializer is a compile-time error — give the value up front, or declare
+the slot nullable when "not yet" is a legitimate state:
 
 ```noxy
-let p: Point              // ✓ null
-let r: ref int            // ✓ null
+let p: Point              // ERROR: variable 'p' needs an initializer: Point has no default value
+                          //   hint: write 'let p: Point = ...' or declare it as 'Point?'
+let q: Point?             // ✓ null
+let r: ref int?           // ✓ null
 let n: int                // ✓ 0
 let cs: (chan int)[]      // ✓ [] — the array is empty, no element default needed
 let c: chan int           // ERROR: variable 'c' needs an initializer: chan int has no default value
@@ -635,6 +765,36 @@ The REPL applies the same rule: a session behaves like a single file typed
 line by line, so re-declaring a name from an earlier line is rejected —
 assign to it instead. A rejected line does not claim its name: after an
 error you may still `let` that name.
+
+**One global namespace.** `let`, `func`, `struct` and imported names share
+the global scope. Declaring a name that another kind already holds is the
+same error, naming the earlier declaration: `'x' redeclared in this scope
+(previous declaration as function at line 1)`. This covers `let x` over
+`func x`, `struct P` over `func P`, and a `let` or `func` over a name
+brought in by `use m`, `use m select a` or `use m select *`. Importing the
+same name twice is not a collision. In the REPL the only relaxation is
+redefining a *function* with another function on a later line — the way one
+iterates on a definition; every other cross-kind collision is rejected as in
+a file.
+
+**Every global name resolves at compile time.** Reading or assigning a name
+that is neither declared in the program (anywhere — a function body may use
+a global declared later in the file), nor imported, nor provided by the
+runtime is a compile error, even inside a branch that never runs:
+
+```noxy
+let cond: bool = false
+if cond then
+    print(typo_global)   // ERROR: undefined global 'typo_global'
+end                      //   hint: declare it with 'let typo_global = ...' or check the spelling
+i = 0                    // ERROR: cannot assign to undeclared name 'i'
+```
+
+The set of runtime-provided names (the built-in natives, extension and
+plugin exports) comes from the embedder: the CLI, the REPL and the module
+loader seed the compiler with the names the VM defines, so `print` or
+`io_open` are known without being declared. A compiler used standalone,
+without a VM, does not check global names.
 
 ### Shadowing in inner scopes
 
@@ -851,21 +1011,24 @@ typed base (`unknown field`), and at runtime through a dynamic one
 
 A struct may contain its own type in two ways, and they mean different things.
 
-**Ownership — a field without `ref`.** A struct-typed field accepts `null`
-(§3), so a recursive structure with a single owner per node — a list, a tree —
-needs no `ref` in its declaration. The children are values: copying a node
-copies the whole subtree (copy-on-write, so the copy is lazy), and a callee
-that receives a node by value cannot reach the caller's tree. In-place
-mutation goes through a `ref` to the *slot* (§2.3 R1, R10):
+**Ownership — a field without `ref`.** A struct-typed field declared `T?`
+accepts `null` (§2.4), so a recursive structure with a single owner per node
+— a list, a tree — needs no `ref` in its declaration: the chain ends in a
+`null`. The children are values: copying a node copies the whole subtree
+(copy-on-write, so the copy is lazy), and a callee that receives a node by
+value cannot reach the caller's tree. In-place mutation goes through a `ref`
+to the *slot* — `ref (TreeNode?)`, a reference to a place that may hold null
+(§2.3 R1, R8, R10); `if *node == null then … return` narrows `*node` for the
+reads that follow:
 
 ```noxy
 struct TreeNode
     valor: int
-    esquerda: TreeNode      // owned, nullable
-    direita: TreeNode
+    esquerda: TreeNode?     // owned; null where the tree ends
+    direita: TreeNode?
 end
 
-func insert(node: ref TreeNode, v: int) -> void
+func insert(node: ref (TreeNode?), v: int) -> void
     if *node == null then
         *node = TreeNode(v, null, null)
         return
@@ -877,12 +1040,18 @@ func insert(node: ref TreeNode, v: int) -> void
     end
 end
 
-let raiz: TreeNode = null
+let raiz: TreeNode? = null
 insert(ref raiz, 50)
 insert(ref raiz, 30)
-let copia: TreeNode = raiz
-copia.esquerda.valor = 999    // raiz.esquerda.valor is still 30
+let copia: TreeNode? = raiz
+if copia != null && copia.esquerda != null then
+    copia.esquerda.valor = 999    // raiz.esquerda.valor is still 30
+end
 ```
+
+A fact about `*node` does not survive a call whose root is a `ref` (§2.4):
+in `1 + count(ref node.esquerda) + count(ref node.direita)` the second
+borrow needs a fresh test — bind the first result to a `let` and test again.
 
 `noxy_examples/bst_owned.nx` is the reference program for this idiom. Its
 cost today is the nested borrow (`ref node.esquerda` inside a recursion) —
@@ -896,13 +1065,15 @@ the struct becomes *ref-carrying* (§2.2 rule 6):
 ```noxy
 struct Node
     value: int
-    next: ref Node
+    next: ref Node?         // shared; null where the list ends
 end
 ```
 
 A `ref` field is filled by rebinding it to a variable (`let novo: Node = ...;
-node.next = ref novo`) or cleared with `null`; assigning a raw `Node` to it is
-a compile error whether `node` is a `Node` or a `ref Node` (§2.3, §4.2). The
+node.next = ref novo`) or — when declared `ref Node?` — cleared with `null`;
+assigning a raw `Node` to it is a compile error whether `node` is a `Node`
+or a `ref Node` (§2.3, §4.2). Reading `node.next.value` needs `if node.next
+!= null then` first (§2.4). The
 sharing is the point of such a field, and it travels with every copy of the
 container: `let b = a`, `f(a)` with `f(x: Node)`, `arr[i]`, `chan_send` all
 hand out a value whose `next` reaches the *same* node — the copy is
@@ -1192,16 +1363,19 @@ print(primeiro(numeros)) // 5 — T inferred from the imported `numeros`
 - **Top level only.** A `func` or `struct` declared with type parameters
   cannot be nested inside a function body.
 
-- **`T` cannot bind a `ref` type.** Passing a `ref` value where `T` would
-  bind to `ref X` is a compile-time error; declare the parameter as `ref T`
-  instead when the generic needs to receive a reference:
+- **`T` cannot bind a `ref` type** (`ref X` or `ref X?`). Passing a `ref`
+  value where `T` would bind to it is a compile-time error; declare the
+  parameter as `ref T` instead when the generic needs to receive a
+  reference. `T` **may** bind a nullable value type: `first(ps)` with
+  `ps: Node?[]` returns `Node?`, and a field `value: T?` instantiated with
+  `T = X?` is `X?` (§2.4).
 
   ```noxy
   func identity<T>(x: T) -> T
       return x
   end
-  let r: ref int = null
-  let v: ref int = identity(r)   // ERROR: T cannot be a ref type
+  let r: ref int? = null
+  let v: ref int? = identity(r)  // ERROR: T cannot be a ref type
 
   func identity_ref<T>(x: ref T) -> ref T  // idiomatic form: `ref` is
       return x                              // explicit, T binds to int
@@ -1428,15 +1602,41 @@ value the program itself produced, an out-of-range index, a violated native
 contract. It unwinds call frames, runs deferred calls along the way, and —
 unobserved — terminates the script with a diagnostic.
 
-A **result struct** means the input was allowed to be bad: untrusted text,
-user input, wire data. Failure is an expected outcome, so it is data — an
-`ok` flag the caller must branch on. Because Noxy functions return a single
-value, the result struct occupies the place of Go's `value, err` pair.
+A **`Result<T>`** means the input was allowed to be bad: untrusted text,
+user input, wire data. Failure is an expected outcome, so it is data — one
+generic struct, declared in the `errors` module, that every operation with
+an expected failure returns:
+
+```noxy
+struct Failure
+    kind: string       // "runtime" | "panic"; "" in the success sentinel
+    message: string
+    stack: string
+    causes: Failure[]  // deferred-call failures aggregated during unwinding
+end
+
+struct Result<T>
+    ok: bool
+    value: T?          // T on success, null on failure
+    failure: Failure   // an empty Failure on success — never null
+end
+```
+
+Both fields always exist and `ok` says which one is meaningful. `if r.ok
+then` narrows `r.value` from `T?` to `T` inside the branch (§2.4), so the
+happy path reads the value without a second test; the `else` branch reads
+`r.failure.message`. The constructors are `Ok(v)`, `Err(message)` and
+`Fail(failure)` — capitalized, like the type, so that `let ok: bool = …` in
+a program that imports the standard library never collides with them.
+Because Noxy functions return a single value, `Result<T>` occupies the place
+of Go's `value, err` pair.
 
 API design rule: an operation whose failure indicates a caller bug raises; an
 operation whose failure is an expected outcome of untrusted data returns a
-result struct. When both kinds of caller exist, provide the raising form and a
-`_result` twin: `to_int` / `to_int_result`, `io.close` / `io.close_result`.
+`Result<T>`. When both kinds of caller exist, provide the raising form and a
+`_result` twin: `to_int` / `to_int_result` (`Result<int>`), `io.close` /
+`io.close_result` (`Result<bool>`), `io.write` / `io.write_result`
+(`Result<int>`, the bytes written), `json.dumps_result` (`Result<string>`).
 
 Two boundaries convert the first channel into the second, and they are the
 only two: the supervised-task boundary (`spawn_task` / `task_await`), and the
@@ -1453,10 +1653,9 @@ that unwinds out of it into a value:
 ```noxy
 use errors select *
 
-let r: CallResult = call_result(to_int, entrada)
+let r = call_result(to_int, entrada)   // r: Result<int> — to_int returns int
 if r.ok then
-    let n: int = to_int(r.value)   // narrowing only: r.value is already int
-    print(n)
+    print(r.value + 1)                  // r.value: int here (narrowed by r.ok)
 else
     print("entrada inválida: " + r.failure.message)
 end
@@ -1465,8 +1664,17 @@ end
 **Signature.**
 
 ```noxy
-call_result(fn, ...args)   // -> CallResult
+call_result(fn, ...args)   // -> errors.Result<R>
 ```
+
+`R` is the static return type of `fn`: a declared function or struct
+constructor, a function value with an exact signature, a function literal,
+or a core native with a known return type (`to_int` → `int`). A `void`
+callee or one whose return type the compiler cannot see (a legacy native, a
+bare `func` value) gives `Result<any>`. The `errors` module must be in scope
+(`use errors select *`, or any `select *` that re-exports it, such as
+`use convert select *`): `call_result` needs `Result` and `Failure` to build
+its envelope, and a call without them is a compile error.
 
 `fn` is the callable to invoke — always the first argument. `...args` are
 zero or more arguments of any Noxy type (scalars, strings, bytes, arrays,
@@ -1517,8 +1725,10 @@ func deposita(saldo: ref int, valor: int)
     *saldo = *saldo + valor
 end
 
-let c: CallResult = call_result(Ponto, 3, 4)      // constructor: value is the instance
-let p: any = c.value                               // p.x == 3, p.y == 4
+let c = call_result(Ponto, 3, 4)                   // constructor: c: Result<Ponto>
+if c.ok then
+    let p: Ponto = c.value                         // p.x == 3, p.y == 4
+end
 
 let saldo: int = 100
 call_result(deposita, ref saldo, 30)               // explicit ref keeps identity: saldo == 130
@@ -1536,14 +1746,14 @@ a reference. Where the callee exposes parameter metadata, the number of
 parameter type and mode — checked synchronously, per the table above.
 `call_result` adds no isolation — it is the same call, wearing a boundary.
 
-**Envelope.** `call_result` always returns a `CallResult` (module `errors`);
-it never raises for anything that happens *inside* `fn`:
+**Envelope.** `call_result` always returns an `errors.Result<R>`; it never
+raises for anything that happens *inside* `fn`:
 
 | Field | Type | `fn` completes | Failure captured |
 |---|---|---|---|
 | `ok` | `bool` | `true` | `false` |
-| `value` | `any` | `fn`'s return value; `null` for `void` | `null` |
-| `failure` | `Failure` | `null` | the primary failure |
+| `value` | `R?` | `fn`'s return value; `null` for `void` | `null` |
+| `failure` | `Failure` | `empty_failure()` (`kind == ""`) | the primary failure |
 
 | `Failure` field | Type | Content |
 |---|---|---|
@@ -1581,27 +1791,20 @@ In detail:
   aggregate under the primary's `causes` in LIFO order, each nesting its own
   `causes` further.
 
-**Representation.** `call_result` is a native, and natives return values
-across the dynamic boundary (§4.2). Like every result envelope a native
-produces today (`convert_to_int_result` and its `IntResult`), the envelope is
-physically a map whose fields match the declared shapes; the `errors` module
-declarations exist so Noxy code can annotate (`let r: CallResult = ...`) and
-so the field names are a compile-checkable contract at typed use sites. The
-consequences are observable and identical to the existing `IntResult`
-precedent: `fmt("%T", r)` reports `map`, and the envelope does not compare
-equal to a hand-constructed `CallResult(...)` instance. Promoting the
-envelopes (this one and `task_await`'s) to genuine struct instances is a
-single future change, gated on natives being able to construct
-stdlib-declared structs. The annotation is nonetheless honored, and by a
-general rule rather than a special case for this envelope: wherever a struct
-shape is expected at a dynamic-boundary annotation or marker, the runtime
-type validator admits any structurally matching map — every field the struct
-declares present, each recursively compatible with the declared field type —
-without nominal checking, and without stamping the map as that struct. The
-admission stops at nominal gates: task-argument validation (`spawn_task`) and
-every other check that requires a real struct instance still reject a map, so
-a `CallResult` envelope passed as a typed task argument fails today;
-unifying the two matchers is tracked as follow-up.
+**Representation.** The envelope is a genuine instance of the monomorphized
+struct `errors::Result<R>` — the compiler instantiates it at the call site
+(the same queue every generic use goes through) and hands the native the
+constructors of that instance and of `Failure` as hidden leading arguments.
+`fmt("%T", r)` reports the instance name, `r == Result(true, 5,
+empty_failure())` compares equal by content, the envelope passes nominal
+checks (typed task arguments, typed slots) like any struct value, and the
+`Failure` tree — including every entry of `causes` — is made of `Failure`
+instances. Each compilation unit instantiates its own `Result<R>`; values
+flow between them by name, so a `Result<int>` built inside `convert` is a
+`Result<int>` in the program that called `to_int_result`. The
+structurally-matching-map admission at dynamic-boundary annotations (§4.2)
+still exists for natives that return maps, but no stdlib envelope relies on
+it any more; `task_await`'s envelope remains a map (follow-up).
 
 **What the boundary does not change.**
 
@@ -1643,19 +1846,50 @@ unifying the two matchers is tracked as follow-up.
 to decorate call sites. The inline form over a closure is legal:
 
 ```noxy
-let r: CallResult = call_result(func() -> int
+let r = call_result(func() -> int
     return to_int(campo) * fator
-end)
+end)                                   // r: Result<int>
 ```
 
-but the idiom is wrap-and-name: a `_result` function with a typed result
-struct is a contract; an inline boundary is a site the reader must decode. The
-boundary's design leans on auditability — `call_result` is one grep away from
-every place errors become data — and on the envelope being deliberately
-untyped (`value: any`), so a named twin that narrows the value is always the
-more comfortable form. Discarding the envelope — `call_result(f, x)` as a
-bare statement — swallows every failure `f` can produce and is almost
-certainly a bug; a compile-time diagnostic for it is tracked as follow-up.
+but the idiom is wrap-and-name: a `_result` function returning `Result<T>`
+is a contract; an inline boundary is a site the reader must decode. The
+boundary's design leans on auditability — `call_result` is one grep away
+from every place errors become data. Discarding the envelope —
+`call_result(f, x)` as a bare statement — swallows every failure `f` can
+produce and is almost certainly a bug; a compile-time diagnostic for it is
+tracked as follow-up.
+
+### Propagation: `try`
+
+`try expr` is the one piece of sugar over `Result<T>`. `expr` must have type
+`Result<U>`, and the enclosing function must return `Result<V>`:
+
+- if `expr.ok`, the expression's value is `expr.value`, of type `U`;
+- otherwise the function returns **immediately** with
+  `Result<V>(false, null, expr.failure)` — the same `Failure`, untouched.
+  Deferred calls run as for any `return`.
+
+```noxy
+use errors select *
+use convert select *
+
+func le_config(texto: string) -> Result<Config>
+    let bruto: string = try le_texto(texto)     // Result<string> → string, or return the failure
+    let porta: int = try to_int_result(bruto)   // Result<int> → int, or return the failure
+    return Ok(Config(porta))
+end
+
+try io.close_result(f)                          // Result<bool> as a statement: only propagates
+```
+
+`try` binds like a prefix operator (`try f(x).ok` is `try (f(x).ok)`), is a
+reserved word, and is a compile error outside a function (`'try' outside a
+function`), in a function whose return type is not a `Result`
+(`'try' requires the enclosing function to return Result<T> (found void)`),
+or on an operand that is not a `Result` (`'try' expects a Result<T>, got
+int`). `Result` is recognized by name — the struct declared in `errors` —
+not by shape, so a user struct that happens to have an `ok` field does not
+get `try`.
 
 ### When / Channel Select
 
@@ -1922,11 +2156,11 @@ to_int(true)     // erro: bool não é número em Noxy
 ```noxy
 use convert select *
 
-let porta: IntResult = to_int_result(getenv("PORT").value)
+let porta = to_int_result(getenv("PORT").value)   // Result<int>
 if porta.ok then
     print("porta " + to_str(porta.value))
 else
-    print("PORT inválida: " + porta.error)
+    print("PORT inválida: " + porta.failure.message)
 end
 ```
 
@@ -2198,7 +2432,7 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `crypto` | Cryptographic functions (hashing, UUID) |
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
-| `errors` | Error boundary envelope shapes (Failure, CallResult) |
+| `errors` | `Failure`, `Result<T>`, `Ok`/`Err`/`Fail`/`empty_failure` — the error-as-data vocabulary (§7) |
 
 ### I/O (`io`)
 
@@ -2211,8 +2445,7 @@ Every fallible operation reports through a result struct instead of raising
 | `IOResult` | `ok: bool`, `data: string`, `error: string` |
 | `IOBytesResult` | `ok: bool`, `data: bytes`, `error: string` |
 | `IOLinesResult` | `ok: bool`, `data: string[]`, `error: string` |
-| `IOWriteResult` | `success: bool`, `bytes_written: int`, `error: string` |
-| `IOCloseResult` | `success: bool`, `error: string` |
+| `IOWriteResult`, `IOCloseResult` | Raw shapes of the underlying natives; the public wrappers below return `errors.Result<T>` |
 | `IOPositionResult` | `ok: bool`, `position: int` (absolute byte offset; `-1` when `ok=false`), `error: string` |
 | `FileInfo` | `exists: bool`, `size: int`, `is_dir: bool` |
 
@@ -2227,7 +2460,7 @@ the three origins, as `lseek` does in C.
 | `open(path, mode) -> File` | `mode` is `"r"`, `"w"` (truncate), `"a"` (append) or `"rw"`/`"r+"` (read and write in place, no truncation). On failure the `File` comes back with `open=false` |
 | `stdin() -> File` | The process's standard input as a `File` (`path="<stdin>"`, read-only, not closable, not seekable). Always the same handle |
 | `close(file) -> void` | Closes and forgets the handle |
-| `close_result(file) -> IOCloseResult` | Same, reporting the outcome (`success=false`, `error="stdin cannot be closed"` for `stdin()`) |
+| `close_result(file) -> Result<bool>` | Same, reporting the outcome (`ok=false`, `failure.message="stdin cannot be closed"` for `stdin()`) |
 | `read(file) -> IOResult` | Everything **from the cursor to the end** as text (the whole file on a fresh handle; what is left after `read_line`/`read_n`/`seek`/`write`; `""` with `ok=true` when already at the end). Leaves the cursor at the end |
 | `read_lines(file) -> IOLinesResult` | Same range split by line, `\r\n` normalized, **with no trailing `""`**: `"a\nb\n"` and `"a\nb"` both give `[a, b]`; `""` gives `[]` |
 | `read_bytes(file) -> IOBytesResult` | Same range as raw `bytes`, no UTF-8 validation |
@@ -2236,9 +2469,9 @@ the three origins, as `lseek` does in C.
 | `seek(file, offset, whence) -> IOPositionResult` | Moves the cursor to `offset` bytes from the start (`SEEK_SET`), from the current position (`SEEK_CUR`) or from the end (`SEEK_END`) and reports the new absolute position. Past the end is allowed (a later read reports EOF; a write extends the file). Errors: `"stdin is not seekable"`, `"invalid whence N (...)"`, a negative resulting position (cursor unchanged), `"File not open"` |
 | `tell(file) -> IOPositionResult` | The current cursor position (`"stdin is not seekable"`, `"File not open"`) |
 | `write(file, content: string) -> void` | Writes text **at the cursor** (overwriting in `"rw"`/`"r+"`, never truncating) and advances it |
-| `write_result(file, content: string) -> IOWriteResult` | Same, reporting `bytes_written` (`error="stdin is read-only"` for `stdin()`) |
+| `write_result(file, content: string) -> Result<int>` | Same, `value` = bytes written (`failure.message="stdin is read-only"` for `stdin()`) |
 | `write_bytes(file, data: bytes) -> void` | Writes raw bytes at the cursor |
-| `write_bytes_result(file, data: bytes) -> IOWriteResult` | Same, reporting `bytes_written` |
+| `write_bytes_result(file, data: bytes) -> Result<int>` | Same, `value` = bytes written |
 | `exists(path) -> bool` | Whether the path exists |
 | `stat(path) -> FileInfo` | Size and `is_dir` (`exists=false` when the path is missing) |
 | `remove(path) -> bool` | Deletes a file |
@@ -2278,7 +2511,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.21.0`). It is a module binding, not a
+string `noxy --version` prints (`v0.22.0`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 

@@ -1,5 +1,102 @@
 # Changelog
 
+## [0.22.0] - 2026-08-28
+
+A distância entre o pitch e o produto fechada nos dois lugares apontados na
+issue #105: **`null` no sistema de tipos** e **ergonomia de erros** — mais a
+solidez de nomes da #47. Struct e `ref` nus nunca são `null`; `T?` é a única
+grafia de nulidade e o compilador estreita (`if x != null then`) no modelo de
+Kotlin/Dart. Um `Result<T>` genérico único em `errors`, `call_result` tipado
+pelo callee e devolvendo instância real, `try expr` propagando a falha.
+Parâmetro duplicado, colisão no escopo global e global inexistente viram erro
+de compilação. Spec §2.4 (nova), §3, §5, §7 reescritas; plano em
+`docs/superpowers/plans/2026-08-28-issue-105-null-safety-result.md`.
+
+### Changed (BREAKING) — nulidade (issue #105 item 1, #84 ampliada)
+
+| Antes (0.21) | Agora (0.22) |
+|---|---|
+| `let p: Point` valia `null`; `let r: ref int` idem | erro `needs an initializer … or declare it as 'Point?'`; `let p: Point?` / `let r: ref int?` valem `null` |
+| `let p: Point = null`, `f(null)` com `n: ref Node`, `Node(1, null)` com `next: ref Node` | erro de compilação com hint `declare it as 'Point?' to allow null` / `declare the parameter as 'ref Node?' to accept null` |
+| `p.x`, `*r`, `r.f`, `xs[i]` sobre valor possivelmente nulo explodiam em runtime | erro de compilação `'p' may be null; test it first` + hint; dentro de `if p != null then … end` o tipo é `Point` |
+| `null` vindo por `any` entrava em struct/ref/array | runtime `expected Point, got null` + hint; entra só em `T?` |
+| `json_loads` punha `null` em qualquer campo struct/ref | só em campo/elemento `T?` |
+| `net.socket_set() -> Socket[64]`, `SelectResult.read: Socket[64]` | `Socket?[64]` na entrada (slot vazio é `null`); `SelectResult.read/write/error: Socket[]` com exatamente `*_count` sockets |
+
+Gramática: `?` é o pós-fixo mais externo — `ref Node?` é referência anulável,
+`ref (Node?)` referência a slot anulável, `Node?[]` array de anuláveis,
+`(func(int) -> int)?` para callables. `T??`, `any?`, `void?` são erros.
+Narrowing vale para expressões estáveis (`x`, `*r`, `a.b.c`) a partir de
+`!= null`/`== null` (com early return), `&&`/`||`, `while e != null do` e
+`if r.ok then` (estreita `r.value`); acaba em atribuição ao prefixo, em
+chamada quando a raiz é `ref`/global/upvalue/capturada/endereçada, em escrita
+através de `ref`, e na entrada de laço que atribui a raiz. `T` genérico pode
+bindar `X?` (nunca `ref`).
+
+### Changed (BREAKING) — erros como dado (issue #105 item 2, #39 item 2)
+
+| Antes (0.21) | Agora (0.22) |
+|---|---|
+| `errors.CallResult {ok, value: any, failure}` (um map em runtime) | `errors.Result<T> {ok, value: T?, failure: Failure}` — instância real; `fmt("%T")` dá o nome da instância, compara igual a `Result(true, v, empty_failure())` |
+| `let r: CallResult = call_result(f, x)` | `let r = call_result(f, x)` é `Result<R>` com `R` o retorno estático de `f` (`Result<any>` se desconhecido/void); exige `use errors select *` em escopo |
+| `to_int_result -> IntResult`, `to_float_result -> FloatResult` | `-> Result<int>` / `Result<float>`; `IntResult`/`FloatResult` removidos |
+| `io.close_result -> IOCloseResult`, `write_result`/`write_bytes_result -> IOWriteResult` | `-> Result<bool>` / `Result<int>` (bytes escritos); `IOWriteResult`/`IOCloseResult` viram shape interno dos nativos |
+| `json.dumps_result -> EncodeResult` | `-> Result<string>` |
+| `r.error` / `r.data` / `r.success` / `r.bytes_written` | `r.failure.message` / `r.value` / `r.ok` / `r.value` |
+| módulo `result` (deprecado desde 0.7.2) | removido |
+| — | `try expr`: `expr: Result<U>` vale `U` ou a função corrente (que devolve `Result<V>`) retorna a mesma `Failure`; `try` é palavra reservada |
+| — | construtoras `Ok(v)`, `Err(msg)`, `Fail(failure)`, `empty_failure()` — capitalizadas para não colidir com `let ok: bool` via `select *` |
+
+### Changed (BREAKING) — solidez de nomes (issue #47)
+
+- `func f(x: int, x: int)` → `duplicate parameter 'x' in function 'f'`.
+- `let`, `func`, `struct` e nomes importados dividem um namespace: `let x`
+  sobre `func x`, `struct P` sobre `func P`, `let range` sobre `use m select
+  range` → `'x' redeclared in this scope (previous declaration as function at
+  line N)`. No REPL, redefinir função por função entre linhas continua
+  permitido.
+- Global inexistente é erro de compilação mesmo atrás de branch que nunca
+  roda: `undefined global 'typo'` + hint; `x = 1` sem `let` →
+  `cannot assign to undeclared name 'x'`. O embutidor semeia os nativos
+  (`vm.GlobalNames()` → `compiler.SetKnownGlobals`); `compiler.New()` puro
+  continua permissivo. `bst_owned.nx` e `test_fmt_types.nx` chamavam
+  `exit(1)` sem importar `sys` — o check pegou.
+
+### Added
+
+- `ast.NullableType`, token `?`, helpers `isNullable`/`nonNull`/`nullable`/
+  `asRefType` (toda pergunta de modo "é ref?" desembrulha `?`).
+- `internal/compiler/narrowing.go`: fatos por chave estável, `conditionFacts`,
+  invalidação por atribuição/chamada/laço, `blockTerminates`.
+- `OP_SWAP` (lowering de `try`); `ast.TryExpression`; `ast.Inspect` (walker).
+- `compiler.SetKnownGlobals`, `compiler.PluginNativeNames`, `vm.GlobalNames`,
+  `compiler.GlobalDecl`/`SetSessionBindings`/`ProgramBindings` (REPL).
+- Re-export transitivo por `select *` resolve o nome no módulo que o declara
+  (tipo e template certos) em vez de apagar o tipo já conhecido.
+- Exemplos: `try_config.nx`; `result_pattern.nx` na forma tipada; fixtures
+  `type_errors/nullable_*.nx`, `try_*.nx`.
+
+### Fixed
+
+- Mensagem de runtime para `null` em slot não-anulável nomeia o tipo
+  (`expected Point, got null` + hint) em vez de "runtime value metadata
+  conflicts with static context".
+- Um `let` global homônimo a um `use` não sombreia mais o namespace em
+  silêncio (era aceito e mudava o significado de `calc.x`).
+
+### Migração
+
+1. `let p: P` sem valor → dê o valor ou `let p: P?`.
+2. Campo/param/retorno que recebe `null` → `T?` / `ref T?` (o hint diz qual).
+3. Leitura de `T?` → `if x != null then … end` (ou `let n = a.b` e teste).
+4. `let r: CallResult = call_result(…)` → `let r = call_result(…)`;
+   `IntResult`/`IOWriteResult`/`EncodeResult` → `Result<T>`; `r.error` →
+   `r.failure.message`; `r.data`/`r.bytes_written` → `r.value`.
+5. `if r.ok == false then return r end` em cadeia → `try`.
+6. `ok`/`err` como nome de função própria em módulo importado por `select *`
+   colidem com nada (as construtoras são `Ok`/`Err`); `try` como identificador
+   precisa ser renomeado.
+
 ## [0.21.0] - 2026-08-28
 
 Campos de struct por **índice**, dos dois lados. A instância guarda os campos

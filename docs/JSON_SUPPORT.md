@@ -153,13 +153,18 @@ The json module exposes strict encoding when callers need explicit failure:
 use json
 
 let value: map[string, any] = {"name": "Noxy", "active": true}
-let result: json.EncodeResult = json.dumps_result(value)
-if result.success then
-    print(result.data)
+let result: any = json.dumps_result(value)   // errors.Result<string> (use `use json select *` for the typed form)
+if result.ok then
+    print(result.value)
 else
-    print(result.error)
+    print(result.failure.message)
 end
 ```
+
+With `use json select *` the wrapper is typed — `let r = dumps_result(value)`
+is a `Result<string>`, `if r.ok then` narrows `r.value` to `string`, and
+`try dumps_result(value)` propagates the failure from a function that returns
+a `Result` (spec §7).
 
 json.dumps_result accepts null, bool, int, finite float, string, arrays, and
 recursively string-keyed maps. It rejects bytes, structs, references,
