@@ -2294,7 +2294,11 @@ the UTF-8 error in `error`, even when the process exited with code 0.
 `json_dumps`, `json_parse` and `json_loads` are documented in
 [`JSON_SUPPORT.md`](JSON_SUPPORT.md). `json_loads(text, ref target)` populates an
 existing typed target in place and returns `false` (with no partial writes)
-when the payload does not fit. For a slot declared `ref T` **inside** the
+when the payload does not fit. "In place" keeps value semantics at every level:
+a composite that is shared somewhere inside the target (`let copia = t[0]`
+before the call) is cloned and the clone is written back to its parent —
+exactly what `t[0].a = v` does — while a uniquely owned container mutates
+without cloning. For a slot declared `ref T` **inside** the
 target (array element, struct field, map value): a slot that already holds a
 reference is written **through** it; a JSON `null` stores `null`; a non-null
 payload for a slot that is `null` (or for a new element/field) builds the `T`

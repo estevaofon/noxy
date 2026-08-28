@@ -78,19 +78,19 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 			if current.Type != value.VAL_OBJ || !ok {
 				return nil, false
 			}
-			return prepareJSONArrayMutation(vm, array, schema.Element, data)
+			return prepareJSONArrayMutation(vm, current, array, schema.Element, data, set)
 		case value.TYPE_MAP:
 			mapping, ok := current.Obj.(*value.ObjMap)
 			if current.Type != value.VAL_OBJ || !ok || !jsonMapKeyCompatible(schema.Key) {
 				return nil, false
 			}
-			return prepareJSONMapMutation(vm, mapping, schema.Value, data)
+			return prepareJSONMapMutation(vm, current, mapping, schema.Value, data, set)
 		case value.TYPE_STRUCT:
 			instance, ok := current.Obj.(*value.ObjInstance)
 			if current.Type != value.VAL_OBJ || !ok || instance.Struct == nil || instance.Struct.Name != schema.Name {
 				return nil, false
 			}
-			return prepareJSONStructMutation(vm, instance, schema, data)
+			return prepareJSONStructMutation(vm, current, instance, schema, data, set)
 		default:
 			if set == nil {
 				return nil, false
@@ -106,11 +106,11 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 	if current.Type == value.VAL_OBJ {
 		switch object := current.Obj.(type) {
 		case *value.ObjArray:
-			return prepareJSONArrayMutation(vm, object, nil, data)
+			return prepareJSONArrayMutation(vm, current, object, nil, data, set)
 		case *value.ObjMap:
-			return prepareJSONMapMutation(vm, object, nil, data)
+			return prepareJSONMapMutation(vm, current, object, nil, data, set)
 		case *value.ObjInstance:
-			return prepareJSONStructMutation(vm, object, nil, data)
+			return prepareJSONStructMutation(vm, current, object, nil, data, set)
 		}
 	}
 	if set == nil {
@@ -126,7 +126,7 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 	return func() { set(replacement) }, true
 }
 
-func prepareJSONArrayMutation(vm *VM, array *value.ObjArray, elementSchema *value.RuntimeTypeInfo, data interface{}) (jsonCommit, bool) {
+func prepareJSONArrayMutation(vm *VM, current value.Value, array *value.ObjArray, elementSchema *value.RuntimeTypeInfo, data interface{}, set jsonSetter) (jsonCommit, bool) {
 	dataArray, ok := data.([]interface{})
 	if !ok {
 		return nil, false
@@ -167,6 +167,7 @@ func prepareJSONArrayMutation(vm *VM, array *value.ObjArray, elementSchema *valu
 		added = append(added, created)
 	}
 	return func() {
+		target, writeBack := jsonCommitTarget(vm, current, set)
 		for _, commit := range commits {
 			commit()
 		}
@@ -178,11 +179,12 @@ func prepareJSONArrayMutation(vm *VM, array *value.ObjArray, elementSchema *valu
 		for j := len(dataArray); j < len(oldElements); j++ {
 			value.Release(oldElements[j])
 		}
-		array.Elements = newElements
+		target.Obj.(*value.ObjArray).Elements = newElements
+		writeBack()
 	}, true
 }
 
-func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.RuntimeTypeInfo, data interface{}) (jsonCommit, bool) {
+func prepareJSONMapMutation(vm *VM, current value.Value, mapping *value.ObjMap, valueSchema *value.RuntimeTypeInfo, data interface{}, set jsonSetter) (jsonCommit, bool) {
 	dataMap, ok := data.(map[string]interface{})
 	if !ok {
 		return nil, false
@@ -219,17 +221,19 @@ func prepareJSONMapMutation(vm *VM, mapping *value.ObjMap, valueSchema *value.Ru
 		added = append(added, created)
 	}
 	return func() {
+		target, writeBack := jsonCommitTarget(vm, current, set)
 		for _, commit := range commits {
 			commit()
 		}
 		for _, created := range added {
 			value.Retain(created) // RC: chave nova — o map vira dono
 		}
-		mapping.Replace(newData)
+		target.Obj.(*value.ObjMap).Replace(newData)
+		writeBack()
 	}, true
 }
 
-func prepareJSONStructMutation(vm *VM, instance *value.ObjInstance, schema *value.RuntimeTypeInfo, data interface{}) (jsonCommit, bool) {
+func prepareJSONStructMutation(vm *VM, current value.Value, instance *value.ObjInstance, schema *value.RuntimeTypeInfo, data interface{}, set jsonSetter) (jsonCommit, bool) {
 	dataMap, ok := data.(map[string]interface{})
 	if !ok || instance.Struct == nil {
 		return nil, false
@@ -267,10 +271,12 @@ func prepareJSONStructMutation(vm *VM, instance *value.ObjInstance, schema *valu
 		commits = append(commits, commit)
 	}
 	return func() {
+		target, writeBack := jsonCommitTarget(vm, current, set)
 		for _, commit := range commits {
 			commit()
 		}
-		instance.Slots = newSlots
+		target.Obj.(*value.ObjInstance).Slots = newSlots
+		writeBack()
 	}, true
 }
 
@@ -529,4 +535,23 @@ func jsonReferenceStorage(vm *VM, ref *value.ObjRef) (value.Value, jsonSetter, b
 		return value.Value{}, nil, false
 	}
 	return stored, jsonStoreThrough(vm, target), true
+}
+
+// jsonCommitTarget e a semantica de valor nos niveis ANINHADOS do json_loads
+// (issue #53 item 1). Roda no INICIO do commit de um conteiner — depois de
+// todos os prepares terem passado, entao nunca fica clone pendurado numa
+// falha. Se o conteiner esta compartilhado (`let copia = t[0]` antes do
+// json_loads) e ha como gravar de volta, clona (copyValue: raso, retem os
+// filhos — que passam a ver-se compartilhados e clonam por sua vez nos
+// PROPRIOS commits, que rodam depois deste passo) e devolve o clone como alvo
+// da atribuicao final mais um finalizador que o grava no pai pelo setter
+// (retain-novo/release-velho e do setter). Dono unico → muta no lugar, sem
+// clone. set == nil (populateObj: alvo passado por valor, sem lugar) → no
+// lugar, como antes. E a mesma disciplina da familia *_MUT do bytecode.
+func jsonCommitTarget(vm *VM, current value.Value, set jsonSetter) (value.Value, func()) {
+	if set == nil || !value.IsShared(current) {
+		return current, func() {}
+	}
+	clone := vm.copyValue(current)
+	return clone, func() { set(clone) }
 }
