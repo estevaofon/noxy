@@ -546,12 +546,22 @@ func (p *Parser) expectPeek(t token.TokenType) bool {
 //     Parses the most basic type unit (int, ident, map, etc.) or a parenthesized group '(T)'.
 //     By using parentheses, the user can override precedence, allowing `(ref int)[]` to mean `Array<Ref<int>>`.
 func (p *Parser) parseType() ast.NoxyType {
+	return p.parseTypeWithNullable(true)
+}
+
+// parseTypeWithNullable e parseType com controle do sufixo `?` (spec §2.4):
+// `?` e o pos-fixo MAIS EXTERNO — binda mais fraco que `ref` e que `[]`.
+// Dentro de `ref …` o `?` nao e consumido pelo elemento (allowNullable=false),
+// para que `ref Node?` seja Nullable(Ref(Node)), uma referencia anulavel;
+// `ref (Node?)` (grupo) e Ref(Nullable(Node)), referencia a slot anulavel.
+// Sem `ref`, `?` e `[]` alternam livremente: `Node?[]`, `Node[]?`.
+func (p *Parser) parseTypeWithNullable(allowNullable bool) ast.NoxyType {
 	// Optional REF - Handle REF here to wrap the result (Ref(Type))
 	// This restores `ref int[]` -> Ref(Array(int)) precedence
 	if p.curToken.Type == token.REF {
 		line, column := p.curToken.Line, p.curToken.Column
 		p.nextToken()
-		elementType := p.parseType()
+		elementType := p.parseTypeWithNullable(false)
 		if elementType == nil {
 			return nil
 		}
@@ -561,7 +571,14 @@ func (p *Parser) parseType() ast.NoxyType {
 			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: 'ref ref' is not a type\n  hint: a reference is never taken to a reference", line, column))
 			return nil
 		}
-		return &ast.RefType{ElementType: elementType}
+		var result ast.NoxyType = &ast.RefType{ElementType: elementType}
+		for allowNullable && p.peekTokenIs(token.QUESTION) {
+			p.nextToken()
+			if result = p.wrapNullable(result); result == nil {
+				return nil
+			}
+		}
+		return result
 	}
 
 	t := p.parseAtomicType()
@@ -571,7 +588,14 @@ func (p *Parser) parseType() ast.NoxyType {
 
 	// Check for array brackets [] or [size]
 	// Loop to support multidimensional arrays int[][]
-	for p.peekTokenIs(token.LBRACKET) {
+	for p.peekTokenIs(token.LBRACKET) || (allowNullable && p.peekTokenIs(token.QUESTION)) {
+		if p.peekTokenIs(token.QUESTION) {
+			p.nextToken() // eat ?
+			if t = p.wrapNullable(t); t == nil {
+				return nil
+			}
+			continue
+		}
 		p.nextToken() // eat [
 
 		size := 0
@@ -595,6 +619,27 @@ func (p *Parser) parseType() ast.NoxyType {
 	}
 
 	return t
+}
+
+// wrapNullable aplica um `?` (o token corrente) ao tipo t. `T??`, `any?`
+// (any ja admite null) e `void?` sao erros de sintaxe.
+func (p *Parser) wrapNullable(t ast.NoxyType) ast.NoxyType {
+	line, column := p.curToken.Line, p.curToken.Column
+	switch typed := t.(type) {
+	case *ast.NullableType:
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: type is already nullable\n  hint: write '%s' once", line, column, typed.String()))
+		return nil
+	case *ast.PrimitiveType:
+		if typed.Name == "any" {
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: 'any' already admits null\n  hint: write 'any'", line, column))
+			return nil
+		}
+		if typed.Name == "void" {
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: 'void' cannot be nullable", line, column))
+			return nil
+		}
+	}
+	return &ast.NullableType{ElementType: t}
 }
 
 func (p *Parser) parseValueType() ast.NoxyType {
@@ -631,6 +676,8 @@ func hasInvalidVoidPosition(t ast.NoxyType, allowVoid bool) bool {
 		return hasInvalidVoidPosition(typed.KeyType, false) ||
 			hasInvalidVoidPosition(typed.ValueType, false)
 	case *ast.RefType:
+		return hasInvalidVoidPosition(typed.ElementType, false)
+	case *ast.NullableType:
 		return hasInvalidVoidPosition(typed.ElementType, false)
 	case *ast.ChanType:
 		return hasInvalidVoidPosition(typed.ElementType, false)

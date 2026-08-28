@@ -107,6 +107,7 @@ const (
 	RBRACE   TokenType = "RBRACE"   // }
 	COMMA    TokenType = "COMMA"    // ,
 	COLON    TokenType = "COLON"    // :
+	QUESTION TokenType = "QUESTION" // ? (sufixo de tipo anulavel: T?)
 	DOT      TokenType = "DOT"      // .
 
 	// Especiais

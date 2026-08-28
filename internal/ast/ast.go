@@ -123,7 +123,31 @@ func (rt *RefType) String() string {
 	if rt.ElementType == nil {
 		return "ref any"
 	}
+	// `ref (Node?)` (referencia a slot anulavel) e diferente de `ref Node?`
+	// (referencia anulavel): o parentese preserva a distincao ao imprimir.
+	if _, nullable := rt.ElementType.(*NullableType); nullable {
+		return "ref (" + rt.ElementType.String() + ")"
+	}
 	return "ref " + rt.ElementType.String()
+}
+
+// NullableType e `T?`: o tipo T ou null. Um `T` nu nunca e null (spec §2.4).
+// O sufixo `?` e o pos-fixo mais externo: `ref Node?` e uma referencia
+// anulavel; `ref (Node?)` uma referencia a slot anulavel; `Node?[]` array de
+// anulaveis; `Node[]?` array anulavel.
+type NullableType struct {
+	ElementType NoxyType
+}
+
+func (nt *NullableType) String() string {
+	if nt.ElementType == nil {
+		return "any"
+	}
+	switch nt.ElementType.(type) {
+	case *FunctionType, *ChanType:
+		return "(" + nt.ElementType.String() + ")?"
+	}
+	return nt.ElementType.String() + "?"
 }
 
 type ChanType struct {

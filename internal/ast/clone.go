@@ -160,6 +160,8 @@ func CloneType(t NoxyType) NoxyType {
 		return &MapType{KeyType: CloneType(n.KeyType), ValueType: CloneType(n.ValueType)}
 	case *RefType:
 		return &RefType{ElementType: CloneType(n.ElementType)}
+	case *NullableType:
+		return &NullableType{ElementType: CloneType(n.ElementType)}
 	case *ChanType:
 		return &ChanType{ElementType: CloneType(n.ElementType)}
 	case *FunctionType:

@@ -67,6 +67,7 @@ var tokenDisplay = map[TokenType]string{
 	RBRACE:   "'}'",
 	COMMA:    "','",
 	COLON:    "':'",
+	QUESTION: "'?'",
 	DOT:      "'.'",
 
 	NEWLINE: "newline",
