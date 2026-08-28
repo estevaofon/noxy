@@ -161,6 +161,13 @@ const (
 	// GET_LOCAL(+CONSTANT+ADD_INT) fundidos; semantica identica.
 	OP_GET_LOCAL_ADD_IMM_INT // [slot u8][imm i8]; push local(int)+imm (wrappa como OP_ADD_INT)
 	OP_GET_LOCAL_2           // [a u8][b u8]; push local a, push local b
+	// perf issue #96: campo de struct por INDICE de slot quando o compilador
+	// conhece o struct da base. Operando [idx u8][nome u16]: o nome e a guarda
+	// de runtime (uma definicao com outra ordem — json_loads monta a sua em
+	// ordem alfabetica — cai no caminho por nome) e o texto das mensagens.
+	OP_GET_FIELD     // [idx u8][name u16]; pops instance, pushes field
+	OP_SET_FIELD     // [idx u8][name u16]; pops val, instance; statement (nao empilha)
+	OP_GET_FIELD_MUT // [idx u8][name u16]; pops instance, pushes field unicizado (OP_GET_PROP_MUT)
 )
 
 func (op OpCode) String() string {
@@ -275,6 +282,12 @@ func (op OpCode) String() string {
 		return "OP_GET_LOCAL_ADD_IMM_INT"
 	case OP_GET_LOCAL_2:
 		return "OP_GET_LOCAL_2"
+	case OP_GET_FIELD:
+		return "OP_GET_FIELD"
+	case OP_SET_FIELD:
+		return "OP_SET_FIELD"
+	case OP_GET_FIELD_MUT:
+		return "OP_GET_FIELD_MUT"
 	case OP_ADD:
 		return "OP_ADD"
 	case OP_SUBTRACT:
@@ -612,6 +625,12 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.slotDeltaInstruction("OP_GET_LOCAL_ADD_IMM_INT", offset)
 	case OP_GET_LOCAL_2:
 		return c.twoSlotInstruction("OP_GET_LOCAL_2", offset)
+	case OP_GET_FIELD:
+		return c.fieldInstruction("OP_GET_FIELD", offset)
+	case OP_SET_FIELD:
+		return c.fieldInstruction("OP_SET_FIELD", offset)
+	case OP_GET_FIELD_MUT:
+		return c.fieldInstruction("OP_GET_FIELD_MUT", offset)
 	case OP_DEFER:
 		return c.byteInstruction("OP_DEFER", offset)
 	case OP_RETURN:
@@ -774,4 +793,19 @@ func (c *Chunk) closureInstruction(name string, offset int) int {
 		}
 	}
 	return offset
+}
+
+// fieldInstruction: [idx u8][name u16] — imprime o indice de slot e o nome
+// (constante) do campo, como em `OP_GET_FIELD    1 'y'`.
+func (c *Chunk) fieldInstruction(name string, offset int) int {
+	idx := c.Code[offset+1]
+	constant := uint16(c.Code[offset+2])<<8 | uint16(c.Code[offset+3])
+	fmt.Printf("%-16s %4d '", name, idx)
+	if int(constant) < len(c.Constants) {
+		fmt.Print(c.Constants[constant])
+	} else {
+		fmt.Print("?")
+	}
+	fmt.Printf("'\n")
+	return offset + 4
 }

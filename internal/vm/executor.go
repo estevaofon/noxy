@@ -451,6 +451,14 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			// Push a reference wrapping the container and property name,
 			// so a later dereference or assignment can resolve this field.
 
+			// issue #93b: o indice do campo e resolvido UMA vez, aqui; descend e
+			// referenceStorageMode conferem `Fields[Slot] == Name` antes de usar.
+			slot := 0
+			if instance, ok := container.Obj.(*value.ObjInstance); ok && instance != nil {
+				if i, ok := instance.Struct.FieldIndex(name); ok {
+					slot = i
+				}
+			}
 			vm.push(value.Value{
 				Type: value.VAL_REF,
 				Obj: &value.ObjRef{
@@ -458,6 +466,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 					Container: container,
 					Base:      base,
 					Name:      name,
+					Slot:      slot,
 				},
 			})
 
@@ -1441,105 +1450,92 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return err
 			}
 
+		// perf issue #96: campo por INDICE quando o compilador conhece o
+		// struct da base. Guarda: a definicao da instancia tem esse nome nesse
+		// slot (json_loads monta definicoes em ordem alfabetica; natives e
+		// bytecode de teste podem montar qualquer coisa). Falhou → o funil por
+		// nome (field_ops.go), com as mesmas mensagens e a mesma linha.
+		case chunk.OP_GET_FIELD:
+			idx := int(c.Code[ip])
+			nameIdx := int(c.Code[ip+1])<<8 | int(c.Code[ip+2])
+			ip += 3
+			name := c.Constants[nameIdx].Obj.(string)
+			top := vm.stackTop
+			if inst, ok := vm.stack[top-1].Obj.(*value.ObjInstance); ok && inst != nil && inst.Struct != nil && idx < len(inst.Slots) && idx < len(inst.Struct.Fields) && inst.Struct.Fields[idx] == name {
+				vm.stack[top-1] = inst.Slots[idx]
+				continue
+			}
+			if err := vm.getPropertyGeneric(c, ip, name); err != nil {
+				return err
+			}
+
+		case chunk.OP_SET_FIELD:
+			// [inst, val] -> []. Statement: nao empilha. Campo `ref T` fica com
+			// o generico (guarda do slot ref). Retain/Release sao no-op em
+			// valores NeverTracked — pular a chamada nao muda a contagem.
+			idx := int(c.Code[ip])
+			nameIdx := int(c.Code[ip+1])<<8 | int(c.Code[ip+2])
+			ip += 3
+			name := c.Constants[nameIdx].Obj.(string)
+			top := vm.stackTop
+			if inst, ok := vm.stack[top-2].Obj.(*value.ObjInstance); ok && inst != nil && inst.Struct != nil && idx < len(inst.Slots) && idx < len(inst.Struct.Fields) && inst.Struct.Fields[idx] == name && (inst.Struct.RefFields == nil || !inst.Struct.RefFields[name]) {
+				val := vm.stack[top-1]
+				old := inst.Slots[idx]
+				if value.NeverTracked(val) && value.NeverTracked(old) {
+					inst.Slots[idx] = val
+				} else {
+					value.Retain(val)
+					inst.Slots[idx] = val
+					value.Release(old)
+				}
+				vm.stack[top-1] = value.Value{}
+				vm.stack[top-2] = value.Value{}
+				vm.stackTop = top - 2
+				continue
+			}
+			if err := vm.setPropertyGeneric(c, ip, name); err != nil {
+				return err
+			}
+			vm.LastPopped = vm.pop()
+
+		case chunk.OP_GET_FIELD_MUT:
+			idx := int(c.Code[ip])
+			nameIdx := int(c.Code[ip+1])<<8 | int(c.Code[ip+2])
+			ip += 3
+			name := c.Constants[nameIdx].Obj.(string)
+			top := vm.stackTop
+			if inst, ok := vm.stack[top-1].Obj.(*value.ObjInstance); ok && inst != nil && inst.Struct != nil && idx < len(inst.Slots) && idx < len(inst.Struct.Fields) && inst.Struct.Fields[idx] == name {
+				fieldVal := inst.Slots[idx]
+				if value.IsShared(fieldVal) {
+					old := fieldVal
+					fieldVal = vm.copyValue(fieldVal)
+					// RC: retain-antes-de-release em torno da troca
+					value.Retain(fieldVal)
+					inst.Slots[idx] = fieldVal
+					value.Release(old)
+				}
+				vm.stack[top-1] = fieldVal
+				continue
+			}
+			if err := vm.getPropMutGeneric(c, ip, name); err != nil {
+				return err
+			}
+
 		case chunk.OP_GET_PROPERTY:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
-			nameVal := c.Constants[index]
-			name := nameVal.Obj.(string)
-
-			instanceVal := vm.pop()
-
-			// Auto-dereference if instance is a ref
-			if instanceVal.Type == value.VAL_REF {
-				resolved, err := vm.resolveReferenceValue(instanceVal)
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				instanceVal = resolved
-			}
-
-			if instanceVal.Type != value.VAL_OBJ {
-				return vm.runtimeError(c, ip, "only instances/maps have properties")
-			}
-
-			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
-				val, ok := instance.Get(name)
-				if !ok {
-					return vm.runtimeError(c, ip, "undefined property '%s'", name)
-				}
-				vm.push(val)
-			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
-				// Allow accessing map keys as properties (for modules)
-				val, ok := mapObj.Get(name)
-				if !ok {
-					return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
-				}
-				vm.push(val)
-			} else {
-				return vm.runtimeError(c, ip, "only instances and maps have properties")
+			name := c.Constants[index].Obj.(string)
+			if err := vm.getPropertyGeneric(c, ip, name); err != nil {
+				return err
 			}
 
 		case chunk.OP_SET_PROPERTY:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
-			nameVal := c.Constants[index]
-			name := nameVal.Obj.(string)
-
-			val := vm.pop()
-			instanceVal := vm.pop()
-
-			// Auto-dereference if instance is a ref.
-			//
-			// issue #83: aqui a referência é ALVO DE ESCRITA, então a
-			// resolução tem de ser em modo de escrita — unicizar o caminho e
-			// gravar os clones de volta. Com `resolveReferenceValue` (modo de
-			// leitura) a mutação ia direto no objeto compartilhado e vazava
-			// numa cópia posterior, que é o bug do #83 chegando por um site de
-			// escrita tipado `any`: `func setx(p: any) -> void  p.x = 99 end`
-			// chamada com `setx(ref arr[0])`. É o caminho dinâmico; via base
-			// tipada o compilador emite a família *_MUT, que já unicizava.
-			if instanceVal.Type == value.VAL_REF {
-				resolved, err := vm.unicizeThroughRefValue(instanceVal)
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				instanceVal = resolved
+			name := c.Constants[index].Obj.(string)
+			if err := vm.setPropertyGeneric(c, ip, name); err != nil {
+				return err
 			}
-
-			if instanceVal.Type != value.VAL_OBJ {
-				return vm.runtimeError(c, ip, "only instances have properties")
-			}
-			instance, ok := instanceVal.Obj.(*value.ObjInstance)
-			if !ok {
-				return vm.runtimeError(c, ip, "only instances have properties")
-			}
-
-			// Struct e nominal, de campos fixos (spec §5): escrever num nome
-			// fora da declaracao e o mesmo "undefined property" da leitura
-			// (issue #61 item 2 — antes a escrita criava o campo em silencio).
-			// Via base tipada o compilador ja rejeitou (`unknown field`); aqui
-			// so dispara em fronteira dinamica (`any`). O caminho quente e um
-			// lookup no indice SO-LEITURA da declaracao (issue #86: o map por
-			// instancia, que duas routines escreviam, nao existe mais).
-			slot, declared := instance.Struct.FieldIndex(name)
-			if !declared {
-				return vm.runtimeError(c, ip, "undefined property '%s'", name)
-			}
-			old := instance.Slots[slot]
-
-			// Guard do slot ref (spec 2026-08-20-ref-slot-invariant §6.3):
-			// via base tipada o compilador ja rejeitou; aqui so dispara em
-			// fronteira dinamica (`any`). Lookup em mapa nil e gratuito.
-			if instance.Struct.FieldIsRef(name) && val.Type != value.VAL_REF && val.Type != value.VAL_NULL {
-				return vm.runtimeError(c, ip, "%s", refSlotWriteError(structRefFieldTypeName(instance.Struct, name), val))
-			}
-
-			// RC: retain-antes-de-release (campo e dono duravel); Release
-			// em slot null e no-op (nao e VAL_OBJ)
-			value.Retain(val)
-			instance.Slots[slot] = val
-			value.Release(old)
-			vm.push(val)
 
 		case chunk.OP_SET_PROPERTY_DEREF:
 			index := c.Code[ip]
@@ -1705,48 +1701,8 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2
 			name := c.Constants[index].Obj.(string)
-			instanceVal := vm.pop()
-			if instanceVal.Type == value.VAL_REF {
-				uniq, err := vm.unicizeThroughRefValue(instanceVal)
-				if err != nil {
-					return vm.runtimeError(c, ip, "%s", err)
-				}
-				instanceVal = uniq
-			}
-			if instanceVal.Type != value.VAL_OBJ {
-				return vm.runtimeError(c, ip, "only instances/maps have properties")
-			}
-			if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
-				slot, ok := instance.Struct.FieldIndex(name)
-				if !ok {
-					return vm.runtimeError(c, ip, "undefined property '%s'", name)
-				}
-				fieldVal := instance.Slots[slot]
-				if value.IsShared(fieldVal) {
-					old := fieldVal
-					fieldVal = vm.copyValue(fieldVal)
-					// RC: retain-antes-de-release em torno da troca
-					value.Retain(fieldVal)
-					instance.Slots[slot] = fieldVal
-					value.Release(old)
-				}
-				vm.push(fieldVal)
-			} else if mapObj, ok := instanceVal.Obj.(*value.ObjMap); ok {
-				// Membros de módulo (e maps acessados como propriedade)
-				stored, ok := mapObj.Get(name)
-				if !ok {
-					return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
-				}
-				v, changed := vm.unicize(stored)
-				if changed {
-					// RC: retain-antes-de-release em torno da troca
-					value.Retain(v)
-					mapObj.Set(name, v)
-					value.Release(stored)
-				}
-				vm.push(v)
-			} else {
-				return vm.runtimeError(c, ip, "only instances and maps have properties")
+			if err := vm.getPropMutGeneric(c, ip, name); err != nil {
+				return err
 			}
 
 		case chunk.OP_DEREF_MUT:

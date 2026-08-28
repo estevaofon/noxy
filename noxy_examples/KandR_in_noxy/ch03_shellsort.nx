@@ -1,6 +1,6 @@
 // shellsort: ordena v em ordem crescente
 func shellsort(v: ref int[])
-    let n: int = length(v)
+    let n: int = length(*v)
     let gap: int = n / 2
     while gap > 0 do
         let i: int = gap

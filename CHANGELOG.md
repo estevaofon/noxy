@@ -1,5 +1,107 @@
 # Changelog
 
+## [0.21.0] - 2026-08-28
+
+Campos de struct por **índice**, dos dois lados. A instância guarda os campos
+em `Slots` na ordem da declaração (issue #86, PR #95) e o compilador resolve
+`p.x` para o índice do slot quando conhece o struct da base (issue #96); o
+empréstimo `ref p.x` resolve o índice uma vez, na criação, em vez de um hash
+por nível a cada acesso (issue #93 b). O teto de 256 níveis no caminho de um
+empréstimo, que matava uma BST por posse degenerada, sai (issue #93 a). Tudo
+com semântica, mensagens e contagem RC idênticas; `-race` no pacote `vm`
+inteiro no CI.
+
+### Changed (BREAKING) — só para quem embute a VM em Go (issue #86)
+
+| Antes (0.20) | Agora (0.21) |
+|---|---|
+| `ObjInstance.Fields map[string]Value` | `ObjInstance.Slots []Value`, na ordem de `ObjStruct.Fields`; `Get/Set/MustSet/Field/Range/Snapshot` por nome continuam, `FieldIndex(name)` em `ObjStruct` |
+| `NewInstanceWith(def, map)` | continua; novo `NewInstanceAdopting(def, slots)` (move: o chamador já reteve) |
+
+Nada muda na linguagem. O `fatal error: concurrent map read and map write` em
+`b.inner.value = …` concorrente some junto com o map por instância; a spec
+nunca prometeu atomicidade para escritas concorrentes no mesmo campo, e o
+teste (`!race`) fixa só que o runtime não cai.
+
+### Added
+
+- `OP_GET_FIELD` / `OP_SET_FIELD` / `OP_GET_FIELD_MUT` `[idx u8][nome u16]`
+  (issue #96), emitidos quando o tipo estático da base é um struct do programa
+  (inclusive instâncias genéricas e structs de escopo local). Base `any`,
+  módulos e `ref p.x` ficam nos opcodes por nome; bytecode com base `any`
+  inalterado. O nome viaja no operando porque **`json_loads` monta definições
+  de struct em ordem alfabética** e essas instâncias entram em contêineres
+  tipados — o caminho rápido confere `Fields[idx] == nome` e cai no funil por
+  nome quando não bate. `OP_SET_FIELD` é statement (sem `OP_POP`).
+- `ObjRef.Slot` (issue #93 b): `OP_REF_PROPERTY` resolve o índice do campo na
+  criação; `descend`/`referenceStorageMode`/setter usam o slot sob a mesma
+  guarda. Zero é seguro para `ObjRef` montado à mão.
+- Benchmarks: `bench_struct_records.nx` (5 campos, 60k construções — o bench
+  da #40 que nunca tinha chegado a `develop`), `bench_bst_owned.nx` /
+  `bench_bst_ref.nx` (as fixtures da #93, 20k chaves); `bench_borrow_path.nx`
+  ganha `CHECKSUM:` (o guard de equivalência o pulava).
+- Specs `2026-08-28-vm-perf-issue-96-struct-field-index-design.md` e
+  `2026-08-28-vm-perf-issue-93b-borrow-path-design.md` (a segunda registra por
+  que "fast path quando `Owners == 1`" é inseguro sem validar a cadeia, e o
+  desenho da cache por época que fica como follow-up).
+
+### Fixed
+
+- **#93 (a)** — `maxBorrowPathDepth = 256` limitava a cadeia de `Base` de um
+  empréstimo com a justificativa de que "um caminho real tem a profundidade do
+  lvalue escrito no fonte", falsa desde a 0.20: `insert(ref node.esquerda, v)`
+  recursivo e `r = ref r.prox` num laço encadeiam um nível por passo, e uma BST
+  por posse degenerada com ~256 nós morria com `reference path too deep`. O
+  teto sai (a cadeia não cicla por construção); `maxRefHopDepth` fica só em
+  `derefPlace`.
+- **#87** — `noxy_examples/KandR_in_noxy/`: sete arquivos não compilavam desde
+  a migração para `ref` explícito (`let i: int = pos`, `length(v)` com
+  `v: ref int[]`, `append(s.items, …)`); só `ch02_mismatch.nx` e
+  `ch02_redeclare.nx`, exemplos de erro intencionais, seguem não compilando.
+- **#53 item 4** — `test_crypto_debug.nx` imprimia `FAIL` em toda execução e
+  saía com 0: o `hex_to_bytes` do exemplo passava por `strings.from_char_code`,
+  que codifica valores ≥ 0x80 em dois bytes UTF-8. `to_bytes(int[])` fecha o
+  round-trip, e cada FAIL termina com `sys.exit(1)` para o runner enxergar.
+
+### Performance
+
+`develop` (0.20.0 + #95) × 0.21.0, intercalado, mediana de 9, mesma máquina:
+
+| bench | antes | depois | delta |
+|---|---|---|---|
+| `bench_path_update` (`cells[i].hits = …`) | 238,9 ms | 163,0 ms | **−31,8 %** |
+| `bench_bst_owned` (BST por posse, 20k) | 816,7 | 575,8 | **−29,5 %** |
+| `bench_borrow_path` (`ref root.b.c.xs[0]`) | 594,4 | 531,8 | **−10,5 %** |
+| `bench_bst_ref` | 227,0 | 212,0 | −6,6 % |
+| `bench_struct_records` | 134,7 | 126,5 | −6,1 % |
+| demais (bubblesort, conway, call_*, map_churn, spawn_sum, generic_vs_hand) | | | −1,7 … +1,5 % (ruído) |
+
+BST por posse com 50k chaves aleatórias: 2,35 s → 1,62 s. Perfis: em
+`bench_path_update` somem `FieldIndex`/`mapaccess2_faststr`/`aeshashbody`
+(15 %) e `Retain`/`Release` de `int` (10 %); na BST por posse o hashing por
+nível cai de 16 % para 1 % e o `reflect` de `validateReferencedValue` sai do
+caminho de todo acesso por ref. Corpus 180/180; diff de saída antes × depois
+0 divergentes. Detalhes em `benchmarks/RESULTS.md`.
+
+### Docs
+
+- Spec §2.2 regra 6 e §5 (issue #92): um campo `ref T` é uma **aresta
+  compartilhada** — a cópia de um struct é independente através dos campos de
+  valor e continua apontando para o mesmo referente através dos campos `ref`;
+  os dois idiomas (posse e `ref`) ficam documentados lado a lado; exemplo
+  novo `noxy_examples/bst_owned.nx` (BST por posse) ao lado de `bst.nx`.
+
+### Conhecido, não consertado
+
+- BST por posse **degenerada** continua O(profundidade²): 1000 chaves
+  ordenadas passam (antes morriam) mas levam ~12 s, contra ~0,4 s com
+  `ref TreeNode` nos filhos. O que resta é a caminhada do modelo de lugar
+  (0.20), agora sem hash; matar o quadrático exige a cache por época da spec do
+  #93 b (§6) — follow-up de arquitetura.
+- #100 — o cache do construtor de struct do PR #70 nunca chegou a `develop`:
+  `validateStructConstructorArguments` é 46 % de `bench_struct_records`.
+- #53 item 1(a) — `json_loads` em struct dentro de array compartilhado ainda
+  vaza.
 ## [0.20.0] - 2026-08-25
 
 Uma referência para dentro de um contêiner denota um **LUGAR**, não um objeto

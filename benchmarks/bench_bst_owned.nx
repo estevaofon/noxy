@@ -1,0 +1,39 @@
+// BST por POSSE (campo composto nulavel + `ref` ao slot para mutar in-place):
+// `insert(ref node.esquerda, v)` recursivo encadeia Base um nivel por chamada,
+// e cada acesso no nivel k re-resolve k niveis (modelo de lugar da #83). E o
+// pior caso do emprestimo aninhado (issue #93b); o gemeo bench_bst_ref.nx usa
+// `ref TreeNode` nos filhos e nao passa por esse caminho.
+struct TreeNode
+    valor: int
+    esquerda: TreeNode
+    direita: TreeNode
+end
+func insert(node: ref TreeNode, v: int) -> void
+    if *node == null then
+        *node = TreeNode(v, null, null)
+        return
+    end
+    if v < node.valor then
+        insert(ref node.esquerda, v)
+    else
+        insert(ref node.direita, v)
+    end
+end
+func count(node: ref TreeNode) -> int
+    if *node == null then
+        return 0
+    end
+    return 1 + count(ref node.esquerda) + count(ref node.direita)
+end
+func main() -> void
+    let raiz: TreeNode = null
+    let seed: int = 12345
+    let i: int = 0
+    while i < 20000 do
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        insert(ref raiz, seed % 1000000)
+        i = i + 1
+    end
+    print(f"CHECKSUM:{count(ref raiz)}")
+end
+main()

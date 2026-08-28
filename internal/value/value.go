@@ -687,6 +687,11 @@ type ObjRef struct {
 	Upvalue     *ObjUpvalue // For Local (safe, captured)
 	Container   Value       // For Property/Index (Object, Array, Map)
 	Index       Value       // For Index
+	// Slot: indice do campo (REF_PROPERTY) resolvido na criacao (issue #93b).
+	// E uma DICA: quem usa confere `Struct.Fields[Slot] == Name` antes, porque
+	// a instancia no lugar pode ter outra definicao (json_loads monta a sua em
+	// ordem alfabetica) e um ObjRef montado a mao deixa zero aqui.
+	Slot int
 	// Base e o LUGAR do contêiner, quando ele é conhecido (issue #83). Um
 	// empréstimo — `ref a[i]`, `ref p.x` — não denota um objeto, denota um
 	// LUGAR dentro de um composto que o copy-on-write pode bifurcar. Congelar

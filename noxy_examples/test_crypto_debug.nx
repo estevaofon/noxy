@@ -1,5 +1,5 @@
 use crypto
-use strings
+use sys
 
 // Teste isolado de encrypt/decrypt
 
@@ -22,7 +22,7 @@ print(f"Encrypted length: {length(encrypted)}")
 
 if encrypted == null then
     print("ERRO: encrypted é null!")
-    return
+    sys.exit(1)
 end
 
 let decrypted: bytes = crypto.aes256_gcm_decrypt(chave, encrypted)
@@ -32,6 +32,7 @@ if to_str(decrypted) == texto then
     print("PASS: Ciclo direto funciona!")
 else
     print("FAIL: Ciclo direto falhou")
+    sys.exit(1)
 end
 
 print("")
@@ -76,14 +77,9 @@ func hex_to_bytes(hex_str: string) -> bytes
         i = i + 2
     end
     
-    // Converter int[] para bytes
-    let byte_str: string = ""
-    let j: int = 0
-    while j < length(result) do
-        byte_str = byte_str + strings.from_char_code(result[j])
-        j = j + 1
-    end
-    return to_bytes(byte_str)
+    // int[] -> bytes direto: passar por string (from_char_code) codificava
+    // cada valor >= 0x80 como um rune UTF-8 de 2 bytes e o tamanho nao fechava
+    return to_bytes(result)
 end
 
 let hex_enc: string = bytes_to_hex(encrypted)
@@ -98,16 +94,19 @@ if length(back_to_bytes) == length(encrypted) then
     print("PASS: Tamanhos iguais")
 else
     print(f"FAIL: Tamanhos diferentes! {length(back_to_bytes)} vs {length(encrypted)}")
+    sys.exit(1)
 end
 
 let decrypted2: bytes = crypto.aes256_gcm_decrypt(chave, back_to_bytes)
 if decrypted2 == null then
     print("FAIL: Descriptografia após hex falhou")
+    sys.exit(1)
 else
     print(f"Decrypted2: {to_str(decrypted2)}")
     if to_str(decrypted2) == texto then
         print("PASS: Ciclo com hex funciona!")
     else
         print("FAIL: Texto diferente após hex")
+        sys.exit(1)
     end
 end

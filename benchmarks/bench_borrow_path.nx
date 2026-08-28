@@ -49,9 +49,7 @@ func main()
         k = k + 1
     end
 
-    print(arr[0])
-    print(root.b.c.xs[0])
-    print(root.b.c.xs[1])
+    print(f"CHECKSUM:{arr[0] + root.b.c.xs[0] * 3 + root.b.c.xs[1] * 7}")
 end
 
 main()

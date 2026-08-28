@@ -45,7 +45,7 @@ func TestEveryOpcodeHasASymbolicNameWithoutGaps(t *testing.T) {
 	}
 	// Sentinela: o último opcode declarado em chunk.go precisa estar nomeado.
 	// Se você acrescentou um opcode depois dele, atualize aqui também.
-	if last := int(chunk.OP_SET_REF_LOCAL_INDEX_ARRAY_NORC); firstUnnamed >= 0 && firstUnnamed <= last {
+	if last := int(chunk.OP_GET_FIELD_MUT); firstUnnamed >= 0 && firstUnnamed <= last {
 		t.Fatalf("opcode %d está abaixo do último declarado (%d) e não tem nome em String()", firstUnnamed, last)
 	}
 }
