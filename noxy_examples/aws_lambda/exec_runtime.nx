@@ -1,4 +1,0 @@
-// Entry point for AWS Lambda Runtime
-use runtime select *
-
-run_runtime()
