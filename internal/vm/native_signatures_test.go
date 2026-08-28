@@ -24,9 +24,9 @@ io.write(legacy, "legacy")
 io.close(legacy)
 
 let observable: io.File = io.open("%s", "a")
-let written: io.IOWriteResult = io.write_result(observable, "é")
-let closed: io.IOCloseResult = io.close_result(observable)
-test_report(written.success && written.bytes_written == 2 && written.error == "" && closed.success && closed.error == "")`, path, path))
+let written: any = io.write_result(observable, "é")
+let closed: any = io.close_result(observable)
+test_report(written.ok && written.value == 2 && written.failure.message == "" && closed.ok && closed.failure.message == "")`, path, path))
 	testExpectedObject(t, true, got)
 }
 
@@ -34,10 +34,10 @@ func TestJSONModuleExposesStrictObservableEncoding(t *testing.T) {
 	source := "\nuse json\n" +
 		"let values: any[] = [1, true, null]\n" +
 		"let document: map[string, any] = {\"name\": \"Noxy\", \"values\": values}\n" +
-		"let encoded: json.EncodeResult = json.dumps_result(document)\n" +
+		"let encoded: any = json.dumps_result(document)\n" +
 		"let invalid: map[string, any] = {\"raw\": b\"abc\"}\n" +
-		"let rejected: json.EncodeResult = json.dumps_result(invalid)\n" +
-		"test_report(encoded.success && encoded.data != \"\" && encoded.error == \"\" && !rejected.success && rejected.data == \"\" && rejected.error != \"\")"
+		"let rejected: any = json.dumps_result(invalid)\n" +
+		"test_report(encoded.ok && encoded.value != \"\" && encoded.failure.message == \"\" && !rejected.ok && rejected.value == null && rejected.failure.message != \"\")"
 	testExpectedObject(t, true, runTypedFunctionProgram(t, source))
 }
 

@@ -69,7 +69,7 @@ func TestResultValueWithoutOkTestNeedsNullCheck(t *testing.T) {
 }
 
 func TestResultConstructorsTargetTyped(t *testing.T) {
-	src := "use errors select *\nfunc parse(s: string) -> Result<int>\n    if s == \"\" then\n        return err(\"empty\")\n    end\n    return ok(length(s))\nend\nlet r: Result<int> = parse(\"ab\")\n"
+	src := "use errors select *\nfunc parse(s: string) -> Result<int>\n    if s == \"\" then\n        return Err(\"empty\")\n    end\n    return Ok(length(s))\nend\nlet r: Result<int> = parse(\"ab\")\n"
 	if _, err := compileFunctionSource(t, src); err != nil {
 		t.Fatal(err)
 	}

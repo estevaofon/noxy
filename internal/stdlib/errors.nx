@@ -7,6 +7,10 @@
 // vazio; em falha `value` e null e `failure` descreve o erro. `if r.ok then`
 // estreita `r.value` para T; `try expr` propaga a falha para o chamador.
 //
+// Construtoras: Ok(v), Err(msg), Fail(failure) — capitalizadas (precedente
+// do antigo result.nx) para nao colidir com `let ok: bool` nos programas
+// que importam a stdlib por select *.
+//
 // call_result(fn, ...args) devolve errors::Result<R>, com R o retorno
 // estatico de fn (any quando desconhecido). Precisa deste modulo em escopo
 // (`use errors select *`): o compilador entrega a instancia monomorfizada e
@@ -31,14 +35,14 @@ func empty_failure() -> Failure
     return Failure("", "", "", [])
 end
 
-func ok<T>(value: T) -> Result<T>
+func Ok<T>(value: T) -> Result<T>
     return Result(true, value, empty_failure())
 end
 
-func err<T>(message: string) -> Result<T>
+func Err<T>(message: string) -> Result<T>
     return Result(false, null, Failure("runtime", message, "", []))
 end
 
-func err_failure<T>(failure: Failure) -> Result<T>
+func Fail<T>(failure: Failure) -> Result<T>
     return Result(false, null, failure)
 end

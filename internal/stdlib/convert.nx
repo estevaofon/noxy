@@ -1,24 +1,24 @@
 // stdlib/convert.nx - Conversões numéricas verificáveis
 //
 // to_int e to_float levantam erro quando a conversão é impossível.
-// Use as formas _result quando a falha for um dado esperado e não um bug.
+// Use as formas _result quando a falha for um dado esperado e não um bug:
+// devolvem errors.Result<int> / Result<float> (spec §7, issue #105) —
+// `if r.ok then` estreita r.value, `try to_int_result(s)` propaga a falha.
 
-struct IntResult
-    ok: bool
-    value: int
-    error: string
+use errors select *
+
+func to_int_result(v: any) -> Result<int>
+    let raw: any = convert_to_int_result(v)
+    if raw.ok then
+        return Ok(raw.value)
+    end
+    return Err(raw.error)
 end
 
-struct FloatResult
-    ok: bool
-    value: float
-    error: string
-end
-
-func to_int_result(v: any) -> IntResult
-    return convert_to_int_result(v)
-end
-
-func to_float_result(v: any) -> FloatResult
-    return convert_to_float_result(v)
+func to_float_result(v: any) -> Result<float>
+    let raw: any = convert_to_float_result(v)
+    if raw.ok then
+        return Ok(raw.value)
+    end
+    return Err(raw.error)
 end

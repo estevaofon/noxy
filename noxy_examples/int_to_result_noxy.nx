@@ -1,7 +1,7 @@
 // int_to_result_noxy.nx — experimento: reimplementar to_int_result em noxy PURO.
 //
 // Antes dos generics o stdlib precisava de dois structs duplicados
-// (IntResult e FloatResult). Com generics, um único Result<T> serve
+// (IntResult e FloatResult). Com generics, um único Resultado<T> serve
 // para qualquer tipo, monomorfizado em compile time.
 //
 // Peças em noxy puro:
@@ -15,7 +15,7 @@
 use strings select char_at, substring, index_of
 use convert select *
 
-struct Result<T>
+struct Resultado<T>
     ok: bool
     value: T
     error: string
@@ -28,7 +28,7 @@ let MIN_DIV10: int = -922337203685477580  // MIN_INT / 10, truncado
 // Parse manual de inteiro decimal, mesmo contrato do strconv.ParseInt(s, 10, 64):
 // sinal opcional, so digitos, sem espacos. Acumula NEGATIVO para conseguir
 // representar exatamente MIN_INT (-2^63), que nao tem simetrico positivo.
-func parse_int_text(text: string) -> Result<int>
+func parse_int_text(text: string) -> Resultado<int>
     let s: string = text
     let negative: bool = false
     if length(s) > 0 then
@@ -39,66 +39,66 @@ func parse_int_text(text: string) -> Result<int>
         end
     end
     if length(s) == 0 then
-        return Result(false, 0, "cannot convert string '" + text + "' to int")
+        return Resultado(false, 0, "cannot convert string '" + text + "' to int")
     end
     let acc: int = 0
     for ch in s do
         let d: int = index_of(DIGITS, ch)
         if d < 0 then
-            return Result(false, 0, "cannot convert string '" + text + "' to int")
+            return Resultado(false, 0, "cannot convert string '" + text + "' to int")
         end
         // proximo passo seria acc*10 - d; estoura int64?
         if acc < MIN_DIV10 || (acc == MIN_DIV10 && d > 8) then
-            return Result(false, 0, "cannot convert string '" + text + "' to int: out of range")
+            return Resultado(false, 0, "cannot convert string '" + text + "' to int: out of range")
         end
         acc = acc * 10 - d
     end
     if !negative then
         if acc == MIN_INT then
-            return Result(false, 0, "cannot convert string '" + text + "' to int: out of range")
+            return Resultado(false, 0, "cannot convert string '" + text + "' to int: out of range")
         end
         acc = -acc
     end
-    return Result(true, acc, "")
+    return Resultado(true, acc, "")
 end
 
-func int_to_result_noxy(v: any) -> Result<int>
+func int_to_result_noxy(v: any) -> Resultado<int>
     let kind: string = fmt("%T", v)
     if kind == "int" then
         let n: int = to_int(v)
-        return Result(true, n, "")
+        return Resultado(true, n, "")
     end
     if kind == "float" then
         let f: float = to_float(v)
         if f != f then
-            return Result(false, 0, "cannot convert float NaN to int")
+            return Resultado(false, 0, "cannot convert float NaN to int")
         end
         if f < -9223372036854775808.0 || f >= 9223372036854775808.0 then
-            return Result(false, 0, "cannot convert float " + to_str(v) + " to int: out of range")
+            return Resultado(false, 0, "cannot convert float " + to_str(v) + " to int: out of range")
         end
         // faixa validada: aqui to_int nunca levanta, so trunca em direcao a zero
         let truncated: int = to_int(f)
-        return Result(true, truncated, "")
+        return Resultado(true, truncated, "")
     end
     if kind == "string" then
         return parse_int_text(to_str(v))
     end
-    return Result(false, 0, "cannot convert " + kind + " to int")
+    return Resultado(false, 0, "cannot convert " + kind + " to int")
 end
 
-// Bonus generics: o MESMO Result<T> serve para float — sem duplicar struct.
-func ok_of<T>(v: T) -> Result<T>
-    return Result(true, v, "")
+// Bonus generics: o MESMO Resultado<T> serve para float — sem duplicar struct.
+func ok_of<T>(v: T) -> Resultado<T>
+    return Resultado(true, v, "")
 end
 
 // ---- teste: compara com o builtin to_int_result em cada entrada ----
 
 func check(input: any) -> bool
-    let mine: Result<int> = int_to_result_noxy(input)
-    let builtin: IntResult = to_int_result(input)
+    let mine: Resultado<int> = int_to_result_noxy(input)
+    let builtin = to_int_result(input)
     let verdict: string = "MATCH"
     let same: bool = true
-    if mine.ok != builtin.ok || mine.value != builtin.value then
+    if mine.ok != builtin.ok || (mine.ok && mine.value != builtin.value) then
         verdict = "DIFF!"
         same = false
     end
@@ -140,8 +140,8 @@ for t in tests do
     end
 end
 
-let rf: Result<float> = ok_of(2.5)
-print(fmt("Result<float> reutilizado do mesmo struct generico: ok=%t value=%v", rf.ok, rf.value))
+let rf: Resultado<float> = ok_of(2.5)
+print(fmt("Resultado<float> reutilizado do mesmo struct generico: ok=%t value=%v", rf.ok, rf.value))
 
 if all_ok then
     print("TODOS OS CASOS BATEM COM O BUILTIN")

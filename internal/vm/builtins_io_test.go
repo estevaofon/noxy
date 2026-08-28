@@ -525,13 +525,13 @@ func TestIOWriteBytesWrappersRoundTrip(t *testing.T) {
 	reported := captureVMSource(t, `
 use io
 let f: io.File = io.open("`+path+`", "w")
-let r: io.IOWriteResult = io.write_bytes_result(f, b"\x00\xff")
+let r: any = io.write_bytes_result(f, b"\x00\xff")
 io.write_bytes(f, b"\x01")
 io.close(f)
 let g: io.File = io.open("`+path+`", "r")
 let data: io.IOBytesResult = io.read_bytes(g)
 io.close(g)
-test_report(to_str(r.bytes_written) + "|" + hex_encode(data.data))`)
+test_report(to_str(r.value) + "|" + hex_encode(data.data))`)
 	if got := reported.Obj.(string); got != "2|00ff01" {
 		t.Fatalf("got %q", got)
 	}
@@ -596,9 +596,9 @@ use io
 let skip: string = input()
 let stdin_file: io.File = io.stdin()
 let all: io.IOResult = io.read(stdin_file)
-let w: io.IOWriteResult = io.write_result(stdin_file, "nao")
-let c: io.IOCloseResult = io.close_result(stdin_file)
-test_report(all.data + "|" + to_str(w.success) + "|" + w.error + "|" + to_str(c.success) + "|" + c.error)`)
+let w: any = io.write_result(stdin_file, "nao")
+let c: any = io.close_result(stdin_file)
+test_report(all.data + "|" + to_str(w.ok) + "|" + w.failure.message + "|" + to_str(c.ok) + "|" + c.failure.message)`)
 		if got := reported.Obj.(string); got != "resto1\nresto2\n|false|stdin is read-only|false|stdin cannot be closed" {
 			t.Fatalf("got %q", got)
 		}

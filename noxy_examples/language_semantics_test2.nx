@@ -116,21 +116,24 @@ func test_convert_result()
     begin("convert result")
 
     // A forma _result nunca levanta: sucesso e falha viram campos.
-    let ok_int: IntResult = to_int_result("42")
+    let ok_int = to_int_result("42")
     check(ok_int.ok, "to_int_result aceita inteiro decimal")
-    check_int(ok_int.value, 42, "value carrega o convertido")
+    if ok_int.ok then
+        // spec §7: `if r.ok then` estreita r.value de int? para int
+        check_int(ok_int.value, 42, "value carrega o convertido")
+    end
 
     // "5.5" e um float valido mas NAO um int: to_int_result recusa
     // em vez de truncar silenciosamente.
-    let nao_int: IntResult = to_int_result("5.5")
+    let nao_int = to_int_result("5.5")
     check(!nao_int.ok, "to_int_result recusa string decimal fracionaria")
-    check(nao_int.error != "", "a falha vem descrita no campo error")
+    check(nao_int.failure.message != "", "a falha vem descrita em failure.message")
 
-    let ok_float: FloatResult = to_float_result("2.5")
+    let ok_float = to_float_result("2.5")
     check(ok_float.ok, "to_float_result aceita fracao")
     check(ok_float.value == 2.5, "value carrega o float exato")
 
-    let nao_float: FloatResult = to_float_result("abc")
+    let nao_float = to_float_result("abc")
     check(!nao_float.ok, "to_float_result recusa texto nao numerico")
 end
 
