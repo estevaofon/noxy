@@ -1,0 +1,213 @@
+// int_to_result_noxy_v2.nx — to_int_result reimplementado em noxy PURO, agora
+// sobre o Result<T> da stdlib (spec §7, issue #105).
+//
+// A primeira versao (int_to_result_noxy.nx) precisou declarar o proprio
+// `struct Resultado<T>` e so conseguia comparar `ok` e `value` com o builtin.
+// Desde 0.22.0 existe UM `Result<T>` em `errors`, e a reimplementacao usa
+// exatamente o envelope da stdlib:
+//
+//   - `Ok(v)` / `Err(msg)` constroem o Result<int>; nenhum struct ad hoc;
+//   - dispatch de tipo sobre `any` com o builtin type(v);
+//   - parse manual de string base 10 com deteccao de overflow de int64
+//     (to_int nao serve no caminho de falha: ele LEVANTA);
+//   - as mensagens de falha seguem o formato do builtin, entao o oraculo
+//     compara o envelope inteiro: ok, value e failure.message;
+//   - `try` propaga a falha em `soma`, que encadeia dois parses.
+//
+// Saida esperada (26 casos):
+//   MATCH  (int)    42                            Ok(42)
+//   MATCH  (float)  3.990000                      Ok(3)
+//   MATCH  (string) "abc"                         Err(cannot convert string "abc" to int)
+//   MATCH  (string) "9223372036854775808"         Err(cannot convert string "9223372036854775808" to int: out of range)
+//   MATCH  (float)  NaN                           Err(cannot convert float NaN to int)
+//   MATCH  (bytes)  "12"                          Err(cannot convert bytes "12" to int)
+//   ...
+//   soma("40", 2.9)        = Ok(42)
+//   soma("40", "quarenta") = Err(cannot convert string "quarenta" to int)
+//
+//   TODOS OS CASOS BATEM COM O BUILTIN
+
+use strings select char_at, substring, index_of
+use convert select *
+use errors select *
+
+// ---- implementacao ----
+
+// Como o builtin escreve um valor na mensagem: texto entre aspas, o resto via to_str.
+// (Nao replica o escape %q de Go nem o corte em 64 caracteres: nenhum caso abaixo os toca.)
+func render(v: any) -> string
+    let kind: string = type(v)
+    if kind == "string" || kind == "bytes" then
+        return "\"" + to_str(v) + "\""
+    end
+    return to_str(v)
+end
+
+// "<tipo> <valor>", como o builtin descreve a entrada rejeitada.
+func describe(v: any) -> string
+    return type(v) + " " + render(v)
+end
+
+let DIGITS: string = "0123456789"
+let MIN_INT: int = -9223372036854775807 - 1
+let MIN_DIV10: int = -922337203685477580  // MIN_INT / 10, truncado
+
+// Parse manual de inteiro decimal, mesmo contrato do strconv.ParseInt(s, 10, 64):
+// sinal opcional, so digitos, sem espacos. Acumula NEGATIVO para conseguir
+// representar exatamente MIN_INT (-2^63), que nao tem simetrico positivo.
+// to_int nao serve no caminho de falha: ele LEVANTA (spec §7, "raise for bugs").
+func parse_int_text(text: string) -> Result<int>
+    let invalid: string = "cannot convert " + describe(text) + " to int"
+    let s: string = text
+    let negative: bool = false
+    if length(s) > 0 then
+        let first: string = char_at(s, 0)
+        if first == "-" || first == "+" then
+            negative = first == "-"
+            s = substring(s, 1, length(s))
+        end
+    end
+    if length(s) == 0 then
+        return Err(invalid)
+    end
+    let acc: int = 0
+    for ch in s do
+        let d: int = index_of(DIGITS, ch)
+        if d < 0 then
+            return Err(invalid)
+        end
+        // proximo passo seria acc*10 - d; estoura int64?
+        if acc < MIN_DIV10 || (acc == MIN_DIV10 && d > 8) then
+            return Err(invalid + ": out of range")
+        end
+        acc = acc * 10 - d
+    end
+    if !negative then
+        if acc == MIN_INT then
+            return Err(invalid + ": out of range")
+        end
+        acc = -acc
+    end
+    return Ok(acc)
+end
+
+// Dispatch sobre `any` com o builtin type(v); cada ramo devolve Ok(...) ou Err(...).
+func int_to_result_noxy(v: any) -> Result<int>
+    let kind: string = type(v)
+    if kind == "int" then
+        return Ok(to_int(v))
+    end
+    if kind == "float" then
+        let f: float = to_float(v)
+        // NaN e ±Inf antes da faixa, como o builtin (mensagem sem "out of range"):
+        // NaN e o unico float != dele mesmo; Inf - Inf da NaN.
+        if f != f || f - f != 0.0 then
+            return Err("cannot convert " + describe(v) + " to int")
+        end
+        if f < -9223372036854775808.0 || f >= 9223372036854775808.0 then
+            return Err("cannot convert " + describe(v) + " to int: out of range")
+        end
+        // faixa validada: aqui to_int nunca levanta, so trunca em direcao a zero
+        return Ok(to_int(f))
+    end
+    if kind == "string" then
+        return parse_int_text(to_str(v))
+    end
+    return Err("cannot convert " + describe(v) + " to int")
+end
+
+// ---- propagacao com try ----
+
+// Dois parses encadeados: em sucesso `try` vale o int; na primeira falha a
+// funcao devolve a MESMA Failure ao chamador, sem `if !r.ok then return … end`.
+func soma(a: any, b: any) -> Result<int>
+    let x: int = try int_to_result_noxy(a)
+    let y: int = try int_to_result_noxy(b)
+    return Ok(x + y)
+end
+
+// ---- teste: compara com o builtin to_int_result em cada entrada ----
+
+// `if r.ok then` estreita r.value de int? para int: to_str recebe um int.
+func show(r: Result<int>) -> string
+    if r.ok then
+        return "Ok(" + to_str(r.value) + ")"
+    end
+    return "Err(" + r.failure.message + ")"
+end
+
+// O envelope inteiro tem que bater: ok, value em sucesso, failure.message em falha.
+func same_outcome(mine: Result<int>, builtin: Result<int>) -> bool
+    if mine.ok != builtin.ok then
+        return false
+    end
+    if mine.ok then
+        return mine.value == builtin.value
+    end
+    return mine.failure.message == builtin.failure.message
+end
+
+func check(input: any) -> bool
+    let mine: Result<int> = int_to_result_noxy(input)
+    let builtin: Result<int> = to_int_result(input)
+    let same: bool = same_outcome(mine, builtin)
+    let verdict: string = "MATCH"
+    if !same then
+        verdict = "DIFF!"
+    end
+    let line: string = fmt("%-6s %-8s %-29s %s", verdict, "(" + type(input) + ")", render(input), show(mine))
+    if !same then
+        line = line + "   builtin=" + show(builtin)
+    end
+    print(line)
+    return same
+end
+
+let INF: float = 1.0e308 * 10.0   // estoura para +Inf
+let NAN: float = INF - INF
+
+let tests: any[] = [
+    42,
+    -7,
+    3.99,
+    -3.99,
+    "123",
+    "-123",
+    "+99",
+    "0",
+    "00123",
+    "",
+    "-",
+    "abc",
+    "12.5",
+    " 42",
+    "9223372036854775807",
+    "-9223372036854775808",
+    "9223372036854775808",
+    "-9223372036854775809",
+    9223372036854775808.0,
+    -9223372036854775808.0,
+    INF,
+    -INF,
+    NAN,
+    true,
+    null,
+    b"12"
+]
+
+let all_ok: bool = true
+for t in tests do
+    if !check(t) then
+        all_ok = false
+    end
+end
+
+print("")
+print("soma(\"40\", 2.9)        = " + show(soma("40", 2.9)))
+print("soma(\"40\", \"quarenta\") = " + show(soma("40", "quarenta")))
+print("")
+if all_ok then
+    print("TODOS OS CASOS BATEM COM O BUILTIN")
+else
+    print("HOUVE DIVERGENCIA — ver linhas DIFF! acima")
+end
