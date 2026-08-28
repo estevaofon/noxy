@@ -1,5 +1,0 @@
-let slice: any = func(native_slice: any) -> func(any, int, int) -> any
-    return func(array: any, start: int, _end: int) -> any
-        return native_slice(array, start, _end)
-    end
-end(slice)
