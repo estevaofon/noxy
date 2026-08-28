@@ -1,35 +1,42 @@
-// result_pattern.nx — o idioma _result construido em noxy puro com call_result.
+// result_pattern.nx — o idioma _result em noxy puro com call_result (spec §7).
 //
-// Antes: modulo `result` (deprecado). Agora: um gemeo `_result` nomeado, com
-// struct de resultado tipado, embrulhando uma primitiva que levanta.
+// call_result(fn, ...args) devolve errors.Result<R> tipado pelo retorno de
+// fn: `if r.ok then` estreita r.value para R, e `try` propaga a falha numa
+// funcao que tambem devolve Result. Nenhum struct ad hoc por operacao.
 
 use errors select *
-
-struct DivResult
-    ok: bool
-    value: int
-    error: string
-end
 
 func divide(a: int, b: int) -> int
     return a / b   // levanta "division by zero" quando b == 0
 end
 
-func divide_result(a: int, b: int) -> DivResult
-    let r: any = call_result(divide, a, b)   // spec §2.4: CallResult.failure é Failure (não nulo); o módulo errors está sendo redesenhado — acesso dinâmico
-    if r.ok then
-        let quociente: int = to_int(r.value)
-        return DivResult(true, quociente, "")
-    end
-    return DivResult(false, 0, r.failure.message)
+// Gemeo _result: a mesma operacao com a falha como dado.
+func divide_result(a: int, b: int) -> Result<int>
+    return call_result(divide, a, b)
 end
 
-let boa: DivResult = divide_result(10, 2)
-let ruim: DivResult = divide_result(1, 0)
+// Propagacao: `try` devolve o int em sucesso e retorna a falha em falha.
+func media(a: int, b: int, divisor: int) -> Result<int>
+    let x: int = try divide_result(a, divisor)
+    let y: int = try divide_result(b, divisor)
+    return Ok((x + y) / 2)
+end
+
+let boa = divide_result(10, 2)
+let ruim = divide_result(1, 0)
 
 if boa.ok then
     print("10 / 2 = " + to_str(boa.value))
 end
 if !ruim.ok then
-    print("1 / 0 falhou: " + ruim.error)
+    print("1 / 0 falhou: " + ruim.failure.message)
+end
+
+let m = media(10, 20, 5)
+if m.ok then
+    print("media = " + to_str(m.value))
+end
+let mz = media(10, 20, 0)
+if !mz.ok then
+    print("media com divisor 0 falhou: " + mz.failure.message)
 end
