@@ -32,8 +32,10 @@ func (vm *VM) setIndexGeneric(c *chunk.Chunk, ip int) error {
 			// RuntimeType) so aceita ref/null; via base tipada o
 			// compilador ja rejeitou. O teste de val.Type vem antes
 			// para o Load() atomico so rodar em escritas nao-ref.
-			if val.Type != value.VAL_REF && val.Type != value.VAL_NULL && arrayElementIsRefSlot(arr) {
-				return vm.runtimeError(c, ip, "%s", refSlotWriteError(arr.RuntimeType.Load().Element.String(), val))
+			if val.Type != value.VAL_REF && val.Type != value.VAL_NULL {
+				if tag := arr.RuntimeType.Load(); arrayTagIsRefSlot(tag) {
+					return vm.runtimeError(c, ip, "%s", refSlotWriteError(tag.Element.String(), val))
+				}
 			}
 			// RC: retain-antes-de-release (elemento e dono duravel)
 			old := arr.Elements[idx]

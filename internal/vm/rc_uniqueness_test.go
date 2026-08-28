@@ -1548,17 +1548,17 @@ func TestBorrowedUpvalueBoxDoesNotRetainOnClose(t *testing.T) {
 // compilador). O round 2 a inferia em runtime varrendo frame.Owned
 // (ownsSlotIndex), e essa resposta erra nas DUAS direcoes:
 //
-//   (a) under-count: um slot POSSUIDO (`let x: Node = null`) cujo ocupante era
-//       null/escalar na hora da captura nunca entrou em frame.Owned (Retain
-//       falha em nao-composto) — a caixa do upvalue era marcada emprestada por
-//       engano e o retain que ela devia ao fechar/gravar era PULADO. O no ficava
-//       com um dono a menos, parecia unico, e `picked.valor = 99` mutava no
-//       lugar: a escrita vazava para head.proximo, quebrando a independencia do
-//       vinculo por valor.
-//   (b) dec a menos: indices de slot sao REUSADOS entre blocos irmaos e
-//       frame.Owned nao e podado no fim do escopo — a entrada morta de um irmao
-//       fazia um slot realmente emprestado parecer possuido, e o guard do
-//       OP_GET_LOCAL_MUT era derrotado (release indevido, o bug original).
+//	(a) under-count: um slot POSSUIDO (`let x: Node = null`) cujo ocupante era
+//	    null/escalar na hora da captura nunca entrou em frame.Owned (Retain
+//	    falha em nao-composto) — a caixa do upvalue era marcada emprestada por
+//	    engano e o retain que ela devia ao fechar/gravar era PULADO. O no ficava
+//	    com um dono a menos, parecia unico, e `picked.valor = 99` mutava no
+//	    lugar: a escrita vazava para head.proximo, quebrando a independencia do
+//	    vinculo por valor.
+//	(b) dec a menos: indices de slot sao REUSADOS entre blocos irmaos e
+//	    frame.Owned nao e podado no fim do escopo — a entrada morta de um irmao
+//	    fazia um slot realmente emprestado parecer possuido, e o guard do
+//	    OP_GET_LOCAL_MUT era derrotado (release indevido, o bug original).
 //
 // Agora quem decide e o compilador: OP_GET_LOCAL_MUT_BORROW para local `ref` e
 // OP_MARK_UPVALUE_BORROW (emitido apos o OP_CLOSURE) para upvalue `ref`.
@@ -1692,12 +1692,12 @@ main()`
 //
 // Este teste ancora o RASTRO DE CONTAGEM, que e a invariante defensavel:
 //
-//   p1 = 1  o campo `proximo` do no anterior e o unico dono
-//   p2 = 2  `*n = v` grava o no no slot por valor `x` — dois donos reais
-//   p3 = 1  `x.valor = 99` clona por independencia (CoW): `x` passa a apontar o
-//           clone e o no volta a ter um dono
-//   p4 = 1  `u.valor = 77` atravessa um emprestimo e muta no lugar; nenhum dono
-//           entra ou sai
+//	p1 = 1  o campo `proximo` do no anterior e o unico dono
+//	p2 = 2  `*n = v` grava o no no slot por valor `x` — dois donos reais
+//	p3 = 1  `x.valor = 99` clona por independencia (CoW): `x` passa a apontar o
+//	        clone e o no volta a ter um dono
+//	p4 = 1  `u.valor = 77` atravessa um emprestimo e muta no lugar; nenhum dono
+//	        entra ou sai
 //
 // NOTA DE DIVERGENCIA CONSCIENTE: o binario pre-chave responde 50 aqui (soma
 // 0+20+30), porque o `*n = v` ligava o bit sticky do no PARA SEMPRE e a
