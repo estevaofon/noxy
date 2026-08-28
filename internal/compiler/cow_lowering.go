@@ -70,8 +70,12 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		if err != nil {
 			return nil, false, err
 		}
-		nameConst := c.makeConstant(value.NewString(n.Member))
-		c.emitOpWithConstantIndex(chunk.OP_GET_PROP_MUT, nameConst)
+		if idx, ok := c.fieldSlot(leftType, n.Member); ok {
+			c.emitFieldOp(chunk.OP_GET_FIELD_MUT, idx, n.Member)
+		} else {
+			nameConst := c.makeConstant(value.NewString(n.Member))
+			c.emitOpWithConstantIndex(chunk.OP_GET_PROP_MUT, nameConst)
+		}
 		// memberType: dono resolvido pela declaracao (`File` ≡ `io.File`) e
 		// tipo do campo ja na visao do programa (issue #58 item 1).
 		t, wasRef := c.derefMutIfRef(c.memberType(leftType, n.Member))
