@@ -562,3 +562,67 @@ f(ref m["k"].x)`)
 		t.Fatalf("err=%v, want 'reference target no longer exists'", err)
 	}
 }
+
+// A profundidade do caminho de um empréstimo é dos DADOS (issue #93a). Uma
+// estrutura recursiva por posse — campo composto nulável, `ref` ao slot para
+// mutar in-place — encadeia Base um nível por chamada recursiva ou por
+// rebinding num laço. O teto de 256 que borrowContainer tinha matava uma BST
+// degenerada ou uma lista com ~256 nós com "reference path too deep"; a
+// caminhada não tem teto porque a cadeia não pode ciclar (ver maxRefHopDepth).
+func TestBorrowPlacePathDepthIsData(t *testing.T) {
+	t.Run("BST por posse com 300 chaves ordenadas (> 256): um nível de Base por chamada", func(t *testing.T) {
+		got := captureVMSource(t, `struct TreeNode
+    valor: int
+    esquerda: TreeNode
+    direita: TreeNode
+end
+func insert(node: ref TreeNode, v: int) -> void
+    if *node == null then
+        *node = TreeNode(v, null, null)
+        return
+    end
+    if v < node.valor then
+        insert(ref node.esquerda, v)
+    else
+        insert(ref node.direita, v)
+    end
+end
+func count(node: ref TreeNode) -> int
+    if *node == null then
+        return 0
+    end
+    return 1 + count(ref node.esquerda) + count(ref node.direita)
+end
+let raiz: TreeNode = null
+let i: int = 0
+while i < 300 do
+    insert(ref raiz, i)
+    i = i + 1
+end
+test_report(count(ref raiz))`)
+		assertReportedInt(t, got, 300)
+	})
+
+	t.Run("lista por posse com 1000 nós: um nível de Base por rebinding, sem recursão", func(t *testing.T) {
+		got := captureVMSource(t, `struct Node
+    valor: int
+    prox: Node
+end
+let head: Node = null
+let r: ref Node = ref head
+let i: int = 0
+while i < 1000 do
+    *r = Node(i, null)
+    r = ref r.prox
+    i = i + 1
+end
+let n: int = 0
+let c: ref Node = ref head
+while *c != null do
+    n = n + c.valor
+    c = ref c.prox
+end
+test_report(n)`)
+		assertReportedInt(t, got, 499500)
+	})
+}
