@@ -128,6 +128,7 @@ func TestImportRuntimeErrorPreservesModuleCause(t *testing.T) {
 // corte para em maxCapturedStackFrames e deixa a marca "frames omitted".
 func TestCallResultStackCapBoundsDeepOverflow(t *testing.T) {
 	source := `
+use errors select *
 func forever() -> int
     return forever()
 end
@@ -149,6 +150,7 @@ test_report(r.failure.stack)
 // (raso) segue presente.
 func TestCallResultStackHasNoOmissionForShallowOverflow(t *testing.T) {
 	source := `
+use errors select *
 func rec(n: int) -> int
     if n == 0 then return to_int("x") end
     return rec(n - 1)

@@ -443,9 +443,9 @@ func TestReferenceFieldPassesItsExistingReference(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 struct Node
     value: int
-    next: ref Node
+    next: ref Node?
 end
-func accept(node: ref Node) -> void
+func accept(node: ref Node?) -> void
     return
 end
 let tail: Node = Node(1, null)
@@ -483,16 +483,17 @@ end`, "expected int, got null"},
 	}
 }
 
-func TestNullRemainsCompatibleWithReferencesStructsAndAny(t *testing.T) {
+// Spec §2.4 fase 2 (issue #105): null so entra em T?, ref T? e any.
+func TestNullCompatibleWithNullableReferencesStructsAndAny(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 struct Node
     value: int
 end
-let node: ref Node = null
-let nullable_node: Node = null
+let node: ref Node? = null
+let nullable_node: Node? = null
 let nested: Node = Node(1)
 let dynamic: any = null
-func accept(node: ref Node) -> void
+func accept(node: ref Node?) -> void
     return
 end
 accept(null)`)
@@ -501,9 +502,9 @@ accept(null)`)
 	}
 }
 
-func TestExactReferenceCallAcceptsNullForCallableElement(t *testing.T) {
+func TestExactReferenceCallAcceptsNullForNullableCallableElement(t *testing.T) {
 	_, err := compileFunctionSource(t, `
-func accept(value: ref func() -> int) -> void
+func accept(value: (ref func() -> int)?) -> void
 end
 accept(null)`)
 	if err != nil {
@@ -572,7 +573,7 @@ end`,
 
 func TestForwardDeclaredStructAcceptsNull(t *testing.T) {
 	_, err := compileFunctionSource(t, `
-func missing() -> Node
+func missing() -> Node?
     return null
 end
 struct Node

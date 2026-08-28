@@ -170,13 +170,17 @@ remove("http://example.invalid")`)
 	}
 }
 
-func TestWildcardImportAndFunctionPredeclarationsPreserveRuntimePrecedence(t *testing.T) {
+// Issue #47 parte 2: antes, func x `use m select *` do mesmo nome era
+// "quem vem depois vence" (silencioso, dependente da ordem). Agora o escopo
+// global e um namespace so: a colisao e erro de compilacao nas duas ordens.
+func TestWildcardImportAndFunctionCollisionIsCompileError(t *testing.T) {
 	tests := []struct {
 		name   string
 		source string
+		want   string
 	}{
 		{
-			name: "later wildcard wins",
+			name: "wildcard after function",
 			source: `
 func delete(left: int, right: int) -> int
     return left + right
@@ -186,9 +190,10 @@ func remove(url: string) -> void
 end
 use http_client select *
 remove("http://example.invalid")`,
+			want: "'delete' redeclared in this scope (previous declaration as function at line 2)",
 		},
 		{
-			name: "later function wins",
+			name: "function after wildcard",
 			source: `
 use http_client select *
 func delete(left: int, right: int) -> int
@@ -197,13 +202,15 @@ end
 func answer() -> int
     return delete(20, 22)
 end`,
+			want: "'delete' redeclared in this scope (previous declaration as import at line 2)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := compileFunctionSource(t, tt.source); err != nil {
-				t.Fatal(err)
+			_, err := compileFunctionSource(t, tt.source)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want %q, got %v", tt.want, err)
 			}
 		})
 	}
@@ -228,7 +235,9 @@ delete(url)`)
 	}
 }
 
-func TestCachedWildcardWrapperShadowsLaterUserBinding(t *testing.T) {
+func TestCachedWildcardWrapperCollidesWithUserBinding(t *testing.T) {
+	// Issue #47 parte 2: o wrapper `delete` de `use http select *` e a
+	// funcao do usuario disputam o mesmo nome global — erro, nao sombra.
 	_, err := compileFunctionSource(t, `
 use http
 func delete(left: int, right: int) -> int
@@ -237,8 +246,8 @@ end
 use http select *
 let url: string = "http://example.invalid"
 delete(url)`)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "'delete' redeclared in this scope (previous declaration as function at line 3)") {
+		t.Fatalf("got %v", err)
 	}
 }
 

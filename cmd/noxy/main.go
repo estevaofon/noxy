@@ -240,9 +240,10 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 	replGlobals := make(map[string]ast.NoxyType)
 	replStructs := make(map[string]*ast.StructStatement)
 	replGenerics := compiler.NewGenericRegistry()
-	// replLets: `let` globais de linhas anteriores — a sessao segue a mesma
-	// regra de redeclaracao de um arquivo (spec §3), linha a linha.
-	replLets := make(map[string]int)
+	// replBindings: nomes globais (let, func, struct, import) de linhas
+	// anteriores — a sessao segue a mesma regra de redeclaracao de um
+	// arquivo (spec §3), linha a linha; so func sobre func e permitido.
+	replBindings := make(map[string]compiler.GlobalDecl)
 	// replModules: aliases de `use m` e cache de descoberta de modulos das
 	// linhas anteriores — `use io` numa linha e `let f: io.File` na seguinte
 	// (e a origem dos structs importados, para tipar `f.path`) so funcionam
@@ -335,7 +336,8 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 		// 3. Compile
 		c := compiler.NewWithState(replGlobals, replStructs, "REPL")
 		c.SetGenericState(replGenerics)
-		c.SetSessionLets(replLets)
+		c.SetSessionBindings(replBindings)
+		c.SetKnownGlobals(append(machine.GlobalNames(), compiler.PluginNativeNames(program)...))
 		c.SetModuleState(replModules)
 		chunk, _, err := c.Compile(program)
 		// Avisos do compilador sao diagnostico: diagOut, nunca stdout
@@ -352,10 +354,10 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 		// Update globals
 		replGlobals = c.GetGlobals()
 		replModules = c.ModuleState()
-		// Sessao lembra os let desta linha — SO apos compilar com sucesso,
+		// Sessao lembra os nomes desta linha — SO apos compilar com sucesso,
 		// para uma linha rejeitada nao queimar o nome.
-		for name, line := range c.ProgramLets() {
-			replLets[name] = line
+		for name, decl := range c.ProgramBindings() {
+			replBindings[name] = decl
 		}
 
 		// 4. Disassembly (optional)
@@ -395,7 +397,11 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		return 1
 	}
 
+	// A VM nasce antes do compilador: seus nativos sao os globais que o
+	// check de global inexistente (issue #47 parte 3) garante existir.
+	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
+	c.SetKnownGlobals(append(machine.GlobalNames(), compiler.PluginNativeNames(program)...))
 	chunk, _, err := c.Compile(program)
 	// Avisos do compilador sao diagnostico: diagOut, nunca stdout (issue
 	// #61 item 3). Saem mesmo quando a compilacao falha depois.
@@ -413,7 +419,6 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 		fmt.Printf("\nExecution:\n")
 	}
 
-	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
 	if err := machine.Interpret(chunk); err != nil {
 		fmt.Fprintf(diagOut, "Runtime error: %s\n", err)
 		var advised *vm.AdvisedError

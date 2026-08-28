@@ -4,7 +4,7 @@ end
 
 struct Result
     value: any
-    err: ref Error
+    err: ref Error?
 end
 
 // Função que simula retorno de múltiplos valores (valor, erro)

@@ -177,7 +177,7 @@ func TestRefEqualityNeverImplicitlyDereferences(t *testing.T) {
 func main()
     let a: int = 1
     let ra: ref int = ref a
-    let nulo: ref int = null
+    let nulo: ref int? = null
     test_report(`+tc.expr+`)
 end
 main()

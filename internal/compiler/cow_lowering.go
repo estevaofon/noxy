@@ -36,12 +36,18 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 			c.emitBytes(byte(chunk.OP_GET_UPVALUE_MUT), byte(arg))
 			t = upvalueType
 		} else {
+			if !c.globalIsKnown(n.Value) {
+				return nil, false, c.undefinedGlobalError(n.Value)
+			}
 			nameConstant := c.makeConstant(value.NewString(n.Value))
 			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL_MUT, nameConstant)
 			t = c.globals[n.Value] // pode ser nil (desconhecido/any)
 		}
-		t, wasRef := c.derefMutIfRef(t)
-		return t, wasRef, nil
+		t = c.narrowType(n.Value, t)
+		if isNullable(t) {
+			return nil, false, c.mayBeNullError(n, t)
+		}
+		return c.derefMutIfRef(t, n)
 
 	case *ast.IndexExpression:
 		leftType, _, err := c.compileLValueBase(n.Left)
@@ -62,8 +68,10 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		} else if mapType, ok := leftType.(*ast.MapType); ok {
 			t = mapType.ValueType
 		}
-		t, wasRef := c.derefMutIfRef(t)
-		return t, wasRef, nil
+		if isNullable(t) {
+			return nil, false, c.mayBeNullError(n, t)
+		}
+		return c.derefMutIfRef(t, n)
 
 	case *ast.MemberAccessExpression:
 		leftType, _, err := c.compileLValueBase(n.Left)
@@ -78,8 +86,14 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		}
 		// memberType: dono resolvido pela declaracao (`File` ≡ `io.File`) e
 		// tipo do campo ja na visao do programa (issue #58 item 1).
-		t, wasRef := c.derefMutIfRef(c.memberType(leftType, n.Member))
-		return t, wasRef, nil
+		t := c.memberType(leftType, n.Member)
+		if key, ok := stableKey(n); ok {
+			t = c.narrowType(key, t)
+		}
+		if isNullable(t) {
+			return nil, false, c.mayBeNullError(n, t)
+		}
+		return c.derefMutIfRef(t, n)
 
 	default:
 		return nil, false, fmt.Errorf("[line %d] invalid assignment target", c.currentLine)
@@ -88,12 +102,20 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 
 // derefMutIfRef emite OP_DEREF_MUT quando o tipo estático é ref, devolvendo
 // o tipo do elemento e true; caso contrário devolve o tipo inalterado e false.
-func (c *Compiler) derefMutIfRef(t ast.NoxyType) (ast.NoxyType, bool) {
+// `ref (T?)` (slot apontado anulavel) e erro: a escrita atravessaria um null.
+func (c *Compiler) derefMutIfRef(t ast.NoxyType, base ast.Expression) (ast.NoxyType, bool, error) {
 	if refType, ok := t.(*ast.RefType); ok {
+		elem := refType.ElementType
+		if key, ok := stableKey(base); ok {
+			elem = c.narrowType("*"+key, elem)
+		}
+		if isNullable(elem) {
+			return nil, false, c.mayBeNullError(&ast.PrefixExpression{Operator: "*", Right: base}, refType.ElementType)
+		}
 		c.emitByte(byte(chunk.OP_DEREF_MUT))
-		return refType.ElementType, true
+		return elem, true, nil
 	}
-	return t, false
+	return t, false, nil
 }
 
 // NOTA (Task 8): havia aqui um trio de funções (reconhecimento de composto

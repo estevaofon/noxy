@@ -625,6 +625,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				return vm.runtimeError(c, ip, "runtime value marker requires type metadata")
 			}
 			if !vm.markRuntimeValueType(vm.peek(0), runtimeType) {
+				// Spec §2.4 fase 2: null vindo por `any` num slot nao-anulavel
+				// e o caso comum aqui — a mensagem nomeia o tipo e o `?`.
+				if vm.peek(0).Type == value.VAL_NULL {
+					return vm.runtimeError(c, ip, "expected %s, got null\n  hint: declare the slot as '%s?' to allow null", runtimeType.String(), runtimeType.String())
+				}
 				return vm.runtimeError(c, ip, "runtime value metadata conflicts with static context")
 			}
 
@@ -1406,6 +1411,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 
 		case chunk.OP_DUP:
 			vm.push(vm.peek(0))
+
+		case chunk.OP_SWAP:
+			top := vm.stackTop
+			vm.stack[top-1], vm.stack[top-2] = vm.stack[top-2], vm.stack[top-1]
 
 		case chunk.OP_IMPORT:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])

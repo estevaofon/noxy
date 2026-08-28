@@ -13,9 +13,9 @@ import "testing"
 const refNullForwardingPrelude = `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
-func eh_nulo(n: ref Node) -> bool
+func eh_nulo(n: ref Node?) -> bool
     return n == null
 end
 `
@@ -45,7 +45,7 @@ test_report([via_ref(ref a)])`, []bool{true})
 // Elemento null de `(ref Node)[]`.
 func TestNullRefArrayElementForwardsNullToRefParameter(t *testing.T) {
 	requireBoolResults(t, refNullForwardingPrelude+`
-let arr: (ref Node)[] = [null]
+let arr: (ref Node)?[] = [null]
 test_report([eh_nulo(arr[0])])`, []bool{true})
 }
 
@@ -63,8 +63,10 @@ test_report([lido == null, eh_nulo(m["x"])])`, []bool{true, true})
 // altera o no original).
 func TestNonNullRefFieldStillForwardsExistingReference(t *testing.T) {
 	requireBoolResults(t, refNullForwardingPrelude+`
-func marca(n: ref Node)
-    n.valor = 99
+func marca(n: ref Node?)
+    if n != null then
+        n.valor = 99
+    end
 end
 let b: Node = Node(2, null)
 let a: Node = Node(1, ref b)

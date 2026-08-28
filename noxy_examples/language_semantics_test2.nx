@@ -67,12 +67,12 @@ end
 
 struct Node
     value: int,
-    next: ref Node
+    next: ref Node?      // spec §2.4: o terminador null exige 'ref Node?'
 end
 
 struct GNode<T>
     value: T,
-    next: ref GNode<T>
+    next: ref GNode<T>?
 end
 
 struct Caixa<T>
@@ -116,21 +116,24 @@ func test_convert_result()
     begin("convert result")
 
     // A forma _result nunca levanta: sucesso e falha viram campos.
-    let ok_int: IntResult = to_int_result("42")
+    let ok_int = to_int_result("42")
     check(ok_int.ok, "to_int_result aceita inteiro decimal")
-    check_int(ok_int.value, 42, "value carrega o convertido")
+    if ok_int.ok then
+        // spec §7: `if r.ok then` estreita r.value de int? para int
+        check_int(ok_int.value, 42, "value carrega o convertido")
+    end
 
     // "5.5" e um float valido mas NAO um int: to_int_result recusa
     // em vez de truncar silenciosamente.
-    let nao_int: IntResult = to_int_result("5.5")
+    let nao_int = to_int_result("5.5")
     check(!nao_int.ok, "to_int_result recusa string decimal fracionaria")
-    check(nao_int.error != "", "a falha vem descrita no campo error")
+    check(nao_int.failure.message != "", "a falha vem descrita em failure.message")
 
-    let ok_float: FloatResult = to_float_result("2.5")
+    let ok_float = to_float_result("2.5")
     check(ok_float.ok, "to_float_result aceita fracao")
     check(ok_float.value == 2.5, "value carrega o float exato")
 
-    let nao_float: FloatResult = to_float_result("abc")
+    let nao_float = to_float_result("abc")
     check(!nao_float.ok, "to_float_result recusa texto nao numerico")
 end
 
@@ -349,20 +352,24 @@ end
 func test_listas_ligadas()
     begin("listas ligadas")
 
-    // 'ref Node' dentro do proprio Node permite encadear valores;
-    // null e o terminador natural.
+    // 'ref Node?' dentro do proprio Node permite encadear valores;
+    // null e o terminador natural (spec §2.4: um 'ref Node' nu nunca e null).
     let n3: Node = Node(3, null)
     let n2: Node = Node(2, ref n3)
     let n1: Node = Node(1, ref n2)
 
     // '.' atravessa a referencia em cada salto (R4, o unico atalho da
     // linguagem); ler o proprio ref continua exigindo '*' (R2).
-    check_int(n1.next.value, 2, "n1.next.value atravessa o ref")
-    check_int(n1.next.next.value, 3, "dois saltos de ref")
+    // Ler atraves de um 'ref Node?' pede o teste de null antes (spec §2.4);
+    // n1 e um local por valor, entao o fato sobrevive as chamadas a check_int.
+    if n1.next != null && n1.next.next != null then
+        check_int(n1.next.value, 2, "n1.next.value atravessa o ref")
+        check_int(n1.next.next.value, 3, "dois saltos de ref")
+    end
 
     // Percurso classico: rebind do cursor ate o null terminador.
     let soma: int = 0
-    let cur: ref Node = ref n1
+    let cur: ref Node? = ref n1
     while cur != null do
         soma = soma + cur.value
         cur = cur.next
@@ -372,24 +379,30 @@ func test_listas_ligadas()
     // A versao generica se comporta igual.
     let g2: GNode<string> = GNode("b", null)
     let g1: GNode<string> = GNode("a", ref g2)
-    check_str(g1.next.value, "b", "GNode<T> auto-referenciada")
+    if g1.next != null then
+        check_str(g1.next.value, "b", "GNode<T> auto-referenciada")
+    end
     check(g2.next == null, "terminador null no campo ref generico")
 
-    // null satisfaz contrato de struct: a variavel existe sem valor...
-    let p: Ponto = null
+    // null satisfaz contrato de struct ANULAVEL (spec §2.4: 'Ponto?'; um
+    // 'Ponto' nu nunca e null): a variavel existe sem valor...
+    let p: Ponto? = null
     check(p == null, "variavel de struct aceita null")
 
-    // ...e volta ao normal ao receber uma instancia real.
+    // ...e volta ao normal ao receber uma instancia real; os campos so sao
+    // acessiveis depois do teste de null (narrowing).
     p = Ponto(1, 2)
     check(p != null, "instancia real nao e null")
-    check_int(p.x, 1, "campos acessiveis apos sair do null")
+    if p != null then
+        check_int(p.x, 1, "campos acessiveis apos sair do null")
+    end
 
     // Igualdade estrita de ref: '== null' pergunta sobre o PROPRIO ref.
     // Um ref VALIDO para um slot que contem null nao e null; a pergunta
     // sobre o valor apontado e '*r == null'. As duas perguntas, antes
     // indistinguiveis, agora tem cada uma sua sintaxe.
-    let vaga: Ponto = null
-    let rv: ref Ponto = ref vaga
+    let vaga: Ponto? = null
+    let rv: ref (Ponto?) = ref vaga    // spec §2.4: ref valido para um slot que pode conter null
     check(rv != null, "ref valido para slot com null nao e null")
     check(*rv == null, "'*r == null' pergunta sobre o valor apontado")
 end

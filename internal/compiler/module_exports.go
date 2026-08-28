@@ -194,6 +194,13 @@ func (c *Compiler) buildModuleStructExports(module string, state *moduleDiscover
 	for _, statement := range program.Statements {
 		switch declaration := statement.(type) {
 		case *ast.StructStatement:
+			// Um TEMPLATE (struct Result<T>) nao e struct concreto: vive no
+			// GenericRegistry via predeclareImportedTemplates, nunca em
+			// c.structs — senao `use errors select *` faria o nome bare
+			// `Result` parecer um struct comum no importador.
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
 			structs[declaration.Name] = declaration
 			state.origins[declaration] = module
 		case *ast.UseStmt:
@@ -580,9 +587,55 @@ func (c *Compiler) importBindingFrom(module string, declarations map[string]ast.
 	case *ast.LetStmt:
 		c.globals[name] = declaration.Type
 	default:
-		c.globals[name] = nil
+		// Re-export transitivo (`use convert select *` traz o que convert
+		// importou de errors por select *): resolve no modulo que DECLARA o
+		// nome, para que o tipo (e um template generico, com o Module certo)
+		// cheguem ao importador em vez de um binding sem tipo — que ainda
+		// apagaria um tipo ja conhecido por um `use errors select *` anterior
+		// e faria validateImportedTemplateScope acusar shadowing.
+		if source, ok := c.reexportSource(module, name, map[string]bool{module: true}); ok {
+			if bindings, loadable := c.moduleTopLevelBindings(source); loadable {
+				return c.importBindingFrom(source, bindings, name)
+			}
+		}
+		if _, known := c.globals[name]; !known {
+			c.globals[name] = nil
+		}
 	}
 	return nil
+}
+
+// reexportSource devolve o modulo, entre os que module importa, cujos
+// exports contem name — o primeiro `use X select *` que o exporta ou um
+// `use X select name`. visited corta ciclos de re-export.
+func (c *Compiler) reexportSource(module, name string, visited map[string]bool) (string, bool) {
+	program, _, ok := c.loadModuleDeclarations(module, c.discoveryState())
+	if !ok || program == nil {
+		return "", false
+	}
+	for _, statement := range program.Statements {
+		use, isUse := statement.(*ast.UseStmt)
+		if !isUse || visited[use.Module] {
+			continue
+		}
+		switch {
+		case use.SelectAll:
+			exports, loadable := c.discoverModuleExports(use.Module)
+			if !loadable {
+				continue
+			}
+			if _, exported := exports[name]; exported {
+				return use.Module, true
+			}
+		case len(use.Selectors) > 0:
+			for _, selector := range use.Selectors {
+				if selector == name {
+					return use.Module, true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 // importedBindingType devolve o tipo declarado, no modulo definidor, de um
@@ -830,4 +883,12 @@ func (c *Compiler) parseModuleDeclarations(content []byte, fileName string, stat
 		return nil, nil, false
 	}
 	return program, nil, true
+}
+
+// isInstanceName: nome qualificado de instancia generica (`modulo::Base<...>`),
+// prependado ao AST por runGenericsPass1 — gerado pelo compilador, idempotente
+// entre importador e modulo (mesma tupla, mesmo layout), fora do namespace
+// de nomes do usuario (declareGlobalName).
+func isInstanceName(name string) bool {
+	return strings.Contains(name, "::")
 }

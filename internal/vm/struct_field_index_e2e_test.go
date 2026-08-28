@@ -110,14 +110,17 @@ func TestFieldIndexRefTypedFieldWriteAndReadThrough(t *testing.T) {
 	got := captureVMSource(t, `
 struct Node
     v: int
-    next: ref Node
+    next: ref Node?
 end
 func main() -> void
     let a: Node = Node(1, null)
     let b: Node = Node(2, null)
     a.next = ref b
     b.v = 3
-    let seen: int = a.next.v
+    let seen: int = 0
+    if a.next != null then
+        seen = a.next.v
+    end
     a.next = null
     test_report([to_str(seen), to_str(a.next == null), to_str(b.v)])
 end
@@ -126,30 +129,47 @@ main()
 	reportedStrings(t, got, []string{"3", "true", "3"})
 }
 
+// newFieldCorruptingVM registra `corrupt_field(inst, nome, v)`, que grava v
+// direto no slot do campo, por baixo do checador. Desde a spec §2.4 uma base
+// TIPADA não-anulável nunca guarda null por sintaxe legal (`let p: Ponto =
+// null` e `p.x` sobre `Ponto?` sem teste são erros de compilação), então é o
+// único jeito de alcançar o estado de runtime que a tabela abaixo compara.
+func newFieldCorruptingVM(t *testing.T) *VM {
+	t.Helper()
+	machine := New()
+	machine.DefineNative("corrupt_field", func(args []value.Value) value.Value {
+		args[0].Obj.(*value.ObjInstance).MustSet(args[1].Obj.(string), args[2])
+		return value.NewNull()
+	})
+	markProbeReadonly(t, machine, "corrupt_field")
+	return machine
+}
+
 // Tabela de erros idênticos: a base tipada erra com a MESMA mensagem que a
-// base `any` para o mesmo estado de runtime.
+// base `any` para o mesmo estado de runtime. O null chega à base tipada por
+// corrupção (campo) ou pela fronteira `any` (parâmetro ref).
 func TestFieldIndexErrorsMatchByName(t *testing.T) {
 	cases := []struct{ name, typed, dynamic, want string }{
 		{"read through null base",
-			"let p: Ponto = null\nlet v: int = p.x\n",
+			"let c: Caixa = Caixa(\"t\", Ponto(1, 2))\ncorrupt_field(c, \"p\", null)\nlet v: int = c.p.x\n",
 			"let p: any = null\nlet v: any = p.x\n",
 			"only instances/maps have properties"},
 		{"write through null base",
-			"let p: Ponto = null\np.x = 1\n",
+			"let c: Caixa = Caixa(\"t\", Ponto(1, 2))\ncorrupt_field(c, \"p\", null)\nc.p.x = 1\n",
 			"let p: any = null\np.x = 1\n",
 			"only instances have properties"},
 		{"nested write through null base",
-			"let c: Caixa = null\nc.p.x = 1\n",
+			"struct Saco\n    c: Caixa\nend\nlet s: Saco = Saco(Caixa(\"t\", Ponto(1, 2)))\ncorrupt_field(s, \"c\", null)\ns.c.p.x = 1\n",
 			"let c: any = null\nc.p.x = 1\n",
 			"only instances/maps have properties"},
 		{"read through null ref",
-			"let r: ref Ponto = null\nlet v: int = r.x\n",
+			"func f(r: ref Ponto) -> int\n    return r.x\nend\nlet a: any = null\nlet v: int = f(a)\n",
 			"", // sem gêmeo any: o OP_DEREF é da base ref tipada
 			"cannot dereference null reference"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			typedErr := interpretVMSource(t, New(), fieldIndexPrelude+tc.typed)
+			typedErr := interpretVMSource(t, newFieldCorruptingVM(t), fieldIndexPrelude+tc.typed)
 			if typedErr == nil || !strings.Contains(typedErr.Error(), tc.want) {
 				t.Fatalf("tipado: esperava %q, obtido %v", tc.want, typedErr)
 			}
@@ -167,12 +187,13 @@ func TestFieldIndexErrorsMatchByName(t *testing.T) {
 // Linha do erro: o operando novo tem 3 bytes; a linha reportada continua a
 // da statement.
 func TestFieldIndexErrorLineIsTheStatement(t *testing.T) {
-	err := interpretVMSource(t, New(), fieldIndexPrelude+`
-let p: Ponto = null
+	err := interpretVMSource(t, newFieldCorruptingVM(t), fieldIndexPrelude+`
+let c: Caixa = Caixa("t", Ponto(1, 2))
+corrupt_field(c, "p", null)
 let a: int = 1
-let v: int = p.x
+let v: int = c.p.x
 `)
-	if err == nil || !strings.Contains(err.Error(), "line 13]") {
-		t.Fatalf("esperava erro na linha 13, obtido %v", err)
+	if err == nil || !strings.Contains(err.Error(), "line 14]") {
+		t.Fatalf("esperava erro na linha 14, obtido %v", err)
 	}
 }

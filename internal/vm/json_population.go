@@ -25,7 +25,8 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 
 	if schema != nil && schema.Kind == value.TYPE_REF {
 		if data == nil {
-			if set == nil {
+			// Spec §2.4 fase 2: null so entra num slot `ref T?`.
+			if set == nil || !schema.Nullable {
 				return nil, false
 			}
 			return func() { set(value.NewNull()) }, true
@@ -54,7 +55,8 @@ func prepareJSONMutation(vm *VM, current value.Value, schema *value.RuntimeTypeI
 		return func() { set(cell) }, true
 	}
 	if schema != nil && schema.Kind == value.TYPE_STRUCT && data == nil {
-		if set == nil {
+		// Spec §2.4 fase 2: null so entra num campo `T?`.
+		if set == nil || !schema.Nullable {
 			return nil, false
 		}
 		return func() { set(value.NewNull()) }, true
@@ -283,6 +285,11 @@ func prepareJSONStructMutation(vm *VM, current value.Value, instance *value.ObjI
 func buildTypedJSONValue(schema *value.RuntimeTypeInfo, data interface{}) (value.Value, bool) {
 	if schema == nil {
 		return value.Value{}, false
+	}
+	// Spec §2.4: um slot `T?` aceita o null do documento; um `T` nu cai nos
+	// cases abaixo, que nao casam nil (exceto any e null).
+	if data == nil && schema.Nullable {
+		return value.NewNull(), true
 	}
 	switch schema.Kind {
 	case value.TYPE_ANY:

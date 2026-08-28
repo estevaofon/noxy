@@ -113,6 +113,12 @@ func (c *Compiler) programViewType(t ast.NoxyType, origin string) (ast.NoxyType,
 			return nil, false
 		}
 		return &ast.RefType{ElementType: element}, true
+	case *ast.NullableType:
+		element, ok := c.programViewType(typed.ElementType, origin)
+		if !ok {
+			return nil, false
+		}
+		return nullable(element), true
 	case *ast.ChanType:
 		element, ok := c.programViewType(typed.ElementType, origin)
 		if !ok {

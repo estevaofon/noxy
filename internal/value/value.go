@@ -117,12 +117,25 @@ type RuntimeTypeInfo struct {
 	ParamIsRef   []bool
 	Return       *RuntimeTypeInfo
 	CallableBare bool
+	// Nullable: o slot e `T?` (spec §2.4) — null e aceito alem de T.
+	Nullable bool
 }
 
 func (t *RuntimeTypeInfo) String() string {
 	if t == nil {
 		return "unknown"
 	}
+	base := t.baseString()
+	if !t.Nullable {
+		return base
+	}
+	if t.Kind == TYPE_CALLABLE && !t.CallableBare || t.Kind == TYPE_CHANNEL {
+		return "(" + base + ")?"
+	}
+	return base + "?"
+}
+
+func (t *RuntimeTypeInfo) baseString() string {
 	switch t.Kind {
 	case TYPE_ANY:
 		return "any"

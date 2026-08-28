@@ -48,6 +48,9 @@ func substituteType(t ast.NoxyType, b map[string]ast.NoxyType) ast.NoxyType {
 		return &ast.MapType{KeyType: substituteType(n.KeyType, b), ValueType: substituteType(n.ValueType, b)}
 	case *ast.RefType:
 		return &ast.RefType{ElementType: substituteType(n.ElementType, b)}
+	case *ast.NullableType:
+		// `T?` com T = X? normaliza para X? (nullable e idempotente).
+		return nullable(substituteType(n.ElementType, b))
 	case *ast.ChanType:
 		return &ast.ChanType{ElementType: substituteType(n.ElementType, b)}
 	case *ast.FunctionType:
@@ -204,6 +207,8 @@ func substituteInExpression(e ast.Expression, b map[string]ast.NoxyType) {
 		substituteInExpression(n.Size, b)
 	case *ast.PrefixExpression:
 		substituteInExpression(n.Right, b)
+	case *ast.TryExpression:
+		substituteInExpression(n.Value, b)
 	case *ast.InfixExpression:
 		substituteInExpression(n.Left, b)
 		substituteInExpression(n.Right, b)

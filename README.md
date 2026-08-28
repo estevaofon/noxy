@@ -1,4 +1,4 @@
-[![noxy 0.21.0](https://img.shields.io/badge/noxy-0.21.0-blue)](CHANGELOG.md)
+[![noxy 0.22.0](https://img.shields.io/badge/noxy-0.22.0-blue)](CHANGELOG.md)
 
 # Noxy
 
@@ -54,26 +54,40 @@ or map gives you an independent value — at any depth, through every field
 that is not `ref`. `ref` is the single, visible mechanism for sharing, and it
 is part of the type: written at the call site — `push(ref xs)` — so a call
 that can mutate your value looks different from one that cannot; or written
-in a struct declaration — `next: ref Node` — so a value that shares says so
-in its type.
+in a struct declaration — `next: ref Node?` — so a value that shares says so
+in its type. And a value that may be *absent* says so too: `Node?` is the
+only spelling of `null`, a bare `Node` never holds it, and a `Node?` is read
+only after a null test — `if n != null then n.valor end` — the compiler
+narrows it for you.
 
 ```noxy
 func push(xs: int[])       // cannot touch the caller's array
 func push(xs: ref int[])   // can — and the signature says so
+
+func busca(k: int) -> Node?    // may not find: the type says so
+let n = busca(7)
+print(n.valor)                 // compile error: 'n' may be null; test it first
 ```
 
 **2. Errors are values, not exceptions.** A failure that indicates a bug
 raises and stops the program. A failure that is *expected* — bad input, wire
-data — is data you branch on. Nothing flies past you silently.
+data — is a `Result<T>` you branch on or propagate with `try`. Nothing flies
+past you silently.
 
 ```noxy
 use errors select *
+use convert select *
 
-let r: CallResult = call_result(to_int, input)
+let r = to_int_result(input)          // Result<int>
 if r.ok then
-    print(r.value)
+    print(r.value + 1)                // r.value is int here
 else
     print("bad input: " + r.failure.message)
+end
+
+func porta(texto: string) -> Result<int>
+    let n: int = try to_int_result(texto)   // on failure, returns it to the caller
+    return Ok(n)
 end
 ```
 
@@ -151,6 +165,9 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 - ✅ Maps (hashmaps) with literals `{key: value}`
 - ✅ Functions with recursion
 - ✅ Explicit references (`ref x` to create, `*r` to read, `ref` at every call site)
+- ✅ Null safety: `T?` is the only nullable type, a bare `T` never holds `null`, and `if x != null then` narrows (Kotlin-style flow typing)
+- ✅ Errors as data: one generic `Result<T>` with `Ok`/`Err`, `if r.ok then` narrows `r.value`, `try expr` propagates the failure
+- ✅ Every global name resolves at compile time; `let`, `func`, `struct` and imports share one namespace
 - ✅ F-strings with interpolation
 - ✅ Single and double quote support
 - ✅ Line tracking for debugging
@@ -205,7 +222,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.21.0
+Noxy REPL v0.22.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5

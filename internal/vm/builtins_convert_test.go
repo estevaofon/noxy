@@ -201,9 +201,9 @@ func TestConvertResultNeverFailsOnBadArity(t *testing.T) {
 
 func TestConvertModuleExposesTypedWrappers(t *testing.T) {
 	source := `use convert select *
-let r: IntResult = to_int_result("42")
-let bad: FloatResult = to_float_result("abc")
-if r.ok && r.value == 42 && !bad.ok && bad.error != "" then
+let r = to_int_result("42")
+let bad = to_float_result("abc")
+if r.ok && r.value == 42 && !bad.ok && bad.failure.message != "" then
     test_report(true)
 else
     test_report(false)

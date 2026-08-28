@@ -7,8 +7,8 @@
 
 struct TreeNode
     valor: int
-    esquerda: ref TreeNode
-    direita: ref TreeNode
+    esquerda: ref TreeNode?
+    direita: ref TreeNode?
 end
 
 // Insere um valor na árvore
@@ -31,7 +31,7 @@ func insert(node: ref TreeNode, valor: int)
 end
 
 // Busca um valor na árvore
-func search(node: ref TreeNode, valor: int) -> bool
+func search(node: ref TreeNode?, valor: int) -> bool
     if node == null then
         return false
     end
@@ -46,17 +46,18 @@ func search(node: ref TreeNode, valor: int) -> bool
 end
 
 // Travessia In-Order (esquerda, raiz, direita) - imprime em ordem crescente
-func inorder(node: ref TreeNode)
+func inorder(node: ref TreeNode?)
     if node == null then
         return
     end
-    inorder(node.esquerda)
-    print(to_str(node.valor))
-    inorder(node.direita)
+    let n: ref TreeNode = node   // spec §2.4: o narrowing de 'node' não sobrevive à chamada; vincula uma vez
+    inorder(n.esquerda)
+    print(to_str(n.valor))
+    inorder(n.direita)
 end
 
 // Encontra o valor mínimo da árvore
-func find_min(node: ref TreeNode) -> int
+func find_min(node: ref TreeNode?) -> int
     if node == null then
         return -1
     end
@@ -68,7 +69,7 @@ func find_min(node: ref TreeNode) -> int
 end
 
 // Encontra o valor máximo da árvore
-func find_max(node: ref TreeNode) -> int
+func find_max(node: ref TreeNode?) -> int
     if node == null then
         return -1
     end
@@ -80,20 +81,22 @@ func find_max(node: ref TreeNode) -> int
 end
 
 // Conta o número de nós na árvore
-func count_nodes(node: ref TreeNode) -> int
+func count_nodes(node: ref TreeNode?) -> int
     if node == null then
         return 0
     end
-    return 1 + count_nodes(node.esquerda) + count_nodes(node.direita)
+    let n: ref TreeNode = node
+    return 1 + count_nodes(n.esquerda) + count_nodes(n.direita)
 end
 
 // Calcula a altura da árvore
-func height(node: ref TreeNode) -> int
+func height(node: ref TreeNode?) -> int
     if node == null then
         return 0
     end
-    let left_height: int = height(node.esquerda)
-    let right_height: int = height(node.direita)
+    let n: ref TreeNode = node
+    let left_height: int = height(n.esquerda)
+    let right_height: int = height(n.direita)
     if left_height > right_height then
         return 1 + left_height
     else

@@ -1,0 +1,9 @@
+// Spec §7: o operando de `try` tem de ser um Result<T>.
+use errors select *
+
+func f() -> Result<int>
+    let n: int = try 42
+    return Ok(n)
+end
+
+print(f().ok)

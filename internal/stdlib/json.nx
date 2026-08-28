@@ -1,9 +1,22 @@
+// stdlib/json.nx - Serialização verificável
+//
+// json_dumps (builtin) devolve "null" para valores que não serializam;
+// dumps_result diz o motivo como dado: errors.Result<string> (spec §7).
+
+use errors select *
+
+// EncodeResult e o shape cru que o nativo json_dumps_result preenche;
+// dumps_result o converte para Result<string>.
 struct EncodeResult
     success: bool
     data: string
     error: string
 end
 
-func dumps_result(value: any) -> EncodeResult
-    return json_dumps_result(value, EncodeResult)
+func dumps_result(value: any) -> Result<string>
+    let raw: EncodeResult = json_dumps_result(value, EncodeResult)
+    if raw.success then
+        return Ok(raw.data)
+    end
+    return Err(raw.error)
 end

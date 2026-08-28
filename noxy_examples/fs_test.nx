@@ -51,7 +51,7 @@ end
 struct Directory
     nome: string
     meta: ref Metadata
-    parent: ref Directory
+    parent: ref Directory?
     arquivos: (ref File)[]
     subdirs: (ref Directory)[]
 end
@@ -130,7 +130,7 @@ end
 
 // --- Phase 7: Recursive Search ---
 
-func find_file(dir: ref Directory, nome: string) -> ref File
+func find_file(dir: ref Directory, nome: string) -> ref File?
     // Search in local files
     let i: int = 0
     while i < length(dir.arquivos) do
@@ -145,7 +145,7 @@ func find_file(dir: ref Directory, nome: string) -> ref File
     let j: int = 0
     while j < length(dir.subdirs) do
         let sub: ref Directory = dir.subdirs[j]
-        let found: ref File = find_file(sub, nome)
+        let found: ref File? = find_file(sub, nome)
         if found != null then
             return found
         end
@@ -186,7 +186,7 @@ print("")
 print("Caminho completo de 'projetos': " + get_full_path(projetos))
 
 print("")
-let found: ref File = find_file(ref root, "codigo.noxy")
+let found: ref File? = find_file(ref root, "codigo.noxy")
 if found != null then
     print("Arquivo encontrado: " + found.nome)
 else

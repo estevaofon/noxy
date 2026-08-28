@@ -78,11 +78,12 @@ func TestCopyValueCloneGivesChildrenASecondOwner(t *testing.T) {
 func TestCallResultOkValueHasExactlyOneOwner(t *testing.T) {
 	machine, observed := vmWithOwnersProbe(t)
 	src := `
+use errors select *
 func faz_array() -> int[]
     return [1, 2, 3]
 end
 let r: any = call_result(faz_array)
-probe_owners(r["value"])
+probe_owners(r.value)
 `
 	if err := interpretVMSource(t, machine, src); err != nil {
 		t.Fatalf("programa falhou: %v", err)
@@ -122,9 +123,9 @@ func boom() -> int
 end
 let t1: any = spawn_task(mk)
 let r1: any = task_await(t1)
-let v: any = r1["value"]
+let v: any = r1.value
 v[0] = 99
-let rv: any = r1["value"]
+let rv: any = r1.value
 let t2: any = spawn_task(boom)
 let r2: any = task_await(t2)
 let e: any = r2["error"]

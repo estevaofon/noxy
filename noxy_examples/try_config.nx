@@ -1,0 +1,42 @@
+// try_config.nx — propagacao de erro com `try` (spec §7, issue #105).
+//
+// Cada nivel que antes repetia `if r.ok == false then return … end` a mao
+// escreve `try`: em sucesso vale o valor; em falha a funcao corrente
+// devolve a MESMA Failure ao chamador. Saida esperada:
+//
+//   porta = 8080
+//   falhou: cannot convert string "oitenta" to int
+//   falhou: config vazia
+
+use errors select *
+use convert select *
+
+struct Config
+    porta: int
+end
+
+// Uma "leitura" que pode falhar como dado: texto vazio nao e config.
+func le_texto(texto: string) -> Result<string>
+    if texto == "" then
+        return Err("config vazia")
+    end
+    return Ok(texto)
+end
+
+func le_config(texto: string) -> Result<Config>
+    let bruto: string = try le_texto(texto)     // Result<string> -> string, ou retorna a falha
+    let porta: int = try to_int_result(bruto)   // Result<int> -> int, ou retorna a falha
+    return Ok(Config(porta))
+end
+
+func mostra(r: Result<Config>) -> void
+    if r.ok then
+        print("porta = " + to_str(r.value.porta))
+    else
+        print("falhou: " + r.failure.message)
+    end
+end
+
+mostra(le_config("8080"))
+mostra(le_config("oitenta"))
+mostra(le_config(""))

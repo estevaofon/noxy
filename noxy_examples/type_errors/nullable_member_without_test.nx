@@ -1,0 +1,10 @@
+// Spec §2.4: ler um campo atraves de um T? sem testar null e erro de compilacao.
+struct P
+    x: int
+end
+
+func f(p: P?) -> int
+    return p.x
+end
+
+print(f(null))

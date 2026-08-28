@@ -73,9 +73,19 @@ referência é nula; `r == 1` é erro — `*r == 1` compara valores.
 
 ## `null`
 
-`null` é valor válido de `ref T`: pode ser guardado, passado, retornado,
-comparado e substituído por rebind. Escrever através de `null` é erro de
-runtime.
+`null` é valor válido de `ref T?` — e só dela (spec §2.4, 0.22.0). Um `ref T`
+nu nunca é `null`: `let r: ref int = null`, `f(null)` para `n: ref Node` e
+`Node(1, null)` para um campo `next: ref Node` são erros de compilação, com o
+hint `declare it as 'ref T?' to allow null`. Uma `ref T?` pode ser guardada,
+passada, retornada, comparada com `null` e substituída por rebind; ler ou
+escrever através dela (`*r`, `r.f`, `*r = v`) exige o teste antes —
+`if r != null then … end` estreita `r` para `ref T` dentro do bloco
+(`'r' may be null; test it first`). O erro de runtime "cannot dereference
+null reference" fica só para referências que chegam por `any`.
+
+`ref (T?)` é a outra forma: referência não-nula a um slot cujo *valor* pode
+ser `null` (`ref raiz` com `raiz: TreeNode?`); `*r` é `T?` e é testado do
+mesmo jeito.
 
 ## Tempo de vida de uma local referenciada
 
@@ -104,7 +114,7 @@ A fronteira é um campo declarado `ref`: ele é uma aresta compartilhada, e a
 cópia carrega a mesma aresta — `f(caixa)` com `caixa.inner: ref Node` deixa o
 callee escrever em `*caixa.inner`. Isso está escrito no **tipo** (`struct`),
 não na chamada (spec §2.2 regra 6). Para estrutura de dono único (lista,
-árvore), declare o campo sem `ref` — `next: Node` aceita `null` — e mute pelo
-slot: `insert(ref node.next, v)` (spec §5 *Self-Reference*,
+árvore), declare o campo sem `ref` — `next: Node?` aceita `null` — e mute pelo
+slot: `insert(ref node.next, v)` com `node: ref (Node?)` (spec §5 *Self-Reference*,
 `noxy_examples/bst_owned.nx`). Reserve campo `ref` para compartilhamento de
 verdade: nó com dois pais, `prev`, ponteiro de pai, grafo.

@@ -55,8 +55,10 @@ dynamic(null)`)
 }
 
 func TestExactCallableReferenceParameterReceivesNullValue(t *testing.T) {
+	// Spec §2.4: so um parametro `ref T?` aceita null; o `?` mais externo
+	// precisa dos parenteses para nao se colar ao retorno do func.
 	got := runTypedFunctionProgram(t, `
-func accept(value: ref func() -> int) -> void
+func accept(value: ref (func() -> int)?) -> void
     test_report(value)
 end
 accept(null)`)
@@ -68,10 +70,16 @@ accept(null)`)
 	}
 }
 
+// Spec §2.4: `let pointer: ref int = null` e `*pointer = 1` sobre um
+// `ref int?` sem teste sao erros de compilacao; o null so chega ao update
+// pela fronteira dinamica (`any` num parametro `ref int`).
 func TestUpdatingNullReferenceFailsClearly(t *testing.T) {
 	err := runTypedFunctionProgramError(t, `
-let pointer: ref int = null
-*pointer = 1`)
+func fill(pointer: ref int) -> void
+    *pointer = 1
+end
+let dyn: any = null
+fill(dyn)`)
 	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
 		t.Fatalf("error=%v", err)
 	}
@@ -121,9 +129,9 @@ func TestReferenceFieldArgumentForwardsNullSlot(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Node
     value: int
-    next: ref Node
+    next: ref Node?
 end
-func is_null(node: ref Node) -> bool
+func is_null(node: ref Node?) -> bool
     return node == null
 end
 func fill(parent: ref Node) -> void
@@ -135,7 +143,7 @@ end
 let head: Node = Node(1, null)
 let was_null: bool = is_null(head.next)
 fill(ref head)
-if was_null then
+if was_null && head.next != null then
     test_report(head.next.value)
 else
     test_report(0)
@@ -143,17 +151,20 @@ end`)
 	testExpectedObject(t, 42, got)
 }
 
+// Spec §2.4: um campo `ref Node?` nao entra num parametro `ref Node` sem
+// teste (erro de compilacao); o null so chega encaminhado pela base `any`.
 func TestWritingThroughForwardedNullFieldIsRuntimeError(t *testing.T) {
 	err := runTypedFunctionProgramError(t, `
 struct Node
     value: int
-    next: ref Node
+    next: ref Node?
 end
 func fill(node: ref Node) -> void
     *node = Node(42, null)
 end
 let head: Node = Node(1, null)
-fill(head.next)`)
+let dyn: any = head
+fill(dyn.next)`)
 	if err == nil || !strings.Contains(err.Error(), "cannot update null reference") {
 		t.Fatalf("error=%v", err)
 	}

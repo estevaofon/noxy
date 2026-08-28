@@ -1,8 +1,8 @@
 // Minimal test for ref field assignment with function return
 
-struct Node 
+struct Node
     data: int,
-    next: ref Node
+    next: ref Node?
 end
 
 let n1: Node = Node(1, null)
@@ -16,7 +16,7 @@ func test_assign(node: ref Node)
     // This works in stack.nx style:
     node.next = ref n2
     print("Basic assign works")
-    
+
     // This is what mergesort does:
     node.next = get_node(ref n2)
     print("Function return assign works")

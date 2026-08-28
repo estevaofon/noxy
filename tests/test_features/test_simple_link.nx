@@ -1,19 +1,20 @@
 // Simple linked list test - just 2 nodes
 
-struct Node 
+struct Node
     data: int,
-    next: ref Node
+    next: ref Node?
 end
 
 let n1: Node = Node(1, null)
 let n2: Node = Node(2, null)
 
-func print_list(head: ref Node) 
-    let current: ref Node = head
+func print_list(head: ref Node)
+    let current: ref Node? = head
     let count: int = 0
     while current != null && count < 10 do
+        let next_node: ref Node? = current.next
         print(current.data)
-        current = current.next
+        current = next_node
         count = count + 1
     end
 end
@@ -32,7 +33,7 @@ print("After link n1->n2:")
 print_list(ref n1)
 
 // Now test modification via function
-func modify(node: ref Node, new_next: ref Node)
+func modify(node: ref Node, new_next: ref Node?)
     node.next = new_next
 end
 

@@ -12,12 +12,17 @@ struct NetResult
     error: string
 end
 
+// SelectResult (spec §2.4, 0.22.0): os conjuntos prontos sao arrays
+// DINAMICOS com exatamente read_count/write_count/error_count sockets —
+// nenhum slot vazio, entao `result.read[i]` e um Socket (nunca null). Os
+// conjuntos de ENTRADA (socket_set) continuam com 64 slots, e slot vazio e
+// null: Socket?[64].
 struct SelectResult
-    read: Socket[64]
+    read: Socket[]
     read_count: int
-    write: Socket[64]
+    write: Socket[]
     write_count: int
-    error: Socket[64]
+    error: Socket[]
     error_count: int
 end
 
@@ -57,32 +62,32 @@ func settimeout(sock: Socket, timeout_ms: int) -> void
     net_settimeout(sock, timeout_ms)
 end
 
-func socket_set() -> Socket[64]
+func socket_set() -> Socket?[64]
     return net_socket_set()
 end
 
-func poll(read: Socket[64], write: Socket[64], err: Socket[64], timeout: int) -> SelectResult
+func poll(read: Socket?[64], write: Socket?[64], err: Socket?[64], timeout: int) -> SelectResult
     let raw: any = net_select(read, write, err, timeout)
-    let ready_read: Socket[64] = socket_set()
-    let ready_write: Socket[64] = socket_set()
-    let ready_error: Socket[64] = socket_set()
+    let ready_read: Socket[] = []
+    let ready_write: Socket[] = []
+    let ready_error: Socket[] = []
 
     let i: int = 0
     while i < raw.read_count do
         let sock: any = raw.read[i]
-        ready_read[i] = Socket(sock.fd, sock.addr, sock.port, sock.open)
+        append(ref ready_read, Socket(sock.fd, sock.addr, sock.port, sock.open))
         i = i + 1
     end
     i = 0
     while i < raw.write_count do
         let sock: any = raw.write[i]
-        ready_write[i] = Socket(sock.fd, sock.addr, sock.port, sock.open)
+        append(ref ready_write, Socket(sock.fd, sock.addr, sock.port, sock.open))
         i = i + 1
     end
     i = 0
     while i < raw.error_count do
         let sock: any = raw.error[i]
-        ready_error[i] = Socket(sock.fd, sock.addr, sock.port, sock.open)
+        append(ref ready_error, Socket(sock.fd, sock.addr, sock.port, sock.open))
         i = i + 1
     end
 

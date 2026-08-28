@@ -23,24 +23,24 @@ check("to_float de string", to_float("2.5") == 2.5)
 check("to_float alarga int", to_float(7) == 7.0)
 
 // Forma recuperável
-let ok_int: IntResult = to_int_result("42")
+let ok_int = to_int_result("42")
 check("to_int_result aceita", ok_int.ok && ok_int.value == 42)
 
-let bad_int: IntResult = to_int_result("abc")
+let bad_int = to_int_result("abc")
 check("to_int_result rejeita texto", !bad_int.ok)
-check("to_int_result explica a falha", bad_int.error != "")
-check("to_int_result zera o valor", bad_int.value == 0)
+check("to_int_result explica a falha", bad_int.failure.message != "")
+check("to_int_result deixa value null", bad_int.value == null)
 
-let overflow: IntResult = to_int_result("9999999999999999999")
+let overflow = to_int_result("9999999999999999999")
 check("to_int_result detecta overflow", !overflow.ok)
 
-let decimal: IntResult = to_int_result("5.5")
+let decimal = to_int_result("5.5")
 check("to_int_result rejeita decimal", !decimal.ok)
 
-let bad_float: FloatResult = to_float_result("abc")
+let bad_float = to_float_result("abc")
 check("to_float_result rejeita texto", !bad_float.ok)
 
-let ok_float: FloatResult = to_float_result("2.5")
+let ok_float = to_float_result("2.5")
 check("to_float_result aceita", ok_float.ok && ok_float.value == 2.5)
 
 print("")

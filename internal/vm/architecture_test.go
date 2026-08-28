@@ -126,6 +126,7 @@ func TestExecutorSourceLayout(t *testing.T) {
 			"DefineContextualNativeWithSignature": true,
 			"SetGlobal":                           true,
 			"GetGlobal":                           true,
+			"GlobalNames":                         true,
 			"SetModule":                           true,
 			"GetModule":                           true,
 		}

@@ -1,8 +1,8 @@
 // Test the exact merge pattern
 
-struct Node 
+struct Node
     data: int,
-    next: ref Node
+    next: ref Node?
 end
 
 let n1: Node = Node(1, null)
@@ -16,7 +16,7 @@ let n4: Node = Node(4, null)
 n1.next = ref n3
 n2.next = ref n4
 
-func merge(l1: ref Node, l2: ref Node) -> ref Node
+func merge(l1: ref Node?, l2: ref Node?) -> ref Node?
     print("merge called")
     if l1 == null then
         print("l1 is null, returning l2")
@@ -26,27 +26,31 @@ func merge(l1: ref Node, l2: ref Node) -> ref Node
         print("l2 is null, returning l1")
         return l1
     end
-    
-    print("l1.data=" + to_str(l1.data) + " l2.data=" + to_str(l2.data))
-    
-    if l1.data < l2.data then
+
+    // spec §2.4: os fatos sobre l1/l2 (refs) morrem em cada chamada; vincula refs não-nulas
+    let a: ref Node = l1
+    let b: ref Node = l2
+    print("l1.data=" + to_str(a.data) + " l2.data=" + to_str(b.data))
+
+    if a.data < b.data then
         print("Going l1 path")
-        l1.next = merge(l1.next, l2)
-        return l1
+        a.next = merge(a.next, b)
+        return a
     else
         print("Going l2 path")
-        l2.next = merge(l1, l2.next)
-        return l2
+        b.next = merge(a, b.next)
+        return b
     end
 end
 
 print("Starting merge test:")
-let result: ref Node = merge(ref n1, ref n2)
+let result: ref Node? = merge(ref n1, ref n2)
 print("Merge complete!")
 
 // Print result
-let current: ref Node = result
+let current: ref Node? = result
 while current != null do
+    let next_node: ref Node? = current.next
     print(current.data)
-    current = current.next
+    current = next_node
 end

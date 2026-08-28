@@ -1,18 +1,19 @@
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 let global_node2: Node = Node(20, null)
 let global_node: Node = Node(10, ref global_node2)
 
 
-func traverse(node: ref Node)
+func traverse(node: ref Node?)
     // Isso é seguro! 'node' é uma variável local que contém um endereço.
     // Mudar o endereço que 'node' aponta NÃO muda 'global_node'.
     while node != null do
+        let proximo: ref Node? = node.proximo
         print(to_str(node.valor))
-        node = node.proximo  // ← Só muda a variável local 'node'
+        node = proximo  // ← Só muda a variável local 'node'
     end
 end
 

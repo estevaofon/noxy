@@ -1,7 +1,7 @@
 // Estruturas recursivas por POSSE — sem nenhum campo `ref` (spec §5 Self-Reference).
 //
-// Um campo de struct aceita `null`, então lista e árvore de dono único não
-// precisam de `ref` na declaração: os filhos são valores. A cópia é
+// Um campo de struct `T?` aceita `null` (spec §2.4), então lista e árvore de
+// dono único não precisam de `ref` na declaração: os filhos são valores. A cópia é
 // independente em qualquer profundidade e um callee que recebe o nó por valor
 // não alcança a árvore do chamador. A mutação in-place vai pelo `ref` ao SLOT
 // (`insert(ref node.esquerda, v)`), não por um campo `ref`.
@@ -9,6 +9,8 @@
 // Contraste com bst.nx / linked_list.nx, onde `esquerda: ref TreeNode` é uma
 // aresta compartilhada e toda cópia alcança os mesmos filhos (spec §2.2 regra 6).
 // Motivação: issue #92. Custo do empréstimo aninhado: issue #93.
+
+use sys select exit
 
 let total: int = 0
 let failures: int = 0
@@ -32,11 +34,12 @@ end
 
 struct TreeNode
     valor: int
-    esquerda: TreeNode      // posse, nulável — sem ref
-    direita: TreeNode
+    esquerda: TreeNode?     // posse, nulável — sem ref (spec §2.4)
+    direita: TreeNode?
 end
 
-func insert(node: ref TreeNode, v: int) -> void
+// `ref (TreeNode?)`: referência ao SLOT que pode conter null.
+func insert(node: ref (TreeNode?), v: int) -> void
     if *node == null then
         *node = TreeNode(v, null, null)
         return
@@ -48,27 +51,49 @@ func insert(node: ref TreeNode, v: int) -> void
     end
 end
 
-func height(node: ref TreeNode) -> int
-    if *node == null then
+func height(node: TreeNode?) -> int        // POR VALOR (spec §2.4: o fato '*node != null' morre na 1a chamada)
+    if node == null then
         return 0
     end
-    let l: int = height(ref node.esquerda)
-    let r: int = height(ref node.direita)
+    let l: int = height(node.esquerda)
+    let r: int = height(node.direita)
     if l > r then
         return l + 1
     end
     return r + 1
 end
 
-func count(node: TreeNode) -> int         // POR VALOR
+func count(node: TreeNode?) -> int        // POR VALOR
     if node == null then
         return 0
     end
     return 1 + count(node.esquerda) + count(node.direita)
 end
 
+// Leituras de uma árvore possivelmente nula (spec §2.4): -1 / null quando não há nó.
+func valor_de(node: TreeNode?) -> int
+    if node == null then
+        return -1
+    end
+    return node.valor
+end
+
+func esquerda_de(node: TreeNode?) -> TreeNode?
+    if node == null then
+        return null
+    end
+    return node.esquerda
+end
+
+func direita_de(node: TreeNode?) -> TreeNode?
+    if node == null then
+        return null
+    end
+    return node.direita
+end
+
 // Callee por valor que muta o que recebeu: não pode vazar para o chamador.
-func soma_mutando(node: TreeNode) -> int
+func soma_mutando(node: TreeNode?) -> int
     if node == null then
         return 0
     end
@@ -82,10 +107,10 @@ end
 
 struct GNode<T>
     value: T,
-    next: GNode<T>
+    next: GNode<T>?
 end
 
-func push_back<T>(node: ref GNode<T>, v: T) -> void
+func push_back<T>(node: ref (GNode<T>?), v: T) -> void
     if *node == null then
         *node = GNode(v, null)
         return
@@ -93,7 +118,7 @@ func push_back<T>(node: ref GNode<T>, v: T) -> void
     push_back(ref node.next, v)
 end
 
-func remove_first<T>(node: ref GNode<T>, v: T) -> bool
+func remove_first<T>(node: ref (GNode<T>?), v: T) -> bool
     if *node == null then
         return false
     end
@@ -104,7 +129,7 @@ func remove_first<T>(node: ref GNode<T>, v: T) -> bool
     return remove_first(ref node.next, v)
 end
 
-func list_sum(node: GNode<int>) -> int
+func list_sum(node: GNode<int>?) -> int
     if node == null then
         return 0
     end
@@ -117,7 +142,7 @@ end
 
 struct Cell
     value: int
-    next: Cell
+    next: Cell?
 end
 
 struct Box
@@ -138,48 +163,58 @@ func main() -> void
     print("=== bst_owned: estruturas recursivas por posse ===")
 
     // --- BST ---
-    let raiz: TreeNode = null
+    // spec §2.4: a raiz e TreeNode? (comeca vazia). Como 'ref raiz' e tomado,
+    // o fato 'raiz != null' morre a cada chamada; as leituras passam por
+    // valor_de/esquerda_de/direita_de, que testam o null por dentro.
+    let raiz: TreeNode? = null
     insert(ref raiz, 50)
     insert(ref raiz, 30)
     insert(ref raiz, 70)
     insert(ref raiz, 20)
     insert(ref raiz, 40)
-    check_int(height(ref raiz), 3, "altura")
+    check_int(height(raiz), 3, "altura")
     check_int(count(raiz), 5, "contagem por valor")
 
-    let copia: TreeNode = raiz
-    copia.esquerda.valor = 999
-    check_int(raiz.esquerda.valor, 30, "copia independente em profundidade")
-    check_int(copia.esquerda.valor, 999, "copia recebeu a escrita")
+    let copia: TreeNode? = raiz
+    if copia != null && copia.esquerda != null then
+        copia.esquerda.valor = 999
+    end
+    check_int(valor_de(esquerda_de(raiz)), 30, "copia independente em profundidade")
+    check_int(valor_de(esquerda_de(copia)), 999, "copia recebeu a escrita")
 
     let s: int = soma_mutando(raiz)
     check_int(s, 5210, "callee por valor mutou a propria copia")
-    check_int(raiz.valor, 50, "callee por valor nao vazou (raiz)")
-    check_int(raiz.esquerda.valor, 30, "callee por valor nao vazou (filho)")
+    check_int(valor_de(raiz), 50, "callee por valor nao vazou (raiz)")
+    check_int(valor_de(esquerda_de(raiz)), 30, "callee por valor nao vazou (filho)")
 
     // subárvore lida por valor e mutada: não afeta a árvore
-    let sub: TreeNode = raiz.esquerda
-    sub.valor = -1
+    let sub: TreeNode? = esquerda_de(raiz)
+    if sub != null then
+        sub.valor = -1
+    end
     insert(ref sub, 35)
-    check_int(raiz.esquerda.valor, 30, "subarvore por valor e independente")
+    check_int(valor_de(esquerda_de(raiz)), 30, "subarvore por valor e independente")
     check_int(count(raiz), 5, "insercao na subarvore copiada nao entra na arvore")
 
     // dois refs ao mesmo slot escrevem no mesmo lugar
-    let r1: ref TreeNode = ref raiz.direita
-    let r2: ref TreeNode = ref raiz.direita
-    r1.valor = 71
-    check_int(r2.valor, 71, "dois refs ao mesmo slot")
-    check_int(raiz.direita.valor, 71, "escrita pelo ref chega na arvore")
+    // (spec §2.4: 'ref' de um caminho testado nao-nulo da um 'ref TreeNode')
+    if raiz != null && raiz.direita != null then
+        let r1: ref TreeNode = ref raiz.direita
+        let r2: ref TreeNode = ref raiz.direita
+        r1.valor = 71
+        check_int(r2.valor, 71, "dois refs ao mesmo slot")
+    end
+    check_int(valor_de(direita_de(raiz)), 71, "escrita pelo ref chega na arvore")
 
     // --- lista generic ---
-    let head: GNode<int> = null
+    let head: GNode<int>? = null
     push_back(ref head, 1)
     push_back(ref head, 2)
     push_back(ref head, 3)
     push_back(ref head, 4)
     check_int(list_sum(head), 10, "lista generic por posse")
 
-    let snapshot: GNode<int> = head
+    let snapshot: GNode<int>? = head
     check(remove_first(ref head, 2), "remocao no meio")
     check(remove_first(ref head, 1), "remocao na cabeca")
     check(remove_first(ref head, 4), "remocao no fim")

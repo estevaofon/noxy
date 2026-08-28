@@ -1,6 +1,6 @@
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func _append(node: ref Node, valor: int)
@@ -18,10 +18,14 @@ func pop(node: ref Node) -> int
         return -1
     end
     let current: ref Node = node
-    while current.proximo.proximo != null do
+    while current.proximo != null && current.proximo.proximo != null do
         current = current.proximo
     end
-    let valor: int = current.proximo.valor
+    let ultimo: ref Node? = current.proximo
+    if ultimo == null then
+        return -1
+    end
+    let valor: int = ultimo.valor
     current.proximo = null
     return valor
 end
@@ -52,8 +56,9 @@ func pop_front(head: ref Node) -> int
     end
 
     // copia dados do próximo para o atual e pula o próximo
-    head.valor = head.proximo.valor
-    head.proximo = head.proximo.proximo
+    let prox: ref Node = head.proximo
+    head.valor = prox.valor
+    head.proximo = prox.proximo
     return valor
 end
 
@@ -66,10 +71,11 @@ end
 let no1: Node = Node(0, null)
 
 func print_list(node: ref Node)
-    let current: ref Node = node
+    let current: ref Node? = node
     while current != null do
+        let prox: ref Node? = current.proximo
         print(to_str(current.valor))
-        current = current.proximo
+        current = prox
     end
 end
 

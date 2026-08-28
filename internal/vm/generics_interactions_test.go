@@ -81,7 +81,7 @@ end
 let c: Caixa<int> = Caixa(7)
 let ch: any = make_chan(1)
 chan_send(ch, c)
-let recebida: Caixa<int>
+let recebida: Caixa<int> = Caixa(0)
 when
     case bound = chan_recv(ch) then
         recebida = bound

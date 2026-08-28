@@ -94,7 +94,7 @@ func TestQualifiedUnknownNamespaceInParameterKeepsModuleMessage(t *testing.T) {
 // --- o que NAO pode disparar ---------------------------------------------
 
 func TestForwardReferenceBetweenTopLevelStructsStillCompiles(t *testing.T) {
-	_, err := compileFunctionSource(t, "struct A\n    b: B\n    next: ref A\nend\nstruct B\n    a: ref A\n    v: int\nend\nlet a: A = A(B(null, 1), null)\n")
+	_, err := compileFunctionSource(t, "struct A\n    b: B\n    next: ref A?\nend\nstruct B\n    a: ref A?\n    v: int\nend\nlet a: A = A(B(null, 1), null)\n")
 	requireNoError(t, err)
 }
 
@@ -104,7 +104,7 @@ func TestFunctionUsingStructDeclaredLaterStillCompiles(t *testing.T) {
 }
 
 func TestStructDeclaredInsideFunctionStillCompiles(t *testing.T) {
-	_, err := compileFunctionSource(t, "func f() -> int\n    struct L\n        v: int\n        next: ref L\n    end\n    let l: L = L(1, null)\n    return l.v\nend\n")
+	_, err := compileFunctionSource(t, "func f() -> int\n    struct L\n        v: int\n        next: ref L?\n    end\n    let l: L = L(1, null)\n    return l.v\nend\n")
 	requireNoError(t, err)
 }
 

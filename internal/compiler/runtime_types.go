@@ -50,6 +50,8 @@ func (c *Compiler) requiresRuntimeValueType(t ast.NoxyType, visiting map[*ast.St
 		return true
 	case *ast.RefType:
 		return c.requiresRuntimeValueType(typed.ElementType, visiting, origin)
+	case *ast.NullableType:
+		return c.requiresRuntimeValueType(typed.ElementType, visiting, origin)
 	case *ast.FunctionType:
 		// Callable signatures carry their own immutable runtime schema. Channels
 		// named by that signature are not values embedded in the callable object.
@@ -150,6 +152,16 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 			return nil, false
 		}
 		return &value.RuntimeTypeInfo{Kind: value.TYPE_REF, Element: element}, true
+	case *ast.NullableType:
+		// Copia rasa com a flag: o schema do elemento pode ser memoizado
+		// (structs) e nao pode ser mutado no lugar.
+		element, ok := c.runtimeTypeInfoWithStructs(typed.ElementType, structs, origin)
+		if !ok {
+			return nil, false
+		}
+		info := *element
+		info.Nullable = true
+		return &info, true
 	case *ast.ChanType:
 		element, ok := c.runtimeTypeInfoWithStructs(typed.ElementType, structs, origin)
 		if !ok {
@@ -168,7 +180,7 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 				return nil, false
 			}
 			info.Params[i] = paramInfo
-			_, info.ParamIsRef[i] = param.(*ast.RefType)
+			_, info.ParamIsRef[i] = asRefType(param)
 		}
 		result := normalizeReturnType(typed.Return)
 		returnInfo, ok := c.runtimeTypeInfoWithStructs(result, structs, origin)
@@ -212,6 +224,20 @@ func (c *Compiler) checkSignatureTypes(name string, params []*ast.Parameter, ret
 	prefix := ""
 	if name != "" {
 		prefix = fmt.Sprintf("function '%s' ", name)
+	}
+	// Parametro duplicado (issue #47 parte 1): sem este check o segundo `x`
+	// sombreia o primeiro em resolveLocal e o primeiro argumento fica
+	// inalcancavel para sempre, em silencio.
+	display := name
+	if display == "" {
+		display = "<anonymous>"
+	}
+	seen := make(map[string]struct{}, len(params))
+	for _, param := range params {
+		if _, dup := seen[param.Name]; dup {
+			return fmt.Errorf("[line %d] duplicate parameter '%s' in function '%s'", line, param.Name, display)
+		}
+		seen[param.Name] = struct{}{}
 	}
 	for _, param := range params {
 		if err := c.checkDeclaredType(param.Type, line, fmt.Sprintf("%sparameter '%s'", prefix, param.Name)); err != nil {
@@ -297,6 +323,8 @@ func firstUnknownTypeName(t ast.NoxyType, resolves func(string) bool) (string, b
 		}
 		return firstUnknownTypeName(typed.ValueType, resolves)
 	case *ast.RefType:
+		return firstUnknownTypeName(typed.ElementType, resolves)
+	case *ast.NullableType:
 		return firstUnknownTypeName(typed.ElementType, resolves)
 	case *ast.ChanType:
 		return firstUnknownTypeName(typed.ElementType, resolves)

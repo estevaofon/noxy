@@ -672,14 +672,12 @@ func TestModuleVariableAssignmentViaNamespaceIsCompileError(t *testing.T) {
 	}
 }
 
-// Um `let` global homonimo ao `use` e legal (a regra de redeclaracao so compara
-// nomes de `let` entre si) e sombreia o binding de namespace: `calc.x` vira
-// campo da struct do usuario e a escrita continua valendo. O guard do §8b so
-// pode valer enquanto o nome ainda e o marcador puro que importNamespace
-// deixou em c.globals (presente, com tipo nil).
-func TestGlobalLetShadowingNamespaceAllowsFieldAssignment(t *testing.T) {
+// Issue #47 parte 2: um `let` global homonimo ao `use` ja nao sombreia o
+// binding de namespace em silencio — o escopo global e um namespace so e a
+// colisao e erro de compilacao apontando o import.
+func TestGlobalLetOverNamespaceImportIsCompileError(t *testing.T) {
 	root := writeModuleFiles(t, map[string]string{"calc.nx": "let x: int = 1\n"})
-	reported, err := runModuleProgram(t, root, `use calc
+	_, err := runModuleProgram(t, root, `use calc
 struct P
     x: int
 end
@@ -687,7 +685,7 @@ let calc: P = P(1)
 calc.x = 2
 test_report(calc.x)
 `)
-	if err != nil || reported.Int() != 2 {
-		t.Fatalf("global let shadowing namespace: %v / %v", reported, err)
+	if err == nil || !strings.Contains(err.Error(), "'calc' redeclared in this scope (previous declaration as import at line 1)") {
+		t.Fatalf("global let over namespace import: %v", err)
 	}
 }

@@ -1,3 +1,5 @@
+use errors select *
+
 struct File
     fd: int
     path: string
@@ -69,8 +71,15 @@ func close(file: File) -> void
     io_close(file)
 end
 
-func close_result(file: File) -> IOCloseResult
-    return io_close_result(file, IOCloseResult)
+// close_result / write_result / write_bytes_result (spec §7, issue #105):
+// gemeas de close/write que devolvem errors.Result<T> em vez de levantar —
+// IOCloseResult e IOWriteResult sao os shapes crus dos nativos.
+func close_result(file: File) -> Result<bool>
+    let raw: IOCloseResult = io_close_result(file, IOCloseResult)
+    if raw.success then
+        return Ok(true)
+    end
+    return Err(raw.error)
 end
 
 func read(file: File) -> IOResult
@@ -93,8 +102,12 @@ func write(file: File, content: string) -> void
     io_write(file, content)
 end
 
-func write_result(file: File, content: string) -> IOWriteResult
-    return io_write_result(file, content, IOWriteResult)
+func write_result(file: File, content: string) -> Result<int>
+    let raw: IOWriteResult = io_write_result(file, content, IOWriteResult)
+    if raw.success then
+        return Ok(raw.bytes_written)
+    end
+    return Err(raw.error)
 end
 
 func exists(path: string) -> bool
@@ -125,8 +138,12 @@ func write_bytes(file: File, data: bytes) -> void
     io_write(file, data)
 end
 
-func write_bytes_result(file: File, data: bytes) -> IOWriteResult
-    return io_write_result(file, data, IOWriteResult)
+func write_bytes_result(file: File, data: bytes) -> Result<int>
+    let raw: IOWriteResult = io_write_result(file, data, IOWriteResult)
+    if raw.success then
+        return Ok(raw.bytes_written)
+    end
+    return Err(raw.error)
 end
 
 // Posicionamento (0.12.0): seek/tell movem e consultam o cursor lógico;

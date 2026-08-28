@@ -194,6 +194,13 @@ func (vm *VM) GetGlobal(name string) (value.Value, bool) {
 	return vm.shared.Root.GetLocal(name)
 }
 
+// GlobalNames devolve os nomes vinculados no ambiente raiz (nativos,
+// extensoes ja carregadas, globais definidos) — o embutidor os passa ao
+// compilador via SetKnownGlobals para o check de global inexistente.
+func (vm *VM) GlobalNames() []string {
+	return vm.shared.Root.LocalNames()
+}
+
 func (vm *VM) SetModule(name string, val value.Value) {
 	source, err := vm.resolveModule(name)
 	if err == nil {

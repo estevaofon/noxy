@@ -60,12 +60,16 @@ func TestNetSelectPublicWrappersAreExecutable(t *testing.T) {
 		return value.NewNull()
 	})
 
+	// Spec §2.4 (0.22.0): conjuntos de entrada sao Socket?[64] (slot vazio e
+	// null); os prontos em SelectResult sao Socket[] com exatamente
+	// read_count elementos — aqui zero.
 	err := interpretVMSourceWithinBound(t, machine, `use net
-let read: net.Socket[64] = net.socket_set()
-let write: net.Socket[64] = net.socket_set()
-let errors: net.Socket[64] = net.socket_set()
+let read: net.Socket?[64] = net.socket_set()
+let write: net.Socket?[64] = net.socket_set()
+let errors: net.Socket?[64] = net.socket_set()
 let selected: net.SelectResult = net.poll(read, write, errors, 0)
-test_report(selected.read)`)
+let ready: net.Socket[] = selected.read
+test_report(read)`)
 	if err != nil {
 		t.Fatal(err)
 	}

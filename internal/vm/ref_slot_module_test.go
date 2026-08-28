@@ -13,9 +13,9 @@ func TestImportedStructRefFieldForwardsThroughAnyBase(t *testing.T) {
 	write(t, root, "lista.nx", `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
-func eh_nulo(n: ref Node) -> bool
+func eh_nulo(n: ref Node?) -> bool
     return n == null
 end
 func preenche(n: ref Node)

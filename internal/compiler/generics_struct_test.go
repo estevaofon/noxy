@@ -76,7 +76,7 @@ func TestGenericStructMemoizedAcrossAnnotationAndConstructor(t *testing.T) {
 // externa, e a ordem da fila (dependencia antes de dependente) e o que faz o
 // pass 2 compilar tudo pelo caminho normal.
 func TestNestedGenericStructOrdersDependencyFirst(t *testing.T) {
-	program := parse("struct Caixa<T>\n    valor: T\nend\nlet d: Caixa<Caixa<int>> = null")
+	program := parse("struct Caixa<T>\n    valor: T\nend\nlet d: Caixa<Caixa<int>>? = null")
 	if _, _, err := New().Compile(program); err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestGenericStructInstanceIsAnOrdinaryStruct(t *testing.T) {
     extra: any
 end
 let c: Caixa<int> = Caixa(1, null)
-let d: Caixa<any>`))
+let d: Caixa<any>?`))
 	if err != nil {
 		t.Fatal(err)
 	}

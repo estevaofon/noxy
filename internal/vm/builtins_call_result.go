@@ -14,10 +14,16 @@ func (vm *VM) defineCallResultBuiltins() {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) < 1 {
+		// Argumentos ocultos (issue #105 item 2): o compilador prefixa o
+		// construtor da instancia errors::Result<R> e o de errors.Failure.
+		defs, err := resultDefsFromArgs(args)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		if len(args) < 3 {
 			return value.NewNull(), fmt.Errorf("call_result expects a callable")
 		}
-		return machine.runCallBoundary(args[0], args[1:])
+		return machine.runCallBoundary(defs, args[2], args[3:])
 	})
 }
 
@@ -59,16 +65,16 @@ func (vm *VM) prepareBoundaryCall(callee value.Value, args []value.Value) (Prepa
 // invariante que a assinatura carrega: depois de prepareBoundaryCall passar,
 // esta funcao so devolve erro se a propria fronteira estiver quebrada — toda
 // falha do callee vira CallResult{ok: false}.
-func (vm *VM) runCallBoundary(callee value.Value, args []value.Value) (value.Value, error) {
+func (vm *VM) runCallBoundary(defs resultDefs, callee value.Value, args []value.Value) (value.Value, error) {
 	prepared, err := vm.prepareBoundaryCall(callee, args)
 	if err != nil {
 		return value.NewNull(), err
 	}
 	result, callErr := vm.invokeBoundaryCall(prepared)
 	if callErr != nil {
-		return callResultFailureEnvelope(callErr), nil
+		return defs.failureEnvelope(callErr), nil
 	}
-	return callResultOkEnvelope(result), nil
+	return defs.okEnvelope(result), nil
 }
 
 // invokeBoundaryCall espelha invokePreparedCall (defer.go) com duas
@@ -218,155 +224,3 @@ func (vm *VM) hardUnwindTo(target int) {
 }
 
 var errBoundaryPanic = fmt.Errorf("call_result: unwinding after Go panic")
-
-// callResultOkEnvelope: NewMapWithData retem `result` (unico campo
-// composto) — e isso, e so isso, que da ao envelope a posse de r.value.
-// Sem esse dono, uma composta devolvida fresca (Owners=0) chegaria a
-// Owners=1 no primeiro `let` do lado Noxy, IsShared ficaria falso e a
-// mutacao nesse binding vazaria para r.value (TestCallResultValueSemantics
-// lia "100|100|3" em vez de "1|100|3").
-func callResultOkEnvelope(result value.Value) value.Value {
-	return value.NewMapWithData(map[string]value.Value{
-		"ok":      value.NewBool(true),
-		"value":   result,
-		"failure": value.NewNull(),
-	})
-}
-
-// callResultFailureEnvelope: a arvore de Failure (este envelope, failureMap
-// e as causes) e construida com value.NewMapWithData/NewArray, que retem
-// cada filho composto (o pai e dono duravel — mesma regra de OP_MAP/
-// OP_ARRAY). Sem esse dono o primeiro `let f: any = r.failure` do lado Noxy
-// levaria o filho a Owners=1, IsShared falso, e a mutacao reescreveria o
-// envelope (TestCallResultFailureAliasDoesNotMutateEnvelope,
-// TestCallResultCauseAliasDoesNotMutateEnvelope). Strings e escalares sao
-// no-op em Retain (ownersOf so rastreia compostos).
-func callResultFailureEnvelope(err error) value.Value {
-	return value.NewMapWithData(map[string]value.Value{
-		"ok":      value.NewBool(false),
-		"value":   value.NewNull(),
-		"failure": failureMap(err),
-	})
-}
-
-// failureMap converte a arvore de erro do unwinding no shape Failure.
-// UnwindError com Primary vira a falha primaria com cada DeferredError em
-// causes (ordem LIFO ja garantida por finalizeCurrentFrame); cleanup-first
-// (Primary nil) promove a PRIMEIRA falha diferida a primaria e agrega as
-// demais sob as causes dela (design §2, "Cleanup as first failure").
-func failureMap(err error) value.Value {
-	if panicErr, ok := err.(*boundaryPanicError); ok {
-		return value.NewMapWithData(map[string]value.Value{
-			"kind":    value.NewString("panic"),
-			"message": value.NewString(panicErr.payload),
-			"stack":   value.NewString(panicErr.stack),
-			"causes":  value.NewArray([]value.Value{}),
-		})
-	}
-	if unwind, ok := err.(*UnwindError); ok {
-		if unwind.Primary != nil {
-			return failureMapWithCauses(unwind.Primary, unwind.Deferred)
-		}
-		if len(unwind.Deferred) > 0 {
-			primary := deferredFailureMap(&unwind.Deferred[0], unwind.Deferred[1:])
-			return primary
-		}
-	}
-	if deferred, ok := err.(*DeferredError); ok {
-		return deferredFailureMap(deferred, nil)
-	}
-	if deferred, ok := err.(DeferredError); ok {
-		return deferredFailureMap(&deferred, nil)
-	}
-	return failureMapWithCauses(err, nil)
-}
-
-func failureMapWithCauses(primary error, deferred []DeferredError) value.Value {
-	causes := make([]value.Value, 0, len(deferred))
-	for index := range deferred {
-		causes = append(causes, deferredFailureMap(&deferred[index], nil))
-	}
-	message := ""
-	if primary != nil {
-		message = primary.Error()
-	}
-	return value.NewMapWithData(map[string]value.Value{
-		"kind":    value.NewString("runtime"),
-		"message": value.NewString(message),
-		"stack":   value.NewString(deepestRuntimeStack(primary)),
-		"causes":  value.NewArray(causes),
-	})
-}
-
-// deferredFailureMap constroi a Failure de uma falha diferida: a causa vira a
-// falha (aninhando as proprias causes dela recursivamente via failureMap) e a
-// localizacao de REGISTRO do defer entra como frame mais externo do stack —
-// forma-envelope da promessa da spec de defer ("with its registration
-// location"). siblings sao falhas diferidas posteriores promovidas para as
-// causes desta (apenas no caso cleanup-first).
-func deferredFailureMap(deferred *DeferredError, siblings []DeferredError) value.Value {
-	failure := failureMap(deferred.Cause)
-	mapping := failure.Obj.(*value.ObjMap)
-
-	stackValue, _ := mapping.Get("stack")
-	stack, _ := stackValue.Obj.(string)
-	registrationFrame := fmt.Sprintf("[%s] defer registration", deferred.Registration)
-	if stack == "" {
-		stack = registrationFrame
-	} else {
-		stack = stack + "\n" + registrationFrame
-	}
-	mapping.Set("stack", value.NewString(stack))
-
-	if len(siblings) > 0 {
-		// merge, nao substitui: a falha promovida ja pode ter causes proprias
-		// (o Cause dela era um *UnwindError com seu proprio Deferred) —
-		// preserva-las primeiro e so entao anexa os siblings (falhas
-		// diferidas posteriores no mesmo frame, cleanup-first) por cima.
-		previous, hadPrevious := mapping.Get("causes")
-		inner := existingCauses(mapping)
-		causes := make([]value.Value, 0, len(inner)+len(siblings))
-		// RC: os herdados apenas TROCAM de array — o retain que o array
-		// antigo registrou passa a valer pelo novo, entao re-reter aqui seria
-		// um dono a mais que ninguem solta (composto IsShared para sempre,
-		// clonando a cada mutacao).
-		causes = append(causes, inner...)
-		for index := range siblings {
-			sibling := deferredFailureMap(&siblings[index], nil)
-			value.Retain(sibling) // filho novo: o array vira dono duravel
-			causes = append(causes, sibling)
-		}
-		// RC: move — os herdados transferem o retain do array antigo, os
-		// irmaos novos foram retidos no laco acima; NewArrayAdopting nao
-		// retem de novo (um dono a mais que ninguem solta deixaria o
-		// composto IsShared para sempre).
-		// RC: ObjMap.Set NAO solta o valor sobrescrito (bindingStore.set so
-		// escreve) — quem faz retain-novo/release-velho no map-set do Noxy e
-		// o funil de OP_SET_INDEX no executor. Aqui a troca e a mao e segue a
-		// mesma ordem: o array novo ganha `mapping` como dono ANTES do antigo
-		// perder o dele (nunca soltar primeiro; um dec a mais nao tem volta).
-		replacement := value.NewArrayAdopting(causes)
-		value.Retain(replacement)
-		mapping.Set("causes", replacement)
-		if hadPrevious {
-			value.Release(previous)
-		}
-	}
-	return failure
-}
-
-// existingCauses le o array "causes" ja presente num mapa Failure recem
-// construido por failureMap — sempre presente (failureMapWithCauses e
-// deferredFailureMap ambos o preenchem, mesmo vazio) mas lido com defesa
-// contra shape inesperado.
-func existingCauses(mapping *value.ObjMap) []value.Value {
-	causesValue, ok := mapping.Get("causes")
-	if !ok {
-		return nil
-	}
-	array, ok := causesValue.Obj.(*value.ObjArray)
-	if !ok || array == nil {
-		return nil
-	}
-	return array.Elements
-}

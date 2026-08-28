@@ -123,7 +123,37 @@ func (rt *RefType) String() string {
 	if rt.ElementType == nil {
 		return "ref any"
 	}
+	// `ref (Node?)` (referencia a slot anulavel) e diferente de `ref Node?`
+	// (referencia anulavel): o parentese preserva a distincao ao imprimir.
+	if _, nullable := rt.ElementType.(*NullableType); nullable {
+		return "ref (" + rt.ElementType.String() + ")"
+	}
 	return "ref " + rt.ElementType.String()
+}
+
+// NullableType e `T?`: o tipo T ou null. Um `T` nu nunca e null (spec §2.4).
+// O sufixo `?` e o pos-fixo mais externo: `ref Node?` e uma referencia
+// anulavel; `ref (Node?)` uma referencia a slot anulavel; `Node?[]` array de
+// anulaveis; `Node[]?` array anulavel.
+type NullableType struct {
+	ElementType NoxyType
+}
+
+func (nt *NullableType) String() string {
+	if nt.ElementType == nil {
+		return "any"
+	}
+	switch elem := nt.ElementType.(type) {
+	case *FunctionType, *ChanType:
+		return "(" + nt.ElementType.String() + ")?"
+	case *RefType:
+		// `ref func() -> int?` leria o `?` no retorno: parentesear.
+		switch elem.ElementType.(type) {
+		case *FunctionType, *ChanType:
+			return "(" + nt.ElementType.String() + ")?"
+		}
+	}
+	return nt.ElementType.String() + "?"
 }
 
 type ChanType struct {
@@ -314,6 +344,23 @@ type BytesLiteral struct {
 func (bl *BytesLiteral) expressionNode()      {}
 func (bl *BytesLiteral) TokenLiteral() string { return bl.Token.Literal }
 func (bl *BytesLiteral) String() string       { return bl.Token.Literal }
+
+// TryExpression e `try expr` (spec §7): expr tem tipo errors::Result<U>; se
+// ok, vale o U de expr.value; senao a funcao corrente (que devolve
+// Result<V>) retorna imediatamente a mesma falha.
+type TryExpression struct {
+	Token token.Token // 'try'
+	Value Expression
+}
+
+func (t *TryExpression) expressionNode()      {}
+func (t *TryExpression) TokenLiteral() string { return t.Token.Literal }
+func (t *TryExpression) String() string {
+	if t.Value == nil {
+		return "try"
+	}
+	return "try " + t.Value.String()
+}
 
 type NullLiteral struct {
 	Token token.Token

@@ -16,9 +16,9 @@ import (
 const refSlotPrelude = `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
-func eh_nulo(n: ref Node) -> bool
+func eh_nulo(n: ref Node?) -> bool
     return n == null
 end
 `
@@ -86,7 +86,7 @@ let a: Node = Node(1, null)
 corrupt_ref_field(a, "proximo", Node(2, null))
 let dynamic: func = eh_nulo
 let r: bool = dynamic(a.proximo)`,
-			want: "function 'eh_nulo' argument 1: expected ref Node, got object",
+			want: "function 'eh_nulo' argument 1: expected ref Node?, got object",
 		},
 		{
 			name: "base any",
@@ -116,11 +116,11 @@ let r: bool = eh_nulo(ref d.proximo)`,
 func TestRawValueInRefArrayElementIsExplicitRuntimeError(t *testing.T) {
 	machine := newCorruptingVM(t)
 	err := interpretVMSource(t, machine, refSlotPrelude+`
-let arr: (ref Node)[] = [null]
+let arr: (ref Node)?[] = [null]
 corrupt_ref_index(arr, 0, Node(2, null))
 let dynamic: func = eh_nulo
 let r: bool = dynamic(arr[0])`)
-	if err == nil || !strings.Contains(err.Error(), "function 'eh_nulo' argument 1: expected ref Node, got object") {
+	if err == nil || !strings.Contains(err.Error(), "function 'eh_nulo' argument 1: expected ref Node?, got object") {
 		t.Fatalf("esperava erro explicito de elemento ref com valor cru, veio %v", err)
 	}
 }
@@ -173,7 +173,7 @@ let r: bool = eh_nulo(ref a.proximo)`)
 func TestAnyBaseNullRefFieldJSONLoadsReturnsFalse(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 struct Holder
-    child: ref any
+    child: ref any?
 end
 let h: Holder = Holder(null)
 let d: any = h
@@ -193,7 +193,7 @@ func TestAnyBaseRefArrayAndMapSlotsForwardNull(t *testing.T) {
 func eh_nulo_int(r: ref int) -> bool
     return r == null
 end
-let arr: (ref int)[] = [null]
+let arr: (ref int)?[] = [null]
 let m: map[string, ref int] = {}
 let da: any = arr
 let dm: any = m
@@ -237,7 +237,7 @@ test_report([ligado, eh_nulo(a.proximo)])`, []bool{true, true})
 func TestAnyBaseWriteOfRawValueIntoRefElementIsRuntimeError(t *testing.T) {
 	cases := map[string]string{
 		"array": `
-let arr: (ref int)[] = [null]
+let arr: (ref int)?[] = [null]
 let d: any = arr
 d[0] = 5`,
 		"map": `
@@ -283,16 +283,16 @@ func TestRawValueInRefMapValueIsExplicitRuntimeError(t *testing.T) {
 		{
 			name: "base tipada via dynamic call",
 			src: `
-let m: map[string, ref Node] = {"k": null}
+let m: map[string, (ref Node)?] = {"k": null}
 corrupt_ref_map(m, "k", Node(2, null))
 let dynamic: func = eh_nulo
 let r: bool = dynamic(m["k"])`,
-			want: "function 'eh_nulo' argument 1: expected ref Node, got object",
+			want: "function 'eh_nulo' argument 1: expected ref Node?, got object",
 		},
 		{
 			name: "base any",
 			src: `
-let m: map[string, ref Node] = {"k": null}
+let m: map[string, (ref Node)?] = {"k": null}
 corrupt_ref_map(m, "k", Node(2, null))
 let d: any = m
 let r: bool = eh_nulo(ref d["k"])`,
@@ -317,21 +317,21 @@ func TestEveryRefSlotHoldsRefOrNullAfterLegitimateWrites(t *testing.T) {
 	requireBoolResults(t, refSlotPrelude+`
 let novo: Node = Node(9, null)
 let a: Node = Node(1, null)
-let arr: (ref Node)[] = [null]
-let m: map[string, ref Node] = {"k": null}
+let arr: (ref Node)?[] = [null]
+let m: map[string, (ref Node)?] = {"k": null}
 a.proximo = ref novo
 arr[0] = ref novo
 m["k"] = ref novo
-let v1: ref Node = a.proximo
-let v2: ref Node = arr[0]
-let v3: ref Node = m["k"]
+let v1: ref Node? = a.proximo
+let v2: ref Node? = arr[0]
+let v3: ref Node? = m["k"]
 let depois_ref: bool = type(v1) == "ref" && type(v2) == "ref" && type(v3) == "ref"
 a.proximo = null
 arr[0] = null
 m["k"] = null
-let n1: ref Node = a.proximo
-let n2: ref Node = arr[0]
-let n3: ref Node = m["k"]
+let n1: ref Node? = a.proximo
+let n2: ref Node? = arr[0]
+let n3: ref Node? = m["k"]
 let depois_null: bool = type(n1) == "null" && type(n2) == "null" && type(n3) == "null"
 test_report([depois_ref, depois_null])`, []bool{true, true})
 }

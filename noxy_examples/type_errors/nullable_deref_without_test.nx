@@ -1,0 +1,6 @@
+// Spec §2.4: *r com r: ref int? sem testar null e erro de compilacao.
+func f(r: ref int?) -> int
+    return *r
+end
+
+print(f(null))

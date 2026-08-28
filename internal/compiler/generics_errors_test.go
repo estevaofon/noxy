@@ -276,7 +276,7 @@ h.callback = id`
 // rejeita `ref` como alvo de binding ANTES de qualquer outra regra —
 // exatamente a garantia que a spec pede.
 func TestRefBindingError(t *testing.T) {
-	_, _, err := New().Compile(parse("func id<T>(x: T) -> T\n    return x\nend\nlet r: ref int = null\nlet v: ref int = id(r)"))
+	_, _, err := New().Compile(parse("func id<T>(x: T) -> T\n    return x\nend\nlet r: ref int? = null\nlet v: ref int? = id(r)"))
 	if err == nil || !strings.Contains(err.Error(), "não pode ser um tipo ref") {
 		t.Fatalf("T=ref deve ser erro de unificacao, veio %v", err)
 	}

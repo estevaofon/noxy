@@ -24,7 +24,7 @@ struct Rec
     names: string[]
     m: map[string, int]
     grid: map[string, int[]]
-    inner: Inner
+    inner: Inner?
     dyn: any
 end
 `
@@ -33,7 +33,11 @@ func TestJSONLoadsBuildsEveryTypedShapeFromSchema(t *testing.T) {
 	got := captureVMSource(t, jsonTypedPrelude+`
 let r: Rec = Rec("", 0.0, false, [], [], [], {}, {}, null, null)
 let ok: bool = json_loads("{\"s\":\"hi\",\"f\":2.5,\"b\":true,\"xs\":[1,2],\"fs\":[1.5],\"names\":[\"a\",\"b\"],\"m\":{\"k\":3},\"grid\":{\"row\":[4,5]},\"inner\":{\"n\":7},\"dyn\":{\"a\":[1,true,null,2.5,\"x\"]}}", ref r)
-test_report([to_str(ok), r.s, to_str(r.f), to_str(r.b), to_str(r.xs), to_str(r.fs), to_str(r.names), to_str(r.m), to_str(r.grid), to_str(r.inner.n), to_str(r.dyn)])
+let inner_n: int = 0
+if r.inner != null then
+    inner_n = r.inner.n
+end
+test_report([to_str(ok), r.s, to_str(r.f), to_str(r.b), to_str(r.xs), to_str(r.fs), to_str(r.names), to_str(r.m), to_str(r.grid), to_str(inner_n), to_str(r.dyn)])
 `)
 	want := []string{"true", "hi", "2.500000", "true", "[1, 2]", "[1.500000]", "[a, b]", "{k: 3}", "{row: [4, 5]}", "7", "{a: [1, true, null, 2.500000, x]}"}
 	cells := semArray(t, got)

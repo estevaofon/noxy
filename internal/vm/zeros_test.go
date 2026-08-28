@@ -43,7 +43,7 @@ end
 let fs: float[2]
 let ss: string[2]
 let bs: bool[2]
-let ps: P[2]
+let ps: P?[2]
 test_report(to_str(fs[1]) + "|" + ss[1] + "|" + to_str(bs[1]) + "|" + to_str(ps[1] == null))`)
 	if got := reported.Obj.(string); got != "0.000000||false|true" {
 		t.Fatalf("defaults = %q", got)

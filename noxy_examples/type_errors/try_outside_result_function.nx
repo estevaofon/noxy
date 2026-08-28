@@ -1,0 +1,10 @@
+// Spec §7: `try` so vale numa funcao que devolve Result<T>.
+use errors select *
+use convert select *
+
+func main() -> void
+    let n: int = try to_int_result("1")
+    print(n)
+end
+
+main()

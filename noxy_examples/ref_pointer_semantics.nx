@@ -1,14 +1,14 @@
 struct Node
     id: int
-    next: ref Node
+    next: ref Node?
 end
 
 // Caso 1: Mover o Ponteiro Local (Variável Local)
 // Comportamento: Apenas a variável local 'current' muda. O chamador não é afetado.
 func traverse_com_local(node: ref Node)
     print("  [traverse_com_local] Recebi node ID: " + to_str(node.id))
-    let current: ref Node = node
-    current = current.next // Rebind local
+    let current: ref Node? = node
+    current = node.next // Rebind local (spec §2.4: 'next' é ref Node?, então 'current' também)
     if current != null then
         print("  [traverse_com_local] 'current' avançou para ID: " + to_str(current.id))
     else
@@ -22,8 +22,8 @@ end
 // NÃO afeta a variável do chamador. (Equivalente a mudar um ponteiro Node*, não Node**)
 func tenta_mover_parametro(node: ref Node)
     print("  [tenta_mover_parametro] Recebi node ID: " + to_str(node.id))
-    node = node.next // Rebind do parâmetro (local)
-    if node != null then
+    if node.next != null then   // spec §2.4: 'next' é ref Node?; testado, vira ref Node e o rebind é válido
+        node = node.next // Rebind do parâmetro (local)
         print("  [tenta_mover_parametro] Parâmetro 'node' agora aponta para ID: " + to_str(node.id))
     end
 end

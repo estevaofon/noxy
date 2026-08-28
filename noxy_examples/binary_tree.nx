@@ -79,16 +79,15 @@ print("=== ADICIONANDO ELEMENTOS ===")
 
 struct Node
   data: int
-  left: Node
-  right: Node
+  left: Node?     // spec §2.4: filho por posse, anulável
+  right: Node?
 end
 
 // Formato mais sofisticado (múltiplos níveis)
+// spec §2.4: 'root.left' é Node?; os netos entram na construção do filho
 let root: Node = Node(1, null, null)
-root.left = Node(2, null, null)
+root.left = Node(2, Node(4, null, null), Node(5, null, null))
 root.right = Node(3, null, null)
-root.left.left = Node(4, null, null)
-root.left.right = Node(5, null, null)
 
 // Desenho da arvore binaria em ASCII
 //     1
@@ -97,14 +96,16 @@ root.left.right = Node(5, null, null)
 //  / \ 
 // 4   5 
 
-func pre_order(node: ref Node, array: ref DynamicArray) -> void
-  if *node != null then
+// spec §2.4: o nó chega por valor como Node?; após o teste, 'node' fica Node
+// e o fato sobrevive às chamadas (local por valor).
+func pre_order(node: Node?, array: ref DynamicArray) -> void
+  if node != null then
     adicionar_elemento(array, node.data)
-    pre_order(ref node.left, array)
-    pre_order(ref node.right, array)
+    pre_order(node.left, array)
+    pre_order(node.right, array)
   end
 end
 
-pre_order(ref root, ref meu_array)
+pre_order(root, ref meu_array)
 print("Pre-order traversal:")
 imprimir_array(ref meu_array)

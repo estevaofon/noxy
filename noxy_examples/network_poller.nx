@@ -34,9 +34,9 @@ func main() -> void
     assert(listener.port > 0, "listener must report its assigned port")
     net.settimeout(listener, 500)
 
-    let listener_read: net.Socket[64] = net.socket_set()
-    let empty_write: net.Socket[64] = net.socket_set()
-    let empty_error: net.Socket[64] = net.socket_set()
+    let listener_read: net.Socket?[64] = net.socket_set()
+    let empty_write: net.Socket?[64] = net.socket_set()
+    let empty_error: net.Socket?[64] = net.socket_set()
     listener_read[0] = listener
 
     let before_connect: net.SelectResult = net.poll(listener_read, empty_write, empty_error, 0)
@@ -61,8 +61,8 @@ func main() -> void
     end
     net.settimeout(server, 500)
 
-    let empty_read: net.Socket[64] = net.socket_set()
-    let client_write: net.Socket[64] = net.socket_set()
+    let empty_read: net.Socket?[64] = net.socket_set()
+    let client_write: net.Socket?[64] = net.socket_set()
     client_write[0] = client
     let writable: net.SelectResult = net.poll(empty_read, client_write, empty_error, 250)
     if writable.write_count != 1 || writable.write[0].fd != client.fd then
@@ -75,7 +75,7 @@ func main() -> void
         fail_all(listener, client, server, "client must send all poll-data bytes")
     end
 
-    let server_read: net.Socket[64] = net.socket_set()
+    let server_read: net.Socket?[64] = net.socket_set()
     server_read[0] = server
     let first_read: net.SelectResult = net.poll(server_read, empty_write, empty_error, 250)
     if first_read.read_count != 1 || first_read.read[0].fd != server.fd then

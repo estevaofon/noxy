@@ -13,7 +13,7 @@ import (
 const refBasePrelude = `
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 `
 
@@ -46,9 +46,9 @@ end`,
 		t.Run(name, func(t *testing.T) {
 			_, err := compileFunctionSource(t, refBasePrelude+src)
 			if err == nil {
-				t.Fatal("esperava 'cannot assign Node to ref Node'")
+				t.Fatal("esperava 'cannot assign Node to ref Node?'")
 			}
-			if !strings.Contains(err.Error(), "cannot assign Node to ref Node") {
+			if !strings.Contains(err.Error(), "cannot assign Node to ref Node?") {
 				t.Fatalf("erro = %q", err)
 			}
 		})
@@ -64,7 +64,9 @@ func formas(node: ref Node, outro: ref Node)
     node.proximo = null
     node.proximo = outro.proximo
     node.proximo = outro
-    *node.proximo = Node(8, null)
+    if node.proximo != null then
+        *node.proximo = Node(8, null)
+    end
 end`)
 	if err != nil {
 		t.Fatalf("formas validas via base ref devem compilar: %v", err)
