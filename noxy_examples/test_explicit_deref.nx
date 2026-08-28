@@ -7,7 +7,7 @@
 
 struct Box
     val: int
-    next: ref Box
+    next: ref Box?
 end
 
 func verify_syntax(r: ref int)
@@ -52,7 +52,9 @@ func test_struct_field_syntax()
     
     // Field Rebind
     b1.next = ref b2
-    print(f"b1.next points to b2 (val: {b1.next.val})")
+    if b1.next != null then
+        print(f"b1.next points to b2 (val: {b1.next.val})")
+    end
     
     // Field Update via Deref
     // *b1.next = ... 
@@ -74,7 +76,9 @@ func test_struct_field_syntax()
     // r_box.next is ref Box.
     // *r_box.next = Box(999, null) -- Update target of next
     
-    *r_box.next = Box(999, null)
+    if r_box.next != null then
+        *r_box.next = Box(999, null)
+    end
     print(f"Updated *r_box.next. b2 should be overwritten.")
     print(f"b2.val: {b2.val}") // Should be 999
     

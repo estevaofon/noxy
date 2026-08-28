@@ -28,7 +28,7 @@ end
 // Deeply Nested Recursive Struct for Limit Testing
 struct Node
     val: int
-    next: ref Node
+    next: ref Node?
     meta: map[string, any]
 end
 

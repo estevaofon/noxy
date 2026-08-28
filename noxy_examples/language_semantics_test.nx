@@ -371,7 +371,8 @@ func test_igualdade()
     check(*rx != 6, "deref explicito no caso negativo")
 
     // E o teste de nulidade pergunta sobre o PROPRIO ref, sem deref.
-    let nulo: ref int = null
+    // spec §2.4: 'ref int' nunca e null; a referencia anulavel e 'ref int?'.
+    let nulo: ref int? = null
     check(nulo == null, "ref nulo é null")
     check(rx != null, "ref valido nao é null")
 end

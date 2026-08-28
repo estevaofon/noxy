@@ -6,7 +6,7 @@ end
 
 struct FileReadResult
     data: string
-    err: ref Error
+    err: ref Error?
 end
 
 // Tenta ler um arquivo retornando (conteúdo, erro)

@@ -16,7 +16,7 @@ func divide(a: int, b: int) -> int
 end
 
 func divide_result(a: int, b: int) -> DivResult
-    let r: CallResult = call_result(divide, a, b)
+    let r: any = call_result(divide, a, b)   // spec §2.4: CallResult.failure é Failure (não nulo); o módulo errors está sendo redesenhado — acesso dinâmico
     if r.ok then
         let quociente: int = to_int(r.value)
         return DivResult(true, quociente, "")

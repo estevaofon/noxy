@@ -72,7 +72,7 @@ check("stack string novo topo", peek(strs) == "b")
 // --- Node<T> lista ligada (auto-referencia via ref) ---
 struct Node<T>
     value: T,
-    next: ref Node<T>
+    next: ref Node<T>?
 end
 
 // Node<int>: 1 -> 2 -> 3
@@ -80,12 +80,17 @@ let n3: Node<int> = Node(3, null)
 let n2: Node<int> = Node(2, ref n3)
 let n1: Node<int> = Node(1, ref n2)
 check("lista int n1.value", n1.value == 1)
-check("lista int n1.next.value", n1.next.value == 2)
-check("lista int n1.next.next.value", n1.next.next.value == 3)
+// spec §2.4: 'next' é ref Node<T>?; cada leitura testa o caminho (o fato morre na chamada a check)
+if n1.next != null then
+    check("lista int n1.next.value", n1.next.value == 2)
+end
+if n1.next != null && n1.next.next != null then
+    check("lista int n1.next.next.value", n1.next.next.value == 3)
+end
 
 func sum_list<T>(head: ref Node<T>) -> T
     let total: T = head.value
-    let cur: ref Node<T> = head.next
+    let cur: ref Node<T>? = head.next
     while cur != null do
         total = total + cur.value
         cur = cur.next
@@ -99,8 +104,12 @@ check("sum_list percorre lista int", sum_list(ref n1) == 6)
 let s2: Node<string> = Node("y", null)
 let s1: Node<string> = Node("x", ref s2)
 check("lista string s1.value", s1.value == "x")
-check("lista string s1.next.value", s1.next.value == "y")
-check("lista string s1.next.next e null", s1.next.next == null)
+if s1.next != null then
+    check("lista string s1.next.value", s1.next.value == "y")
+end
+if s1.next != null then
+    check("lista string s1.next.next e null", s1.next.next == null)
+end
 
 // --- Caixa<Caixa<int>>: aninhamento de instanciacao ---
 struct Caixa<T>

@@ -1,6 +1,6 @@
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 func destruir(node: ref Node)

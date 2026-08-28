@@ -19,9 +19,9 @@ net.setblocking(server, false)
 
 // Socket set management
 // Fixed array of 64 sockets.
-let inputs: Socket[64] = net.socket_set()
-let outputs: Socket[64] = net.socket_set() // Empty
-let errors: Socket[64] = net.socket_set()  // Empty
+let inputs: Socket?[64] = net.socket_set()
+let outputs: Socket?[64] = net.socket_set() // Empty
+let errors: Socket?[64] = net.socket_set()  // Empty
 
 // Add server to inputs at index 0
 inputs[0] = server

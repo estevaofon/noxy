@@ -1,8 +1,8 @@
 // Test recursive ref assignment like in merge
 
-struct Node 
+struct Node
     data: int,
-    next: ref Node
+    next: ref Node?
 end
 
 let n1: Node = Node(1, null)
@@ -12,16 +12,17 @@ let n3: Node = Node(3, null)
 n1.next = ref n2
 n2.next = ref n3
 
-func recursive_test(node: ref Node) -> ref Node
+func recursive_test(node: ref Node?) -> ref Node?
     if node == null then
         return null
     end
-    print(node.data)
+    let n: ref Node = node   // spec §2.4: o fato sobre 'node' (ref) morre na chamada a print
+    print(n.data)
     // This is the pattern that mergesort uses:
-    node.next = recursive_test(node.next)
-    return node
+    n.next = recursive_test(n.next)
+    return n
 end
 
 print("Starting recursive test:")
-let result: ref Node = recursive_test(ref n1)
+let result: ref Node? = recursive_test(ref n1)
 print("Done!")

@@ -121,7 +121,7 @@ end
 
 // --- Phase 7: Cycle Detection ---
 
-func has_cycle_util(v: ref Vertex, parent: ref Vertex) -> bool
+func has_cycle_util(v: ref Vertex, parent: ref Vertex?) -> bool
     v.visitado = true
     
     let i: int = 0

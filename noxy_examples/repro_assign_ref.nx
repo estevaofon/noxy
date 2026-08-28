@@ -1,5 +1,5 @@
 struct Node
-    next: ref Node
+    next: ref Node?
 end
 
 let n: Node = Node(null)
@@ -9,6 +9,8 @@ let current: ref Node = ref n
 let next_node: Node = Node(null)
 current.next = ref next_node
 
-// Test Rebind
-current = current.next
+// Test Rebind (spec §2.4: current.next is 'ref Node?', test before rebinding)
+if current.next != null then
+    current = current.next
+end
 print("Rebind successful")

@@ -2,7 +2,7 @@
 
 struct Node
     valor: int
-    proximo: ref Node
+    proximo: ref Node?
 end
 
 // Teste 1: Com ref Node

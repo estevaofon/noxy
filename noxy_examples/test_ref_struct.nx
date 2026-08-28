@@ -12,7 +12,7 @@ change(ref b)
 print("After: " + to_str(b.val))
 
 struct Node
-    next: ref Node
+    next: ref Node?
 end
 
 func link(n: ref Node)
