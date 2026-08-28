@@ -20,7 +20,7 @@ func refReadHint(expr ast.Expression) string {
 // espera um valor, um `ref T` estatico e erro. `where` nomeia a posicao na
 // mensagem ("operand of '+'", "condition", "index").
 func (c *Compiler) rejectRefRead(t ast.NoxyType, expr ast.Expression, where string) error {
-	if _, isRef := t.(*ast.RefType); !isRef {
+	if _, isRef := asRefType(t); !isRef {
 		return nil
 	}
 	return fmt.Errorf("[line %d] %s cannot be %s: a ref is never read implicitly%s",
