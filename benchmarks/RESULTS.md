@@ -3,6 +3,31 @@
 Registro corrido das comparações de performance, mais recente primeiro. Cada
 seção compara dois binários pelo protocolo intercalado (ver Reprodução no fim).
 
+## Guards de slot `ref` no caminho `any` — issue #53 item 2 (medido em 2026-08-28, v0.21.0 + #104)
+
+A #50 pôs um guard em toda escrita genérica: `arrayElementIsRefSlot` (um
+`Load()` atômico da tag) em `OP_SET_INDEX` e `FieldIsRef` (lookup em map nil
+para struct sem campo `ref`) em `OP_SET_PROPERTY`. Estava estimado em ~1 ns e
+nunca tinha sido medido. Desde a #66 (`*_NORC`) e a #96 (`OP_SET_FIELD`) o
+caminho **tipado** não passa por esses opcodes — é exatamente a alternativa da
+spec §6.3 ("guard só quando o compilador não conhece a base") — então o custo
+restante é só das escritas por `any`.
+
+Micro `benchmarks/bench_dyn_write.nx` (novo na suíte; 1,2 M escritas por base
+`any`: `xs[k] = …` e `c.hits = …`), binário com guard × binário com o guard
+desligado nos dois funis, intercalado, mediana de 9, duas rodadas:
+
+| rodada | guard | sem guard | delta |
+|---|---|---|---|
+| 1 | 105,2 ms | 99,9 ms | +5,3 % |
+| 2 | 96,7 ms | 94,6 ms | +2,1 % |
+
+≈ 2–4 ns por escrita dinâmica. `bench_path_update` (caminho tipado) nas mesmas
+condições: 165,1 × 165,0 ms — **0 %**. Trocar `FieldIsRef` por teste de nil
+antes do lookup não moveu o ponteiro (+2,3 % na rodada 2) e foi descartado.
+Conclusão: o guard custa o que a fronteira dinâmica custa e só onde ela é
+necessária; nada a fazer no compilador.
+
 ## feature/issue-queue-2026-08-28 (a52c7e1) × empréstimo aninhado com slot — issue #93 (b) (4026c43)
 
 **Data:** 2026-08-28 · Windows 11 · Intel Core 7 150U · pwsh 7.6.5 · protocolo

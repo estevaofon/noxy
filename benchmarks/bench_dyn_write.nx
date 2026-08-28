@@ -1,0 +1,31 @@
+// Escrita por base DINAMICA (`any`): OP_SET_INDEX e OP_SET_PROPERTY genericos,
+// os unicos que ainda pagam o guard de slot `ref` da #50 em toda escrita
+// (`arrayElementIsRefSlot` = um Load atomico da tag; `FieldIsRef` = lookup num
+// map nil quando o struct nao tem campo ref). O caminho tipado saiu daqui na
+// #66 (NORC) e na #96 (OP_SET_FIELD). Issue #53 item 2: sentinela do custo.
+struct Cell
+    hits: int
+    score: int
+end
+
+func main()
+    let xs: any = [0, 0, 0, 0, 0, 0, 0, 0]
+    let c: any = Cell(0, 0)
+    let i: int = 0
+    while i < 400000 do
+        let k: int = i % 8
+        xs[k] = xs[k] + 1
+        c.hits = c.hits + 1
+        c.score = c.score + k
+        i = i + 1
+    end
+    let s: int = 0
+    i = 0
+    while i < 8 do
+        s = s + xs[i]
+        i = i + 1
+    end
+    print(f"CHECKSUM:{s + c.hits + c.score}")
+end
+
+main()
