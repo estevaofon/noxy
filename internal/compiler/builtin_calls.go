@@ -43,7 +43,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 	}
 
 	name := ident.Value
-	if name != "append" && name != "pop" && name != "delete" && name != "json_loads" && name != "range" {
+	if name != "append" && name != "pop" && name != "delete" && name != "json_loads" && name != "range" && name != "call_result" {
 		return false, nil, nil
 	}
 	if slot, _ := c.resolveLocal(name); slot != -1 {
@@ -54,6 +54,10 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 	}
 	if _, declared := c.resolveGlobalType(name); declared {
 		return false, nil, nil
+	}
+	if name == "call_result" {
+		resultType, err := c.compileCallResult(call, emission)
+		return true, resultType, err
 	}
 	if name == "range" {
 		if len(call.Arguments) < 1 || len(call.Arguments) > 3 {

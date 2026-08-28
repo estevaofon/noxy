@@ -194,6 +194,13 @@ func (c *Compiler) buildModuleStructExports(module string, state *moduleDiscover
 	for _, statement := range program.Statements {
 		switch declaration := statement.(type) {
 		case *ast.StructStatement:
+			// Um TEMPLATE (struct Result<T>) nao e struct concreto: vive no
+			// GenericRegistry via predeclareImportedTemplates, nunca em
+			// c.structs — senao `use errors select *` faria o nome bare
+			// `Result` parecer um struct comum no importador.
+			if len(declaration.TypeParams) > 0 {
+				continue
+			}
 			structs[declaration.Name] = declaration
 			state.origins[declaration] = module
 		case *ast.UseStmt:

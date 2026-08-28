@@ -15,7 +15,7 @@ use errors select *
 
 let f: Failure = Failure("runtime", "boom", "st", [])
 let nested: Failure = Failure("runtime", "outer", "st", [f])
-let r: CallResult = CallResult(true, 42, f)
+let r: Result<int> = Result(true, 42, f)
 test_report(nested.causes[0].message + "|" + to_str(r.ok) + "|" + to_str(r.value))
 `
 	reported := captureVMSource(t, source)
@@ -45,7 +45,7 @@ let b: any = call_result(to_int, "5")
 let c: any = call_result(P, 7)
 let d: any = call_result(nada)
 let inst: any = c.value
-test_report(to_str(a.ok) + "|" + to_str(a.value) + "|" + to_str(b.value) + "|" + to_str(inst.x) + "|" + to_str(d.ok) + "|" + to_str(d.value == null) + "|" + to_str(a.failure == null))
+test_report(to_str(a.ok) + "|" + to_str(a.value) + "|" + to_str(b.value) + "|" + to_str(inst.x) + "|" + to_str(d.ok) + "|" + to_str(d.value == null) + "|" + to_str(a.failure.kind == ""))
 `
 	reported := captureVMSource(t, source)
 	text, _ := reported.Obj.(string)
@@ -54,15 +54,29 @@ test_report(to_str(a.ok) + "|" + to_str(a.value) + "|" + to_str(b.value) + "|" +
 	}
 }
 
-func TestCallResultEnvelopeIsMap(t *testing.T) {
+// Issue #105 item 2: o envelope e uma instancia REAL de errors::Result<R> —
+// compara igual a um Result construido a mao e passa pela validacao nominal.
+func TestCallResultEnvelopeIsResultInstance(t *testing.T) {
 	source := `
-let r: any = call_result(to_int, "5")
-test_report(fmt("%T", r))
+use errors select *
+let r = call_result(to_int, "5")
+let manual: Result<int> = Result(true, 5, empty_failure())
+let typed: Result<int> = r
+test_report(fmt("%T", r) + "|" + to_str(r == manual) + "|" + to_str(typed.ok))
 `
 	reported := captureVMSource(t, source)
-	if text, _ := reported.Obj.(string); text != "map" {
-		t.Fatalf("envelope should be a map at the dynamic boundary, got %q", text)
+	text, _ := reported.Obj.(string)
+	if !strings.Contains(text, "Result<int>") || !strings.HasSuffix(text, "|true|true") {
+		t.Fatalf("envelope should be an errors::Result<int> instance equal to a hand-built one, got %q", text)
 	}
+}
+
+// testResultDefs monta as definicoes que o compilador entregaria a
+// call_result, para exercitar a arvore de Failure fora de um programa.
+func testResultDefs() resultDefs {
+	failure := value.NewStruct("Failure", []string{"kind", "message", "stack", "causes"}).Obj.(*value.ObjStruct)
+	result := value.NewStruct("errors::Result<any>", []string{"ok", "value", "failure"}).Obj.(*value.ObjStruct)
+	return resultDefs{result: result, failure: failure}
 }
 
 func TestCallResultCapturesRuntimeError(t *testing.T) {
@@ -73,7 +87,7 @@ func quebra(texto: string) -> int
     return to_int(texto)
 end
 
-let r: CallResult = call_result(quebra, "abc")
+let r = call_result(quebra, "abc")
 let depois: int = 40 + 2
 test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message + "|" + to_str(length(r.failure.causes)) + "|" + to_str(r.value == null) + "|" + to_str(depois))
 `
@@ -97,6 +111,7 @@ test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message + "|" 
 // script" junto.
 func TestCallResultFailureStackExcludesBoundary(t *testing.T) {
 	source := `
+use errors select *
 func fundo() -> int
     return to_int("x")
 end
@@ -135,6 +150,7 @@ test_report(chamador_externo())
 // que exige "in script" no Stack de um erro fora de qualquer call_result.
 func TestCallResultStackFloorIsRestoredAfterBoundary(t *testing.T) {
 	source := `
+use errors select *
 func inofensiva() -> int
     return 1
 end
@@ -160,6 +176,7 @@ test_report(externa())
 
 func TestCallResultCapturesStackOverflow(t *testing.T) {
 	source := `
+use errors select *
 func infinita() -> int
     return infinita()
 end
@@ -205,10 +222,10 @@ func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
 		Deferred: []DeferredError{promoted, outerSibling},
 	}
 
-	result := failureMap(unwind)
-	mapping, ok := result.Obj.(*value.ObjMap)
+	result := testResultDefs().failureOf(unwind)
+	mapping, ok := result.Obj.(*value.ObjInstance)
 	if !ok {
-		t.Fatalf("failureMap did not return a map: %#v", result)
+		t.Fatalf("failureOf did not return a Failure instance: %#v", result)
 	}
 	message, _ := mapping.Get("message")
 	if text, _ := message.Obj.(string); text != "inner primary failure" {
@@ -228,9 +245,9 @@ func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
 	}
 
 	causeMessage := func(v value.Value) string {
-		m, ok := v.Obj.(*value.ObjMap)
+		m, ok := v.Obj.(*value.ObjInstance)
 		if !ok {
-			t.Fatalf("cause is not a map: %#v", v)
+			t.Fatalf("cause is not a Failure instance: %#v", v)
 		}
 		msg, _ := m.Get("message")
 		text, _ := msg.Obj.(string)
@@ -267,6 +284,7 @@ func TestFailureMapMergesInnerCausesWithSiblingsOnPromotion(t *testing.T) {
 // linha sintetica de registro, que e concatenada depois da truncagem.
 func TestCallResultAggregatesDeferFailures(t *testing.T) {
 	source := `
+use errors select *
 func limpeza_ruim()
     to_int("defer-quebrado")
 end
@@ -312,6 +330,7 @@ test_report(chamador_do_defer())
 // sob ela).
 func TestCallResultCleanupFirstFailure(t *testing.T) {
 	source := `
+use errors select *
 func limpeza_ruim()
     to_int("so-o-defer-quebra")
 end
@@ -351,6 +370,7 @@ test_report(to_str(r.ok) + "|" + to_str(r.value == null) + "|" + r.failure.messa
 // mais direto.
 func TestCallResultCallerDefersUnaffected(t *testing.T) {
 	source := `
+use errors select *
 let trilha: string[] = []
 
 func marca(rotulo: string)
@@ -384,6 +404,7 @@ func TestCallResultCapturesGoPanic(t *testing.T) {
 		panic("boom-nativo")
 	})
 	source := `
+use errors select *
 func corpo() -> int
     explode()
     return 1
@@ -409,6 +430,7 @@ test_report(to_str(r.ok) + "|" + r.failure.kind + "|" + r.failure.message)
 
 func TestCallResultNestedBoundaries(t *testing.T) {
 	source := `
+use errors select *
 func interna() -> int
     return to_int("x")
 end
@@ -427,6 +449,7 @@ test_report(to_str(fora.ok) + "|" + fora.value)
 
 func TestCallResultNoRollback(t *testing.T) {
 	source := `
+use errors select *
 func muta_e_quebra(alvo: ref int) -> int
     *alvo = 99
     return to_int("x")
@@ -443,6 +466,7 @@ test_report(to_str(r.ok) + "|" + to_str(caixa))
 
 func TestCallResultValueSemantics(t *testing.T) {
 	source := `
+use errors select *
 func faz_array() -> int[]
     return [1, 2, 3]
 end
@@ -471,12 +495,13 @@ test_report(to_str(original[0]) + "|" + to_str(copia[0]) + "|" + to_str(length(o
 // envelope intacto.
 func TestCallResultFailureAliasDoesNotMutateEnvelope(t *testing.T) {
 	source := `
+use errors select *
 func quebra(texto: string) -> int
     return to_int(texto)
 end
 let r: any = call_result(quebra, "abc")
 let f: any = r.failure
-f["message"] = "hacked"
+f.message = "hacked"
 test_report(to_str(r.failure.message == "hacked") + "|" + to_str(f.message))
 `
 	reported := captureVMSource(t, source)
@@ -496,6 +521,7 @@ test_report(to_str(r.failure.message == "hacked") + "|" + to_str(f.message))
 // causa tenham dono duravel registrado na construcao.
 func TestCallResultCauseAliasDoesNotMutateEnvelope(t *testing.T) {
 	source := `
+use errors select *
 func limpeza_ruim()
     to_int("defer-quebrado")
 end
@@ -505,7 +531,7 @@ func corpo() -> int
 end
 let r: any = call_result(corpo)
 let c: any = r.failure.causes[0]
-c["kind"] = "hacked"
+c.kind = "hacked"
 test_report(to_str(r.failure.causes[0].kind == "hacked") + "|" + to_str(c.kind) + "|" + to_str(length(r.failure.causes)))
 `
 	reported := captureVMSource(t, source)
@@ -558,6 +584,7 @@ func TestCallResultPanicSkipsPendingNoxyDeferAndReleasesCapturedArgs(t *testing.
 		return value.NewNull()
 	})
 	source := `
+use errors select *
 let trilha: string[] = []
 
 func marca(rotulo: string)
@@ -602,23 +629,29 @@ func TestCallResultMisuseRaisesSynchronously(t *testing.T) {
 	cases := []struct {
 		name, source, wantErr string
 	}{
-		{"non-callable", `call_result(42)`, "call_result expects a callable"},
+		{"non-callable", `use errors select *
+call_result(42)`, "call_result expects a callable"},
 		{"closure arity", `
+use errors select *
 func soma(a: int, b: int) -> int
     return a + b
 end
 call_result(soma, 1)`, "expected 2 arguments but got 1"},
 		{"constructor arity", `
+use errors select *
 struct P
     x: int
 end
 call_result(P, 1, 2)`, "expected 1 arguments for struct P"},
-		{"no arguments at all", `call_result()`, "call_result expects a callable"},
+		{"no arguments at all", `use errors select *
+call_result()`, "call_result expects a callable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Misuse e sincrono: em compilacao quando o compilador ja ve
+			// (sem callable), senao no chamador em runtime.
 			machine := New()
-			err := interpretVMSource(t, machine, tc.source)
+			err := interpretOrCompileErr(t, machine, tc.source)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("want synchronous error containing %q, got: %v", tc.wantErr, err)
 			}

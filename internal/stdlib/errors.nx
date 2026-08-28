@@ -1,24 +1,44 @@
-// errors.nx - Formas do envelope da fronteira sincrona de erro.
+// errors.nx - O vocabulario unico de erro-como-dado (spec §7, issue #105).
 //
-// call_result e um nativo global; estes structs dao nome e contrato de campos
-// ao envelope que ele devolve. Fisicamente o envelope e um MAP na fronteira
-// dinamica (mesmo precedente de IntResult em convert.nx): fmt("%T") reporta
-// "map" e ele nao compara igual a um CallResult construido a mao. A anotacao
-// tipada (`let r: CallResult = ...`) vale pelo contrato de campos.
+// Failure descreve uma falha capturada (kind "runtime" | "panic", mensagem,
+// stack e as falhas de defer agregadas em causes). Result<T> e o envelope
+// tipado de toda operacao cuja falha e um resultado esperado: `ok` diz qual
+// dos dois campos vale — em sucesso `value` e T e `failure` e o sentinela
+// vazio; em falha `value` e null e `failure` descreve o erro. `if r.ok then`
+// estreita `r.value` para T; `try expr` propaga a falha para o chamador.
 //
-// Referencia completa (callables aceitos, semantica dos argumentos, misuse
-// sincrono vs falha capturada, agregacao de defer, cobertura de panico):
-// docs/NOXY_LANGUAGE_SPEC.md, secao "The error boundary: call_result".
+// call_result(fn, ...args) devolve errors::Result<R>, com R o retorno
+// estatico de fn (any quando desconhecido). Precisa deste modulo em escopo
+// (`use errors select *`): o compilador entrega a instancia monomorfizada e
+// o construtor de Failure a fronteira, que monta instancias reais.
+//
+// Referencia completa: docs/NOXY_LANGUAGE_SPEC.md, secao "Errors".
 
 struct Failure
-    kind: string       // "runtime" | "panic"
+    kind: string       // "runtime" | "panic"; "" no sentinela de sucesso
     message: string
     stack: string
     causes: Failure[]  // falhas de defer agregadas no unwinding, ordem LIFO
 end
 
-struct CallResult
+struct Result<T>
     ok: bool
-    value: any         // retorno de fn; null para void e em falha
-    failure: Failure   // null quando ok
+    value: T?          // T em sucesso (if r.ok then estreita), null em falha
+    failure: Failure   // sentinela vazio em sucesso, nunca null
+end
+
+func empty_failure() -> Failure
+    return Failure("", "", "", [])
+end
+
+func ok<T>(value: T) -> Result<T>
+    return Result(true, value, empty_failure())
+end
+
+func err<T>(message: string) -> Result<T>
+    return Result(false, null, Failure("runtime", message, "", []))
+end
+
+func err_failure<T>(failure: Failure) -> Result<T>
+    return Result(false, null, failure)
 end

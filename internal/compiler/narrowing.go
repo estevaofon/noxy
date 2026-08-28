@@ -333,8 +333,23 @@ func (c *Compiler) mayBeNullError(expr ast.Expression, t ast.NoxyType) error {
 	return fmt.Errorf("[line %d] value of type %s may be null; test it first\n  hint: bind it with 'let' and test for null", c.currentLine, t.String())
 }
 
-// resultValueKey (Parte B, Task 12): `if r.ok then` estreita `r.value` quando
-// r e errors.Result<T>. Ate la, nenhum fato.
+// resultValueKey: `if r.ok then` estreita `r.value` para T quando r e
+// errors::Result<T> (o compilador conhece Result nominalmente — spec §7).
+// O tipo da base sai de uma compilacao descartavel (typeOfDiscardedExpression).
 func (c *Compiler) resultValueKey(e *ast.MemberAccessExpression) string {
-	return ""
+	if e.Member != "ok" {
+		return ""
+	}
+	key, ok := stableKey(e.Left)
+	if !ok {
+		return ""
+	}
+	baseType, err := c.typeOfDiscardedExpression(e.Left)
+	if err != nil || baseType == nil {
+		return ""
+	}
+	if _, isResult := c.resultTypeArgs(baseType); !isResult {
+		return ""
+	}
+	return key + ".value"
 }

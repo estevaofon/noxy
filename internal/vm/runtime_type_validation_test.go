@@ -267,8 +267,12 @@ func TestLetStructAnnotationRejectsStructurallyMismatchedMap(t *testing.T) {
 		})
 	})
 	source := `
-use errors select *
-let r: CallResult = __test_dynamic_envelope_bad()
+struct Envelope
+    ok: bool
+    value: any
+    failure: string[]
+end
+let r: Envelope = __test_dynamic_envelope_bad()
 `
 	err := interpretVMSource(t, machine, source)
 	if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {

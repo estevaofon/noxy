@@ -227,6 +227,7 @@ func TestForeignPanicInsideCallResultStaysAPanicEnvelope(t *testing.T) {
 		panic("panico estranho")
 	})
 	if err := interpretVMSource(t, machine, `
+use errors select *
 func alvo() -> int
     estoura()
     return 1
