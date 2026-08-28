@@ -345,6 +345,23 @@ func (bl *BytesLiteral) expressionNode()      {}
 func (bl *BytesLiteral) TokenLiteral() string { return bl.Token.Literal }
 func (bl *BytesLiteral) String() string       { return bl.Token.Literal }
 
+// TryExpression e `try expr` (spec §7): expr tem tipo errors::Result<U>; se
+// ok, vale o U de expr.value; senao a funcao corrente (que devolve
+// Result<V>) retorna imediatamente a mesma falha.
+type TryExpression struct {
+	Token token.Token // 'try'
+	Value Expression
+}
+
+func (t *TryExpression) expressionNode()      {}
+func (t *TryExpression) TokenLiteral() string { return t.Token.Literal }
+func (t *TryExpression) String() string {
+	if t.Value == nil {
+		return "try"
+	}
+	return "try " + t.Value.String()
+}
+
 type NullLiteral struct {
 	Token token.Token
 }

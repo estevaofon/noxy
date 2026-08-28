@@ -1412,6 +1412,10 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 		case chunk.OP_DUP:
 			vm.push(vm.peek(0))
 
+		case chunk.OP_SWAP:
+			top := vm.stackTop
+			vm.stack[top-1], vm.stack[top-2] = vm.stack[top-2], vm.stack[top-1]
+
 		case chunk.OP_IMPORT:
 			index := int(c.Code[ip])<<8 | int(c.Code[ip+1])
 			ip += 2

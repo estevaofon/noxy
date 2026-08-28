@@ -1565,6 +1565,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Fallback?
 		return c.currentChunk, leftType, nil
 
+	case *ast.TryExpression:
+		return c.compileTry(n)
+
 	case *ast.PrefixExpression:
 		// Handle 'ref' operator specially - don't compile Right first
 		if n.Operator == "ref" {

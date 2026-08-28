@@ -266,6 +266,11 @@ func commonInferredType(left, right ast.NoxyType) ast.NoxyType {
 // import x import nunca colide (re-importar e idempotente); func x func
 // entre linhas de sessao e permitido (iteracao no REPL).
 func (c *Compiler) declareGlobalName(declared map[string]GlobalDecl, name, kind string, line int) error {
+	if isInstanceName(name) {
+		// Instancia monomorfizada: o modulo que a exporta e o programa que a
+		// prependa falam do MESMO struct/funcao gerado — nao e redeclaracao.
+		return nil
+	}
 	if prev, ok := declared[name]; ok && !(kind == "import" && prev.Kind == "import") {
 		switch {
 		case kind == "variable" && prev.Kind == "variable":

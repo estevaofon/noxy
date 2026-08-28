@@ -85,6 +85,8 @@ func Inspect(node Node, fn func(Node) bool) {
 		}
 	case *FunctionLiteral:
 		inspectBlock(n.Body, fn)
+	case *TryExpression:
+		Inspect(n.Value, fn)
 	}
 }
 

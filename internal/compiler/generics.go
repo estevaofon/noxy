@@ -1008,6 +1008,8 @@ func collectBoundNamesInExpression(e ast.Expression, bound map[string]bool) {
 		collectBoundNamesInExpression(n.Size, bound)
 	case *ast.PrefixExpression:
 		collectBoundNamesInExpression(n.Right, bound)
+	case *ast.TryExpression:
+		collectBoundNamesInExpression(n.Value, bound)
 	case *ast.InfixExpression:
 		collectBoundNamesInExpression(n.Left, bound)
 		collectBoundNamesInExpression(n.Right, bound)
@@ -1121,6 +1123,8 @@ func collectFreeInExpression(e ast.Expression, bound, free map[string]bool) {
 		collectFreeInExpression(n.Size, bound, free)
 	case *ast.PrefixExpression:
 		collectFreeInExpression(n.Right, bound, free)
+	case *ast.TryExpression:
+		collectFreeInExpression(n.Value, bound, free)
 	case *ast.InfixExpression:
 		collectFreeInExpression(n.Left, bound, free)
 		collectFreeInExpression(n.Right, bound, free)

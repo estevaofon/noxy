@@ -60,6 +60,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.BIT_NOT, p.parsePrefixExpression)
 	p.registerPrefix(token.FUNC, p.parseFunctionLiteral)
 	p.registerPrefix(token.STAR, p.parsePrefixExpression) // Support *deref
+	p.registerPrefix(token.TRY, p.parseTryExpression)
 
 	p.registerPrefix(token.PERCENT, nil) // Percent is not a prefix operator.
 	p.registerPrefix(token.LBRACE, p.parseMapLiteral)
@@ -1093,6 +1094,15 @@ func (p *Parser) parseFString() ast.Expression {
 		}
 	}
 	return combined
+}
+
+// parseTryExpression: `try expr` com a precedencia de prefixo — `try f(x).ok`
+// e `try (f(x).ok)`, como `-` e `*`.
+func (p *Parser) parseTryExpression() ast.Expression {
+	expression := &ast.TryExpression{Token: p.curToken}
+	p.nextToken()
+	expression.Value = p.parseExpression(PREFIX)
+	return expression
 }
 
 func (p *Parser) parsePrefixExpression() ast.Expression {

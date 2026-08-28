@@ -30,6 +30,7 @@ const (
 	DO       TokenType = "DO"
 	RETURN   TokenType = "RETURN"
 	DEFER    TokenType = "DEFER"
+	TRY      TokenType = "TRY" // try expr: propaga a falha de um Result<T> (spec §7)
 	BREAK    TokenType = "BREAK"
 	CONTINUE TokenType = "CONTINUE"
 	FOR      TokenType = "FOR"
@@ -128,6 +129,7 @@ var keywords = map[string]TokenType{
 	"do":       DO,
 	"return":   RETURN,
 	"defer":    DEFER,
+	"try":      TRY,
 	"break":    BREAK,
 	"continue": CONTINUE,
 	"int":      TYPE_INT,

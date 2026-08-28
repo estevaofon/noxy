@@ -207,6 +207,8 @@ func substituteInExpression(e ast.Expression, b map[string]ast.NoxyType) {
 		substituteInExpression(n.Size, b)
 	case *ast.PrefixExpression:
 		substituteInExpression(n.Right, b)
+	case *ast.TryExpression:
+		substituteInExpression(n.Value, b)
 	case *ast.InfixExpression:
 		substituteInExpression(n.Left, b)
 		substituteInExpression(n.Right, b)

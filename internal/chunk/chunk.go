@@ -52,6 +52,9 @@ const (
 	OP_IMPORT
 	OP_IMPORT_FROM_ALL
 	OP_DUP
+	// OP_SWAP troca os dois valores do topo (sem efeito em RC): suporte ao
+	// lowering de `try` (issue #105 item 2).
+	OP_SWAP
 	OP_ARRAY
 	OP_MAP
 	OP_ZEROS
@@ -368,6 +371,8 @@ func (op OpCode) String() string {
 		return "OP_ADDR"
 	case OP_DUP:
 		return "OP_DUP"
+	case OP_SWAP:
+		return "OP_SWAP"
 	case OP_ARRAY:
 		return "OP_ARRAY"
 	case OP_MAP:
@@ -665,6 +670,8 @@ func (c *Chunk) disassembleInstruction(offset int) int {
 		return c.simpleInstruction("OP_IMPORT_FROM_ALL", offset)
 	case OP_DUP:
 		return c.simpleInstruction("OP_DUP", offset)
+	case OP_SWAP:
+		return c.simpleInstruction("OP_SWAP", offset)
 	case OP_ADD_INT:
 		return c.simpleInstruction("OP_ADD_INT", offset)
 	case OP_SUB_INT:

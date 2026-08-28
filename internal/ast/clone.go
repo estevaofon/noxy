@@ -108,6 +108,8 @@ func CloneExpression(e Expression) Expression {
 		return &Boolean{Token: n.Token, Value: n.Value}
 	case *PrefixExpression:
 		return &PrefixExpression{Token: n.Token, Operator: n.Operator, Right: CloneExpression(n.Right)}
+	case *TryExpression:
+		return &TryExpression{Token: n.Token, Value: CloneExpression(n.Value)}
 	case *InfixExpression:
 		return &InfixExpression{Token: n.Token, Left: CloneExpression(n.Left), Operator: n.Operator, Right: CloneExpression(n.Right)}
 	case *FunctionLiteral:
