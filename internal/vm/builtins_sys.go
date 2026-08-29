@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -15,6 +16,13 @@ import (
 	"noxy-vm/internal/value"
 	"noxy-vm/internal/version"
 )
+
+// pluginDeprecationWarned: um unico aviso por processo (spec 2026-08-29
+// §10.1). sys_load_plugin, internal/plugin e compiler.PluginNativeNames
+// saem juntos na v0.25.0.
+var pluginDeprecationWarned atomic.Bool
+
+const pluginDeprecationWarning = "warning: sys_load_plugin is deprecated since v0.23.0 and will be removed in v0.25.0; publish the plugin as a kind = \"process\" extension (docs/EXTENSIONS.md)"
 
 func (vm *VM) defineSystemBuiltins() {
 	vm.DefineNative("sys_signal_notify", func(args []value.Value) value.Value {
@@ -192,6 +200,9 @@ func (vm *VM) defineSystemBuiltins() {
 	})
 
 	vm.DefineContextualNative("sys_load_plugin", func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		if pluginDeprecationWarned.CompareAndSwap(false, true) {
+			fmt.Fprintln(os.Stderr, pluginDeprecationWarning)
+		}
 		machine, contextErr := nativeVM(context)
 		if contextErr != nil {
 			return value.NewNull(), contextErr
