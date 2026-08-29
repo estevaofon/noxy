@@ -559,7 +559,12 @@ interpretador). Os dois contratos são travados por
 **Extensões e plugins**: extensões WASM rodam no wazero sem WASI e com
 `capabilities = []` obrigatório (M1) — o loader rejeita manifesto com
 capability. Plugins (`sys.load_plugin`) são processos externos falando JSON;
-a VM não os isola.
+a VM não os isola. Desde a issue #110 (2026-08-29) a divisão é por perfil:
+wasm para computação pura; I/O, SO, drivers e SDKs vão para plugins por
+processo (tier B, spec na #80) — as capabilities do wasm (M2) estão suspensas
+e o invariante 5 do RFC #78 ("VM não desestabilizável") não é mais requisito.
+Invariantes revisados em
+`docs/superpowers/specs/2026-08-29-extensibility-invariants-revision.md`.
 
 ---
 

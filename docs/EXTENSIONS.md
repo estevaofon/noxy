@@ -5,6 +5,12 @@ hashing, codecs, parsers — as a single platform-independent `.wasm` artifact,
 loaded by the VM's embedded WebAssembly runtime (wazero). Design:
 `docs/superpowers/specs/2026-08-23-wasm-extension-mechanism-design.md`.
 
+**Scope (issue #110).** WASM extensions are for pure computation over their
+arguments — buffer in, buffer out. I/O, OS access, network, drivers and SDK
+bindings are the job of process plugins (tier B, issue #80); the wasm
+capability plan (`capabilities`, M2) is suspended. Pick the backend by the
+API's profile. Invariants: `docs/superpowers/specs/2026-08-29-extensibility-invariants-revision.md`.
+
 ## Package layout
 
 ```
@@ -42,8 +48,9 @@ because a handle only means something to the instance that minted it.
 
 A non-empty `capabilities` list is rejected outright: the loader errors on
 `noxy_ext.toml` parsing rather than silently ignoring capabilities the host
-does not implement yet. M1 ships zero capabilities — every extension is a
-pure function of its declared arguments (see ABI v1 summary below).
+does not implement (the capability plan is suspended — issue #110; I/O
+belongs to process plugins). M1 ships zero capabilities — every extension is
+a pure function of its declared arguments (see ABI v1 summary below).
 
 Export names must match `^[a-z][a-z0-9_]*$` and start with `<name>_`. Before
 registering any export, the loader checks every declared export against the
