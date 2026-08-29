@@ -76,9 +76,9 @@ func (b *syncBuffer) String() string {
 func (c *fakeConn) exit(err error) {
 	c.once.Do(func() {
 		c.waitErr = err
+		close(c.exited) // antes dos pipes: um Kill que empata com a saida ja ve o processo morto
 		_ = c.stdoutW.Close()
 		_ = c.stdinR.Close()
-		close(c.exited)
 	})
 }
 
