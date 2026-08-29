@@ -17,7 +17,7 @@
 // ✅ Detecção de ciclo                 -> has_cycle() retorna true
 // ✅ Múltiplas refs para mesmo nó      -> C recebe refs de B, D, E
 // ✅ Lista tipada de refs              -> (ref Vertex)[]
-// ✅ slice() com lista de refs         -> array_utils.slice() funciona
+// ✅ slice() com lista de refs         -> slice() builtin funciona
 //
 // ESTRUTURA DO GRAFO:
 //
@@ -34,8 +34,6 @@
 // - D -> E -> C -> D
 //
 // ============================================================
-
-use array_utils
 
 // --- Phase 1: Struct Vertex ---
 struct Vertex
@@ -100,7 +98,7 @@ func bfs(start: ref Vertex)
         // Remove first element from queue using slice
         let atual: ref Vertex = fila[0]
         if length(fila) > 1 then
-            fila = array_utils.slice(fila, 1, length(fila))
+            fila = slice(fila, 1, length(fila))
         else
             fila = []
         end

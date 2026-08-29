@@ -163,7 +163,7 @@ func TestGlobalStructOverStructFails(t *testing.T) {
 }
 
 func TestGlobalLetOverSelectiveImportFails(t *testing.T) {
-	requireRedeclarationError(t, "use array_utils select range\nlet range: int = 5\n", "previous declaration as import at line 1")
+	requireRedeclarationError(t, "use sys select os\nlet os: int = 5\n", "previous declaration as import at line 1")
 }
 
 func TestGlobalLetOverNamespaceImportFails(t *testing.T) {
