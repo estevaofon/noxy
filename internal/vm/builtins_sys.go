@@ -369,6 +369,9 @@ func (vm *VM) defineSystemBuiltins() {
 		if len(args) > 0 {
 			code = int(args[0].Int())
 		}
+		// os.Exit nao roda defers: fecha os plugins por processo aqui, senao
+		// eles ficariam orfaos ate perceberem o EOF (spec §4.5).
+		vm.shared.CloseExtensions()
 		os.Exit(code)
 		return value.NewNull()
 	})

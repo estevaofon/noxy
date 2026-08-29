@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"noxy-vm/internal/ext/exttest"
 	"noxy-vm/internal/value"
@@ -171,4 +172,31 @@ func TestProcessExtensionSumMatchLoads(t *testing.T) {
 	if got.Int() != 2 {
 		t.Fatalf("verified load must work: %#v", got)
 	}
+}
+
+func TestCloseExtensionsStopsTheProcess(t *testing.T) {
+	root := t.TempDir()
+	writeProcessExtensionPackage(t, root)
+	machine := NewWithConfig(VMConfig{RootPath: root})
+	captured := value.NewNull()
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		captured = args[0]
+		return value.NewNull()
+	})
+	if err := machine.Interpret(compileVMSourceAtRoot(t, root, "use guest as g\ntest_report(g.pid())\n")); err != nil {
+		t.Fatal(err)
+	}
+	pid := int(captured.Int())
+	if !exttest.ProcessAlive(pid) {
+		t.Fatal("guest must be alive after the call")
+	}
+	machine.CloseExtensions()
+	deadline := time.Now().Add(3 * time.Second)
+	for exttest.ProcessAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if exttest.ProcessAlive(pid) {
+		t.Fatal("CloseExtensions must stop the plugin")
+	}
+	machine.CloseExtensions() // idempotente
 }

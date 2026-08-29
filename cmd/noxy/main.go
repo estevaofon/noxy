@@ -227,6 +227,9 @@ func replExitCode(err error) int {
 func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 	// Shared VM for persistence
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: "."})
+	// Extensoes por processo precisam de EOF/kill na saida (spec §4.5); o
+	// defer cobre sucesso, erro de runtime e o desenrolar de um panic.
+	defer machine.CloseExtensions()
 
 	// Persist globals, struct definitions (comuns e instancias monomorfizadas
 	// de generico) e o registry de templates genericos entre linhas do REPL
@@ -400,6 +403,9 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 	// A VM nasce antes do compilador: seus nativos sao os globais que o
 	// check de global inexistente (issue #47 parte 3) garante existir.
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
+	// Extensoes por processo precisam de EOF/kill na saida (spec §4.5); o
+	// defer cobre sucesso, erro de runtime e o desenrolar de um panic.
+	defer machine.CloseExtensions()
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
 	c.SetKnownGlobals(append(machine.GlobalNames(), compiler.PluginNativeNames(program)...))
 	chunk, _, err := c.Compile(program)
