@@ -478,18 +478,14 @@ func (vm *VM) defineNetworkBuiltins() {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) < 1 {
-			return value.NewNull(), nil
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("net_accept expects exactly 1 argument")
 		}
-		socket, ok := args[0].Obj.(*value.ObjMap)
-		if !ok {
-			return value.NewNull(), nil
+		listenerFD, descriptorErr := networkSocketDescriptor(args[0])
+		if descriptorErr != nil {
+			return value.NewNull(), descriptorErr
 		}
-		fdValue, exists := socket.Get("fd")
-		if !exists {
-			return value.NewNull(), nil
-		}
-		resource, exists := machine.shared.Listeners.get(int(fdValue.Int()))
+		resource, exists := machine.shared.Listeners.get(listenerFD)
 		if !exists {
 			return socketValue(-1, "", 0, false), nil
 		}
@@ -528,15 +524,14 @@ func (vm *VM) defineNetworkBuiltins() {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) < 2 {
-			return value.NewNull(), nil
+		if len(args) != 2 {
+			return value.NewNull(), fmt.Errorf("net_recv expects exactly 2 arguments")
 		}
-		socket, ok := args[0].Obj.(*value.ObjMap)
-		if !ok {
-			return value.NewNull(), nil
+		handle, descriptorErr := networkSocketDescriptor(args[0])
+		if descriptorErr != nil {
+			return value.NewNull(), descriptorErr
 		}
-		fdValue, _ := socket.Get("fd")
-		resource, exists := machine.shared.Sockets.get(int(fdValue.Int()))
+		resource, exists := machine.shared.Sockets.get(handle)
 		if !exists {
 			return netResult(false, "", 0, "invalid socket"), nil
 		}
@@ -548,19 +543,18 @@ func (vm *VM) defineNetworkBuiltins() {
 		if err != nil {
 			return value.NewNull(), err
 		}
-		if len(args) < 2 {
-			return value.NewNull(), nil
+		if len(args) != 2 {
+			return value.NewNull(), fmt.Errorf("net_send expects exactly 2 arguments")
 		}
-		socket, ok := args[0].Obj.(*value.ObjMap)
-		if !ok {
-			return value.NewNull(), nil
+		handle, descriptorErr := networkSocketDescriptor(args[0])
+		if descriptorErr != nil {
+			return value.NewNull(), descriptorErr
 		}
-		fdValue, _ := socket.Get("fd")
 		data := args[1].String()
 		if args[1].Type == value.VAL_BYTES {
 			data = args[1].Obj.(string)
 		}
-		resource, exists := machine.shared.Sockets.get(int(fdValue.Int()))
+		resource, exists := machine.shared.Sockets.get(handle)
 		if !exists {
 			return netResult(false, "", 0, "invalid socket"), nil
 		}
@@ -579,10 +573,8 @@ func (vm *VM) defineNetworkBuiltins() {
 		if args[0].Type == value.VAL_INT {
 			fd = int(args[0].Int())
 		} else if args[0].Type == value.VAL_OBJ {
-			if socket, ok := args[0].Obj.(*value.ObjMap); ok {
-				if fdValue, found := socket.Get("fd"); found {
-					fd = int(fdValue.Int())
-				}
+			if handle, descriptorErr := networkSocketDescriptor(args[0]); descriptorErr == nil {
+				fd = handle
 			}
 		} else {
 			return value.NewNull(), nil

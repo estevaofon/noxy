@@ -28,6 +28,7 @@ var nativeRegistrationHelpers = map[string]bool{
 	// defineValueNative (native_ref_args.go) e um DefineNative que interpoe
 	// rejectRefArgs: registra native igual, e o coletor tem de ve-lo.
 	"defineValueNative":                   true,
+	"defineValueNativeErr":                true,
 	"DefineNative":                        true,
 	"DefineNativeWithSignature":           true,
 	"DefineContextualNative":              true,

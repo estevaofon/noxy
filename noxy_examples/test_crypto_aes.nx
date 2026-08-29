@@ -41,12 +41,17 @@ end
 
 print("")
 print("=== Teste crypto.aes256_gcm_decrypt ===")
-let senha_recuperada: bytes = crypto.aes256_gcm_decrypt(chave, dados_criptografados)
-print(f"Senha recuperada: {to_str(senha_recuperada)}")
-if to_str(senha_recuperada) == "fb_pass_456" then
-    print("PASS: Descriptografia bem sucedida!")
+// aes256_gcm_decrypt -> bytes?: null quando os dados nao autenticam
+let senha_recuperada: bytes? = crypto.aes256_gcm_decrypt(chave, dados_criptografados)
+if senha_recuperada == null then
+    print("FAIL: aes256_gcm_decrypt devolveu null")
 else
-    print("FAIL: Senha recuperada diferente da original")
+    print(f"Senha recuperada: {to_str(senha_recuperada)}")
+    if to_str(senha_recuperada) == "fb_pass_456" then
+        print("PASS: Descriptografia bem sucedida!")
+    else
+        print("FAIL: Senha recuperada diferente da original")
+    end
 end
 
 print("")
@@ -58,14 +63,18 @@ let chave2: bytes = crypto.pbkdf2_sha256("outra_senha", salt2, 10000, 32)
 // Criptografar e descriptografar
 let segredo: bytes = b"Meu segredo super importante!"
 let cifrado: bytes = crypto.aes256_gcm_encrypt(chave2, segredo)
-let decifrado: bytes = crypto.aes256_gcm_decrypt(chave2, cifrado)
+let decifrado: bytes? = crypto.aes256_gcm_decrypt(chave2, cifrado)
 
-if to_str(decifrado) == "Meu segredo super importante!" then
-    print("PASS: Ciclo completo encrypt/decrypt funcionando!")
+if decifrado == null then
+    print("FAIL: Ciclo falhou - aes256_gcm_decrypt devolveu null")
 else
-    print("FAIL: Ciclo falhou")
-    print(f"Esperado: Meu segredo super importante!")
-    print(f"Obtido: {to_str(decifrado)}")
+    if to_str(decifrado) == "Meu segredo super importante!" then
+        print("PASS: Ciclo completo encrypt/decrypt funcionando!")
+    else
+        print("FAIL: Ciclo falhou")
+        print(f"Esperado: Meu segredo super importante!")
+        print(f"Obtido: {to_str(decifrado)}")
+    end
 end
 
 print("")

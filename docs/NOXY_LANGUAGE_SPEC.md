@@ -958,9 +958,12 @@ end
 The standard library honours the `any` contract on its own side: a wrapper
 whose native reports failure with `null` says so in its signature —
 `time.parse(s) -> DateTime?`, `time.parse_date(s) -> DateTime?`,
-`sqlite.prepare(db, sql) -> Statement?` — so `let dt = parse(s)` imported
-with `select` has the static type `DateTime?` and is tested with `if dt !=
-null then`.
+`sqlite.prepare(db, sql) -> Statement?`, `crypto.aes256_gcm_decrypt(key,
+data) -> bytes?` — so `let dt = parse(s)` imported with `select` has the
+static type `DateTime?` and is tested with `if dt != null then`. A native
+that rejects an *argument* (`crypto.random_bytes(0)`, a 5-byte AES-256 key,
+a value that is not a socket) raises a runtime error instead: `null` under a
+`-> T` wrapper is never a way of saying "bad argument".
 
 Three limits. `any` crosses only at the *top* of a type: element, key,
 value, channel payload and `ref` target are invariant, so `any[]` is not an
@@ -2596,7 +2599,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.23.1`). It is a module binding, not a
+string `noxy --version` prints (`v0.23.2`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 
