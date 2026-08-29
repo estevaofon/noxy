@@ -1,34 +1,43 @@
-use github_com.estevaofon.noxy_dynamodb.dynamodb
+use errors select *
+use github_com.estevaofon.noxy_dynamodb as dynamodb
 
-print("--- DynamoDB Plugin Test ---")
+print("--- DynamoDB Extension Test ---")
 
-print("1. Connecting...")
-// This options map is passed to the plugin
-let options: map[string, any] = {
-    "region": "us-east-1"
-}
+func main() -> void
+    print("1. Connecting...")
+    // This options map is passed to the extension. Credentials come from the
+    // environment (AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, ~/.aws, IAM role).
+    let options: map[string, any] = {
+        "region": "us-east-1"
+    }
 
-let client: dynamodb.Client = dynamodb.connect(options)
+    // connect raises when the AWS configuration cannot be loaded (unknown
+    // option, missing profile); credentials are only checked by the first
+    // request, i.e. by put_item below.
+    let conn = call_result(dynamodb.connect, options)
+    if !conn.ok then
+        print(f"FAILED: Client creation failed: {conn.failure.message}")
+        return
+    end
+    let client: dynamodb.Client = conn.value
+    print(f"Client handle: {client.handle}")
 
-print("Client ID: " + client.id)
+    print("2. Putting Item...")
+    let item: map[string, any] = {
+        "id": "123",
+        "name": "Noxy User",
+        "active": true
+    }
 
-if client.id == "error" || client.id == "" then
-    print("FAILED: Client creation failed")
+    let ok: bool = dynamodb.put_item(client, "mynotes_users", item)
+    if ok then
+        print("SUCCESS: Put item successful")
+    else
+        print("FAILED: Put item failed (Expected if no AWS creds)")
+    end
+
+    dynamodb.close(client)
 end
 
-
-print("2. Putting Item...")
-let item: map[string, any] = {
-    "id": "123",
-    "name": "Noxy User",
-    "active": true
-}
-
-let ok: bool = dynamodb.put_item(client, "mynotes_users", item)
-if ok then
-    print("SUCCESS: Put item successful")
-else
-    print("FAILED: Put item failed (Expected if no AWS creds)")
-end
-
+main()
 print("--- Test Finished ---")

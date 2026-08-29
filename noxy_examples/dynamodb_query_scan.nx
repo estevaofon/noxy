@@ -1,62 +1,82 @@
-use github_com.estevaofon.noxy_dynamodb.dynamodb
+use errors select *
+use github_com.estevaofon.noxy_dynamodb as dynamodb
 
 // ==========================================
 // DynamoDB Example: Query and Scan
 // ==========================================
 
-print("--- DynamoDB Query & Scan Example ---")
+func main() -> void
+    print("--- DynamoDB Query & Scan Example ---")
 
-let options: map[string, any] = {"region": "us-east-1"}
-let client: dynamodb.Client = dynamodb.connect(options)
-let TABLE_NAME: string = "mynotes_users"
+    let options: map[string, any] = {"region": "us-east-1"}
+    // connect raises when the AWS configuration cannot be loaded; there is no
+    // empty client to test for. Credentials are checked by the first request.
+    let client: dynamodb.Client = dynamodb.connect(options)
+    let TABLE_NAME: string = "mynotes_users"
 
-if client.id == "" then
-    print("Failed to connect.")
-    // exit
-end
-
-// ------------------------------------------
-// 1. Scan (Get All Items)
-// ------------------------------------------
-print("\n--- Scanning All Items ---")
-// scan returns a list of maps (any type in Noxy for now)
-let allItems: any = dynamodb.scan(client, TABLE_NAME)
-
-if allItems != null then
-    // In Noxy, we can iterate over lists
-    // Note: Since we don't have generics in foreach yet, 'item' is 'any'
-    // but we can cast or use it as map if valid.
-    // Note: Iteration over 'any' result from plugin might require explicit casting 
-    // or if the plugin returns specific Noxy List type. 
-    // Currently 'any' holds the list.
-    print(f"Found {length(allItems)} items.")
-    print(allItems) // Printing the whole list
-end
-
-// ------------------------------------------
-// 2. Query (Find specific items)
-// ------------------------------------------
-print("\n--- Querying Items (Partition Key) ---")
-// We want to find user with id "123" using Query instead of GetItem
-// KeyConditionExpression: "id = :uid"
-let keyCond: string = "id = :uid"
-let exprVals: map[string, any] = {
-    ":uid": "123"
-}
-
-let queryResults: any = dynamodb.query(client, TABLE_NAME, keyCond, exprVals)
-
-if queryResults != null then
-    print(f"Found {length(queryResults)} matching items.")
-    if length(queryResults) > 0 then
-        let first: map[string, any] = queryResults[0]
-        print(f"First match: {first['name']}")
+    // ------------------------------------------
+    // 1. Scan (up to a limit)
+    // ------------------------------------------
+    print("\n--- Scanning Items (limit 100) ---")
+    // scan returns a typed array of maps. The limit caps how much of the
+    // table is read: each request asks DynamoDB for no more than the
+    // remainder. limit 0 reads EVERY item — avoid it on large tables (the
+    // call is killed by the 60 s deadline and returns nothing).
+    // scan raises on failure (unknown table, credentials).
+    let items: map[string, any][] = dynamodb.scan(client, TABLE_NAME, 100)
+    print(f"Found {length(items)} item(s).")
+    for item in items do
+        print(f"  {item['id']}: {item['name']}")
     end
-else
-    print("Query failed or returned null.")
+
+    // ------------------------------------------
+    // 2. Scan a large table page by page
+    // ------------------------------------------
+    print("\n--- Scanning page by page (25 per request) ---")
+    // scan_page does exactly one request. Pass page.last_key back as
+    // start_key for the next page; null means there is nothing left.
+    let total: int = 0
+    let pages: int = 0
+    let cursor: map[string, any]? = null
+    while true do
+        let page: dynamodb.Page = dynamodb.scan_page(client, TABLE_NAME, 25, cursor)
+        total = total + length(page.items)
+        pages = pages + 1
+        if page.last_key == null then
+            break
+        end
+        cursor = page.last_key
+    end
+    print(f"Total: {total} item(s) in {pages} page(s).")
+
+    // ------------------------------------------
+    // 3. Query (Find specific items)
+    // ------------------------------------------
+    print("\n--- Querying Items (Partition Key) ---")
+    // KeyConditionExpression: "id = :uid" — only key attributes.
+    let keyCond: string = "id = :uid"
+    let exprVals: map[string, any] = {
+        ":uid": "456"
+    }
+
+    // query raises on failure; capture it with call_result to keep going.
+    let q = call_result(dynamodb.query, client, TABLE_NAME, keyCond, exprVals, 10)
+    if q.ok then
+        let matches: map[string, any][] = q.value
+        print(f"Found {length(matches)} matching item(s).")
+        if length(matches) > 0 then
+            let first: map[string, any] = matches[0]
+            print(f"First match: {first['name']}")
+        end
+    else
+        print(f"Query failed: {q.failure.message}")
+    end
+
+    dynamodb.close(client)
+    print("\n--- Finished ---")
 end
 
-print("\n--- Finished ---")
+main()
 
 // ==========================================
 // REFERENCE: Complex Query Syntax
@@ -79,3 +99,8 @@ print("\n--- Finished ---")
 //      keyCond: "pk = :id AND sk BETWEEN :start AND :end"
 //      exprVals: {":id": "User123", ":start": 100, ":end": 200}
 //
+//   A partition with more items than you want in memory: use query_page the
+//   same way as scan_page —
+//      dynamodb.query_page(client, table, keyCond, exprVals, 500, cursor)
+//
+
