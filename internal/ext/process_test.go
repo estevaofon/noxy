@@ -532,3 +532,128 @@ func TestProcessTimeoutConcurrentDoesNotBlockOthers(t *testing.T) {
 	}
 	t.Fatal("process must be killed and poisoned after the cancel grace")
 }
+
+func TestProcessExitFailsInFlightAndPoisons(t *testing.T) {
+	p, _ := newFakeProcess(t, "single", "", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) { fp.conn.exit(errors.New("status 3")) }
+	})
+	_, err := callEcho(t, p, value.NewNull())
+	if err == nil || err.Error() != "extension 'guest' trapped: process exited (status 3)" {
+		t.Fatalf("got %v", err)
+	}
+	_, err = callEcho(t, p, value.NewNull())
+	if err == nil || !strings.Contains(err.Error(), "extension 'guest' is poisoned by an earlier trap") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestProcessRestartOnlyWithStateless(t *testing.T) {
+	p, h := newFakeProcess(t, "stateless", "restart = true", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) {
+			args, _ := DecodeArgs(f.Body, DefaultLimits())
+			if args[0].Int() == 0 {
+				fp.conn.exit(nil)
+				return
+			}
+			fp.result(f.ID, args[0])
+		}
+	})
+	if _, err := callEcho(t, p, value.NewInt(0)); err == nil || !strings.Contains(err.Error(), "process exited (status 0)") {
+		t.Fatalf("got %v", err)
+	}
+	got, err := callEcho(t, p, value.NewInt(5))
+	if err != nil || got.Int() != 5 {
+		t.Fatalf("restart must respawn on the next call: %#v %v", got, err)
+	}
+	if h.spawns != 2 {
+		t.Fatalf("expected a second spawn, got %d", h.spawns)
+	}
+}
+
+func TestProcessStartFailureIsTrap(t *testing.T) {
+	m, _ := ParseManifest([]byte(fmt.Sprintf(processTestManifest, "single", "")))
+	p := newProcess(m, ProcessConfig{}, func(context.Context) (procConn, error) {
+		return nil, errors.New("exec format error")
+	})
+	_, err := callEcho(t, p, value.NewNull())
+	if err == nil || err.Error() != "extension 'guest' trapped: start: exec format error" {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := callEcho(t, p, value.NewNull()); err == nil || !strings.Contains(err.Error(), "poisoned") {
+		t.Fatalf("start failure poisons without restart: %v", err)
+	}
+}
+
+func TestProcessUnknownReplyIdIsViolation(t *testing.T) {
+	p, _ := newFakeProcess(t, "single", "", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) { fp.result(99, value.NewNull()) }
+	})
+	_, err := callEcho(t, p, value.NewNull())
+	if err == nil || !strings.Contains(err.Error(), "trapped: protocol violation: reply for unknown call id 99") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestProcessMalformedFrameIsViolation(t *testing.T) {
+	p, _ := newFakeProcess(t, "single", "", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) {
+			fp.writeMu.Lock()
+			_, _ = fp.conn.stdoutW.Write([]byte{0x02, 0, 0, 0, 0xff, 0xff})
+			fp.writeMu.Unlock()
+		}
+	})
+	_, err := callEcho(t, p, value.NewNull())
+	if err == nil || !strings.Contains(err.Error(), "trapped: protocol violation: frame length 2 below header size") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestProcessMalformedResultIsViolation(t *testing.T) {
+	p, _ := newFakeProcess(t, "single", "", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) { fp.send(nil, Frame{Kind: FrameResult, ID: f.ID, Body: []byte{0x77}}) }
+	})
+	_, err := callEcho(t, p, value.NewNull())
+	if err == nil || !strings.Contains(err.Error(), "trapped: protocol violation: RESULT body") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestProcessCloseSendsEOFAndRefusesLaterCalls(t *testing.T) {
+	shortGraces(t)
+	p, h := newFakeProcess(t, "single", "", nil)
+	if _, err := callEcho(t, p, value.NewNull()); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conn := h.plugin().conn
+	select {
+	case <-conn.exited:
+	default:
+		t.Fatal("plugin must have exited on EOF before Close returns")
+	}
+	if conn.killed.Load() {
+		t.Fatal("a plugin that honours EOF must not be killed")
+	}
+	_, err := callEcho(t, p, value.NewNull())
+	if err == nil || !strings.Contains(err.Error(), "extension 'guest' was closed at exit") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestProcessCloseKillsAfterGrace(t *testing.T) {
+	shortGraces(t)
+	p, h := newFakeProcess(t, "single", "", func(fp *fakePlugin) { fp.ignoreEOF = true })
+	if _, err := callEcho(t, p, value.NewNull()); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	_ = p.Close(context.Background())
+	if !h.plugin().conn.killed.Load() {
+		t.Fatal("a plugin that ignores EOF must be killed after the shutdown grace")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("Close must not wait beyond the grace")
+	}
+}
