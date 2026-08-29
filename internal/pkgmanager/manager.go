@@ -220,3 +220,18 @@ func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
+
+// recordProcessSums grava manifesto + bin/<asset> de TODAS as plataformas
+// publicadas (spec §8.1, passo 6).
+func recordProcessSums(root, localPath string, manifestData []byte, binaries map[string]string) error {
+	sums, err := ParseSumFile(SumFilePath(root))
+	if err != nil {
+		return err
+	}
+	pkg := strings.ReplaceAll(localPath, "\\", "/")
+	sums.Set(pkg, "noxy_ext.toml", sha256Hex(manifestData))
+	for asset, digest := range binaries {
+		sums.Set(pkg, "bin/"+asset, digest)
+	}
+	return sums.Save(SumFilePath(root))
+}
