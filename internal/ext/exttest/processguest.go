@@ -19,10 +19,10 @@ var (
 
 // BuildProcessGuest compila testdata/processguest (modulo aninhado que usa
 // o SDK via replace) uma vez por processo de teste e devolve o caminho do
-// executavel. Roda o binario uma vez logo apos o build (stdin vazio → o
-// SDK ve EOF e sai 0): na maquina do dono um .exe recem-compilado pode ser
-// apagado pelo antivirus nos primeiros segundos — se sumir, reconstroi uma
-// vez antes de falhar.
+// executavel. Roda o binario uma vez logo apos o build (warm, abaixo) so
+// para confirmar que ele ainda esta la: na maquina do dono um .exe
+// recem-compilado pode ser apagado pelo antivirus nos primeiros segundos —
+// se sumir, reconstroi uma vez antes de falhar.
 func BuildProcessGuest(tb testing.TB) string {
 	tb.Helper()
 	procMu.Lock()
