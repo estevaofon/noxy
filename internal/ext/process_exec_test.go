@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"noxy-vm/internal/ext/exttest"
 	"noxy-vm/internal/value"
 )
 
@@ -29,7 +32,66 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func helperHost() int { return 0 } // substituido na Task 13
+// helperHost (NOXY_EXT_HELPER=host): sobe o guest, imprime o pid dele em
+// stdout e fica parado ate ser morto pelo teste — que entao confere que o
+// guest morreu junto (spec §4.5: pdeathsig no Linux, job object no
+// Windows, EOF no macOS).
+func helperHost() int {
+	guest := os.Getenv("NOXY_EXT_GUEST")
+	src := fmt.Sprintf(processGuestManifest, "single", "", runtime.GOOS+"-"+runtime.GOARCH, filepath.Base(guest))
+	m, err := ParseManifest([]byte(src))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	p := NewProcess(m, ProcessConfig{Path: guest, NoxyVersion: "helper"})
+	pid, err := p.Call(context.Background(), fnPid, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(pid.Int())
+	time.Sleep(30 * time.Second)
+	return 0
+}
+
+func TestOrphanGuestDiesWithHost(t *testing.T) {
+	guest := exttest.BuildProcessGuest(t)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self)
+	cmd.Env = append(os.Environ(), "NOXY_EXT_HELPER=host", "NOXY_EXT_GUEST="+guest)
+	cmd.Stderr = os.Stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("helper host did not report the guest pid: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("pid line %q: %v", line, err)
+	}
+	if !exttest.ProcessAlive(pid) {
+		t.Fatal("guest must be alive while the host lives")
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	deadline := time.Now().Add(5 * time.Second)
+	for exttest.ProcessAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if exttest.ProcessAlive(pid) {
+		t.Fatalf("guest %d outlived its killed host", pid)
+	}
+}
 
 // helperPlugin: HELLO → HELLO; CALL fn 0 → echo; fn 1 → ERROR; EOF → sai 0.
 func helperPlugin() int {
