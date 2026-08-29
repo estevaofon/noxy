@@ -36,6 +36,13 @@ func write(t *testing.T, root, name, source string) {
 func captureVMSourceAtRoot(t *testing.T, root, source string) value.Value {
 	t.Helper()
 	machine := NewWithConfig(VMConfig{RootPath: root})
+	// CloseExtensions antes do TempDir se desfazer: um backend por processo
+	// (kind = "process") mantem bin/<asset> aberto enquanto o guest esta de
+	// pe, e no Windows isso faz o RemoveAll do t.TempDir() falhar com
+	// "Access is denied" (achado ao rodar os testes da issue #80). t.Cleanup
+	// e LIFO, entao registrar aqui — depois do t.TempDir() do chamador —
+	// garante que o processo morre antes da limpeza do diretorio.
+	t.Cleanup(machine.CloseExtensions)
 	captured := value.NewNull()
 	machine.DefineNative("test_report", func(args []value.Value) value.Value {
 		if len(args) != 0 {
