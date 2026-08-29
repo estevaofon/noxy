@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.23.1] - 2026-08-29
+
+Issue #118 — dois atritos do wrapper de extensão (`noxy_dynamodb`): uma
+escolha de design da 0.7.0 que ficou obsoleta (`any` só entrava por `let`
+anotado) e uma lacuna de implementação (a f-string encerrava o narrowing de
+um global).
+
+### Changed
+- **`any` entra num slot tipado em qualquer posição** — `let` anotado,
+  argumento de assinatura exata e `return` — e o runtime confere o valor ali:
+  `expected int, got string`, `expected map[string, any][], got int[]`. Antes
+  só o `let` aceitava (`return nativo()` e `f(nativo())` eram `expected T,
+  got any`) e o wrapper precisava de um `let` temporário por função; agora
+  `func scan(...) -> map[string, any][]` pode `return dynamodb_scan(...)`
+  direto. A exceção continua o callable exato: `any` nunca vira
+  `func(int) -> int` (nem tipo que o contenha).
+- **A guarda do `let` anotado passou a valer para primitivos e structs.**
+  `let x: int = nativo()` com `nativo() -> any` devolvendo `"texto"` rodava
+  e deixava uma string em `x`; agora é erro de runtime `expected int, got
+  string`. Compostos (array/map/chan) já eram checados. Código tipado não
+  paga nada: a guarda só é emitida onde o tipo estático é `any` ou
+  desconhecido.
+- **Builtins centrais não encerram narrowing.** `print`, `to_str`, `length`,
+  `fmt`, `keys`, `slice`, `range` e os demais da spec §10, quando não
+  sombreados, são nativos puros que nunca rodam código Noxy — o fato
+  `m != null` de um global sobrevive a eles, inclusive na entrada de laço.
+  Em particular `f"{m['a']} {m['b']}"` (duas chamadas a `to_str` geradas
+  pelo parser) e `print(m["a"])` seguido de `print(m["b"])` compilam com `m`
+  global. Chamada a função do programa, `call_result`, `spawn_task`,
+  `task_await` e `func` bare continuam encerrando.
+- **Diagnóstico do fato perdido.** Ler um `T?` cujo fato foi derrubado por
+  uma chamada diz o porquê, em vez de sugerir o `if` que já está ali:
+  `'m' may be null: it was tested, but 'm' is a global and a call came
+  between the test and this use` + `hint: test it again after the call, bind
+  it first ('let v = m' before the 'if') and use 'v', or move the code into a
+  function` (raiz `ref`, capturada, upvalue ou endereçada tem a frase
+  própria).
+- A marcação de runtime que falha (`OP_MARK_RUNTIME_VALUE_TYPE`) nomeia os
+  dois tipos — `expected chan int, got chan string`, `expected int[4], got
+  int[]`, `expected Envelope, got map` — no lugar de `runtime value metadata
+  conflicts with static context`.
+
+### Docs
+- Spec §2.4 (builtins puros, diagnóstico, código em nível de arquivo), §4.2
+  (fronteira `any` checada em toda posição, wrapper sem `let` temporário),
+  §9 (f-string é `to_str`), §10.
+
+Follow-ups: atribuição (`x = v`, `s.f = v`, `xs[i] = v`) ainda não emite a
+guarda para primitivos vindos de `any` — três sub-caminhos com regras de
+`ref` próprias; simplificar o wrapper `noxy_dynamodb.nx` (outro repo).
+
 ## [0.23.0] - 2026-08-29
 
 Extensões por processo (tier B) como meio principal de I/O — issue #80

@@ -621,16 +621,33 @@ on an `errors.Result<T>` (which narrows `r.value`, §7). A `ref x` taken on a
 narrowed `x: T?` is a `ref T`.
 
 **What ends a narrowing.** An assignment to the expression or to a prefix of
-its path (`p = q`, `no = …` for `no.prox`); any call, for a path whose root
+its path (`p = q`, `no = …` for `no.prox`); a call, for a path whose root
 is a `ref`-typed variable, a global, an upvalue, a captured local or a local
 whose address was taken with `ref` — someone else may reach it during the
 call; a write through a reference (`*r = v`, `r.f = v`), which drops every
 member-path fact; and entering a loop whose body assigns the root. A path
 rooted at a plain value local survives calls: value semantics (§2.2)
-guarantee nobody outside the frame can reach it. When a fact is lost, test
-again or bind first (`let n = no.prox` then `if n != null then … end`).
-Facts never survive into a different function: a closure body starts with
-none.
+guarantee nobody outside the frame can reach it.
+
+A call to a core builtin (§10: `print`, `to_str`, `length`, `fmt`, `keys`,
+`slice`, `range`, …) that the program has not shadowed ends **no**
+narrowing: those natives never run Noxy code, so nothing can reach the root
+during the call. That is why `f"{m['a']} {m['b']}"` (two `to_str` calls,
+§9) and `print(m["a"])` followed by `print(m["b"])` keep a global `m`
+narrowed, and a loop whose body only calls them keeps the fact too. A call
+to a program function, `call_result`, `spawn_task`, `task_await` or a bare
+`func` does run program code and ends it.
+
+When a fact is lost, test again or bind first (`let n = no.prox` then `if n
+!= null then … end`). The diagnostic says which happened: a read after the
+fact was dropped by a call reports `'m' may be null: it was tested, but 'm'
+is a global and a call came between the test and this use`, with the fix in
+the hint (`test it again after the call, bind it first ('let v = m' before
+the 'if') and use 'v', or move the code into a function`). A top-level `let`
+is a global, so file-level code loses its facts at every call to a program
+function; inside a `func main()` the same binding is a value local and
+survives them. Facts never survive into a different function: a closure body
+starts with none.
 
 **Generics and modules.** A type parameter `T` may bind a nullable type
 (`first(ps)` with `ps: Node?[]` returns `Node?`); it still cannot bind a
@@ -887,7 +904,7 @@ let dynamic: func = exact       // exact-to-dynamic widening is valid
 let exact_again: func(int) -> int = dynamic // ERROR: no implicit narrowing
 ```
 
-Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, so a function returning their result must either declare `any` or replace the bare callable with an exact signature. Explicit `ref` arguments remain references across this dynamic boundary. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
+Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, which crosses into a typed slot under the runtime check described at the end of this section — a function returning their result may declare the concrete type, or `any`. Explicit `ref` arguments remain references across this dynamic boundary. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
 
 ```noxy
 let callbacks: func[] = [no_arguments, two_arguments]
@@ -905,6 +922,30 @@ let factory: func(int) -> int[] = make_list   // one function returning int[]
 ```
 
 Exact function types may also appear in parameters, returns, struct fields, map values, channels, and references. `any`, native functions, plugins, and untyped module exports remain dynamic boundaries and retain runtime validation; an unknown native value cannot be implicitly narrowed to an exact function type.
+
+**The dynamic boundary is checked at runtime, in every position.** A value
+whose static type is `any` — or unknown: an untyped native, a plugin, a
+module member read through a namespace, a bare `func` result — is accepted
+wherever a typed slot is expected: an annotated `let`, an argument of an
+exact signature, a `return`. The runtime checks the value against the slot's
+type at that point and names both sides on mismatch: `expected int, got
+string`, `expected map[string, any][], got int[]`, `expected Point, got
+null` (§2.4). Typed code pays nothing — the check is emitted only where the
+static type is `any` or unknown. An extension wrapper therefore returns the
+export directly:
+
+```noxy
+// dynamodb_scan is an extension export: composite results reach the
+// compiler as `any`
+func scan(client: Client, table: string, limit: int) -> map[string, any][]
+    return dynamodb_scan(client.handle, table, limit)   // checked here, at runtime
+end
+```
+
+The one exception is an exact function type: `any` is never narrowed to
+`func(int) -> int`, nor to a type containing one (`(func(int) -> int)[]`) —
+the rule above, no implicit narrowing to an exact signature, holds at every
+boundary.
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 
@@ -2073,6 +2114,11 @@ let name: string = "Noxy"
 print(f"Hello, {name}!")
 ```
 
+Each `{e}` is compiled as `to_str(e)` and the pieces are joined with `+`.
+`to_str` is a core builtin, so an interpolation never ends a narrowing
+(§2.4): `if m != null then print(f"{m['a']} {m['b']}") end` compiles with `m`
+a global `map[string, any]?`.
+
 **Literal braces.** `{{` produces `{` and `}}` produces `}`:
 
 ```noxy
@@ -2174,6 +2220,8 @@ The core builtins have static return types where the result never varies —
 `keys(map[K, V]) -> K[]`, `slice` (same type as its first argument) — so a
 value of theirs is checked like any other expression (`let s: string =
 length(xs)` is a compile error) and can initialize an inferred `let` (§3).
+They — together with `print` and `range` — are pure natives that never run
+Noxy code, so a call to one of them never ends a narrowing (§2.4).
 `call_result` is typed by its callee (`errors.Result<R>`, §7). The others
 (`json_parse`, `task_await`, `make_chan`, ...) are dynamic-boundary builtins:
 their result is `any` or untyped and needs an annotation. A function the
@@ -2513,7 +2561,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.23.0`). It is a module binding, not a
+string `noxy --version` prints (`v0.23.1`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 
