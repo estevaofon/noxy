@@ -95,15 +95,31 @@ func (c *Compiler) narrowType(key string, declared ast.NoxyType) ast.NoxyType {
 // O registro de fatos perdidos (narrowLost) acompanha: um fato perdido dentro
 // do ramo nao vale fora dele, e testar de novo apaga a perda.
 func (c *Compiler) pushFacts(keys []string) func() {
+	return c.pushFactsWith(keys, c.takePendingLost())
+}
+
+// takePendingLost entrega (e zera) as perdas registradas por conditionFacts
+// desde a ultima consulta. O `if` as toma uma vez e as da aos DOIS ramos.
+func (c *Compiler) takePendingLost() map[string]lostFact {
+	pending := c.narrowLostPending
+	c.narrowLostPending = nil
+	return pending
+}
+
+// pushFactsWith e pushFacts com as perdas pendentes explicitas.
+func (c *Compiler) pushFactsWith(keys []string, pending map[string]lostFact) func() {
 	saved := c.narrowed
 	next := make(map[string]struct{}, len(saved)+len(keys))
 	for k := range saved {
 		next[k] = struct{}{}
 	}
 	savedLost := c.narrowLost
-	nextLost := make(map[string]lostFact, len(savedLost))
+	nextLost := make(map[string]lostFact, len(savedLost)+len(pending))
 	for k, why := range savedLost {
 		nextLost[k] = why
+	}
+	for k, lost := range pending {
+		nextLost[k] = lost
 	}
 	for _, k := range keys {
 		next[k] = struct{}{}
@@ -119,10 +135,14 @@ func (c *Compiler) pushFacts(keys []string) func() {
 
 // keepFacts adiciona fatos sem restore (depois de um ramo que termina).
 func (c *Compiler) keepFacts(keys []string) {
-	if len(keys) == 0 {
+	c.keepFactsWith(keys, c.takePendingLost())
+}
+
+func (c *Compiler) keepFactsWith(keys []string, pending map[string]lostFact) {
+	if len(keys) == 0 && len(pending) == 0 {
 		return
 	}
-	c.pushFacts(keys)
+	c.pushFactsWith(keys, pending)
 }
 
 func keyDependsOn(key, root string) bool {
@@ -219,16 +239,32 @@ func (c *Compiler) dropFactsCrossingCall(keys []string, right ast.Expression, op
 		if why == "" {
 			why = fmt.Sprintf("'%s' is read through a reference", k)
 		}
-		if c.narrowLost == nil {
-			c.narrowLost = make(map[string]lostFact)
+		// Pendente: conditionFacts roda ANTES do pushFacts do ramo; o registro
+		// entra no ramo (e so nele) quando pushFacts o consome.
+		if c.narrowLostPending == nil {
+			c.narrowLostPending = make(map[string]lostFact)
 		}
-		c.narrowLost[k] = lostFact{
+		c.narrowLostPending[k] = lostFact{
 			why:   why,
 			event: "a call in the condition ran after the test",
-			again: fmt.Sprintf("put the call before the test ('%s %s %s %s null')", call.String(), op, k, cmp),
+			again: fmt.Sprintf("put the call before the test ('%s(...) %s %s %s null')", calleeLabel(call), op, k, cmp),
 		}
 	}
 	return kept
+}
+
+// calleeLabel e o nome do callee para um hint — nunca call.String(), que e
+// um renderer de debug (perde aspas e parenteses).
+func calleeLabel(call *ast.CallExpression) string {
+	switch fn := call.Function.(type) {
+	case *ast.Identifier:
+		return fn.Value
+	case *ast.MemberAccessExpression:
+		if base, ok := fn.Left.(*ast.Identifier); ok {
+			return base.Value + "." + fn.Member
+		}
+	}
+	return "f"
 }
 
 // rootSharing: a raiz pode mudar por fora deste frame — slot `ref`,
@@ -251,10 +287,23 @@ func (c *Compiler) rootSharing(root string) (shared bool, why string) {
 		}
 		return false, ""
 	}
-	if slot, _ := c.resolveUpvalue(root); slot != -1 {
+	if c.enclosingHasLocal(root) {
 		return true, fmt.Sprintf("'%s' is an upvalue", root)
 	}
 	return true, fmt.Sprintf("'%s' is a global", root)
+}
+
+// enclosingHasLocal: o nome resolve para um local de alguma funcao envolvente
+// — SEM capturar. resolveUpvalue marca IsCaptured e cria o upvalue; uma
+// classificacao para diagnostico nao pode mudar o programa (a revisao do #119
+// achou uma chave morta `p` capturando o `p` homonimo do pai).
+func (c *Compiler) enclosingHasLocal(name string) bool {
+	for e := c.enclosing; e != nil; e = e.enclosing {
+		if slot, _ := e.resolveLocal(name); slot != -1 {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Compiler) rootIsShared(root string) bool {
@@ -290,12 +339,18 @@ func (c *Compiler) dropSharedAfterCall(event, again string) {
 }
 
 // pureBuiltins sao os builtins centrais (builtin_return_types.go, mais os
-// sem tipo de retorno util) que nunca executam codigo Noxy: uma chamada a
-// eles nao pode reatribuir raiz nenhuma, entao nao encerra narrowing (#118).
+// sem tipo de retorno util — print/eprint/iprint/eiprint, append/pop/delete,
+// range/keys/slice) que nunca executam codigo Noxy: uma chamada a eles nao
+// pode reatribuir raiz nenhuma, entao nao encerra narrowing (#118).
 // call_result, spawn_task, task_await e chamadas via `func` bare ficam fora:
-// reentram em codigo do programa.
+// reentram em codigo do programa. json_loads tambem: escreve atraves do ref
+// e pode por null na raiz.
 var pureBuiltins = func() map[string]struct{} {
-	set := map[string]struct{}{"print": {}, "range": {}, "keys": {}, "slice": {}}
+	set := map[string]struct{}{
+		"print": {}, "eprint": {}, "iprint": {}, "eiprint": {},
+		"append": {}, "pop": {}, "delete": {},
+		"range": {}, "keys": {}, "slice": {},
+	}
 	for name := range coreBuiltinReturnTypes {
 		set[name] = struct{}{}
 	}
@@ -304,20 +359,26 @@ var pureBuiltins = func() map[string]struct{} {
 
 // isPureBuiltinCall: a chamada resolve para um builtin puro — nome na tabela
 // e nao sombreado por local, upvalue ou global declarado pelo programa (a
-// mesma regra de sombreamento de builtinReturnType, compileCallExpression).
+// mesma regra de sombreamento de builtinReturnType, compileCallExpression) —
+// ou para um construtor de struct (declarado ou template generico), que
+// tambem nao roda codigo do programa.
 func (c *Compiler) isPureBuiltinCall(call *ast.CallExpression) bool {
 	ident, ok := call.Function.(*ast.Identifier)
 	if !ok {
 		return false
 	}
-	if _, pure := pureBuiltins[ident.Value]; !pure {
-		return false
-	}
 	if c.isShadowedByLocal(ident.Value) {
 		return false
 	}
-	_, declared := c.globals[ident.Value]
-	return !declared
+	if _, pure := pureBuiltins[ident.Value]; pure {
+		_, declared := c.globals[ident.Value]
+		return !declared
+	}
+	if c.structDeclaration(ident.Value) != nil {
+		return true
+	}
+	_, isStructTemplate := c.registryOrInit().Structs[ident.Value]
+	return isStructTemplate
 }
 
 // noteAssignment invalida os fatos afetados por uma atribuicao a target.
@@ -369,6 +430,21 @@ func (c *Compiler) loopEffects(body *ast.BlockStatement) (roots []string, hasCal
 	if body == nil {
 		return nil, false
 	}
+	// A pureza e decidida ANTES de compilar o corpo: um `let print = zera`
+	// (ou `func`) declarado dentro do laco sombreia o builtin na iteracao — o
+	// nome declarado no corpo torna a chamada homonima impura (revisao #119).
+	declared := map[string]struct{}{}
+	ast.Inspect(body, func(node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.LetStmt:
+			if n.Name != nil {
+				declared[n.Name.Value] = struct{}{}
+			}
+		case *ast.FunctionStatement:
+			declared[n.Name] = struct{}{}
+		}
+		return true
+	})
 	seen := map[string]struct{}{}
 	add := func(expr ast.Expression) {
 		if key, ok := stableKey(expr); ok {
@@ -390,7 +466,11 @@ func (c *Compiler) loopEffects(body *ast.BlockStatement) (roots []string, hasCal
 		case *ast.ForStatement:
 			seen[n.Identifier] = struct{}{}
 		case *ast.CallExpression:
-			if !c.isPureBuiltinCall(n) {
+			shadowedInBody := false
+			if ident, ok := n.Function.(*ast.Identifier); ok {
+				_, shadowedInBody = declared[ident.Value]
+			}
+			if shadowedInBody || !c.isPureBuiltinCall(n) {
 				hasCall = true
 			}
 		}

@@ -3,8 +3,6 @@ package vm
 import (
 	"strings"
 	"testing"
-
-	"noxy-vm/internal/value"
 )
 
 // Issue #120 item 1: wrappers da stdlib cujo nativo devolve null como
@@ -43,5 +41,4 @@ func TestNamespaceCallIntoNonNullableSlotIsCheckedAtRuntime(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "expected Statement, got null\n  hint: declare the slot as 'Statement?' to allow null") {
 		t.Fatalf("want the runtime null guard, got %v", err)
 	}
-	_ = value.NewNull
 }

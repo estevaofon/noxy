@@ -47,9 +47,27 @@ um global).
   compilava e falhava em runtime — `toca()` roda depois do teste e pode zerar
   `m`. O fato de raiz compartilhada não sai mais para o ramo (`if`, `while`,
   `else` de `||`); diagnóstico `a call in the condition ran after the test` +
-  hint `put the call before the test ('toca() && m != null')`. Dentro da
+  hint `put the call before the test ('toca(...) && m != null')`. Dentro da
   expressão nada muda (`dropAfterCall` já derrubava); local de valor e builtin
   puro seguem mantendo o fato.
+- **Revisão do PR #119** (achados confirmados por execução):
+  - `any` atravessa a fronteira só no **topo** do tipo: `ref any` não é
+    `ref int` (`bump(ref a)` com `a: any` volta a ser `expected ref int, got
+    ref any`), `any[]` não é `int[]`, `map[string, any]` não é
+    `map[string, int]` — elementos e alvo de `ref` são invariantes, como em
+    develop.
+  - A guarda tem um único ponto de emissão (`emitSlotGuards`), que cobre os
+    três sites que ficaram de fora: `*r = v`, `xs[i] = v` no caminho fundido
+    de local, e o valor de `append(ref xs, v)` (também a chave de `delete` e o
+    texto de `json_loads`).
+  - Narrowing: classificar a raiz não captura mais nada (`resolveUpvalue`
+    mutava — uma chave morta `p` capturava o `p` do pai); fato de local morre
+    com o escopo; `let print = …` dentro do laço torna a chamada homônima
+    impura já na entrada do laço; construtor de struct é puro; `eprint`,
+    `iprint`, `eiprint`, `append`, `pop`, `delete` entram no conjunto puro
+    (`json_loads` não: escreve através do `ref` e pode pôr `null` na raiz);
+    o registro do fato perdido na condição fica nos ramos do `if` (e depois
+    dele), não vaza para fora.
 - **Builtins centrais não encerram narrowing.** `print`, `to_str`, `length`,
   `fmt`, `keys`, `slice`, `range` e os demais da spec §10, quando não
   sombreados, são nativos puros que nunca rodam código Noxy — o fato

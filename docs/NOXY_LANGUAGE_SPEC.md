@@ -629,10 +629,12 @@ member-path fact; and entering a loop whose body assigns the root. A path
 rooted at a plain value local survives calls: value semantics (§2.2)
 guarantee nobody outside the frame can reach it.
 
-A call to a core builtin (§10: `print`, `to_str`, `length`, `fmt`, `keys`,
-`slice`, `range`, …) that the program has not shadowed ends **no**
-narrowing: those natives never run Noxy code, so nothing can reach the root
-during the call. That is why `f"{m['a']} {m['b']}"` (two `to_str` calls,
+A call to a core builtin (§10: `print`, `eprint`, `to_str`, `length`, `fmt`,
+`keys`, `slice`, `append`, `pop`, `delete`, `range`, …) that the program has
+not shadowed, or to a struct constructor, ends **no** narrowing: those never
+run Noxy code, so nothing can reach the root during the call (`json_loads` is
+the exception — it writes through its `ref` argument and may leave `null` in
+the root). That is why `f"{m['a']} {m['b']}"` (two `to_str` calls,
 §9) and `print(m["a"])` followed by `print(m["b"])` keep a global `m`
 narrowed, and a loop whose body only calls them keeps the fact too. A call
 to a program function, `call_result`, `spawn_task`, `task_await` or a bare
@@ -959,10 +961,14 @@ then`, and `let stmt: Statement = sqlite.prepare(db, sql)` through the
 namespace form stops at the boundary with `expected Statement, got null`
 instead of failing later.
 
-The one exception is an exact function type: `any` is never narrowed to
-`func(int) -> int`, nor to a type containing one (`(func(int) -> int)[]`) —
-the rule above, no implicit narrowing to an exact signature, holds at every
-boundary.
+Two limits. `any` crosses only at the *top* of a type: element, key, value,
+channel payload and `ref` target are invariant, so `any[]` is not an `int[]`,
+`map[string, any]` is not a `map[string, int]`, and `ref a` with `a: any` is
+a `ref any`, never a `ref int` — the slot it points to may change type after
+any check. And an exact function type is never a target: `any` is not
+narrowed to `func(int) -> int`, nor to a type containing one
+(`(func(int) -> int)[]`) — the rule above, no implicit narrowing to an exact
+signature, holds at every boundary.
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 

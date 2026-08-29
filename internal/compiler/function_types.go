@@ -241,20 +241,32 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 	case *ast.ArrayType:
 		a, ok := actual.(*ast.ArrayType)
 		return ok && (e.Size == 0 || e.Size == a.Size) &&
-			c.areStrictTypesCompatible(e.ElementType, a.ElementType)
+			c.strictCompatibleNested(e.ElementType, a.ElementType)
 	case *ast.MapType:
 		a, ok := actual.(*ast.MapType)
-		return ok && c.areStrictTypesCompatible(e.KeyType, a.KeyType) &&
-			c.areStrictTypesCompatible(e.ValueType, a.ValueType)
+		return ok && c.strictCompatibleNested(e.KeyType, a.KeyType) &&
+			c.strictCompatibleNested(e.ValueType, a.ValueType)
 	case *ast.ChanType:
 		a, ok := actual.(*ast.ChanType)
-		return ok && c.areStrictTypesCompatible(e.ElementType, a.ElementType)
+		return ok && c.strictCompatibleNested(e.ElementType, a.ElementType)
 	case *ast.RefType:
 		a, ok := actual.(*ast.RefType)
-		return ok && c.areStrictTypesCompatible(e.ElementType, a.ElementType)
+		return ok && c.strictCompatibleNested(e.ElementType, a.ElementType)
 	default:
 		return expected.String() == actual.String() || c.typesEquivalent(expected, actual)
 	}
+}
+
+// strictCompatibleNested e a regra dos tipos ANINHADOS — elemento de array,
+// chave/valor de map, payload de chan, alvo de ref: invariantes. `any` so
+// atravessa a fronteira dinamica no TOPO do tipo (areStrictTypesCompatible):
+// `any[]` nao e `int[]` e `ref any` nao e `ref int` — o slot apontado pode
+// mudar de tipo depois da checagem (revisao do #119).
+func (c *Compiler) strictCompatibleNested(expected, actual ast.NoxyType) bool {
+	if isAny(actual) {
+		return isAny(expected)
+	}
+	return c.areStrictTypesCompatible(expected, actual)
 }
 
 func commonInferredType(left, right ast.NoxyType) ast.NoxyType {

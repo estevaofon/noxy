@@ -152,7 +152,7 @@ func (c *Compiler) tryFuseLocalIndexAssign(target *ast.IndexExpression, valueExp
 	if !c.areTypesCompatible(arrType.ElementType, valType) {
 		return true, fmt.Errorf("[line %d] type mismatch in array assignment: expected %s, got %s%s", c.currentLine, arrType.ElementType.String(), valType.String(), c.derefReadHint(arrType.ElementType, valType, valueExpr))
 	}
-	if err := c.emitRuntimeValueType(arrType.ElementType); err != nil {
+	if err := c.emitSlotGuards(arrType.ElementType, valType); err != nil {
 		return true, err
 	}
 	c.emitBytes(byte(op), byte(arg))

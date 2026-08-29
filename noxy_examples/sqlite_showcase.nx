@@ -28,6 +28,7 @@ if begin(db) then
         print("Transação commitada com sucesso.")
     else
         print("Erro ao preparar o INSERT (a tabela 'produtos' existe?).")
+        rollback(db)
     end
 else
     print("Erro ao iniciar transação.")

@@ -14,7 +14,7 @@ const narrowingCondPrelude = "func busca() -> map[string, any]?\n    return {\"n
 func TestNarrowingAndOperandCallDropsSharedRootFacts(t *testing.T) {
 	src := narrowingCondPrelude + "if m != null && toca() then\n    print(m[\"nome\"])\nend\n"
 	_, err := compileFunctionSource(t, src)
-	want := "[line 10] 'm' may be null: it was tested, but 'm' is a global and a call in the condition ran after the test\n  hint: put the call before the test ('toca() && m != null'), bind it first ('let v = m' before the 'if') and use 'v', or move the code into a function"
+	want := "[line 10] 'm' may be null: it was tested, but 'm' is a global and a call in the condition ran after the test\n  hint: put the call before the test ('toca(...) && m != null'), bind it first ('let v = m' before the 'if') and use 'v', or move the code into a function"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("want %q, got %v", want, err)
 	}

@@ -51,6 +51,19 @@ func (c *Compiler) emitDynamicBoundaryGuard(expected, actual ast.NoxyType) error
 	return c.emitMarkRuntimeValueType(expected)
 }
 
+// emitSlotGuards e o UNICO ponto de emissao das checagens de um slot tipado
+// que recebe um valor (let, atribuicao, argumento, return, elemento de
+// append, chave de delete...): metadado de composto (emitRuntimeValueType) e
+// guarda da fronteira dinamica (emitDynamicBoundaryGuard). Todo site de slot
+// passa por aqui — a revisao do #119 achou tres sites que emitiam so o
+// primeiro.
+func (c *Compiler) emitSlotGuards(expected, actual ast.NoxyType) error {
+	if err := c.emitRuntimeValueType(expected); err != nil {
+		return err
+	}
+	return c.emitDynamicBoundaryGuard(expected, actual)
+}
+
 // emitMarkRuntimeValueType emite OP_MARK_RUNTIME_VALUE_TYPE para o tipo t
 // sobre o valor no topo da pilha; no-op para tipos sem descricao de runtime.
 func (c *Compiler) emitMarkRuntimeValueType(t ast.NoxyType) error {

@@ -116,7 +116,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 					c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(item),
 				)
 			}
-			if err := c.emitRuntimeValueType(array.ElementType); err != nil {
+			if err := c.emitSlotGuards(array.ElementType, item); err != nil {
 				return true, nil, err
 			}
 		}
@@ -159,6 +159,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 				c.currentLine, noxyTypeName(mapping.KeyType), noxyTypeName(key),
 			)
 		}
+		if err := c.emitSlotGuards(mapping.KeyType, key); err != nil {
+			return true, nil, err
+		}
 		c.emitCall(2, emission, false)
 		return true, builtinType("void"), nil
 	case "json_loads":
@@ -171,6 +174,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 				"[line %d] argument 1 to 'json_loads': expected string, got %s",
 				c.currentLine, noxyTypeName(jsonText),
 			)
+		}
+		if err := c.emitSlotGuards(builtinType("string"), jsonText); err != nil {
+			return true, nil, err
 		}
 		targetType, err := c.compileBuiltinRefArgument(call.Arguments[1], "argument 2 to 'json_loads'", "ref T")
 		if err != nil {
