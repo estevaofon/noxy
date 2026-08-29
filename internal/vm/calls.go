@@ -125,6 +125,9 @@ func (vm *VM) call(closure *value.ObjClosure, argCount int, c *chunk.Chunk, ip i
 	if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
 		return false, vm.runtimeError(c, ip, "%s", err)
 	}
+	if err := vm.validateRefTargets(fn.Name, fn.RuntimeType, args); err != nil {
+		return false, vm.runtimeError(c, ip, "%s", err)
+	}
 	// RC: fronteira de valor para parametros nao-ref nao precisa de marcacao
 	// aqui — a copia so acontece se alguem mutar (unicize), e a posse do
 	// slot novo e decidida por ownSlot/Retain dentro de callPreparedClosure.

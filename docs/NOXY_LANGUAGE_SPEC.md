@@ -398,7 +398,10 @@ end
 ```
 
 An argument of type `any` is accepted at compile time; the runtime checks
-the parameter mode (`function 'f' argument 1: expected ref int, got int`).
+the parameter mode (`function 'f' argument 1: expected ref int, got int`)
+and, for a `ref T` parameter, the type of the target the reference points
+to (`function 'f' argument 1: expected ref int, got ref string`); a `null`
+target is forwarded and fails on the read (§4.2).
 
 #### R6. Rebind is `=`, update is `*… =`
 
@@ -933,15 +936,14 @@ Exact function types may also appear in parameters, returns, struct fields, map 
 **The dynamic boundary is checked at runtime, in every position.** A value
 whose static type is `any` — an `any`-typed variable, field or parameter,
 the result of a function declared `-> any`, of `json_parse`, `task_await` or
-a bare `func` call — or *unknown* — an untyped native, a plugin, a module
-member called through a namespace (`m.f()`) — is accepted wherever a typed
-slot is expected: an annotated `let`, an assignment (`x = v`, `s.f = v`,
-`xs[i] = v`), an argument of an exact signature, a `return`. The runtime
-checks the value against the slot's type at that point and names both sides
-on mismatch: `expected int, got string`, `expected map[string, any][], got
-int[]`, `expected Point, got null` (§2.4). Typed code pays nothing — the
-check is emitted only where the static type is `any` or unknown. A wrapper
-around an `any`-returning function therefore returns it directly:
+a bare `func` call — is accepted wherever a typed slot is expected: an
+annotated `let`, an assignment (`x = v`, `s.f = v`, `xs[i] = v`), an
+argument of an exact signature, a `return`. The runtime checks the value
+against the slot's type at that point and names both sides on mismatch:
+`expected int, got string`, `expected map[string, any][], got int[]`,
+`expected Point, got null` (§2.4). Typed code pays nothing — the check is
+emitted only where the static type is `any`. A wrapper around an
+`any`-returning function therefore returns it directly:
 
 ```noxy
 func itens() -> any                       // e.g. a parsed JSON payload
@@ -953,22 +955,32 @@ func scan() -> map[string, any][]
 end
 ```
 
-The standard library honours the same contract: a wrapper whose native
-reports failure with `null` says so in its signature — `time.parse(s) ->
-DateTime?`, `time.parse_date(s) -> DateTime?`, `sqlite.prepare(db, sql) ->
-Statement?` — so `let dt = time.parse(s)` is tested with `if dt != null
-then`, and `let stmt: Statement = sqlite.prepare(db, sql)` through the
-namespace form stops at the boundary with `expected Statement, got null`
-instead of failing later.
+The standard library honours the `any` contract on its own side: a wrapper
+whose native reports failure with `null` says so in its signature —
+`time.parse(s) -> DateTime?`, `time.parse_date(s) -> DateTime?`,
+`sqlite.prepare(db, sql) -> Statement?` — so `let dt = parse(s)` imported
+with `select` has the static type `DateTime?` and is tested with `if dt !=
+null then`.
 
-Two limits. `any` crosses only at the *top* of a type: element, key, value,
-channel payload and `ref` target are invariant, so `any[]` is not an `int[]`,
-`map[string, any]` is not a `map[string, int]`, and `ref a` with `a: any` is
-a `ref any`, never a `ref int` — the slot it points to may change type after
-any check. And an exact function type is never a target: `any` is not
+Three limits. `any` crosses only at the *top* of a type: element, key,
+value, channel payload and `ref` target are invariant, so `any[]` is not an
+`int[]`, `map[string, any]` is not a `map[string, int]`, and `ref a` with
+`a: any` is a `ref any`, never a `ref int`. An `any` value that *carries* a
+reference (R2) may fill a `ref T` slot or parameter — R5's dynamic
+boundary — and there the target is checked, not only the mode: `inc(a)`
+with `inc(r: ref int)` and `a` holding `ref s` (`s: string`) is `function
+'inc' argument 1: expected ref int, got ref string`; `let r: ref int = a`
+is `expected ref int, got ref string`. A `null` target is forwarded as
+before and fails on the read. And an exact function type is never a target: `any` is not
 narrowed to `func(int) -> int`, nor to a type containing one
 (`(func(int) -> int)[]`) — the rule above, no implicit narrowing to an exact
 signature, holds at every boundary.
+
+A value of *unknown* static type — an untyped native, a plugin, a module
+member called through a namespace (`m.f()`) — is accepted as before and is
+not checked by this guard: the natives declare no return contract yet, and
+checking every wrapper call measured at +35–55 % per call. Only a composite
+slot (array, map, chan) carries its runtime marker in every position.
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 

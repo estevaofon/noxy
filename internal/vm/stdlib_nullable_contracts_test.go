@@ -33,12 +33,3 @@ func TestSqlitePrepareNullOnBadSqlIsTestable(t *testing.T) {
 	got := captureVMSource(t, "use sqlite select *\nlet db: Database = open(\":memory:\")\nlet bad = prepare(db, \"SELECT * FROM tabela_inexistente\")\nlet ok = prepare(db, \"SELECT 1\")\nlet score: int = 0\nif bad == null then\n    score = score + 1\nend\nif ok != null then\n    if ok.handle > 0 then\n        score = score + 10\n    end\n    finalize(ok)\nend\nclose(db)\ntest_report(score)\n")
 	testExpectedObject(t, 11, got)
 }
-
-func TestNamespaceCallIntoNonNullableSlotIsCheckedAtRuntime(t *testing.T) {
-	// Pela forma de namespace (`sqlite.prepare`) o membro nao tem tipo
-	// estatico: a guarda de tipo desconhecido e quem segura o null.
-	err := interpretOrCompileErr(t, New(), "use sqlite\nlet db: sqlite.Database = sqlite.open(\":memory:\")\nlet stmt: sqlite.Statement = sqlite.prepare(db, \"SELECT * FROM tabela_inexistente\")\n")
-	if err == nil || !strings.Contains(err.Error(), "expected Statement, got null\n  hint: declare the slot as 'Statement?' to allow null") {
-		t.Fatalf("want the runtime null guard, got %v", err)
-	}
-}

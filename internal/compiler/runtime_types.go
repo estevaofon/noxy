@@ -26,23 +26,25 @@ func (c *Compiler) emitRuntimeValueType(t ast.NoxyType) error {
 }
 
 // emitDynamicBoundaryGuard e a checagem de runtime da fronteira dinamica
-// (spec §4.2, #118/#120): quando o tipo estatico do valor e `any` ou
-// DESCONHECIDO (nil: nativo sem assinatura, membro de namespace, plugin) e o
-// slot tem tipo concreto, o valor no topo da pilha e conferido contra o tipo
-// do slot — `expected int, got string`, `expected Statement, got null`. Vale
-// para let anotado, atribuicao, argumento de assinatura exata e return.
-// Tipos que ja carregam metadado (array, map, chan) foram marcados — e
-// validados — por emitRuntimeValueType; o resto (primitivos, structs, refs)
-// so passa por aqui. Codigo tipado nao paga nada.
+// (spec §4.2, #118/#120): quando o tipo estatico do valor e `any` e o slot
+// tem tipo concreto, o valor no topo da pilha e conferido contra o tipo do
+// slot — `expected int, got string`. Vale para let anotado, atribuicao,
+// argumento de assinatura exata e return. Tipos que ja carregam metadado
+// (array, map, chan) foram marcados — e validados — por emitRuntimeValueType;
+// o resto (primitivos, structs) so passa por aqui. Codigo tipado nao paga
+// nada.
 //
-// Os wrappers da stdlib cujo nativo devolve null como resultado de dado
-// (time.parse/parse_date, sqlite.prepare) dizem `T?` na assinatura (#120
-// item 1) — foi o que permitiu ligar a guarda para tipo desconhecido.
+// Tipo estatico DESCONHECIDO (nil: nativo sem assinatura, membro de
+// namespace `m.f()`, plugin) fica de fora de proposito (revisao do #119,
+// decisao B): 134 natives da stdlib nao declaram contrato de retorno, e a
+// guarda em cada `return native(...)` custava +35-55 % por chamada de
+// wrapper, alem de transformar nulls silenciosos de crypto/net em aborts
+// dentro da stdlib. Contrato de retorno dos natives e issue propria.
 func (c *Compiler) emitDynamicBoundaryGuard(expected, actual ast.NoxyType) error {
 	if expected == nil || isAny(expected) {
 		return nil
 	}
-	if actual != nil && !isAny(actual) {
+	if !isAny(actual) {
 		return nil
 	}
 	if c.requiresRuntimeValueType(expected, make(map[*ast.StructStatement]bool), "") {

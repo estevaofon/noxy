@@ -20,18 +20,16 @@ um global).
   `let x: int = nativo()` com `nativo() -> any` devolvendo `"texto"` rodava
   e deixava uma string em `x`; agora é erro de runtime `expected int, got
   string`. Compostos (array/map/chan) já eram checados. Código tipado não
-  paga nada: a guarda só é emitida onde o tipo estático é `any` ou
-  desconhecido.
+  paga nada: a guarda só é emitida onde o tipo estático é `any`. Tipo
+  estático **desconhecido** (nativo sem assinatura, membro de namespace
+  `m.f()`, plugin) segue sem guarda, como antes: ligar a guarda ali custava
+  +35–55 % por chamada de wrapper da stdlib e expunha nulls de crypto/net
+  que ninguém auditou — ver follow-ups.
 - **Atribuição também tem a guarda** (#120 item 2): `x = v`, `s.f = v`,
-  `xs[i] = v`, `m[k] = v`, upvalue e global com `v` de tipo `any` ou
-  desconhecido → `expected int, got string` em runtime. Um `int[]` escrito
-  via `any` num elemento `int` é recusado antes da escrita (antes caía no
-  caminho genérico do NORC).
-- **Tipo estático desconhecido entra na guarda** (nativo sem assinatura,
-  membro de namespace `m.f()`, plugin): a spec §4.2 sempre prometeu a
-  checagem. `let stmt: sqlite.Statement = sqlite.prepare(db, sql)` com SQL
-  inválido para em `expected Statement, got null` + hint na fronteira, em vez
-  de falhar depois.
+  `xs[i] = v`, `m[k] = v`, upvalue e global com `v` de tipo `any` →
+  `expected int, got string` em runtime. Um `int[]` escrito via `any` num
+  elemento `int` é recusado antes da escrita (antes caía no caminho genérico
+  do NORC).
 - **Contratos da stdlib (BREAKING, #120 item 1)**: `time.parse` e
   `time.parse_date` → `DateTime?`; `sqlite.prepare` → `Statement?`. Auditoria
   cruzando todos os wrappers `-> T` com os `return null` dos nativos: eram os
@@ -39,9 +37,10 @@ um global).
   de argumento, inalcançável pelo wrapper tipado). Migração: com `use m
   select …`, `let dt: DateTime = parse(s)` vira `expected DateTime, got
   DateTime?` — escreva `let dt = parse(s)` e teste `if dt != null then`;
-  pela forma `m.f()` nada muda na compilação, mas null num slot `T` é erro de
-  runtime na fronteira (item acima). `time_demo.nx` e `sqlite_showcase.nx`
-  migrados.
+  pela forma `m.f()` (membro de namespace, sem tipo estático) nada muda:
+  compila e o null segue chegando ao slot como antes — o contrato de retorno
+  dos natives é follow-up. `time_demo.nx`, `sqlite_showcase.nx` e
+  `defer_lifo.nx` migrados.
 - **`&&`/`||` com chamada no operando direito** (#120 item 3, pré-existente
   desde 0.22.0): `if m != null && toca() then m["k"] end` com `m` global
   compilava e falhava em runtime — `toca()` roda depois do teste e pode zerar
@@ -55,7 +54,14 @@ um global).
     `ref int` (`bump(ref a)` com `a: any` volta a ser `expected ref int, got
     ref any`), `any[]` não é `int[]`, `map[string, any]` não é
     `map[string, int]` — elementos e alvo de `ref` são invariantes, como em
-    develop.
+    develop. E um `any` que carrega referência (R2) continua entrando em
+    `ref T` (R5: fronteira dinâmica, modo validado em runtime), mas agora o
+    **alvo** é conferido também: `inc(a)` com `a` guardando `ref string` →
+    `function 'inc' argument 1: expected ref int, got ref string`
+    (`validateRefTargets`, só no caminho `OP_CALL` de modo não provado —
+    código tipado não paga); `let r: ref int = a` / `return a` →
+    `expected ref int, got ref string` pela guarda do slot. Em 0.23.0 os três
+    liam a string como int em silêncio. Alvo `null` segue encaminhado.
   - A guarda tem um único ponto de emissão (`emitSlotGuards`), que cobre os
     três sites que ficaram de fora: `*r = v`, `xs[i] = v` no caminho fundido
     de local, e o valor de `append(ref xs, v)` (também a chave de `delete` e o
@@ -94,7 +100,10 @@ um global).
   (fronteira `any` checada em toda posição, wrapper sem `let` temporário),
   §9 (f-string é `to_str`), §10.
 
-Follow-up: simplificar o wrapper `noxy_dynamodb.nx` (outro repo) removendo
+Follow-ups: #121 (natives que devolvem `null` como dado sob wrapper `-> T` —
+crypto/net — `T?` ou erro tipado); #122 (contrato de retorno dos natives +
+fast path no `OP_MARK`, para religar a guarda em tipo desconhecido sem custo
+por chamada); simplificar o wrapper `noxy_dynamodb.nx` (outro repo) removendo
 os `let` temporários.
 
 ## [0.23.0] - 2026-08-29

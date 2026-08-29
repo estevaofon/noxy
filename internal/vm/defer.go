@@ -32,6 +32,9 @@ func (vm *VM) prepareDeferredCall(callee value.Value, args []value.Value, regist
 		if err := validateParameterModes(fn.Name, fn.Params, args); err != nil {
 			return PreparedCall{}, err
 		}
+		if err := vm.validateRefTargets(fn.Name, fn.RuntimeType, args); err != nil {
+			return PreparedCall{}, err
+		}
 		vm.retainPreparedArguments(prepared.Arguments, fn.Params)
 		return prepared, nil
 

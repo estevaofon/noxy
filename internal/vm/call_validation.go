@@ -36,6 +36,34 @@ func runtimeValueMode(v value.Value) string {
 	}
 }
 
+// validateRefTargets confere o TIPO DO ALVO de cada argumento `ref` contra o
+// parametro `ref T` (revisao do #119, condicao 2): validateParameterModes so
+// olha o modo, e um `any` guardando `ref string` entrava num `ref int` e era
+// lido como int. Roda so no caminho de modo nao provado (OP_CALL com
+// argumento any/desconhecido) — codigo tipado usa OP_CALL_STATIC e nao passa
+// aqui. Alvo null segue encaminhado (ref-null-forwarding: falha na leitura).
+func (vm *VM) validateRefTargets(name string, schema *value.RuntimeTypeInfo, args []value.Value) error {
+	if schema == nil || len(schema.ParamIsRef) != len(schema.Params) {
+		return nil
+	}
+	for i, param := range schema.Params {
+		if i >= len(args) || !schema.ParamIsRef[i] || args[i].Type != value.VAL_REF {
+			continue
+		}
+		if param == nil || param.Kind != value.TYPE_REF || param.Element == nil {
+			continue
+		}
+		target, err := vm.resolveReferenceValue(args[i])
+		if err != nil || target.Type == value.VAL_NULL {
+			continue
+		}
+		if !vm.runtimeValueMatchesType(target, param.Element) {
+			return fmt.Errorf("function '%s' argument %d: expected %s, got %s", name, i+1, param.String(), vm.runtimeValueDescription(args[i]))
+		}
+	}
+	return nil
+}
+
 func validateParameterModes(name string, params []value.ParamInfo, args []value.Value) error {
 	for i, param := range params {
 		if i >= len(args) {

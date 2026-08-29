@@ -191,11 +191,12 @@ test_report(f())`)
 	testExpectedObject(t, 35, got)
 }
 
-func TestAnyBoundaryGuardChecksUnknownStaticType(t *testing.T) {
+func TestAnyBoundaryGuardSkipsUnknownStaticType(t *testing.T) {
 	// Tipo estatico DESCONHECIDO (nativo sem assinatura, membro de namespace)
-	// e fronteira dinamica como `any` (spec §4.2): a guarda confere o valor.
-	// Ficou de fora ate os contratos da stdlib serem corrigidos (#120 item 1:
-	// time.parse/parse_date -> DateTime?, sqlite.prepare -> Statement?).
+	// NAO e checado por esta guarda: 134 natives da stdlib nao tem contrato
+	// de retorno declarado e a guarda custava +35-55 % por chamada de wrapper
+	// (revisao do #119, decisao B). O contrato de retorno dos natives e uma
+	// issue propria; ate la o comportamento anterior fica.
 	machine := New()
 	machine.DefineNative("__untyped_null", func(args []value.Value) value.Value {
 		return value.NewNull()
@@ -216,10 +217,10 @@ func wrapper() -> P
 end
 let p: P = wrapper()
 test_report(p)`)
-	if err == nil || !strings.Contains(err.Error(), "expected P, got null\n  hint: declare the slot as 'P?' to allow null") {
-		t.Fatalf("unknown static type must be checked at the boundary, got %v", err)
+	if err != nil {
+		t.Fatalf("unknown static type must keep the pre-#118 behavior, got %v", err)
 	}
-	if captured.Type != value.VAL_INT || captured.Int() != -1 {
-		t.Fatalf("the null must not reach test_report, got %v", captured)
+	if captured.Type != value.VAL_NULL {
+		t.Fatalf("want null through the untyped wrapper, got %v", captured)
 	}
 }

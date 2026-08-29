@@ -19,10 +19,15 @@ func displayStructName(name string) string {
 
 // runtimeValueDescription e o nome de tipo de um valor nos diagnosticos de
 // fronteira dinamica (`expected T, got U`, #118): um composto ja etiquetado
-// mostra a etiqueta (`int[4]`, `map[string, int]`, `chan string`); o resto,
-// o nome de runtime de sempre (runtimeTypeName).
-func runtimeValueDescription(val value.Value) string {
+// mostra a etiqueta (`int[4]`, `map[string, int]`, `chan string`), uma
+// referencia mostra o alvo (`ref string`, `ref null`); o resto, o nome de
+// runtime de sempre (runtimeTypeName).
+func (vm *VM) runtimeValueDescription(val value.Value) string {
 	switch val.Type {
+	case value.VAL_REF:
+		if target, err := vm.resolveReferenceValue(val); err == nil {
+			return "ref " + vm.runtimeValueDescription(target)
+		}
 	case value.VAL_OBJ:
 		switch obj := val.Obj.(type) {
 		case *value.ObjArray:

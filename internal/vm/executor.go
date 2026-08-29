@@ -632,7 +632,7 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				}
 				// Fronteira dinamica (#118): nomeia os dois tipos, como o
 				// checador estatico faz.
-				return vm.runtimeError(c, ip, "expected %s, got %s", runtimeType.String(), runtimeValueDescription(vm.peek(0)))
+				return vm.runtimeError(c, ip, "expected %s, got %s", runtimeType.String(), vm.runtimeValueDescription(vm.peek(0)))
 			}
 
 		case chunk.OP_DEREF:

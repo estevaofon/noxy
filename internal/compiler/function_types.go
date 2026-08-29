@@ -218,7 +218,8 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 	if isAny(actual) {
 		// #118: `any` atravessa para um slot concreto em qualquer posicao —
 		// argumento e return como o `let` — e a guarda de runtime
-		// (emitDynamicBoundaryGuard) confere o valor. A mesma regra do tipo
+		// (emitDynamicBoundaryGuard) confere o valor — para um slot `ref T`,
+		// o alvo da referencia (walk TYPE_REF). A mesma regra do tipo
 		// desconhecido (actual == nil, acima): a excecao e o callable exato,
 		// inclusive aninhado, que nunca sofre narrowing implicito (spec §4.2).
 		return !c.containsCallableType(expected, nil)
