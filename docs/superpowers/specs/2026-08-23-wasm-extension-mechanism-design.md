@@ -8,6 +8,16 @@ WASM cannot express; formalizing it is a separate spec. In-process dynamic
 libraries were rejected in the RFC for violating invariant 5 and are not
 revisited here.
 
+> **Amended 2026-08-29 (issue #110).** The RFC's five invariants were revised
+> by the author — see `2026-08-29-extensibility-invariants-revision.md`.
+> Invariant 5 ("the VM cannot be destabilized") is no longer a requirement;
+> "cross-compile, and the user never compiles" is the decisive filter.
+> Consequences for this document: tier B (process plugins) is the **primary**
+> path for I/O, OS access and drivers — not a second tier; the capability
+> plan of §9 and phase M2 of §14 are suspended; approach C stays out for the
+> cross-compilation cost it imposes on authors, not for invariant 5. The
+> original text is kept as written, with amendment notes where superseded.
+
 ## Goal and Scope
 
 **Goal:** a third party can publish a native-performance module — compression,
@@ -395,6 +405,14 @@ let it do. v1 policy:
 
 Tier B (process plugins) can make no such guarantee; its spec must say so.
 
+> **Amended 2026-08-29 (issue #110).** Invariant 5 was dropped, so tier B
+> no longer needs to make that guarantee — process isolation is a bonus, not
+> a requirement. The `random`/`clock`/`fs`/`net` capability namespaces above
+> are **suspended**: I/O is tier B's job (issue #80). A restricted WASI
+> preview1 grant (clock, random, stdout→`nx_log`; no filesystem mount, no
+> sockets) is the candidate answer to authoring friction, in its own issue
+> if pursued.
+
 ## 10. ABI evolution
 
 - `noxy:host/v1` is additive-only: new imports may be added (instantiation
@@ -439,9 +457,19 @@ Acceptance benchmark for the implementation (gates merge):
 - **Out-of-process plugins as the only mechanism** (RFC approach B): survives
   as tier 2. Rejected as primary for the per-call cost (~50–500 µs — three
   orders above the boundary here) and the N-artifacts-per-release packaging.
+  *Amended 2026-08-29 (issue #110): now the primary mechanism for I/O, OS
+  access and drivers; wasm stays primary for pure computation. The
+  N-artifacts cost is accepted — Go cross-compiles the whole matrix without
+  cgo — and the per-call cost is irrelevant for I/O-bound APIs.*
 - **In-process dynamic libraries via purego** (RFC approach C): best raw
   performance, violates invariant 5 by construction. Rejected; not even
   behind a flag until someone brings a use case tier B cannot serve.
+  *Amended 2026-08-29 (issue #110): invariant 5 is gone; the rejection now
+  rests on (a) Go `-buildmode=c-shared` requiring cgo and a C toolchain per
+  target, which forfeits the cross-compile advantage; (b) a permanently
+  stable C-API over `Value`; (c) the gain mattering only for hot per-element
+  calls, which wasm serves. Reopens on a concrete case needing the whole OS
+  and hot calls that cannot be batched.*
 - **Host-side handle table with accessor imports** (the "rich ABI"): rejected
   for v1, §3. Re-openable with evidence: a concrete extension whose profiled
   copy cost dominates and whose API cannot be made chunky.
@@ -490,6 +518,8 @@ Named in the RFC, owned here:
 - **M2 — capabilities.** `noxy:cap/random/v1` + `noxy:cap/clock/v1`, grant
   lines in `noxy.mod`, `--get` prompt. Reference extension exercising them
   (proposed: an argon2/password-hashing lib).
+  *Suspended 2026-08-29 (issue #110): I/O and OS access are tier B's job;
+  see `2026-08-29-extensibility-invariants-revision.md`.*
 - **M3 — core diet, decision only.** Measure binary share of
   `modernc.org/sqlite` (+`libc`) with `go tool nm` size accounting; if it is
   the expected majority share, spec sqlite-as-extension (needs
@@ -517,5 +547,8 @@ Named in the RFC, owned here:
 - **Tier B formalization** — versioned handshake for `sys_load_plugin`,
   msgpack framing, platform-artifact selection in the package manager; its
   own spec, sharing the manifest and `noxy.sum` machinery where possible.
+  *Now issue #80 (spec) with the deltas of issue #110: NXB framing (not
+  msgpack), binaries as release assets per platform, portable `noxy.sum`,
+  `noxy_terminal` and `noxy_dynamodb` as the reference extensions.*
 - **REPL story** — loading extensions from the REPL session works via the
   same module path; poisoning semantics in a long-lived REPL deserve a test.
