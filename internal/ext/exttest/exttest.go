@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -37,13 +36,30 @@ func isUnsupportedToolchainOutput(output string) bool {
 	return false
 }
 
+// repoRoot sobe a partir do diretorio do pacote em teste (o cwd de todo
+// "go test") ate o go.mod deste modulo. Nao usa runtime.Caller: com
+// GOFLAGS=-trimpath (configuracao de maquina) o caminho gravado no binario
+// e relativo ao modulo ("noxy-vm/...") e o chdir do go build dos guests
+// falhava.
 func repoRoot(tb testing.TB) string {
-	_, self, _, ok := runtime.Caller(0)
-	if !ok {
-		tb.Fatal("exttest: cannot locate caller")
+	tb.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		tb.Fatalf("exttest: getwd: %v", err)
 	}
-	// internal/ext/exttest/exttest.go -> raiz do repo
-	return filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(self))))
+	for {
+		if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
+			first := strings.TrimSpace(strings.SplitN(string(data), "\n", 2)[0])
+			if first == "module noxy-vm" {
+				return dir
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			tb.Fatal("exttest: go.mod of module noxy-vm not found above the test directory")
+		}
+		dir = parent
+	}
 }
 
 // BuildGuest compila testdata/guest com os ldflags dados e devolve os bytes
