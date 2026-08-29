@@ -1,0 +1,30 @@
+# Release workflow template for a Noxy process extension.
+#
+# Copy this file to `.github/workflows/` in your extension repository and
+# replace `<name>` below with your extension's name (the same name you pass
+# to `release/build.sh` and use as the `name` key in `noxy_ext.toml`). It
+# builds the linux/darwin/windows amd64/arm64 matrix, writes
+# `dist/checksums.txt`, and publishes both as assets on the GitHub release
+# for the pushed tag — exactly what `noxy --get` downloads.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: sh release/build.sh <name>
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
