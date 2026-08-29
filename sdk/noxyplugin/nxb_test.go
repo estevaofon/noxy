@@ -122,3 +122,30 @@ func TestNXBArgsAndStringMap(t *testing.T) {
 		t.Fatal("an int is not a string map")
 	}
 }
+
+func TestNXBMixedMapDirectPath(t *testing.T) {
+	// chaves int e int64 distintas, mais string: ints primeiro, ordenados
+	m := map[any]any{"b": int64(1), int64(2): "x", int(1): "y"}
+	data, err := encodeValue(nil, m, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := encodeValue(nil, map[int64]any{1: "y", 2: "x"}, 0)
+	// o cabecalho do mapa misto conta 3 entradas: confere pelo decode
+	decoded, err := decodeValue(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, map[any]any{int64(1): "y", int64(2): "x", "b": int64(1)}) {
+		t.Fatalf("mixed map round trip: %#v", decoded)
+	}
+	if !bytes.HasPrefix(data[5:], want[5:]) {
+		t.Fatalf("int keys must come first, sorted:\n got %x\nwant prefix %x", data[5:], want[5:])
+	}
+}
+
+func TestNXBMixedMapRejectsCollidingKeys(t *testing.T) {
+	if _, err := encodeValue(nil, map[any]any{int64(2): "a", int(2): "b"}, 0); err == nil || !strings.Contains(err.Error(), "duplicate map key 2") {
+		t.Fatalf("int(2) and int64(2) are the same Noxy key: %v", err)
+	}
+}

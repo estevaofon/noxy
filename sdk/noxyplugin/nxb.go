@@ -168,40 +168,51 @@ func encodeStruct(buf []byte, s Struct, depth int) ([]byte, error) {
 	return buf, nil
 }
 
-// encodeMixedMap: ints antes de strings, cada grupo ordenado — a mesma
-// ordem deterministica do host.
+// encodeMixedMap normaliza as chaves (int → int64) e rejeita duplicata
+// apos a normalizacao: duas chaves Go com o mesmo valor Noxy nunca viram
+// perda silenciosa. Ordem: ints antes de strings, cada grupo ordenado.
 func encodeMixedMap(buf []byte, m map[any]any, depth int) ([]byte, error) {
-	var ints []int64
-	var strs []string
-	for k := range m {
+	ints := make(map[int64]any)
+	strs := make(map[string]any)
+	for k, v := range m {
 		switch key := k.(type) {
 		case int64:
-			ints = append(ints, key)
+			if _, dup := ints[key]; dup {
+				return nil, fmt.Errorf("nxb: duplicate map key %d after normalization", key)
+			}
+			ints[key] = v
 		case int:
-			ints = append(ints, int64(key))
+			if _, dup := ints[int64(key)]; dup {
+				return nil, fmt.Errorf("nxb: duplicate map key %d after normalization", key)
+			}
+			ints[int64(key)] = v
 		case string:
-			strs = append(strs, key)
+			strs[key] = v
 		default:
 			return nil, fmt.Errorf("nxb: map key of type %T cannot cross the boundary", k)
 		}
 	}
-	sort.Slice(ints, func(i, j int) bool { return ints[i] < ints[j] })
-	sort.Strings(strs)
-	buf = appendU32(append(buf, tagMap), uint32(len(m)))
+	intKeys := make([]int64, 0, len(ints))
+	for k := range ints {
+		intKeys = append(intKeys, k)
+	}
+	sort.Slice(intKeys, func(i, j int) bool { return intKeys[i] < intKeys[j] })
+	strKeys := make([]string, 0, len(strs))
+	for k := range strs {
+		strKeys = append(strKeys, k)
+	}
+	sort.Strings(strKeys)
+	buf = appendU32(append(buf, tagMap), uint32(len(intKeys)+len(strKeys)))
 	var err error
-	for _, k := range ints {
+	for _, k := range intKeys {
 		buf = appendInt(buf, k)
-		item, ok := m[k]
-		if !ok {
-			item = m[int(k)]
-		}
-		if buf, err = encodeValue(buf, item, depth+1); err != nil {
+		if buf, err = encodeValue(buf, ints[k], depth+1); err != nil {
 			return nil, err
 		}
 	}
-	for _, k := range strs {
+	for _, k := range strKeys {
 		buf = appendBlob(buf, tagString, []byte(k))
-		if buf, err = encodeValue(buf, m[k], depth+1); err != nil {
+		if buf, err = encodeValue(buf, strs[k], depth+1); err != nil {
 			return nil, err
 		}
 	}
