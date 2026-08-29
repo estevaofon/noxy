@@ -6,7 +6,7 @@ To install follow the instructions presented in the noxy_dynamodb repository:
 ## Usage Example
 
 ```noxy
-use github_com.estevaofon.noxy_dynamodb as dynamodb
+use github_com.estevaofon.noxy_dynamodb.dynamodb as dynamodb
 
 func main() -> void
     // 1. Connect (Uses default AWS credentials)
