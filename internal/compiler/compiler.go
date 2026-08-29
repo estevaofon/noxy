@@ -138,6 +138,10 @@ type Compiler struct {
 	// narrowed: chaves estaveis provadas nao-nulas no ponto corrente
 	// (narrowing.go). Por compilador — cada corpo de funcao comeca vazio.
 	narrowed map[string]struct{}
+	// narrowLost: chaves cujo fato existiu e foi derrubado por uma chamada
+	// (dropAfterCall), com o motivo — so para o diagnostico dizer "foi
+	// testado, mas..." em vez de sugerir o `if` que ja esta ali (#118).
+	narrowLost map[string]string
 	// warnings e a lista de avisos COMPARTILHADA pela arvore de compiladores
 	// (raiz + NewChild): ponteiro, como generics/instances, para que o aviso
 	// emitido dentro de um corpo de funcao suba ate o compilador raiz, que e
@@ -320,7 +324,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.AssignStmt:
 		defer c.noteAssignment(effect.Target)
 	case *ast.CallExpression:
-		defer c.dropAfterCall()
+		// Builtin central nao sombreado (print, to_str, length...) e nativo
+		// puro: nunca roda codigo Noxy, nada alcanca a raiz — o fato fica
+		// (#118; a f-string vira to_str no parser e cai aqui).
+		if !c.isPureBuiltinCall(effect) {
+			defer c.dropAfterCall()
+		}
 	}
 	switch n := node.(type) {
 	case *ast.Program:
@@ -470,6 +479,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s%s%s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType), c.derefReadHint(n.Type, valType, n.Value), c.nullMismatchHint(n.Type, valType, n.Value))
 			}
 			if err := c.emitRuntimeValueType(n.Type); err != nil {
+				return nil, nil, err
+			}
+			if err := c.emitDynamicBoundaryGuard(n.Type, valType); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -2310,6 +2322,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		if err := c.emitRuntimeValueType(expected); err != nil {
 			return nil, nil, err
 		}
+		if err := c.emitDynamicBoundaryGuard(expected, actual); err != nil {
+			return nil, nil, err
+		}
 		c.emitByte(byte(chunk.OP_RETURN))
 		return c.currentChunk, nil, nil
 
@@ -2704,6 +2719,9 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 		if isExact {
 			if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+				return nil, nil, err
+			}
+			if err := c.emitDynamicBoundaryGuard(funcType.Params[i], argType); err != nil {
 				return nil, nil, err
 			}
 		}

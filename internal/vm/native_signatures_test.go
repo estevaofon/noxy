@@ -1089,7 +1089,7 @@ let text: chan string = make_chan(1)
 let dynamic: any = text
 let integer: chan int = make_chan(1)
 integer = dynamic`)
-		if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {
+		if err == nil || !strings.Contains(err.Error(), "expected chan int, got chan string") {
 			t.Fatalf("error=%v", err)
 		}
 	})
@@ -1885,24 +1885,24 @@ test_report(length(target) * 10 + length(keys(item)))`)
 }
 
 func TestConflictingCollectionAndChannelMetadataFailsWithoutOverwrite(t *testing.T) {
-	tests := []string{
-		`let dynamic: int[] = [1, 2, 3, 4]
+	tests := []struct{ source, want string }{
+		{`let dynamic: int[] = [1, 2, 3, 4]
 let fixed: int[4] = [1, 2, 3, 4]
 let erased: any = dynamic
-fixed = erased`,
-		`let text: map[string, int] = {"value": 1}
+fixed = erased`, "expected int[4], got int[]"},
+		{`let text: map[string, int] = {"value": 1}
 let integer: map[int, string] = {1: "value"}
 let erased: any = integer
-text = erased`,
-		`let text: chan string = make_chan(1)
+text = erased`, "expected map[string, int], got map[int, string]"},
+		{`let text: chan string = make_chan(1)
 let integer: chan int = make_chan(1)
 let erased: any = text
-integer = erased`,
+integer = erased`, "expected chan int, got chan string"},
 	}
-	for _, source := range tests {
-		err := runTypedFunctionProgramError(t, source)
-		if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {
-			t.Fatalf("error=%v", err)
+	for _, tt := range tests {
+		err := runTypedFunctionProgramError(t, tt.source)
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("want %q, got error=%v", tt.want, err)
 		}
 	}
 }

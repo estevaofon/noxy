@@ -630,7 +630,9 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 				if vm.peek(0).Type == value.VAL_NULL {
 					return vm.runtimeError(c, ip, "expected %s, got null\n  hint: declare the slot as '%s?' to allow null", runtimeType.String(), runtimeType.String())
 				}
-				return vm.runtimeError(c, ip, "runtime value metadata conflicts with static context")
+				// Fronteira dinamica (#118): nomeia os dois tipos, como o
+				// checador estatico faz.
+				return vm.runtimeError(c, ip, "expected %s, got %s", runtimeType.String(), runtimeValueDescription(vm.peek(0)))
 			}
 
 		case chunk.OP_DEREF:

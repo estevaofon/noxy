@@ -90,17 +90,29 @@ func (c *Compiler) narrowType(key string, declared ast.NoxyType) ast.NoxyType {
 }
 
 // pushFacts adiciona fatos e devolve o restore que repoe o conjunto anterior.
+// O registro de fatos perdidos (narrowLost) acompanha: um fato perdido dentro
+// do ramo nao vale fora dele, e testar de novo apaga a perda.
 func (c *Compiler) pushFacts(keys []string) func() {
 	saved := c.narrowed
 	next := make(map[string]struct{}, len(saved)+len(keys))
 	for k := range saved {
 		next[k] = struct{}{}
 	}
+	savedLost := c.narrowLost
+	nextLost := make(map[string]string, len(savedLost))
+	for k, why := range savedLost {
+		nextLost[k] = why
+	}
 	for _, k := range keys {
 		next[k] = struct{}{}
+		delete(nextLost, k)
 	}
 	c.narrowed = next
-	return func() { c.narrowed = saved }
+	c.narrowLost = nextLost
+	return func() {
+		c.narrowed = saved
+		c.narrowLost = savedLost
+	}
 }
 
 // keepFacts adiciona fatos sem restore (depois de um ramo que termina).
@@ -120,10 +132,16 @@ func keyDependsOn(key, root string) bool {
 }
 
 // dropKey invalida a chave e tudo que depende dela (`x` derruba `x.a`, `*x`).
+// Uma atribuicao supera o motivo "perdido por chamada": o registro sai junto.
 func (c *Compiler) dropKey(key string) {
 	for k := range c.narrowed {
 		if keyDependsOn(k, key) {
 			delete(c.narrowed, k)
+		}
+	}
+	for k := range c.narrowLost {
+		if keyDependsOn(k, key) {
+			delete(c.narrowLost, k)
 		}
 	}
 }
@@ -133,6 +151,11 @@ func (c *Compiler) dropCompound() {
 	for k := range c.narrowed {
 		if strings.ContainsAny(k, ".*") {
 			delete(c.narrowed, k)
+		}
+	}
+	for k := range c.narrowLost {
+		if strings.ContainsAny(k, ".*") {
+			delete(c.narrowLost, k)
 		}
 	}
 }
@@ -161,13 +184,71 @@ func (c *Compiler) rootIsShared(root string) bool {
 	return true
 }
 
-// dropAfterCall invalida o que uma chamada pode ter mudado.
+// dropAfterCall invalida o que uma chamada pode ter mudado e registra o
+// motivo, para o diagnostico de leitura sem fato (mayBeNullError).
 func (c *Compiler) dropAfterCall() {
 	for k := range c.narrowed {
 		if strings.HasPrefix(k, "*") || c.rootIsShared(rootOf(k)) {
 			delete(c.narrowed, k)
+			if c.narrowLost == nil {
+				c.narrowLost = make(map[string]string)
+			}
+			c.narrowLost[k] = c.sharedRootReason(rootOf(k))
 		}
 	}
+}
+
+// sharedRootReason descreve por que a raiz e alcancavel durante uma chamada —
+// a mesma classificacao de rootIsShared, em palavras.
+func (c *Compiler) sharedRootReason(root string) string {
+	for i := len(c.locals) - 1; i >= 0; i-- {
+		if c.locals[i].Name != root {
+			continue
+		}
+		l := c.locals[i]
+		if _, isRef := asRefType(l.Type); isRef {
+			return fmt.Sprintf("'%s' is a ref", root)
+		}
+		if l.IsCaptured {
+			return fmt.Sprintf("'%s' is captured by a closure", root)
+		}
+		return fmt.Sprintf("'%s' had its address taken with 'ref'", root)
+	}
+	if slot, _ := c.resolveUpvalue(root); slot != -1 {
+		return fmt.Sprintf("'%s' is an upvalue", root)
+	}
+	return fmt.Sprintf("'%s' is a global", root)
+}
+
+// pureBuiltins sao os builtins centrais (builtin_return_types.go, mais os
+// sem tipo de retorno util) que nunca executam codigo Noxy: uma chamada a
+// eles nao pode reatribuir raiz nenhuma, entao nao encerra narrowing (#118).
+// call_result, spawn_task, task_await e chamadas via `func` bare ficam fora:
+// reentram em codigo do programa.
+var pureBuiltins = func() map[string]struct{} {
+	set := map[string]struct{}{"print": {}, "range": {}, "keys": {}, "slice": {}}
+	for name := range coreBuiltinReturnTypes {
+		set[name] = struct{}{}
+	}
+	return set
+}()
+
+// isPureBuiltinCall: a chamada resolve para um builtin puro — nome na tabela
+// e nao sombreado por local, upvalue ou global declarado pelo programa (a
+// mesma regra de sombreamento de builtinReturnType, compileCallExpression).
+func (c *Compiler) isPureBuiltinCall(call *ast.CallExpression) bool {
+	ident, ok := call.Function.(*ast.Identifier)
+	if !ok {
+		return false
+	}
+	if _, pure := pureBuiltins[ident.Value]; !pure {
+		return false
+	}
+	if c.isShadowedByLocal(ident.Value) {
+		return false
+	}
+	_, declared := c.globals[ident.Value]
+	return !declared
 }
 
 // noteAssignment invalida os fatos afetados por uma atribuicao a target.
@@ -213,8 +294,9 @@ func (c *Compiler) markRefTaken(expr ast.Expression) {
 }
 
 // loopEffects colhe as raizes atribuidas no corpo de um laco (alvo de `=`,
-// operando de `ref`, variavel do for) e se ha alguma chamada.
-func loopEffects(body *ast.BlockStatement) (roots []string, hasCall bool) {
+// operando de `ref`, variavel do for) e se ha alguma chamada que encerra
+// narrowing (builtin puro nao conta — isPureBuiltinCall).
+func (c *Compiler) loopEffects(body *ast.BlockStatement) (roots []string, hasCall bool) {
 	if body == nil {
 		return nil, false
 	}
@@ -239,7 +321,9 @@ func loopEffects(body *ast.BlockStatement) (roots []string, hasCall bool) {
 		case *ast.ForStatement:
 			seen[n.Identifier] = struct{}{}
 		case *ast.CallExpression:
-			hasCall = true
+			if !c.isPureBuiltinCall(n) {
+				hasCall = true
+			}
 		}
 		return true
 	})
@@ -252,7 +336,7 @@ func loopEffects(body *ast.BlockStatement) (roots []string, hasCall bool) {
 // dropForLoop invalida, ANTES de compilar um laco, os fatos que o corpo
 // pode derrubar em qualquer iteracao.
 func (c *Compiler) dropForLoop(body *ast.BlockStatement) {
-	roots, hasCall := loopEffects(body)
+	roots, hasCall := c.loopEffects(body)
 	for _, r := range roots {
 		c.dropKey(r)
 	}
@@ -326,8 +410,17 @@ func (c *Compiler) narrowBorrowOwner(base ast.Expression, owner ast.NoxyType) (a
 }
 
 // mayBeNullError e o diagnostico de leitura atraves de um `T?` sem teste.
+// Se o fato existiu e uma chamada o derrubou (narrowLost), diz isso: sugerir
+// `if x != null` com o `if` a duas linhas de distancia e enganoso (#118).
 func (c *Compiler) mayBeNullError(expr ast.Expression, t ast.NoxyType) error {
 	if key, ok := stableKey(expr); ok {
+		if why, lost := c.narrowLost[key]; lost {
+			hint := fmt.Sprintf("test it again after the call, or bind it first ('let v = %s' before the 'if') and use 'v'", key)
+			if strings.HasSuffix(why, "is a global") {
+				hint = fmt.Sprintf("test it again after the call, bind it first ('let v = %s' before the 'if') and use 'v', or move the code into a function", key)
+			}
+			return fmt.Errorf("[line %d] '%s' may be null: it was tested, but %s and a call came between the test and this use\n  hint: %s", c.currentLine, key, why, hint)
+		}
 		return fmt.Errorf("[line %d] '%s' may be null; test it first\n  hint: use 'if %s != null then ... end'", c.currentLine, key, key)
 	}
 	return fmt.Errorf("[line %d] value of type %s may be null; test it first\n  hint: bind it with 'let' and test for null", c.currentLine, t.String())

@@ -275,8 +275,8 @@ end
 let r: Envelope = __test_dynamic_envelope_bad()
 `
 	err := interpretVMSource(t, machine, source)
-	if err == nil || !strings.Contains(err.Error(), "runtime value metadata conflicts with static context") {
-		t.Fatalf("want the existing marker-rejection error, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "expected Envelope, got map") {
+		t.Fatalf("want the marker-rejection error naming both types, got: %v", err)
 	}
 }
 

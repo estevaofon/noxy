@@ -49,13 +49,23 @@ func TestFunctionTypeCompatibility(t *testing.T) {
 	}
 }
 
-func TestStrictCompatibilityRejectsActualAny(t *testing.T) {
+func TestStrictCompatibilityAcceptsActualAnyExceptExactCallable(t *testing.T) {
+	// Issue #118 item 1: `any` atravessa a fronteira para um slot concreto em
+	// qualquer posicao (let, argumento, return) — o runtime checa. A unica
+	// excecao e o callable exato (spec §4.2: nunca ha narrowing implicito).
 	c := New()
-	if c.areStrictTypesCompatible(primitive("int"), primitive("any")) {
-		t.Fatal("actual any must not satisfy concrete int in an exact contract")
+	if !c.areStrictTypesCompatible(primitive("int"), primitive("any")) {
+		t.Fatal("actual any must cross into concrete int (runtime-checked)")
 	}
 	if !c.areStrictTypesCompatible(primitive("any"), primitive("int")) {
 		t.Fatal("expected any must accept int")
+	}
+	exact := &ast.FunctionType{Params: []ast.NoxyType{primitive("int")}, Return: primitive("int")}
+	if c.areStrictTypesCompatible(exact, primitive("any")) {
+		t.Fatal("any must not narrow to an exact function type")
+	}
+	if c.areStrictTypesCompatible(&ast.ArrayType{ElementType: exact}, primitive("any")) {
+		t.Fatal("any must not narrow to an array of exact function types")
 	}
 }
 
@@ -155,11 +165,6 @@ add(1, 2)`, "expects 1 arguments, got 2"},
     return a
 end
 add("x")`, "argument 1 to 'add': expected int, got string"},
-		{"any", `func add(a: int) -> int
-    return a
-end
-let x: any = 1
-add(x)`, "expected int, got any"},
 		{"ref", `func set(v: ref int) -> void
     return
 end
@@ -324,9 +329,6 @@ end`, "void function 'bad' cannot return int"},
         return 1
     end
 end`, "may finish without returning int"},
-		{"actual any", `func bad(v: any) -> int
-    return v
-end`, "expected int, got any"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
