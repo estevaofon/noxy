@@ -56,10 +56,12 @@ func (c *Compiler) conditionFacts(cond ast.Expression) (then, els []string) {
 		case "&&":
 			lt, _ := c.conditionFacts(e.Left)
 			rt, _ := c.conditionFacts(e.Right)
+			lt = c.dropFactsCrossingCall(lt, e.Right, "&&", "!=")
 			return append(lt, rt...), nil
 		case "||":
 			_, le := c.conditionFacts(e.Left)
 			_, re := c.conditionFacts(e.Right)
+			le = c.dropFactsCrossingCall(le, e.Right, "||", "==")
 			return nil, append(le, re...)
 		}
 	case *ast.PrefixExpression:
@@ -168,11 +170,65 @@ func rootOf(key string) string {
 	return key
 }
 
-// lostFact: por que um fato foi derrubado por chamada (dropAfterCall) e se
-// foi na entrada de um laco (dropForLoop) — so para o diagnostico.
+// lostFact: por que um fato foi derrubado por chamada — a raiz (why), o que
+// aconteceu (event) e a primeira saida do hint (again) — so para o
+// diagnostico de mayBeNullError.
 type lostFact struct {
-	why    string
-	inLoop bool
+	why   string
+	event string
+	again string
+}
+
+// firstImpureCall devolve a primeira chamada de expr que encerra narrowing
+// (nao e builtin puro), ou nil.
+func (c *Compiler) firstImpureCall(expr ast.Expression) *ast.CallExpression {
+	var found *ast.CallExpression
+	ast.Inspect(expr, func(node ast.Node) bool {
+		if found != nil {
+			return false
+		}
+		if call, ok := node.(*ast.CallExpression); ok && !c.isPureBuiltinCall(call) {
+			found = call
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// dropFactsCrossingCall (#120 item 3): em `a && b` / `a || b`, uma chamada
+// nao-pura em b roda DEPOIS do teste de a — os fatos de a sobre raiz
+// compartilhada nao podem sair para o ramo (dentro da expressao o
+// dropAfterCall ja os derruba; o furo era so nos fatos exportados). Registra
+// a perda para o diagnostico apontar a chamada na condicao.
+func (c *Compiler) dropFactsCrossingCall(keys []string, right ast.Expression, op, cmp string) []string {
+	if len(keys) == 0 {
+		return keys
+	}
+	call := c.firstImpureCall(right)
+	if call == nil {
+		return keys
+	}
+	kept := keys[:0:0]
+	for _, k := range keys {
+		shared, why := c.rootSharing(rootOf(k))
+		if !strings.HasPrefix(k, "*") && !shared {
+			kept = append(kept, k)
+			continue
+		}
+		if why == "" {
+			why = fmt.Sprintf("'%s' is read through a reference", k)
+		}
+		if c.narrowLost == nil {
+			c.narrowLost = make(map[string]lostFact)
+		}
+		c.narrowLost[k] = lostFact{
+			why:   why,
+			event: "a call in the condition ran after the test",
+			again: fmt.Sprintf("put the call before the test ('%s %s %s %s null')", call.String(), op, k, cmp),
+		}
+	}
+	return kept
 }
 
 // rootSharing: a raiz pode mudar por fora deste frame — slot `ref`,
@@ -209,13 +265,14 @@ func (c *Compiler) rootIsShared(root string) bool {
 // dropAfterCall invalida o que uma chamada pode ter mudado e registra o
 // motivo, para o diagnostico de leitura sem fato (mayBeNullError).
 func (c *Compiler) dropAfterCall() {
-	c.dropSharedAfterCall(false)
+	c.dropSharedAfterCall("a call came between the test and this use", "test it again after the call")
 }
 
-// dropSharedAfterCall e o corpo de dropAfterCall; inLoop marca que a queda
-// veio da entrada de um laco (dropForLoop) — a chamada pode vir DEPOIS do
-// uso no texto e rodar antes dele na iteracao seguinte.
-func (c *Compiler) dropSharedAfterCall(inLoop bool) {
+// dropSharedAfterCall e o corpo de dropAfterCall; event/again descrevem a
+// queda no diagnostico — a entrada de um laco (dropForLoop) tem a sua: a
+// chamada pode vir DEPOIS do uso no texto e rodar antes dele na iteracao
+// seguinte.
+func (c *Compiler) dropSharedAfterCall(event, again string) {
 	for k := range c.narrowed {
 		shared, why := c.rootSharing(rootOf(k))
 		if !strings.HasPrefix(k, "*") && !shared {
@@ -228,7 +285,7 @@ func (c *Compiler) dropSharedAfterCall(inLoop bool) {
 		if c.narrowLost == nil {
 			c.narrowLost = make(map[string]lostFact)
 		}
-		c.narrowLost[k] = lostFact{why: why, inLoop: inLoop}
+		c.narrowLost[k] = lostFact{why: why, event: event, again: again}
 	}
 }
 
@@ -353,7 +410,7 @@ func (c *Compiler) dropForLoop(body *ast.BlockStatement) {
 		c.dropKey(r)
 	}
 	if hasCall {
-		c.dropSharedAfterCall(true)
+		c.dropSharedAfterCall("the loop body calls a function that can run before this use", "test it again inside the loop")
 	}
 }
 
@@ -427,15 +484,11 @@ func (c *Compiler) narrowBorrowOwner(base ast.Expression, owner ast.NoxyType) (a
 func (c *Compiler) mayBeNullError(expr ast.Expression, t ast.NoxyType) error {
 	if key, ok := stableKey(expr); ok {
 		if lost, ok := c.narrowLost[key]; ok {
-			event, again := "a call came between the test and this use", "test it again after the call"
-			if lost.inLoop {
-				event, again = "the loop body calls a function that can run before this use", "test it again inside the loop"
-			}
-			hint := fmt.Sprintf("%s, or bind it first ('let v = %s' before the 'if') and use 'v'", again, key)
+			hint := fmt.Sprintf("%s, or bind it first ('let v = %s' before the 'if') and use 'v'", lost.again, key)
 			if strings.HasSuffix(lost.why, "is a global") {
-				hint = fmt.Sprintf("%s, bind it first ('let v = %s' before the 'if') and use 'v', or move the code into a function", again, key)
+				hint = fmt.Sprintf("%s, bind it first ('let v = %s' before the 'if') and use 'v', or move the code into a function", lost.again, key)
 			}
-			return fmt.Errorf("[line %d] '%s' may be null: it was tested, but %s and %s\n  hint: %s", c.currentLine, key, lost.why, event, hint)
+			return fmt.Errorf("[line %d] '%s' may be null: it was tested, but %s and %s\n  hint: %s", c.currentLine, key, lost.why, lost.event, hint)
 		}
 		return fmt.Errorf("[line %d] '%s' may be null; test it first\n  hint: use 'if %s != null then ... end'", c.currentLine, key, key)
 	}

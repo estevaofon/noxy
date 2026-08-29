@@ -666,6 +666,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if err := c.emitRuntimeValueType(localType); err != nil {
 							return nil, nil, err
 						}
+						if err := c.emitDynamicBoundaryGuard(localType, valType); err != nil {
+							return nil, nil, err
+						}
 						// RC: rebind de local `ref` e troca de EMPRESTIMO, nao
 						// de posse — grava no slot sem retain/release (o dono
 						// real e o campo/global/slot do chamador apontado).
@@ -687,6 +690,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s%s%s", c.currentLine, ident.Value, localType.String(), valType.String(), c.derefReadHint(localType, valType, n.Value), c.nullMismatchHint(localType, valType, n.Value))
 					}
 					if err := c.emitRuntimeValueType(localType); err != nil {
+						return nil, nil, err
+					}
+					if err := c.emitDynamicBoundaryGuard(localType, valType); err != nil {
 						return nil, nil, err
 					}
 					// RC: mesma pergunta do gemeo MUT — so slot POSSUIDOR troca
@@ -716,6 +722,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if err := c.emitRuntimeValueType(upvalueType); err != nil {
 					return nil, nil, err
 				}
+				if err := c.emitDynamicBoundaryGuard(upvalueType, valType); err != nil {
+					return nil, nil, err
+				}
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
 				c.emitByte(byte(chunk.OP_POP))
 			} else {
@@ -734,6 +743,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 							nameConstant := c.makeConstant(value.NewString(ident.Value))
 							if err := c.emitRuntimeValueType(globalType); err != nil {
+								return nil, nil, err
+							}
+							if err := c.emitDynamicBoundaryGuard(globalType, valType); err != nil {
 								return nil, nil, err
 							}
 							// RC: rebind de global `ref` e troca de
@@ -756,6 +768,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s%s%s", c.currentLine, ident.Value, globalType.String(), valType.String(), c.derefReadHint(globalType, valType, n.Value), c.nullMismatchHint(globalType, valType, n.Value))
 					}
 					if err := c.emitRuntimeValueType(globalType); err != nil {
+						return nil, nil, err
+					}
+					if err := c.emitDynamicBoundaryGuard(globalType, valType); err != nil {
 						return nil, nil, err
 					}
 				} else if !c.globalIsKnown(ident.Value) {
@@ -861,6 +876,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if err := c.emitRuntimeValueType(assignedType); err != nil {
 				return nil, nil, err
 			}
+			if err := c.emitDynamicBoundaryGuard(assignedType, valType); err != nil {
+				return nil, nil, err
+			}
 
 			// perf #66: elemento sem contador RC em base T[] escreve pela forma
 			// NORC, que e statement (nao empilha; sem OP_POP). O VM confere em
@@ -954,6 +972,9 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					}
 				}
 				if err := c.emitRuntimeValueType(fieldType); err != nil {
+					return nil, nil, err
+				}
+				if err := c.emitDynamicBoundaryGuard(fieldType, valType); err != nil {
 					return nil, nil, err
 				}
 			}

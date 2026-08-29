@@ -40,20 +40,20 @@ test_report(f())
 	}
 }
 
-// Elemento composto vindo por `any` numa base int[]: o NORC ve que o valor e
-// rastreado e cai no generico, que retem — o composto ganha o dono do
-// elemento, como no caminho generico.
-func TestTypedIndexNorcRetainsCompositeFromAny(t *testing.T) {
-	got := captureVMSource(t, `
+// Elemento composto vindo por `any` numa base int[]: desde a guarda da
+// fronteira dinamica em atribuicao (#120 item 2) o valor e recusado ANTES da
+// escrita — `expected int, got int[]` — em vez de cair no caminho generico
+// do NORC com um int[] dentro de um int[]. O fallback do NORC continua na VM
+// como defesa; da linguagem nao se chega mais a ele com tipo errado.
+func TestTypedIndexRejectsCompositeFromAnyBeforeTheStore(t *testing.T) {
+	err := interpretOrCompileErr(t, New(), `
 let inner: int[] = [7]
 let xs: int[] = [1, 2]
 let v: any = inner
 xs[0] = v
-test_report(xs)
 `)
-	outer := got.Obj.(*value.ObjArray)
-	if value.OwnersCount(outer.Elements[0]) < 2 {
-		t.Fatalf("composto escrito via any deve ter o dono do elemento alem do global: owners=%d", value.OwnersCount(outer.Elements[0]))
+	if err == nil || !strings.Contains(err.Error(), "expected int, got int[]") {
+		t.Fatalf("want the boundary guard to reject int[] into an int element, got %v", err)
 	}
 }
 

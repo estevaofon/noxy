@@ -48,7 +48,9 @@ func execute_params(db: Database, sql: string, params: any[]) -> ExecResult
     return sqlite_exec_params(db, sql, params, ExecResult(false, "", 0, 0))
 end
 
-func prepare(db: Database, sql: string) -> Statement
+// Prepara um statement; null se o banco esta fechado ou o SQL nao compila
+// (teste com `if stmt != null then`).
+func prepare(db: Database, sql: string) -> Statement?
     return sqlite_prepare(db, sql, Statement(0))
 end
 

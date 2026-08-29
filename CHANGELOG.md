@@ -20,9 +20,36 @@ um global).
   `let x: int = nativo()` com `nativo() -> any` devolvendo `"texto"` rodava
   e deixava uma string em `x`; agora é erro de runtime `expected int, got
   string`. Compostos (array/map/chan) já eram checados. Código tipado não
-  paga nada: a guarda só é emitida onde o tipo estático é `any`. Tipo
-  estático **desconhecido** (nativo sem assinatura, membro de namespace)
-  segue sem guarda, como antes — ver follow-ups.
+  paga nada: a guarda só é emitida onde o tipo estático é `any` ou
+  desconhecido.
+- **Atribuição também tem a guarda** (#120 item 2): `x = v`, `s.f = v`,
+  `xs[i] = v`, `m[k] = v`, upvalue e global com `v` de tipo `any` ou
+  desconhecido → `expected int, got string` em runtime. Um `int[]` escrito
+  via `any` num elemento `int` é recusado antes da escrita (antes caía no
+  caminho genérico do NORC).
+- **Tipo estático desconhecido entra na guarda** (nativo sem assinatura,
+  membro de namespace `m.f()`, plugin): a spec §4.2 sempre prometeu a
+  checagem. `let stmt: sqlite.Statement = sqlite.prepare(db, sql)` com SQL
+  inválido para em `expected Statement, got null` + hint na fronteira, em vez
+  de falhar depois.
+- **Contratos da stdlib (BREAKING, #120 item 1)**: `time.parse` e
+  `time.parse_date` → `DateTime?`; `sqlite.prepare` → `Statement?`. Auditoria
+  cruzando todos os wrappers `-> T` com os `return null` dos nativos: eram os
+  únicos três com null como resultado de dado (os demais nulls são validação
+  de argumento, inalcançável pelo wrapper tipado). Migração: com `use m
+  select …`, `let dt: DateTime = parse(s)` vira `expected DateTime, got
+  DateTime?` — escreva `let dt = parse(s)` e teste `if dt != null then`;
+  pela forma `m.f()` nada muda na compilação, mas null num slot `T` é erro de
+  runtime na fronteira (item acima). `time_demo.nx` e `sqlite_showcase.nx`
+  migrados.
+- **`&&`/`||` com chamada no operando direito** (#120 item 3, pré-existente
+  desde 0.22.0): `if m != null && toca() then m["k"] end` com `m` global
+  compilava e falhava em runtime — `toca()` roda depois do teste e pode zerar
+  `m`. O fato de raiz compartilhada não sai mais para o ramo (`if`, `while`,
+  `else` de `||`); diagnóstico `a call in the condition ran after the test` +
+  hint `put the call before the test ('toca() && m != null')`. Dentro da
+  expressão nada muda (`dropAfterCall` já derrubava); local de valor e builtin
+  puro seguem mantendo o fato.
 - **Builtins centrais não encerram narrowing.** `print`, `to_str`, `length`,
   `fmt`, `keys`, `slice`, `range` e os demais da spec §10, quando não
   sombreados, são nativos puros que nunca rodam código Noxy — o fato
@@ -49,14 +76,8 @@ um global).
   (fronteira `any` checada em toda posição, wrapper sem `let` temporário),
   §9 (f-string é `to_str`), §10.
 
-Follow-ups: atribuição (`x = v`, `s.f = v`, `xs[i] = v`) ainda não emite a
-guarda para primitivos vindos de `any` — três sub-caminhos com regras de
-`ref` próprias. Tipo estático desconhecido ficou fora da guarda de
-propósito: a revisão achou wrappers da stdlib que devolvem `null` num
-`-> T` (`time.parse`, `time.parse_date`, `time.from_timestamp`,
-`sqlite.prepare`, …) — estender a guarda a nativos sem assinatura exige
-antes corrigir esses contratos (`T?` + migração). Simplificar o wrapper
-`noxy_dynamodb.nx` (outro repo).
+Follow-up: simplificar o wrapper `noxy_dynamodb.nx` (outro repo) removendo
+os `let` temporários.
 
 ## [0.23.0] - 2026-08-29
 

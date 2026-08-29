@@ -636,7 +636,12 @@ during the call. That is why `f"{m['a']} {m['b']}"` (two `to_str` calls,
 §9) and `print(m["a"])` followed by `print(m["b"])` keep a global `m`
 narrowed, and a loop whose body only calls them keeps the fact too. A call
 to a program function, `call_result`, `spawn_task`, `task_await` or a bare
-`func` does run program code and ends it.
+`func` does run program code and ends it. That includes a call in the right
+operand of `&&` (or of `||`, for the false branch): it runs *after* the test
+in the left operand, so `if m != null && toca() then m["k"] end` with a
+global `m` is an error (`'m' may be null: it was tested, but 'm' is a global
+and a call in the condition ran after the test`), while `if toca() && m !=
+null then` and `if m != null && length(m) > 0 then` keep the fact.
 
 When a fact is lost, test again or bind first (`let n = no.prox` then `if n
 != null then … end`). The diagnostic says which happened: a read after the
@@ -926,13 +931,15 @@ Exact function types may also appear in parameters, returns, struct fields, map 
 **The dynamic boundary is checked at runtime, in every position.** A value
 whose static type is `any` — an `any`-typed variable, field or parameter,
 the result of a function declared `-> any`, of `json_parse`, `task_await` or
-a bare `func` call — is accepted wherever a typed slot is expected: an
-annotated `let`, an argument of an exact signature, a `return`. The runtime
+a bare `func` call — or *unknown* — an untyped native, a plugin, a module
+member called through a namespace (`m.f()`) — is accepted wherever a typed
+slot is expected: an annotated `let`, an assignment (`x = v`, `s.f = v`,
+`xs[i] = v`), an argument of an exact signature, a `return`. The runtime
 checks the value against the slot's type at that point and names both sides
 on mismatch: `expected int, got string`, `expected map[string, any][], got
 int[]`, `expected Point, got null` (§2.4). Typed code pays nothing — the
-check is emitted only where the static type is `any`. A wrapper around an
-`any`-returning function therefore returns it directly:
+check is emitted only where the static type is `any` or unknown. A wrapper
+around an `any`-returning function therefore returns it directly:
 
 ```noxy
 func itens() -> any                       // e.g. a parsed JSON payload
@@ -944,10 +951,13 @@ func scan() -> map[string, any][]
 end
 ```
 
-A value of *unknown* static type — an untyped native, a plugin, a module
-member read through a namespace — is accepted as before and is not checked
-by this guard: only a composite slot (array, map, chan) carries its runtime
-marker in every position.
+The standard library honours the same contract: a wrapper whose native
+reports failure with `null` says so in its signature — `time.parse(s) ->
+DateTime?`, `time.parse_date(s) -> DateTime?`, `sqlite.prepare(db, sql) ->
+Statement?` — so `let dt = time.parse(s)` is tested with `if dt != null
+then`, and `let stmt: Statement = sqlite.prepare(db, sql)` through the
+namespace form stops at the boundary with `expected Statement, got null`
+instead of failing later.
 
 The one exception is an exact function type: `any` is never narrowed to
 `func(int) -> int`, nor to a type containing one (`(func(int) -> int)[]`) —

@@ -26,22 +26,23 @@ func (c *Compiler) emitRuntimeValueType(t ast.NoxyType) error {
 }
 
 // emitDynamicBoundaryGuard e a checagem de runtime da fronteira dinamica
-// (spec §4.2, #118): quando o tipo estatico do valor e `any` e o slot tem
-// tipo concreto, o valor no topo da pilha e conferido contra o tipo do slot
-// — `expected int, got string`. Vale para let anotado, argumento de
-// assinatura exata e return. Tipos que ja carregam metadado (array, map,
-// chan) foram marcados — e validados — por emitRuntimeValueType; o resto
-// (primitivos, structs, refs) so passa por aqui. Codigo tipado nao paga nada.
+// (spec §4.2, #118/#120): quando o tipo estatico do valor e `any` ou
+// DESCONHECIDO (nil: nativo sem assinatura, membro de namespace, plugin) e o
+// slot tem tipo concreto, o valor no topo da pilha e conferido contra o tipo
+// do slot — `expected int, got string`, `expected Statement, got null`. Vale
+// para let anotado, atribuicao, argumento de assinatura exata e return.
+// Tipos que ja carregam metadado (array, map, chan) foram marcados — e
+// validados — por emitRuntimeValueType; o resto (primitivos, structs, refs)
+// so passa por aqui. Codigo tipado nao paga nada.
 //
-// Tipo estatico DESCONHECIDO (nil: nativo sem assinatura, membro de
-// namespace) fica de fora de proposito: wrappers da stdlib devolvem null num
-// `-> T` (time.parse, sqlite.prepare) e a guarda os abortaria — contrato da
-// stdlib a corrigir antes (follow-up do #118), nao aqui.
+// Os wrappers da stdlib cujo nativo devolve null como resultado de dado
+// (time.parse/parse_date, sqlite.prepare) dizem `T?` na assinatura (#120
+// item 1) — foi o que permitiu ligar a guarda para tipo desconhecido.
 func (c *Compiler) emitDynamicBoundaryGuard(expected, actual ast.NoxyType) error {
 	if expected == nil || isAny(expected) {
 		return nil
 	}
-	if !isAny(actual) {
+	if actual != nil && !isAny(actual) {
 		return nil
 	}
 	if c.requiresRuntimeValueType(expected, make(map[*ast.StructStatement]bool), "") {
