@@ -7,7 +7,7 @@ import (
 
 // Issue #61 item 3: um modulo carregado por `use` e compilado em RUNTIME
 // (modules.go) — o aviso do compilador que ele gerar e diagnostico da VM e
-// vai para stderr (AGENTS.md E.6), nunca para stdout nem para o silencio.
+// vai para stderr (AGENTS.md, regra "Saida"), nunca para stdout nem para o silencio.
 
 func TestModuleCompileWarningsGoToStderr(t *testing.T) {
 	root := t.TempDir()

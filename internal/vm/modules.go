@@ -209,7 +209,7 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 	c.SetKnownGlobals(append(vm.GlobalNames(), compiler.PluginNativeNames(program)...))
 	code, _, err := c.Compile(program)
 	// Aviso do compilador de um modulo carregado em runtime e diagnostico
-	// da VM: os.Stderr (AGENTS.md E.6), nunca stdout (issue #61 item 3).
+	// da VM: os.Stderr (AGENTS.md, regra "Saida"), nunca stdout (issue #61 item 3).
 	for _, warning := range c.Warnings() {
 		fmt.Fprintln(os.Stderr, warning)
 	}

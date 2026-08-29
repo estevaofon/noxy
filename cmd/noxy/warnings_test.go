@@ -6,7 +6,7 @@ import (
 )
 
 // Issue #61 item 3: aviso do compilador ("rebinding ref parameter") e
-// diagnostico — sai em diagOut, nunca em stdout (AGENTS.md E.6), e nao muda
+// diagnostico — sai em diagOut, nunca em stdout (AGENTS.md, regra "Saida"), e nao muda
 // o codigo de saida nem a saida do programa. Vale para `noxy arquivo.nx` e
 // para o REPL.
 

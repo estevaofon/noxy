@@ -3,7 +3,7 @@ package compiler
 import "fmt"
 
 // Warning e um diagnostico NAO fatal do compilador. O compilador nunca
-// escreve em stdout/stderr (AGENTS.md E.6: stdout e do programa, stderr e do
+// escreve em stdout/stderr (AGENTS.md, regra "Saida": stdout e do programa, stderr e do
 // diagnostico): acumula os avisos e quem chamou Compile decide o destino — a
 // CLI e o REPL imprimem em diagOut, o loader de modulos da VM em os.Stderr.
 // Issue #61 item 3.
