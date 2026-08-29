@@ -431,3 +431,104 @@ func TestProcessSingleSerializesCalls(t *testing.T) {
 		t.Fatalf("single mode allows one call in flight, saw %d", maxInFlight.Load())
 	}
 }
+
+func shortGraces(t *testing.T) {
+	t.Helper()
+	prevCancel, prevShutdown := cancelGrace, shutdownGrace
+	cancelGrace, shutdownGrace = 100*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { cancelGrace, shutdownGrace = prevCancel, prevShutdown })
+}
+
+func TestProcessTimeoutCancelHonoured(t *testing.T) {
+	shortGraces(t)
+	cancelled := make(chan uint32, 1)
+	p, _ := newFakeProcess(t, "single", "", func(fp *fakePlugin) {
+		stop := make(map[uint32]chan struct{})
+		var mu sync.Mutex
+		fp.handle = func(fp *fakePlugin, f Frame) {
+			if f.Fn != 2 {
+				fp.result(f.ID, value.NewNull())
+				return
+			}
+			ch := make(chan struct{})
+			mu.Lock()
+			stop[f.ID] = ch
+			mu.Unlock()
+			<-ch // espera o CANCEL
+			fp.fail(f.ID, "cancelled")
+		}
+		fp.onCancel = func(fp *fakePlugin, id uint32) {
+			mu.Lock()
+			ch := stop[id]
+			mu.Unlock()
+			close(ch)
+			cancelled <- id
+		}
+	})
+	_, err := p.Call(context.Background(), 2, nil) // guest_slow: timeout_ms = 50
+	if err == nil || err.Error() != "extension 'guest' timed out: guest_slow exceeded 50 ms" {
+		t.Fatalf("got %v", err)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("host must send CANCEL on expiry")
+	}
+	if _, err := callEcho(t, p, value.NewInt(1)); err != nil {
+		t.Fatalf("a cancelled call does not poison: %v", err)
+	}
+}
+
+func TestProcessTimeoutCancelIgnoredKillsAndPoisons(t *testing.T) {
+	shortGraces(t)
+	p, h := newFakeProcess(t, "single", "", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) { /* nunca responde */ }
+	})
+	_, err := p.Call(context.Background(), 2, nil)
+	if err == nil || !strings.Contains(err.Error(), "extension 'guest' trapped: guest_slow exceeded 50 ms and did not cancel; process killed") {
+		t.Fatalf("got %v", err)
+	}
+	if !h.plugin().conn.killed.Load() {
+		t.Fatal("plugin must be killed after the cancel grace")
+	}
+	_, err = callEcho(t, p, value.NewNull())
+	if err == nil || !strings.Contains(err.Error(), "is poisoned by an earlier trap") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestProcessTimeoutConcurrentDoesNotBlockOthers(t *testing.T) {
+	shortGraces(t)
+	p, _ := newFakeProcess(t, "concurrent", "", func(fp *fakePlugin) {
+		fp.handle = func(fp *fakePlugin, f Frame) {
+			if f.Fn == 2 {
+				return // guest_slow nunca responde; o cancel tambem nao
+			}
+			fp.result(f.ID, value.NewInt(7))
+		}
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.Call(context.Background(), 2, nil)
+		done <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	got, err := callEcho(t, p, value.NewNull())
+	if err != nil || got.Int() != 7 {
+		t.Fatalf("other call must complete while guest_slow hangs: %#v %v", got, err)
+	}
+	err = <-done
+	if err == nil || !strings.Contains(err.Error(), "timed out: guest_slow exceeded 50 ms") {
+		t.Fatalf("caller gets timed out immediately in concurrent mode, got %v", err)
+	}
+	// depois da carencia sem resposta ao CANCEL, o processo cai e a proxima
+	// chamada ve o poison
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := callEcho(t, p, value.NewNull()); err != nil && strings.Contains(err.Error(), "poisoned") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("process must be killed and poisoned after the cancel grace")
+}
