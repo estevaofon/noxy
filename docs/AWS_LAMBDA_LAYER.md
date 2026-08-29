@@ -69,11 +69,11 @@ Two layouts work:
    └── bin/noxy-plugin-dynamodb-linux-amd64        # executable; -linux-arm64 on Graviton
    ```
 
-   `noxy --get github.com/estevaofon/noxy_dynamodb@v0.2.0` on any workstation records the hashes of **all** published binaries in `noxy.sum`, so a `noxy.sum` generated on Windows or macOS verifies the Linux binary the Lambda runs. `--get` only downloads the workstation's own binary, though: fetch the Lambda's from the release page into `bin/` before zipping:
+   `noxy --get github.com/estevaofon/noxy_dynamodb@v0.3.0` on any workstation records the hashes of **all** published binaries in `noxy.sum`, so a `noxy.sum` generated on Windows or macOS verifies the Linux binary the Lambda runs. `--get` only downloads the workstation's own binary, though: fetch the Lambda's from the release page into `bin/` before zipping:
 
    ```bash
    curl -L -o noxy_libs/github_com/estevaofon/noxy_dynamodb/bin/noxy-plugin-dynamodb-linux-amd64 \
-     https://github.com/estevaofon/noxy_dynamodb/releases/download/v0.2.0/noxy-plugin-dynamodb-linux-amd64
+     https://github.com/estevaofon/noxy_dynamodb/releases/download/v0.3.0/noxy-plugin-dynamodb-linux-amd64
    chmod +x noxy_libs/github_com/estevaofon/noxy_dynamodb/bin/noxy-plugin-dynamodb-linux-amd64
    ```
 

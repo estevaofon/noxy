@@ -9,7 +9,7 @@ No Go toolchain, no build step. Requires Noxy **0.23.0** or newer.
 ## Installation
 
 ```bash
-noxy --get github.com/estevaofon/noxy_dynamodb@v0.2.0
+noxy --get github.com/estevaofon/noxy_dynamodb@v0.3.0
 ```
 
 Without `@version`, `--get` resolves the newest release tag. The package
@@ -52,8 +52,8 @@ func main() -> void
         print(f"Found user: {found['name']}")
     end
 
-    // 4. Scan and query return every matching item, all pages
-    let users: map[string, any][] = dynamodb.scan(client, "Users")
+    // 4. Scan and query take a limit; page through big tables with scan_page
+    let users: map[string, any][] = dynamodb.scan(client, "Users", 100)
     print(f"{length(users)} user(s)")
 
     dynamodb.close(client)
@@ -72,8 +72,16 @@ main()
 | `get_item(client, table, key)` | `map[string, any]?` (`null` when missing) | raises |
 | `update_item(client, table, key, update_expression, expression_values)` | `bool` | `false` |
 | `delete_item(client, table, key)` | `bool` | `false` |
-| `scan(client, table)` | `map[string, any][]` | raises |
-| `query(client, table, key_condition, expression_values)` | `map[string, any][]` | raises |
+| `scan(client, table, limit)` | `map[string, any][]` — up to `limit` items | raises |
+| `scan_page(client, table, limit, start_key)` | `Page{items, last_key: map[string, any]?}` — one request | raises |
+| `query(client, table, key_condition, expression_values, limit)` | `map[string, any][]` — up to `limit` items | raises |
+| `query_page(client, table, key_condition, expression_values, limit, start_key)` | `Page` — one request | raises |
+
+`scan` and `query` follow pagination only as far as `limit` requires and ask
+DynamoDB for no more than the remainder per request; `limit = 0` means every
+item (opt-in — on a large table that runs until the 60 s call deadline). To
+walk a big table in pieces, loop on `scan_page` / `query_page`, passing
+`page.last_key` back as `start_key` until it is `null`.
 
 Failures are the extension's runtime errors — `extension 'dynamodb' failed:
 <message from AWS>` — capturable with `call_result` (`use errors select *`).
