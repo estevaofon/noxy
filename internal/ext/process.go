@@ -360,7 +360,12 @@ func (p *Process) Call(ctx context.Context, fnIndex int, args []value.Value) (va
 	}
 	if err := p.writeFrame(conn, Frame{Kind: FrameCall, ID: id, Fn: uint32(fnIndex), Body: encoded}); err != nil {
 		p.die(conn, err)
-		return value.NewNull(), (<-ch).err
+		// resposta que empatou com a falha de escrita: nunca vira sucesso silencioso
+		r := <-ch
+		if r.err != nil {
+			return value.NewNull(), r.err
+		}
+		return p.finish(conn, r, fnIndex)
 	}
 	var deadline <-chan time.Time
 	if d := p.Manifest.CallTimeout(fnIndex); d > 0 {
@@ -417,7 +422,12 @@ func (p *Process) expire(conn procConn, id uint32, ch chan reply, fnIndex int) (
 	timedOut := fmt.Errorf("extension '%s' timed out: %s exceeded %d ms", name, export, limit)
 	if err := p.writeFrame(conn, Frame{Kind: FrameCancel, ID: id}); err != nil {
 		p.die(conn, err)
-		return value.NewNull(), (<-ch).err
+		// resposta que empatou com a falha de escrita: nunca vira sucesso silencioso
+		r := <-ch
+		if r.err != nil {
+			return value.NewNull(), r.err
+		}
+		return value.NewNull(), timedOut
 	}
 	await := func() error {
 		select {
