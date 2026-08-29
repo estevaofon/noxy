@@ -82,6 +82,10 @@ type Process struct {
 	pending  map[uint32]chan reply
 	nextID   uint32
 	deathErr error
+	// readerDone fecha quando readLoop termina (sempre via die, que ja fez
+	// Kill+Wait). Close espera este canal em vez de chamar Wait direto: Wait
+	// antes do fim das leituras fecha o pipe por baixo do leitor.
+	readerDone chan struct{}
 	// dying e a primeira causa registrada para a conexao atual: o kill do
 	// host (timeout sem cancel, violacao) precede o EOF que ele mesmo
 	// provoca no leitor, e e a causa que deve aparecer no erro.
@@ -148,7 +152,8 @@ func (p *Process) ensureStarted(ctx context.Context) error {
 	p.conn = conn
 	p.alive = true
 	p.deathErr = nil
-	go p.readLoop(conn, reader)
+	p.readerDone = make(chan struct{})
+	go p.readLoop(conn, reader, p.readerDone)
 	return nil
 }
 
@@ -260,8 +265,10 @@ func (p *Process) printLog(f Frame) error {
 }
 
 // readLoop demultiplexa as respostas por id (spec §5). Qualquer erro de
-// leitura ou quadro fora de lugar encerra o processo (§4.4, §6).
-func (p *Process) readLoop(conn procConn, reader *bufio.Reader) {
+// leitura ou quadro fora de lugar encerra o processo (§4.4, §6). done fecha
+// ao final: sempre depois de die ter feito Kill+Wait (Close espera por ele).
+func (p *Process) readLoop(conn procConn, reader *bufio.Reader, done chan struct{}) {
+	defer close(done)
 	for {
 		f, err := ReadFrame(reader, p.limits.MaxBytes)
 		if err != nil {
@@ -515,14 +522,15 @@ func exitStatus(waitErr error) string {
 func (p *Process) Close(ctx context.Context) error {
 	p.mu.Lock()
 	p.closed = true
-	conn, alive := p.conn, p.alive
+	conn, alive, done := p.conn, p.alive, p.readerDone
 	p.mu.Unlock()
 	if !alive || conn == nil {
 		return nil
 	}
+	// EOF = shutdown (spec §2.7). Quem chama Wait e o leitor (die), depois de
+	// drenar o stdout: Wait antes do fim das leituras fecha o pipe por baixo
+	// do leitor e perde o ultimo LOG/RESULT.
 	_ = conn.Stdin().Close()
-	done := make(chan error, 1)
-	go func() { done <- conn.Wait() }()
 	select {
 	case <-done:
 	case <-time.After(shutdownGrace):

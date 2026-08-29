@@ -3,9 +3,11 @@ package ext
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 )
 
@@ -24,6 +26,11 @@ type execConn struct {
 // o ambiente e o diretorio do host; stderr passa direto (spec §2.1).
 func execSpawner(path string) spawnFunc {
 	return func(ctx context.Context) (procConn, error) {
+		// spec §2.1: caminho absoluto, nunca busca no PATH — exec.Command
+		// procuraria no PATH um nome sem separador.
+		if !filepath.IsAbs(path) {
+			return nil, fmt.Errorf("extension binary path %q is not absolute", path)
+		}
 		cmd := exec.Command(path)
 		cmd.Env = os.Environ()
 		cmd.Stderr = os.Stderr
