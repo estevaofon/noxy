@@ -32,6 +32,7 @@ vault.key
 .agents/
 .worktrees/
 noxy_libs/github_com/estevaofon/noxy_terminal/
+noxy_libs/github_com/estevaofon/noxy_dynamodb/
 
 # gerado por noxy_examples/test_alias_conflict.nx (o rm do exemplo falha no Windows)
 log_alias.txt
