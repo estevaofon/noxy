@@ -141,7 +141,7 @@ type Compiler struct {
 	// narrowLost: chaves cujo fato existiu e foi derrubado por uma chamada
 	// (dropAfterCall), com o motivo — so para o diagnostico dizer "foi
 	// testado, mas..." em vez de sugerir o `if` que ja esta ali (#118).
-	narrowLost map[string]string
+	narrowLost map[string]lostFact
 	// warnings e a lista de avisos COMPARTILHADA pela arvore de compiladores
 	// (raiz + NewChild): ponteiro, como generics/instances, para que o aviso
 	// emitido dentro de um corpo de funcao suba ate o compilador raiz, que e

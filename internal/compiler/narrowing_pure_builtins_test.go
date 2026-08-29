@@ -88,6 +88,18 @@ func TestNarrowingLostDiagnosticDoesNotLeakOutsideTheBranch(t *testing.T) {
 	}
 }
 
+func TestNarrowingLostInLoopDiagnosticNamesTheLoop(t *testing.T) {
+	// O fato cai na ENTRADA do laco (dropForLoop): a chamada vem depois do
+	// uso no texto, mas roda antes dele na iteracao seguinte — a mensagem
+	// nao pode dizer "a call came between the test and this use".
+	src := narrowingGlobalMapPrelude + "func toca() -> void\n    m = null\nend\nif m != null then\n    let i: int = 0\n    while i < 2 do\n        print(m[\"nome\"])\n        toca()\n        i = i + 1\n    end\nend\n"
+	_, err := compileFunctionSource(t, src)
+	want := "[line 11] 'm' may be null: it was tested, but 'm' is a global and the loop body calls a function that can run before this use\n  hint: test it again inside the loop, bind it first ('let v = m' before the 'if') and use 'v', or move the code into a function"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("want %q, got %v", want, err)
+	}
+}
+
 func TestNarrowingLostDiagnosticClearedWhenTestedAgain(t *testing.T) {
 	src := narrowingGlobalMapPrelude + "func toca() -> void\n    m = null\nend\nif m != null then\n    toca()\n    if m != null then\n        print(m[\"nome\"])\n    end\nend\n"
 	if _, err := compileFunctionSource(t, src); err != nil {

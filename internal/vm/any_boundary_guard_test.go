@@ -3,6 +3,8 @@ package vm
 import (
 	"strings"
 	"testing"
+
+	"noxy-vm/internal/value"
 )
 
 // Issue #118 item 1: a fronteira `any` -> slot tipado e checada em runtime em
@@ -115,4 +117,37 @@ end
 let x: any = 41
 test_report(add(x) * 1000 + tipado() * 10 + conta(itens()) + conta(scan()))`)
 	testExpectedObject(t, 42*1000+41*10+2+2, got)
+}
+
+func TestAnyBoundaryGuardSkipsUnknownStaticType(t *testing.T) {
+	// Tipo estatico DESCONHECIDO (nativo sem assinatura, membro de namespace)
+	// nao e `any`: a guarda nao dispara e o comportamento anterior fica —
+	// wrappers da stdlib como time.parse devolvem null num `-> DateTime`
+	// (revisao do #118; contrato da stdlib e follow-up, nao este PR).
+	machine := New()
+	machine.DefineNative("__untyped_null", func(args []value.Value) value.Value {
+		return value.NewNull()
+	})
+	captured := value.NewInt(-1)
+	machine.DefineNative("test_report", func(args []value.Value) value.Value {
+		if len(args) == 1 {
+			captured = args[0]
+		}
+		return value.NewNull()
+	})
+	err := interpretVMSource(t, machine, `
+struct P
+    x: int
+end
+func wrapper() -> P
+    return __untyped_null()
+end
+let p: P = wrapper()
+test_report(p)`)
+	if err != nil {
+		t.Fatalf("unknown static type must keep the pre-#118 behavior, got %v", err)
+	}
+	if captured.Type != value.VAL_NULL {
+		t.Fatalf("want null through the untyped wrapper, got %v", captured)
+	}
 }

@@ -99,7 +99,7 @@ func (c *Compiler) pushFacts(keys []string) func() {
 		next[k] = struct{}{}
 	}
 	savedLost := c.narrowLost
-	nextLost := make(map[string]string, len(savedLost))
+	nextLost := make(map[string]lostFact, len(savedLost))
 	for k, why := range savedLost {
 		nextLost[k] = why
 	}
@@ -168,56 +168,68 @@ func rootOf(key string) string {
 	return key
 }
 
-// rootIsShared: a raiz pode mudar por fora deste frame — slot `ref`,
-// capturada por closure, endereco tomado com `ref`, upvalue ou global.
-func (c *Compiler) rootIsShared(root string) bool {
+// lostFact: por que um fato foi derrubado por chamada (dropAfterCall) e se
+// foi na entrada de um laco (dropForLoop) — so para o diagnostico.
+type lostFact struct {
+	why    string
+	inLoop bool
+}
+
+// rootSharing: a raiz pode mudar por fora deste frame — slot `ref`,
+// capturada por closure, endereco tomado com `ref`, upvalue ou global — e o
+// motivo em palavras, para o diagnostico do fato perdido.
+func (c *Compiler) rootSharing(root string) (shared bool, why string) {
 	for i := len(c.locals) - 1; i >= 0; i-- {
 		if c.locals[i].Name != root {
 			continue
 		}
 		l := c.locals[i]
 		if _, isRef := asRefType(l.Type); isRef {
-			return true
+			return true, fmt.Sprintf("'%s' is a ref", root)
 		}
-		return l.IsCaptured || l.RefTaken
+		if l.IsCaptured {
+			return true, fmt.Sprintf("'%s' is captured by a closure", root)
+		}
+		if l.RefTaken {
+			return true, fmt.Sprintf("'%s' had its address taken with 'ref'", root)
+		}
+		return false, ""
 	}
-	return true
+	if slot, _ := c.resolveUpvalue(root); slot != -1 {
+		return true, fmt.Sprintf("'%s' is an upvalue", root)
+	}
+	return true, fmt.Sprintf("'%s' is a global", root)
+}
+
+func (c *Compiler) rootIsShared(root string) bool {
+	shared, _ := c.rootSharing(root)
+	return shared
 }
 
 // dropAfterCall invalida o que uma chamada pode ter mudado e registra o
 // motivo, para o diagnostico de leitura sem fato (mayBeNullError).
 func (c *Compiler) dropAfterCall() {
-	for k := range c.narrowed {
-		if strings.HasPrefix(k, "*") || c.rootIsShared(rootOf(k)) {
-			delete(c.narrowed, k)
-			if c.narrowLost == nil {
-				c.narrowLost = make(map[string]string)
-			}
-			c.narrowLost[k] = c.sharedRootReason(rootOf(k))
-		}
-	}
+	c.dropSharedAfterCall(false)
 }
 
-// sharedRootReason descreve por que a raiz e alcancavel durante uma chamada —
-// a mesma classificacao de rootIsShared, em palavras.
-func (c *Compiler) sharedRootReason(root string) string {
-	for i := len(c.locals) - 1; i >= 0; i-- {
-		if c.locals[i].Name != root {
+// dropSharedAfterCall e o corpo de dropAfterCall; inLoop marca que a queda
+// veio da entrada de um laco (dropForLoop) — a chamada pode vir DEPOIS do
+// uso no texto e rodar antes dele na iteracao seguinte.
+func (c *Compiler) dropSharedAfterCall(inLoop bool) {
+	for k := range c.narrowed {
+		shared, why := c.rootSharing(rootOf(k))
+		if !strings.HasPrefix(k, "*") && !shared {
 			continue
 		}
-		l := c.locals[i]
-		if _, isRef := asRefType(l.Type); isRef {
-			return fmt.Sprintf("'%s' is a ref", root)
+		delete(c.narrowed, k)
+		if why == "" {
+			why = fmt.Sprintf("'%s' is read through a reference", k)
 		}
-		if l.IsCaptured {
-			return fmt.Sprintf("'%s' is captured by a closure", root)
+		if c.narrowLost == nil {
+			c.narrowLost = make(map[string]lostFact)
 		}
-		return fmt.Sprintf("'%s' had its address taken with 'ref'", root)
+		c.narrowLost[k] = lostFact{why: why, inLoop: inLoop}
 	}
-	if slot, _ := c.resolveUpvalue(root); slot != -1 {
-		return fmt.Sprintf("'%s' is an upvalue", root)
-	}
-	return fmt.Sprintf("'%s' is a global", root)
 }
 
 // pureBuiltins sao os builtins centrais (builtin_return_types.go, mais os
@@ -341,7 +353,7 @@ func (c *Compiler) dropForLoop(body *ast.BlockStatement) {
 		c.dropKey(r)
 	}
 	if hasCall {
-		c.dropAfterCall()
+		c.dropSharedAfterCall(true)
 	}
 }
 
@@ -414,12 +426,16 @@ func (c *Compiler) narrowBorrowOwner(base ast.Expression, owner ast.NoxyType) (a
 // `if x != null` com o `if` a duas linhas de distancia e enganoso (#118).
 func (c *Compiler) mayBeNullError(expr ast.Expression, t ast.NoxyType) error {
 	if key, ok := stableKey(expr); ok {
-		if why, lost := c.narrowLost[key]; lost {
-			hint := fmt.Sprintf("test it again after the call, or bind it first ('let v = %s' before the 'if') and use 'v'", key)
-			if strings.HasSuffix(why, "is a global") {
-				hint = fmt.Sprintf("test it again after the call, bind it first ('let v = %s' before the 'if') and use 'v', or move the code into a function", key)
+		if lost, ok := c.narrowLost[key]; ok {
+			event, again := "a call came between the test and this use", "test it again after the call"
+			if lost.inLoop {
+				event, again = "the loop body calls a function that can run before this use", "test it again inside the loop"
 			}
-			return fmt.Errorf("[line %d] '%s' may be null: it was tested, but %s and a call came between the test and this use\n  hint: %s", c.currentLine, key, why, hint)
+			hint := fmt.Sprintf("%s, or bind it first ('let v = %s' before the 'if') and use 'v'", again, key)
+			if strings.HasSuffix(lost.why, "is a global") {
+				hint = fmt.Sprintf("%s, bind it first ('let v = %s' before the 'if') and use 'v', or move the code into a function", again, key)
+			}
+			return fmt.Errorf("[line %d] '%s' may be null: it was tested, but %s and %s\n  hint: %s", c.currentLine, key, lost.why, event, hint)
 		}
 		return fmt.Errorf("[line %d] '%s' may be null; test it first\n  hint: use 'if %s != null then ... end'", c.currentLine, key, key)
 	}

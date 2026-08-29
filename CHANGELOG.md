@@ -20,8 +20,9 @@ um global).
   `let x: int = nativo()` com `nativo() -> any` devolvendo `"texto"` rodava
   e deixava uma string em `x`; agora é erro de runtime `expected int, got
   string`. Compostos (array/map/chan) já eram checados. Código tipado não
-  paga nada: a guarda só é emitida onde o tipo estático é `any` ou
-  desconhecido.
+  paga nada: a guarda só é emitida onde o tipo estático é `any`. Tipo
+  estático **desconhecido** (nativo sem assinatura, membro de namespace)
+  segue sem guarda, como antes — ver follow-ups.
 - **Builtins centrais não encerram narrowing.** `print`, `to_str`, `length`,
   `fmt`, `keys`, `slice`, `range` e os demais da spec §10, quando não
   sombreados, são nativos puros que nunca rodam código Noxy — o fato
@@ -36,7 +37,8 @@ um global).
   between the test and this use` + `hint: test it again after the call, bind
   it first ('let v = m' before the 'if') and use 'v', or move the code into a
   function` (raiz `ref`, capturada, upvalue ou endereçada tem a frase
-  própria).
+  própria; fato derrubado na entrada de um laço diz `the loop body calls a
+  function that can run before this use`).
 - A marcação de runtime que falha (`OP_MARK_RUNTIME_VALUE_TYPE`) nomeia os
   dois tipos — `expected chan int, got chan string`, `expected int[4], got
   int[]`, `expected Envelope, got map` — no lugar de `runtime value metadata
@@ -49,7 +51,12 @@ um global).
 
 Follow-ups: atribuição (`x = v`, `s.f = v`, `xs[i] = v`) ainda não emite a
 guarda para primitivos vindos de `any` — três sub-caminhos com regras de
-`ref` próprias; simplificar o wrapper `noxy_dynamodb.nx` (outro repo).
+`ref` próprias. Tipo estático desconhecido ficou fora da guarda de
+propósito: a revisão achou wrappers da stdlib que devolvem `null` num
+`-> T` (`time.parse`, `time.parse_date`, `time.from_timestamp`,
+`sqlite.prepare`, …) — estender a guarda a nativos sem assinatura exige
+antes corrigir esses contratos (`T?` + migração). Simplificar o wrapper
+`noxy_dynamodb.nx` (outro repo).
 
 ## [0.23.0] - 2026-08-29
 
