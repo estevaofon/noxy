@@ -79,3 +79,44 @@ func TestFrameEOFClassification(t *testing.T) {
 		t.Fatalf("truncated body must be io.ErrUnexpectedEOF, got %v", err)
 	}
 }
+
+func TestFrameBoundaryMaxBody(t *testing.T) {
+	// Body of exactly maxBody bytes is accepted
+	body64 := make([]byte, 64)
+	var buf bytes.Buffer
+	if err := WriteFrame(&buf, Frame{Kind: FrameCall, ID: 1, Fn: 1, Body: body64}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := ReadFrame(&buf, 64)
+	if err != nil || len(out.Body) != 64 {
+		t.Fatalf("body of exactly maxBody (64) bytes should be accepted: %v", err)
+	}
+}
+
+func TestFrameBoundaryExceedsMax(t *testing.T) {
+	// Body of exactly maxBody+1 bytes is rejected with ProtocolError containing "exceeds"
+	raw := []byte{
+		0x4d, 0x00, 0x00, 0x00, // length = 12 + 65 = 77
+		FrameCall, 0, 0, 0, // kind, flags, reserved
+		1, 0, 0, 0, // id
+		1, 0, 0, 0, // fn
+	}
+	readViolation(t, raw, 64, "exceeds")
+}
+
+func TestFrameKindOutOfRange(t *testing.T) {
+	// kind 0x07 (just above FrameCancel) is rejected
+	valid := func(kind, flags byte) []byte {
+		return []byte{0x0c, 0, 0, 0, kind, flags, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0}
+	}
+	readViolation(t, valid(0x07, 0), 1<<20, "unknown frame kind 0x07")
+}
+
+func TestFrameReservedBitsIsolated(t *testing.T) {
+	// Reserved byte 6 non-zero with flags=0
+	reserved6 := []byte{0x0c, 0, 0, 0, FrameCall, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0}
+	readViolation(t, reserved6, 1<<20, "flags")
+	// Reserved byte 7 non-zero with flags=0
+	reserved7 := []byte{0x0c, 0, 0, 0, FrameCall, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0}
+	readViolation(t, reserved7, 1<<20, "flags")
+}
