@@ -7,7 +7,10 @@ da stdlib (crypto e net; bug desde 0.23.0, achado na revisão do #119). O
 null passava em silêncio pela forma `m.f()` e pelo `select` (o tipo do
 wrapper mentia) e só quebrava depois, longe da causa. Decisão por função:
 `T?` na assinatura quando o null é resultado de dado; erro tipado do native
-quando é argumento inválido. Nunca null silencioso.
+quando é argumento inválido. Argumento inválido nunca mais vira null; o null
+de dado passa a ser **tipado** — o que o `select` confere estaticamente, mas
+a forma `m.f()` (tipo desconhecido, sem guarda até a #122) não: ver a
+migração abaixo.
 
 ### Changed
 - **`crypto.aes256_gcm_decrypt` → `bytes?` (BREAKING)**: null é resultado
@@ -15,11 +18,13 @@ quando é argumento inválido. Nunca null silencioso.
   demais para conter o nonce). Migração: com `use crypto select …`,
   `let texto: bytes = aes256_gcm_decrypt(k, d)` vira `expected bytes, got
   bytes?` — escreva `let texto = aes256_gcm_decrypt(k, d)` e teste
-  `if texto != null then`; pela forma `m.f()` (sem tipo estático) compila
-  como antes, e a forma honesta é `let texto: bytes? =
-  crypto.aes256_gcm_decrypt(k, d)`. `password_manager/server.nx` e
-  `test_crypto_debug.nx` migrados; `docs/CRYPTO_MODULE.md` já prometia o
-  null, agora o tipo diz o mesmo.
+  `if texto != null then`. Pela forma `m.f()` (sem tipo estático) nada é
+  conferido: até a #122, `let texto: bytes = crypto.aes256_gcm_decrypt(k,
+  d)` compila **e em runtime ainda recebe o null em silêncio** (`texto ==
+  null` é `true`, `length(texto)` é 0) — a forma honesta é `let texto:
+  bytes? = crypto.aes256_gcm_decrypt(k, d)` e testar. `password_manager/
+  server.nx`, `test_crypto_debug.nx` e `test_crypto_aes.nx` migrados;
+  `docs/CRYPTO_MODULE.md` já prometia o null, agora o tipo diz o mesmo.
 - **Argumento inválido em crypto é erro de runtime, não null**:
   `random_bytes(0)` → `native 'crypto_random_bytes' failed:
   crypto_random_bytes: n must be > 0, got 0`; `pbkdf2_sha256` com
