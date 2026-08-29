@@ -23,6 +23,8 @@ var (
 
 // procConn e o que um plugin em execucao parece ao host: os dois pipes e
 // wait/kill. execConn (process_spawn.go) e o real; os testes usam io.Pipe.
+// Wait pode ser chamado mais de uma vez e concorrentemente: devolve sempre
+// o mesmo resultado.
 type procConn interface {
 	Stdin() io.WriteCloser
 	Stdout() io.Reader
