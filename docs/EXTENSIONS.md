@@ -1,4 +1,4 @@
-# Noxy WASM Extensions (experimental, M1)
+# Noxy Extensions (wasm and process)
 
 Extensions let third parties ship native-performance modules — compression,
 hashing, codecs, parsers — as a single platform-independent `.wasm` artifact,
@@ -11,7 +11,9 @@ bindings are the job of process plugins (tier B, issue #80); the wasm
 capability plan (`capabilities`, M2) is suspended. Pick the backend by the
 API's profile. Invariants: `docs/superpowers/specs/2026-08-29-extensibility-invariants-revision.md`.
 
-## Package layout
+## WASM extensions (tier A)
+
+### Package layout
 
 ```
 my_ext/
@@ -23,7 +25,7 @@ my_ext/
 Install with `noxy --get github.com/you/my_ext` (artifact hashes are recorded
 in `noxy.sum`); import with `use github_com.you.my_ext.my_ext as my_ext`.
 
-## Manifest reference
+### Manifest reference
 
 ```toml
 name = "zstd"            # ^[a-z][a-z0-9_]*$; export prefix
@@ -58,7 +60,7 @@ VM's existing globals; if a name collides with a stdlib native or with
 another already-loaded extension's export, the whole load fails explicitly
 (atomically — no partial registration, no silent shadowing).
 
-## ABI v1 summary
+### ABI v1 summary
 
 The guest exports `nx_abi_version() -> u32` (return 1),
 `nx_alloc(u32) -> u32`, `nx_free(u32, u32)`, and
@@ -78,7 +80,7 @@ pure function of its arguments. A complete minimal guest in Rust lives at
 `internal/ext/testdata/rustguest/` (allocator, `nx_call` dispatch, `nx_fail`,
 NXB bytes result) — copy it as your starting point.
 
-## Errors
+### Errors
 
 `nx_fail` + return 0 → Noxy runtime error `extension 'x' failed: <msg>`
 (capturable with `call_result`). A trap (out-of-bounds, unreachable, memory
@@ -92,13 +94,13 @@ enforced by cancelling the guest's execution context. A guest stuck in an
 infinite loop does not hang the host process: the call expires, surfaces as
 a trap, and poisons the instance exactly like any other trap.
 
-## Granularity (normative)
+### Granularity (normative)
 
 The unit of a call is a buffer, a document, a batch — never an element. A
 boundary crossing costs on the order of a microsecond plus copies; a per-item
 call in a hot loop is two orders of magnitude slower than a builtin.
 
-## Compilation cache
+### Compilation cache
 
 Loading a `.wasm` module compiles it with wazero. To avoid recompiling on
 every `noxy script.nx` invocation, the loader keeps a persistent compilation
@@ -107,7 +109,7 @@ on Windows, `~/.cache/noxy/wazero` on Linux). The cache is best-effort: if it
 cannot be created (read-only filesystem, missing permissions, ...), the load
 proceeds without it rather than failing.
 
-## Measured cost (M1, dev machine)
+### Measured cost (M1, dev machine)
 
 Numbers below are from `internal/ext`'s benchmarks on the author's dev
 machine (`go test -bench` under `internal/ext`) — a snapshot, not a
@@ -121,3 +123,153 @@ portability guarantee:
 - Binary size delta from embedding wazero: **≈4.0 MiB**.
 - Module load, compilation cache warm: **≈29 ms**.
 - Module load, compilation cache cold (no cache directory): **≈565 ms**.
+
+## Process extensions (tier B)
+
+A process extension is an executable that speaks `noxy-plugin/1` over its
+stdin/stdout. It is the primary mechanism for I/O, OS access, drivers and
+SDK bindings (issue #110): the author cross-compiles one binary per
+platform with plain Go, the user never compiles. Design and protocol
+contract: `docs/superpowers/specs/2026-08-29-process-extensions-design.md`.
+
+### Package layout
+
+```
+noxy_terminal/
+├── noxy_ext.toml          # kind = "process"
+├── terminal.nx            # typed wrapper — same idiom as wasm
+└── bin/                   # created by `noxy --get`: this platform's asset only
+    └── noxy-plugin-terminal-windows-amd64.exe
+```
+
+`noxy --get github.com/you/noxy_terminal@v0.2.0` clones the repo, downloads
+`checksums.txt` and the asset for your OS/arch from the release, verifies
+it, and records the hashes of **every** published asset in `noxy.sum`, so
+the committed lockfile is valid for a teammate on another OS. Without a
+version, `--get` resolves the newest semver tag. No asset for your
+platform is an error at `--get` time — never at runtime, and there is no
+compile-from-source fallback.
+
+### Manifest reference (process keys)
+
+```toml
+name = "terminal"
+abi = 1
+kind = "process"                # "wasm" (default) | "process"
+min_noxy = "0.23.0"
+concurrency = "concurrent"      # single (default) | stateless | concurrent (process only)
+capabilities = ["tty"]          # declarative: shown by --get, never enforced
+call_timeout_ms = 30000         # default 30000; 0 = no deadline
+handshake_timeout_ms = 5000     # default 5000
+restart = false                 # respawn after a crash; needs concurrency = "stateless"
+
+[binaries]                      # "<GOOS>-<GOARCH>" = release asset name; windows-* end in .exe
+linux-amd64   = "noxy-plugin-terminal-linux-amd64"
+darwin-arm64  = "noxy-plugin-terminal-darwin-arm64"
+windows-amd64 = "noxy-plugin-terminal-windows-amd64.exe"
+
+[[export]]
+name = "terminal_read_key"      # same rules as wasm: "<name>_" prefix, typed params/returns
+params = []
+returns = "string"
+timeout_ms = 0                  # per-export override; 0 = blocks as long as it likes
+```
+
+`wasm`, `memory_max_mb` are rejected under `kind = "process"`; `binaries`,
+the timeouts, `restart`, `timeout_ms` and `concurrency = "concurrent"` are
+rejected under `kind = "wasm"`.
+
+`single` lets one call in flight (the plugin may be single-threaded);
+`stateless` multiplexes and forbids `stateful` exports; `concurrent`
+multiplexes **and** allows handles, because there is one process and its
+handles are process-wide — the mode an extension holding connections wants.
+
+### Lifecycle
+
+The process starts on the **first call** to any export, not at `use`
+(`--smoke`-style runs that never call it need no binary at run time).
+Every call runs under a deadline; on expiry the host sends CANCEL and
+returns `extension 'x' timed out: <export> exceeded <N> ms` — the process
+survives if it cancels within 1 s, otherwise it is killed and the extension
+is poisoned like a wasm trap. A crash poisons the extension (`extension 'x'
+is poisoned by an earlier trap`) unless `restart = true`. At exit the VM
+closes the plugin's stdin (EOF) and kills it after 2 s if it lingers;
+Linux adds `PDEATHSIG`, Windows a job object, so a hard-killed `noxy`
+leaves no orphan. Stdout is the protocol channel; stderr passes through;
+`noxyplugin.Logf` lands on stderr as `[ext <name>] <message>`.
+
+### Errors
+
+| situation | error text | poisons |
+|---|---|---|
+| handler returned an error | `extension 'x' failed: <message>` | no |
+| result violates the declared return type | `extension 'x': result does not match declared return type "T"` | no |
+| deadline expired, plugin cancelled in time | `extension 'x' timed out: <export> exceeded <N> ms` | no |
+| deadline expired, no reply to CANCEL | `extension 'x' trapped: <export> exceeded <N> ms and did not cancel; process killed` | yes |
+| exec or handshake failure | `extension 'x' trapped: start: ...` / `trapped: handshake: ...` | yes |
+| process exited | `extension 'x' trapped: process exited (status N)` | yes |
+| malformed frame, unknown id | `extension 'x' trapped: protocol violation: ...` | yes |
+
+All are runtime errors with the Noxy stack of the call site, capturable
+with `call_result`. Nothing returns `null` + a stderr line.
+
+### Writing one in Go
+
+```go
+package main
+
+import (
+    "context"
+
+    "github.com/estevaofon/noxy/sdk/noxyplugin"
+)
+
+func main() {
+    p := noxyplugin.New()
+    p.Handle("terminal_is_terminal", noxyplugin.Func0(isTerminal))
+    p.Handle("terminal_read_key",    noxyplugin.Func0(readKey))
+    p.Main() // serves stdin/stdout, exits with the protocol's status
+}
+
+func isTerminal(ctx context.Context) (bool, error)  { /* ... */ }
+func readKey(ctx context.Context) (string, error)    { /* blocks until a key or ctx.Done() */ }
+```
+
+`Func0`…`Func5` check arity and convert arguments (`int64`, `float64`,
+`bool`, `string`, `[]byte`, slices, maps, `noxyplugin.Struct`); an
+untyped `Handler` gets `Args` with accessors. Handler errors become
+`failed`; panics are recovered into `failed: panic: ...`; the handler's
+`context.Context` is cancelled on CANCEL and at shutdown. `Main` protects
+stdout (a stray `fmt.Println` goes to stderr) and refuses to run in a
+terminal. Build the matrix and publish a release with `checksums.txt`
+(`sdk/noxyplugin/release/build.sh`, or the GitHub Actions template next to
+it); list exactly those asset names in `[binaries]`.
+
+### `sys_load_plugin` (deprecated)
+
+The line-delimited JSON plugin builtin is deprecated since v0.23.0 and
+will be removed in v0.25.0 together with `internal/plugin` and the
+compiler's `PluginNativeNames` special case; it prints a warning on first
+use. Migrate by publishing the plugin as a `kind = "process"` extension.
+
+### Measured cost (process, dev machine)
+
+From `go test ./internal/ext -run '^$' -bench BenchmarkProcess` on the
+author's machine (Windows 11, 11th Gen Intel Core i7-1165G7, 8 logical
+CPUs, `GOFLAGS=-trimpath=false`):
+
+```
+BenchmarkProcessRoundTripEmpty-8               53938        45309 ns/op
+BenchmarkProcessRoundTrip1KB-8                 47551        49856 ns/op     20.54 MB/s
+BenchmarkProcessRoundTrip1MB-8                    627      3873768 ns/op    270.69 MB/s
+BenchmarkProcessConcurrent8/single-8             1734      1414920 ns/op
+BenchmarkProcessConcurrent8/concurrent-8        13261       182567 ns/op
+```
+
+Reading: empty round trip ≈45 µs; 1 KB round trip ≈50 µs against ≈4 µs for
+the wasm 1 KB round trip (the extra cost is the OS pipe/process boundary,
+not the protocol); 1 MB ≈3.9 ms, dominated by the copy across the pipe;
+`concurrent` mode delivers ≈7.7× the throughput of `single` mode with a
+handler that sleeps 1 ms, since `single` serializes calls on one instance
+while `concurrent` multiplexes them over the same process (Windows, 8
+CPUs).

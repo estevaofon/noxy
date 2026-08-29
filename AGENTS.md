@@ -3,7 +3,7 @@
 ## 🎯 Visão Geral
 
 **Noxy VM** é uma máquina virtual baseada em bytecode para a linguagem Noxy,
-escrita em Go (módulo `noxy-vm`, Go 1.25). Versão corrente: `v0.22.0`
+escrita em Go (módulo `noxy-vm`, Go 1.25). Versão corrente: `v0.23.0`
 (`internal/version/version.go`, `CHANGELOG.md`).
 
 ### Características
@@ -17,7 +17,7 @@ escrita em Go (módulo `noxy-vm`, Go 1.25). Versão corrente: `v0.22.0`
   concorrência (`spawn`/channels/`when`/tasks supervisionadas)
 - Stdlib embutida (`io`, `sys`, `strings`, `json`, `net`, `http`, `sqlite`,
   `crypto`, `time`, `errors`, ...), gerenciador de pacotes (`noxy --get`),
-  extensões WASM (experimental) e plugins por processo
+  extensões WASM (computação pura) e por processo (I/O, SDKs — meio principal)
 
 ### Arquitetura
 ```
@@ -39,8 +39,9 @@ Source Code → Lexer → Parser → AST → Compiler → Bytecode (Chunk) → V
 | | `internal/lineedit` | Editor de linha do REPL (tty POSIX) |
 | | `internal/console` | Conserta o modo raw vazado no console Windows (`EnsureLineInput`) |
 | | `internal/pkgmanager` | `noxy.mod` / `noxy.sum`, `noxy --get` |
-| | `internal/ext` | Extensões WASM (wazero): manifesto `noxy_ext.toml`, loader, chamada |
-| | `internal/plugin` | Plugins externos por processo (JSON via stdin/stdout, `sys.load_plugin`) |
+| | `internal/ext` | Extensões: wasm (wazero) e por processo (`noxy-plugin/1` sobre stdio); manifesto `noxy_ext.toml`, loader, `Process`, codec de quadros |
+| | `internal/plugin` | Plugins JSON legados (`sys_load_plugin`, deprecado — sai na v0.25.0) |
+| | `sdk/noxyplugin` | SDK Go para extensões por processo — módulo aninhado `github.com/estevaofon/noxy/sdk/noxyplugin`, sem dependência de `noxy-vm` |
 | | `internal/version` | `version.Version` — fonte única de `noxy --version` e `sys.version` |
 
 `internal/vm/vm.go` tem ~200 linhas (tipos, tetos, construtores,
@@ -556,14 +557,16 @@ interpretador). Os dois contratos são travados por
 `internal/vm/inline_guard_test.go` — se você mexer em `push` ou em
 `ensureCallCapacity`, rode esse teste (ou `go build -gcflags='-m -m' ./internal/vm`).
 
-**Extensões e plugins**: extensões WASM rodam no wazero sem WASI e com
-`capabilities = []` obrigatório (M1) — o loader rejeita manifesto com
-capability. Plugins (`sys.load_plugin`) são processos externos falando JSON;
-a VM não os isola. Desde a issue #110 (2026-08-29) a divisão é por perfil:
-wasm para computação pura; I/O, SO, drivers e SDKs vão para plugins por
-processo (tier B, spec na #80) — as capabilities do wasm (M2) estão suspensas
-e o invariante 5 do RFC #78 ("VM não desestabilizável") não é mais requisito.
-Invariantes revisados em
+**Extensões e plugins**: duas fronteiras, um `Backend` (`internal/ext/backend.go`).
+wasm (`kind = "wasm"`, default) roda no wazero sem WASI, para computação pura.
+Processo (`kind = "process"`, spec `docs/superpowers/specs/2026-08-29-process-extensions-design.md`)
+é o meio principal para I/O, SO, drivers e SDKs: um executável por plataforma
+publicado como asset de release, `noxy --get` baixa só o da máquina e grava
+os hashes de todos em `noxy.sum`; protocolo `noxy-plugin/1` (quadros NXB por
+stdio, start lazy, CANCEL cooperativo, poison/restart); SDK em `sdk/noxyplugin`
+(testes rodam à parte: `go test ./...` dentro do módulo). `sys_load_plugin`
+(JSON) está deprecado e sai na v0.25.0 junto com `internal/plugin` e
+`compiler.PluginNativeNames`. Invariantes em
 `docs/superpowers/specs/2026-08-29-extensibility-invariants-revision.md`.
 
 ---
@@ -628,6 +631,6 @@ da 1.0, **com** tabela de migração no CHANGELOG.
 ---
 
 **Última Atualização**: 2026-08-28  
-**Versão**: 1.1 (Noxy VM 0.22.0)
+**Versão**: 1.1 (Noxy VM 0.23.0)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*

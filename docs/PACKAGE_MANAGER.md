@@ -19,6 +19,16 @@ This command will:
 3.  Update your `noxy.mod` file.
 4.  Remove the `.git` directory from the downloaded package to avoid nested repositories.
 
+`--get` always installs a fresh copy: the package directory under
+`noxy_libs/` is replaced on every run (there is no `.git` left to pull).
+For a process extension (`kind = "process"` in `noxy_ext.toml`) the
+version is a release tag — omitted, `--get` resolves the newest semver
+tag and prints it — and `--get` also downloads `checksums.txt` plus the
+binary for your OS/arch from
+`https://<host>/<user>/<repo>/releases/download/<tag>/` into
+`noxy_libs/<pkg>/bin/`, verifying its sha256. A release without a binary
+for your platform is an error here, never at runtime.
+
 ## Configuration (`noxy.mod`)
 
 The `noxy.mod` file tracks your project's module name and dependencies. It is automatically updated when you run `noxy --get`.
@@ -71,9 +81,15 @@ To create a shareable package:
 
 ## Integrity (`noxy.sum`)
 
-When a downloaded package contains a WASM extension (`noxy_ext.toml`),
-`noxy --get` records the sha256 of both the manifest and the `.wasm`
-artifact in `noxy.sum` next to your `noxy.mod`. Verification only applies to
+When a downloaded package contains an extension (`noxy_ext.toml`),
+`noxy --get` records sha256 lines in `noxy.sum` next to your `noxy.mod`:
+the manifest plus the `.wasm` artifact for wasm extensions, or the
+manifest plus **every** published binary (`bin/<asset>`) for process
+extensions — hashes of the assets your machine did not download come from
+the release's `checksums.txt`, so one committed `noxy.sum` verifies a
+teammate's macOS download and a Lambda's Linux download alike. At load
+time the VM checks the manifest first and then the artifact it is about
+to run. Verification only applies to
 packages installed under `noxy_libs`; when the package has a matching
 `noxy.sum` entry, the VM verifies the manifest hash first (an attacker who
 could repoint the manifest at an unregistered `.wasm` file would otherwise

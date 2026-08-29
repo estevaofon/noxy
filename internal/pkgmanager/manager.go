@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -19,90 +20,145 @@ func Get(pkgArg string) error {
 	return downloadPackage(pkgArg, true, visited)
 }
 
-func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error {
-	// 1. Parse argument: github.com/user/repo@version
-	parts := strings.Split(pkgArg, "@")
-	repoURL := parts[0] // e.g., github.com/user/repo
-	version := "HEAD"
-	if len(parts) > 1 {
-		version = parts[1]
+func splitPackageArg(pkgArg string) (repoURL, version string) {
+	parts := strings.SplitN(pkgArg, "@", 2)
+	if len(parts) == 2 && parts[1] != "" {
+		return parts[0], parts[1]
 	}
+	return parts[0], "HEAD"
+}
 
-	// Avoid cycles
+// localPackagePath: github.com/user/repo → github_com/user/repo.
+func localPackagePath(repoURL string) string {
+	parts := strings.Split(repoURL, "/")
+	parts[0] = strings.ReplaceAll(parts[0], ".", "_")
+	return strings.Join(parts, "/")
+}
+
+// readManifest devolve (nil, nil, nil) quando o pacote nao e uma extensao;
+// um manifesto presente mas invalido falha o --get — binarios dependem
+// dele, e um typo nao pode virar "pacote sem extensao" em silencio.
+func readManifest(dir string) (*ext.Manifest, []byte, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "noxy_ext.toml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	manifest, err := ext.ParseManifest(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	return manifest, data, nil
+}
+
+func manifestKindAt(dir string) string {
+	manifest, _, err := readManifest(dir)
+	if err != nil || manifest == nil {
+		return ""
+	}
+	return manifest.Kind
+}
+
+func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error {
+	repoURL, version := splitPackageArg(pkgArg)
 	cacheKey := repoURL + "@" + version
 	if visited[cacheKey] {
 		return nil
 	}
 	visited[cacheKey] = true
 
-	// Ensure we have a valid URL (assume https for now if no scheme)
-	gitURL := repoURL
-	if !strings.HasPrefix(gitURL, "http") && !strings.HasPrefix(gitURL, "git@") {
-		gitURL = "https://" + gitURL
-	}
-
-	// 2. Prepare target directory
-	// Store in noxy_libs/<domain>/<user>/<repo>
-	// Replace dots in domain with underscores (e.g. github.com -> github_com)
-	parts = strings.Split(repoURL, "/")
-	if len(parts) > 0 {
-		parts[0] = strings.ReplaceAll(parts[0], ".", "_")
-	}
-	localPath := strings.Join(parts, "/")
+	localPath := localPackagePath(repoURL)
 	targetDir := filepath.Join(NoxyLibsDir, filepath.FromSlash(localPath))
-
 	if isRoot {
 		fmt.Printf("Getting package %s...\n", pkgArg)
 	} else {
 		fmt.Printf("Getting dependency %s...\n", pkgArg)
 	}
 
-	// Check if already exists
-	if _, err := os.Stat(targetDir); !os.IsNotExist(err) {
-		// fmt.Printf("Updating existing package in %s...\n", targetDir)
-		// It exists, try to pull
-		if err := gitPull(targetDir); err != nil {
-			fmt.Printf("Warning: failed to update package %s: %s\n", repoURL, err)
-		}
-	} else {
-		// Clone it
-		// fmt.Printf("Cloning into %s...\n", targetDir)
-		if err := gitClone(gitURL, targetDir); err != nil {
-			return fmt.Errorf("failed to clone package: %w", err)
-		}
+	// Clone fresco num diretorio temporario irmao; o destino so e tocado no
+	// fim (spec §8.1): o antigo "existe → git pull" nao atualizava nada
+	// depois de remover o .git, e com binarios em disco um diretorio velho
+	// guardaria um asset velho.
+	if err := os.MkdirAll(filepath.Dir(targetDir), 0o755); err != nil {
+		return err
+	}
+	tmpDir, err := os.MkdirTemp(filepath.Dir(targetDir), ".get-"+filepath.Base(targetDir)+"-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := gitClone(gitURLFor(repoURL), tmpDir); err != nil {
+		return fmt.Errorf("failed to clone package: %w", err)
 	}
 
-	// 3. Checkout version
-	if version != "HEAD" {
-		// fmt.Printf("Checking out version %s...\n", version)
-		if err := gitCheckout(targetDir, version); err != nil {
-			return fmt.Errorf("failed to checkout version %s: %w", version, err)
+	// Sem versao, uma extensao por processo precisa de uma tag: os assets
+	// pendem de uma release (spec §8.1, passo 2).
+	resolved := version
+	if version == "HEAD" && manifestKindAt(tmpDir) == ext.KindProcess {
+		tag, err := resolveNewestTag(gitURLFor(repoURL))
+		if err != nil {
+			return fmt.Errorf("%s: %w", repoURL, err)
+		}
+		fmt.Printf("Resolved %s to %s\n", repoURL, tag)
+		resolved = tag
+	}
+	if resolved != "HEAD" {
+		if err := gitCheckout(tmpDir, resolved); err != nil {
+			return fmt.Errorf("failed to checkout version %s: %w", resolved, err)
 		}
 	}
-
-	// 4. Remove .git directory to avoid nested repo issues
-	if err := os.RemoveAll(filepath.Join(targetDir, ".git")); err != nil {
+	if err := os.RemoveAll(filepath.Join(tmpDir, ".git")); err != nil {
 		fmt.Printf("Warning: failed to remove .git directory: %s\n", err)
 	}
 
-	// Artefatos executaveis (extensoes WASM) entram no noxy.sum ao serem
-	// baixados — sem integridade nao ha distribuicao de binarios (spec §8).
-	// "--get" roda na raiz do projeto (mesma convencao do noxy.mod).
-	if err := RecordExtensionSums(".", targetDir, localPath); err != nil {
-		fmt.Printf("Warning: failed to record noxy.sum entries: %s\n", err)
+	manifest, manifestData, err := readManifest(tmpDir)
+	if err != nil {
+		return err
+	}
+	var binarySums map[string]string
+	if manifest != nil && manifest.Kind == ext.KindProcess {
+		base, err := releaseBaseURL(repoURL, resolved)
+		if err != nil {
+			return err
+		}
+		binarySums, err = fetchProcessBinaries(httpClient, base, manifest, tmpDir, runtime.GOOS, runtime.GOARCH, os.Stdout)
+		if err != nil {
+			return fmt.Errorf("%s@%s: %w", repoURL, resolved, err)
+		}
 	}
 
-	// 5. Update noxy.mod (ONLY if ROOT)
+	if err := os.RemoveAll(targetDir); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpDir, targetDir); err != nil {
+		return fmt.Errorf("failed to install package: %w", err)
+	}
+
+	if manifest != nil {
+		var sumErr error
+		if manifest.Kind == ext.KindProcess {
+			sumErr = recordProcessSums(".", localPath, manifestData, binarySums)
+		} else {
+			sumErr = RecordExtensionSums(".", targetDir, localPath)
+		}
+		if sumErr != nil {
+			fmt.Printf("Warning: failed to record noxy.sum entries: %s\n", sumErr)
+		}
+		if len(manifest.Capabilities) != 0 {
+			fmt.Printf("%s declares: %s\n", manifest.Name, strings.Join(manifest.Capabilities, ", "))
+		}
+	}
+
 	if isRoot {
-		if err := updateModFile(repoURL, version); err != nil {
+		if err := updateModFile(repoURL, resolved); err != nil {
 			fmt.Printf("Warning: failed to update noxy.mod: %s\n", err)
 		}
 	}
 
-	// 6. Recursively download dependencies from the downloaded package's noxy.mod
 	pkgModPath := filepath.Join(targetDir, "noxy.mod")
 	if _, err := os.Stat(pkgModPath); err == nil {
-		// Parse it
 		config, err := ParseModFile(pkgModPath)
 		if err != nil {
 			fmt.Printf("Warning: failed to parse %s: %s\n", pkgModPath, err)
@@ -125,21 +181,12 @@ func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error 
 	return nil
 }
 
+// Os bytes do pacote sao os do repositorio em qualquer maquina: sem isso,
+// core.autocrlf=true (default do git no Windows) reescreve noxy_ext.toml
+// em CRLF e o hash gravado no noxy.sum deixa de valer para o colega no
+// Linux (spec §8.1, lockfile portavel).
 func gitClone(url, dir string) error {
-	cmd := exec.Command("git", "clone", url, dir)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
-
-func gitPull(dir string) error {
-	// If .git is gone, we can't pull.
-	// Check if .git exists
-	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
-		return nil
-	}
-
-	cmd := exec.Command("git", "-C", dir, "pull")
+	cmd := exec.Command("git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", url, dir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -149,7 +196,7 @@ func gitCheckout(dir, version string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", dir, "checkout", version)
+	cmd := exec.Command("git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "-C", dir, "checkout", version)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -185,9 +232,8 @@ func updateModFile(pkg, pkgVersion string) error {
 //
 // O manifesto e parseado com ext.ParseManifest (internal/ext importa so
 // internal/value — nao ha ciclo real com pkgmanager; um comentario anterior
-// alegava ciclo por engano, revisao final corrigiu). Um manifesto invalido
-// (ou ausente) apenas pula o registro de sums: "--get" nao deve falhar por
-// causa de um pacote que nao e uma extensao WASM.
+// alegava ciclo por engano, revisao final corrigiu). Manifesto ausente pula
+// o registro; um invalido ja falhou em readManifest.
 func RecordExtensionSums(root, targetDir, localPath string) error {
 	manifestPath := filepath.Join(targetDir, "noxy_ext.toml")
 	manifestData, err := os.ReadFile(manifestPath)
@@ -219,4 +265,19 @@ func RecordExtensionSums(root, targetDir, localPath string) error {
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// recordProcessSums grava manifesto + bin/<asset> de TODAS as plataformas
+// publicadas (spec §8.1, passo 6).
+func recordProcessSums(root, localPath string, manifestData []byte, binaries map[string]string) error {
+	sums, err := ParseSumFile(SumFilePath(root))
+	if err != nil {
+		return err
+	}
+	pkg := strings.ReplaceAll(localPath, "\\", "/")
+	sums.Set(pkg, "noxy_ext.toml", sha256Hex(manifestData))
+	for asset, digest := range binaries {
+		sums.Set(pkg, "bin/"+asset, digest)
+	}
+	return sums.Save(SumFilePath(root))
 }

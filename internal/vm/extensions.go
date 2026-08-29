@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"noxy-vm/internal/ext"
@@ -28,7 +29,7 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 	shared.ExtMu.Lock()
 	defer shared.ExtMu.Unlock()
 	if shared.Ext == nil {
-		shared.Ext = make(map[string]*ext.Module)
+		shared.Ext = make(map[string]ext.Backend)
 		shared.ExtNames = make(map[string]string)
 	}
 	if _, loaded := shared.Ext[dir]; loaded {
@@ -59,19 +60,13 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 			return fmt.Errorf("extension %q: export %q collides with an existing global", manifest.Name, exp.Name)
 		}
 	}
-	wasmPath := filepath.Join(dir, manifest.Wasm)
-	wasmBytes, err := os.ReadFile(wasmPath)
-	if err != nil {
-		return fmt.Errorf("extension %q: %w", manifest.Name, err)
+	var backend ext.Backend
+	switch manifest.Kind {
+	case ext.KindProcess:
+		backend, err = vm.loadProcessBackend(dir, manifest, manifestData)
+	default:
+		backend, err = vm.loadWasmBackend(dir, manifest, manifestData)
 	}
-	if err := vm.verifyExtensionSum(dir, manifest, manifestData, wasmBytes); err != nil {
-		return err
-	}
-
-	// Sem campo diagOut no VM ainda: nx_log vai para stderr explicitamente
-	// (achado de revisao) ate a spec de diagOut chegar.
-	module, err := ext.LoadModule(context.Background(), wasmBytes, manifest,
-		ext.LoaderConfig{PermittedImports: extensionLoaderPermits, Log: os.Stderr})
 	if err != nil {
 		return err
 	}
@@ -87,12 +82,55 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 		}
 		vm.DefineContextualNativeWithSignature(exp.Name, sig,
 			func(_ value.NativeContext, args []value.Value) (value.Value, error) {
-				return module.Call(context.Background(), index, args)
+				return backend.Call(context.Background(), index, args)
 			})
 	}
-	shared.Ext[dir] = module
+	shared.Ext[dir] = backend
 	shared.ExtNames[manifest.Name] = dir
 	return nil
+}
+
+// loadWasmBackend e o caminho do M1: le o .wasm, verifica o hash, carrega
+// no wazero.
+func (vm *VM) loadWasmBackend(dir string, manifest *ext.Manifest, manifestData []byte) (ext.Backend, error) {
+	wasmBytes, err := os.ReadFile(filepath.Join(dir, manifest.Wasm))
+	if err != nil {
+		return nil, fmt.Errorf("extension %q: %w", manifest.Name, err)
+	}
+	if err := vm.verifyExtensionSum(dir, manifest, manifestData, manifest.Wasm, wasmBytes); err != nil {
+		return nil, err
+	}
+	// Sem campo diagOut no VM ainda: nx_log vai para stderr explicitamente
+	// (achado de revisao) ate a spec de diagOut chegar.
+	return ext.LoadModule(context.Background(), wasmBytes, manifest,
+		ext.LoaderConfig{PermittedImports: extensionLoaderPermits, Log: os.Stderr})
+}
+
+// loadProcessBackend resolve o binario da plataforma em bin/, verifica o
+// hash e constroi o backend SEM subir o processo (spec §4.1) — o start e da
+// primeira chamada.
+func (vm *VM) loadProcessBackend(dir string, manifest *ext.Manifest, manifestData []byte) (ext.Backend, error) {
+	asset, ok := manifest.BinaryFor(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		return nil, fmt.Errorf("extension %q has no binary for %s/%s (published: %s)",
+			manifest.Name, runtime.GOOS, runtime.GOARCH, strings.Join(manifest.PublishedPlatforms(), ", "))
+	}
+	binPath := filepath.Join(dir, "bin", asset)
+	binBytes, err := os.ReadFile(binPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("extension %q: binary bin/%s not found — run 'noxy --get' to download it", manifest.Name, asset)
+		}
+		return nil, fmt.Errorf("extension %q: %w", manifest.Name, err)
+	}
+	if err := vm.verifyExtensionSum(dir, manifest, manifestData, "bin/"+asset, binBytes); err != nil {
+		return nil, err
+	}
+	absPath, err := filepath.Abs(binPath)
+	if err != nil {
+		return nil, err
+	}
+	return ext.NewProcess(manifest, ext.ProcessConfig{Path: absPath, NoxyVersion: version.Version, Log: os.Stderr}), nil
 }
 
 // signatureTypeName mapeia o vocabulario do manifesto para os TypeName que
@@ -108,17 +146,19 @@ func signatureTypeName(declared string) string {
 	}
 }
 
-// verifyExtensionSum confere o hash do artefato wasm carregado contra o
-// noxy.sum do projeto (M1 trust-on-first-use: spec §15, noxy.sum spec
-// pendente). So se aplica a pacotes sob <RootPath>/noxy_libs — layouts de
-// desenvolvimento fora dali nao tem entrada e a checagem e ignorada.
+// verifyExtensionSum confere o hash do artefato que o backend vai executar
+// (`.wasm` ou `bin/<asset>`) contra o noxy.sum do projeto (M1
+// trust-on-first-use: spec §15, noxy.sum spec pendente). So se aplica a
+// pacotes sob <RootPath>/noxy_libs — layouts de desenvolvimento fora dali
+// nao tem entrada e a checagem e ignorada.
 //
-// O manifesto decide QUAL wasm verificar (manifest.Wasm), entao ele proprio
-// precisa ser verificado primeiro — senao renomear o artefato no manifesto
-// (ex.: trocar "wasm = ..." para apontar para um binario nao registrado)
-// contorna a checagem, pois a busca pelo novo nome no noxy.sum simplesmente
-// nao encontra entrada e cai no ramo de TOFU-allow (achado de revisao).
-func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestData, wasmBytes []byte) error {
+// O manifesto decide QUAL artefato verificar (manifest.Wasm ou o asset de
+// [binaries]), entao ele proprio precisa ser verificado primeiro — senao
+// renomear o artefato no manifesto (ex.: trocar "wasm = ..." para apontar
+// para um binario nao registrado) contorna a checagem, pois a busca pelo
+// novo nome no noxy.sum simplesmente nao encontra entrada e cai no ramo de
+// TOFU-allow (achado de revisao).
+func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestData []byte, artifactName string, artifact []byte) error {
 	rootAbs, err := filepath.Abs(vm.Config.RootPath)
 	if err != nil {
 		return err
@@ -142,8 +182,8 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestDat
 	}
 	pkg := filepath.ToSlash(rel)
 	wantManifest, hasManifest := sums.Lookup(pkg, "noxy_ext.toml")
-	wantWasm, hasWasm := sums.Lookup(pkg, manifest.Wasm)
-	if !hasManifest && !hasWasm {
+	wantArtifact, hasArtifact := sums.Lookup(pkg, artifactName)
+	if !hasManifest && !hasArtifact {
 		// TOFU do M1 (spec §15, noxy.sum spec pendente): sem NENHUMA entrada,
 		// o load segue, mas nao em silencio — quem roda o script deve saber
 		// que esta extensao nunca foi registrada por "noxy --get" (achado de
@@ -158,14 +198,27 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestDat
 				pkg, wantManifest, gotManifest)
 		}
 	}
-	if !hasWasm {
+	if !hasArtifact {
 		return nil // sem entrada: TOFU do M1 (spec §15, noxy.sum spec pendente)
 	}
-	sum := sha256.Sum256(wasmBytes)
+	sum := sha256.Sum256(artifact)
 	got := hex.EncodeToString(sum[:])
-	if got != wantWasm {
+	if got != wantArtifact {
 		return fmt.Errorf("extension artifact mismatch for %s/%s: noxy.sum has sha256:%s, disk has sha256:%s",
-			pkg, manifest.Wasm, wantWasm, got)
+			pkg, artifactName, wantArtifact, got)
 	}
 	return nil
 }
+
+// CloseExtensions encerra todo backend carregado (spec §4.5): plugins por
+// processo recebem EOF e sao mortos apos a carencia; modulos wasm fecham o
+// runtime. Idempotente; chamado em todo caminho de saida do hospedeiro.
+func (s *SharedState) CloseExtensions() {
+	s.ExtMu.Lock()
+	defer s.ExtMu.Unlock()
+	for _, backend := range s.Ext {
+		_ = backend.Close(context.Background())
+	}
+}
+
+func (vm *VM) CloseExtensions() { vm.shared.CloseExtensions() }

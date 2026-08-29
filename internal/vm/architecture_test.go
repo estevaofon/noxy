@@ -202,7 +202,22 @@ func productionGoFiles(t *testing.T) []string {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if entry.IsDir() {
+			// "testdata" e modulos aninhados (go.mod proprio) nao sao codigo de
+			// producao deste modulo — a mesma regra do "go list". O guest do SDK
+			// em internal/ext/testdata/processguest importa um modulo que o
+			// importador daqui nao resolve.
+			if entry.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			if path != ".." {
+				if _, statErr := os.Stat(filepath.Join(path, "go.mod")); statErr == nil {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		matches, err := build.Default.MatchFile(filepath.Dir(path), filepath.Base(path))
