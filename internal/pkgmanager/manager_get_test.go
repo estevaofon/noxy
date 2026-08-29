@@ -25,14 +25,6 @@ func TestGetProcessExtensionFromTaggedRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	// core.autocrlf=true na maquina (ver internal/pkgmanager e o resto do
-	// repo: convenção CRLF no worktree) faria o "git checkout" reescrever
-	// as quebras de linha do manifesto no clone, e o sha256 esperado deixaria
-	// de bater com o texto original em memoria. gitClone/gitCheckout nao
-	// definem cmd.Env, entao herdam este override de processo.
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "false")
 	work := t.TempDir()
 	repo := filepath.Join(work, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {
@@ -130,10 +122,6 @@ func TestGetFailsWithoutPlatformAsset(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
 	}
-	// ver comentario equivalente em TestGetProcessExtensionFromTaggedRepo.
-	t.Setenv("GIT_CONFIG_COUNT", "1")
-	t.Setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
-	t.Setenv("GIT_CONFIG_VALUE_0", "false")
 	work := t.TempDir()
 	repo := filepath.Join(work, "repo")
 	if err := os.MkdirAll(repo, 0o755); err != nil {

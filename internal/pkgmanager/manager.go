@@ -181,8 +181,12 @@ func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error 
 	return nil
 }
 
+// Os bytes do pacote sao os do repositorio em qualquer maquina: sem isso,
+// core.autocrlf=true (default do git no Windows) reescreve noxy_ext.toml
+// em CRLF e o hash gravado no noxy.sum deixa de valer para o colega no
+// Linux (spec §8.1, lockfile portavel).
 func gitClone(url, dir string) error {
-	cmd := exec.Command("git", "clone", url, dir)
+	cmd := exec.Command("git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "clone", url, dir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -192,7 +196,7 @@ func gitCheckout(dir, version string) error {
 	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
 		return nil
 	}
-	cmd := exec.Command("git", "-C", dir, "checkout", version)
+	cmd := exec.Command("git", "-c", "core.autocrlf=false", "-c", "core.eol=lf", "-C", dir, "checkout", version)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
