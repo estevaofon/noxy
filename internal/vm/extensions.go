@@ -28,7 +28,7 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 	shared.ExtMu.Lock()
 	defer shared.ExtMu.Unlock()
 	if shared.Ext == nil {
-		shared.Ext = make(map[string]*ext.Module)
+		shared.Ext = make(map[string]ext.Backend)
 		shared.ExtNames = make(map[string]string)
 	}
 	if _, loaded := shared.Ext[dir]; loaded {

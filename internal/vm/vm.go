@@ -81,7 +81,7 @@ type SharedState struct {
 	// Extensoes WASM carregadas (spec 2026-08-23): chave = diretorio do
 	// pacote; ExtNames detecta colisao de nome entre pacotes distintos.
 	ExtMu    sync.Mutex
-	Ext      map[string]*ext.Module
+	Ext      map[string]ext.Backend
 	ExtNames map[string]string
 }
 
