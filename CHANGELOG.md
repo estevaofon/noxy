@@ -1,5 +1,111 @@
 # Changelog
 
+## [0.23.1] - 2026-08-29
+
+Issue #118 — dois atritos do wrapper de extensão (`noxy_dynamodb`): uma
+escolha de design da 0.7.0 que ficou obsoleta (`any` só entrava por `let`
+anotado) e uma lacuna de implementação (a f-string encerrava o narrowing de
+um global).
+
+### Changed
+- **`any` entra num slot tipado em qualquer posição** — `let` anotado,
+  argumento de assinatura exata e `return` — e o runtime confere o valor ali:
+  `expected int, got string`, `expected map[string, any][], got int[]`. Antes
+  só o `let` aceitava (`return nativo()` e `f(nativo())` eram `expected T,
+  got any`) e o wrapper precisava de um `let` temporário por função; agora
+  `func scan(...) -> map[string, any][]` pode `return dynamodb_scan(...)`
+  direto. A exceção continua o callable exato: `any` nunca vira
+  `func(int) -> int` (nem tipo que o contenha).
+- **A guarda do `let` anotado passou a valer para primitivos e structs.**
+  `let x: int = nativo()` com `nativo() -> any` devolvendo `"texto"` rodava
+  e deixava uma string em `x`; agora é erro de runtime `expected int, got
+  string`. Compostos (array/map/chan) já eram checados. Código tipado não
+  paga nada: a guarda só é emitida onde o tipo estático é `any`. Tipo
+  estático **desconhecido** (nativo sem assinatura, membro de namespace
+  `m.f()`, plugin) segue sem guarda, como antes: ligar a guarda ali custava
+  +35–55 % por chamada de wrapper da stdlib e expunha nulls de crypto/net
+  que ninguém auditou — ver follow-ups.
+- **Atribuição também tem a guarda** (#120 item 2): `x = v`, `s.f = v`,
+  `xs[i] = v`, `m[k] = v`, upvalue e global com `v` de tipo `any` →
+  `expected int, got string` em runtime. Um `int[]` escrito via `any` num
+  elemento `int` é recusado antes da escrita (antes caía no caminho genérico
+  do NORC).
+- **Contratos da stdlib (BREAKING, #120 item 1)**: `time.parse` e
+  `time.parse_date` → `DateTime?`; `sqlite.prepare` → `Statement?`. Auditoria
+  cruzando todos os wrappers `-> T` com os `return null` dos nativos: eram os
+  únicos três com null como resultado de dado (os demais nulls são validação
+  de argumento, inalcançável pelo wrapper tipado). Migração: com `use m
+  select …`, `let dt: DateTime = parse(s)` vira `expected DateTime, got
+  DateTime?` — escreva `let dt = parse(s)` e teste `if dt != null then`;
+  pela forma `m.f()` (membro de namespace, sem tipo estático) nada muda:
+  compila e o null segue chegando ao slot como antes — o contrato de retorno
+  dos natives é follow-up. `time_demo.nx`, `sqlite_showcase.nx` e
+  `defer_lifo.nx` migrados.
+- **`&&`/`||` com chamada no operando direito** (#120 item 3, pré-existente
+  desde 0.22.0): `if m != null && toca() then m["k"] end` com `m` global
+  compilava e falhava em runtime — `toca()` roda depois do teste e pode zerar
+  `m`. O fato de raiz compartilhada não sai mais para o ramo (`if`, `while`,
+  `else` de `||`); diagnóstico `a call in the condition ran after the test` +
+  hint `put the call before the test ('toca(...) && m != null')`. Dentro da
+  expressão nada muda (`dropAfterCall` já derrubava); local de valor e builtin
+  puro seguem mantendo o fato.
+- **Revisão do PR #119** (achados confirmados por execução):
+  - `any` atravessa a fronteira só no **topo** do tipo: `ref any` não é
+    `ref int` (`bump(ref a)` com `a: any` volta a ser `expected ref int, got
+    ref any`), `any[]` não é `int[]`, `map[string, any]` não é
+    `map[string, int]` — elementos e alvo de `ref` são invariantes, como em
+    develop. E um `any` que carrega referência (R2) continua entrando em
+    `ref T` (R5: fronteira dinâmica, modo validado em runtime), mas agora o
+    **alvo** é conferido também: `inc(a)` com `a` guardando `ref string` →
+    `function 'inc' argument 1: expected ref int, got ref string`
+    (`validateRefTargets`, só no caminho `OP_CALL` de modo não provado —
+    código tipado não paga); `let r: ref int = a` / `return a` →
+    `expected ref int, got ref string` pela guarda do slot. Em 0.23.0 os três
+    liam a string como int em silêncio. Alvo `null` segue encaminhado.
+  - A guarda tem um único ponto de emissão (`emitSlotGuards`), que cobre os
+    três sites que ficaram de fora: `*r = v`, `xs[i] = v` no caminho fundido
+    de local, e o valor de `append(ref xs, v)` (também a chave de `delete` e o
+    texto de `json_loads`).
+  - Narrowing: classificar a raiz não captura mais nada (`resolveUpvalue`
+    mutava — uma chave morta `p` capturava o `p` do pai); fato de local morre
+    com o escopo; `let print = …` dentro do laço torna a chamada homônima
+    impura já na entrada do laço; construtor de struct é puro; `eprint`,
+    `iprint`, `eiprint`, `append`, `pop`, `delete` entram no conjunto puro
+    (`json_loads` não: escreve através do `ref` e pode pôr `null` na raiz);
+    o registro do fato perdido na condição fica nos ramos do `if` (e depois
+    dele), não vaza para fora.
+- **Builtins centrais não encerram narrowing.** `print`, `to_str`, `length`,
+  `fmt`, `keys`, `slice`, `range` e os demais da spec §10, quando não
+  sombreados, são nativos puros que nunca rodam código Noxy — o fato
+  `m != null` de um global sobrevive a eles, inclusive na entrada de laço.
+  Em particular `f"{m['a']} {m['b']}"` (duas chamadas a `to_str` geradas
+  pelo parser) e `print(m["a"])` seguido de `print(m["b"])` compilam com `m`
+  global. Chamada a função do programa, `call_result`, `spawn_task`,
+  `task_await` e `func` bare continuam encerrando.
+- **Diagnóstico do fato perdido.** Ler um `T?` cujo fato foi derrubado por
+  uma chamada diz o porquê, em vez de sugerir o `if` que já está ali:
+  `'m' may be null: it was tested, but 'm' is a global and a call came
+  between the test and this use` + `hint: test it again after the call, bind
+  it first ('let v = m' before the 'if') and use 'v', or move the code into a
+  function` (raiz `ref`, capturada, upvalue ou endereçada tem a frase
+  própria; fato derrubado na entrada de um laço diz `the loop body calls a
+  function that can run before this use`).
+- A marcação de runtime que falha (`OP_MARK_RUNTIME_VALUE_TYPE`) nomeia os
+  dois tipos — `expected chan int, got chan string`, `expected int[4], got
+  int[]`, `expected Envelope, got map` — no lugar de `runtime value metadata
+  conflicts with static context`.
+
+### Docs
+- Spec §2.4 (builtins puros, diagnóstico, código em nível de arquivo), §4.2
+  (fronteira `any` checada em toda posição, wrapper sem `let` temporário),
+  §9 (f-string é `to_str`), §10.
+
+Follow-ups: #121 (natives que devolvem `null` como dado sob wrapper `-> T` —
+crypto/net — `T?` ou erro tipado); #122 (contrato de retorno dos natives +
+fast path no `OP_MARK`, para religar a guarda em tipo desconhecido sem custo
+por chamada); simplificar o wrapper `noxy_dynamodb.nx` (outro repo) removendo
+os `let` temporários.
+
 ## [0.23.0] - 2026-08-29
 
 Extensões por processo (tier B) como meio principal de I/O — issue #80

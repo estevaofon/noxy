@@ -71,10 +71,14 @@ print("Nome do mês (atual):", month_name(dt.month))
 
 // 6. Parsing
 print("\n--- 6. Parsing ---")
-let parsed: DateTime = parse("2023-01-01 12:00:00")
-print("Parse '2023-01-01 12:00:00':", format(parsed))
+let parsed = parse("2023-01-01 12:00:00")       // DateTime? — null se nao casar o formato
+if parsed != null then
+    print("Parse '2023-01-01 12:00:00':", format(parsed))
+end
 
-let parsed_date: DateTime = parse_date("2023-01-01")
-print("Parse Date '2023-01-01':", format(parsed_date))
+let parsed_date = parse_date("2023-01-01")
+if parsed_date != null then
+    print("Parse Date '2023-01-01':", format(parsed_date))
+end
 
 print("\n=== Verificação Concluída ===")

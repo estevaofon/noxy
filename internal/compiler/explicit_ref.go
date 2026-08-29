@@ -60,6 +60,10 @@ func (c *Compiler) compileRefArgument(arg ast.Expression) (refArgument, error) {
 		return refArgument{proven: true}, nil
 	}
 	if actual == nil || isAny(actual) {
+		// Fronteira dinamica (R5): modo validado em runtime por
+		// validateParameterModes e, desde a revisao do #119, o TIPO DO ALVO
+		// por validateRefTargets — `inc(a)` com a guardando `ref string` e
+		// `expected ref int, got ref string` na chamada, nao lixo no `*r`.
 		return refArgument{}, nil
 	}
 	return refArgument{plain: actual}, nil

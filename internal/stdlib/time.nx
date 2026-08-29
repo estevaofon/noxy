@@ -95,13 +95,14 @@ end
 // Parsing
 // ============================================
 
-// Parse string "YYYY-MM-DD HH:MM:SS" -> DateTime
-func parse(s: string) -> DateTime
+// Parse string "YYYY-MM-DD HH:MM:SS" -> DateTime; null se a string nao casa
+// o formato (teste com `if dt != null then`).
+func parse(s: string) -> DateTime?
     return time_parse(s, DateTime)
 end
 
-// Parse apenas data "YYYY-MM-DD"
-func parse_date(s: string) -> DateTime
+// Parse apenas data "YYYY-MM-DD"; null se a string nao casa o formato.
+func parse_date(s: string) -> DateTime?
     return time_parse_date(s, DateTime)
 end
 

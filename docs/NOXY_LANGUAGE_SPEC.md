@@ -398,7 +398,10 @@ end
 ```
 
 An argument of type `any` is accepted at compile time; the runtime checks
-the parameter mode (`function 'f' argument 1: expected ref int, got int`).
+the parameter mode (`function 'f' argument 1: expected ref int, got int`)
+and, for a `ref T` parameter, the type of the target the reference points
+to (`function 'f' argument 1: expected ref int, got ref string`); a `null`
+target is forwarded and fails on the read (§4.2).
 
 #### R6. Rebind is `=`, update is `*… =`
 
@@ -621,16 +624,40 @@ on an `errors.Result<T>` (which narrows `r.value`, §7). A `ref x` taken on a
 narrowed `x: T?` is a `ref T`.
 
 **What ends a narrowing.** An assignment to the expression or to a prefix of
-its path (`p = q`, `no = …` for `no.prox`); any call, for a path whose root
+its path (`p = q`, `no = …` for `no.prox`); a call, for a path whose root
 is a `ref`-typed variable, a global, an upvalue, a captured local or a local
 whose address was taken with `ref` — someone else may reach it during the
 call; a write through a reference (`*r = v`, `r.f = v`), which drops every
 member-path fact; and entering a loop whose body assigns the root. A path
 rooted at a plain value local survives calls: value semantics (§2.2)
-guarantee nobody outside the frame can reach it. When a fact is lost, test
-again or bind first (`let n = no.prox` then `if n != null then … end`).
-Facts never survive into a different function: a closure body starts with
-none.
+guarantee nobody outside the frame can reach it.
+
+A call to a core builtin (§10: `print`, `eprint`, `to_str`, `length`, `fmt`,
+`keys`, `slice`, `append`, `pop`, `delete`, `range`, …) that the program has
+not shadowed, or to a struct constructor, ends **no** narrowing: those never
+run Noxy code, so nothing can reach the root during the call (`json_loads` is
+the exception — it writes through its `ref` argument and may leave `null` in
+the root). That is why `f"{m['a']} {m['b']}"` (two `to_str` calls,
+§9) and `print(m["a"])` followed by `print(m["b"])` keep a global `m`
+narrowed, and a loop whose body only calls them keeps the fact too. A call
+to a program function, `call_result`, `spawn_task`, `task_await` or a bare
+`func` does run program code and ends it. That includes a call in the right
+operand of `&&` (or of `||`, for the false branch): it runs *after* the test
+in the left operand, so `if m != null && toca() then m["k"] end` with a
+global `m` is an error (`'m' may be null: it was tested, but 'm' is a global
+and a call in the condition ran after the test`), while `if toca() && m !=
+null then` and `if m != null && length(m) > 0 then` keep the fact.
+
+When a fact is lost, test again or bind first (`let n = no.prox` then `if n
+!= null then … end`). The diagnostic says which happened: a read after the
+fact was dropped by a call reports `'m' may be null: it was tested, but 'm'
+is a global and a call came between the test and this use`, with the fix in
+the hint (`test it again after the call, bind it first ('let v = m' before
+the 'if') and use 'v', or move the code into a function`). A top-level `let`
+is a global, so file-level code loses its facts at every call to a program
+function; inside a `func main()` the same binding is a value local and
+survives them. Facts never survive into a different function: a closure body
+starts with none.
 
 **Generics and modules.** A type parameter `T` may bind a nullable type
 (`first(ps)` with `ps: Node?[]` returns `Node?`); it still cannot bind a
@@ -887,7 +914,7 @@ let dynamic: func = exact       // exact-to-dynamic widening is valid
 let exact_again: func(int) -> int = dynamic // ERROR: no implicit narrowing
 ```
 
-Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, so a function returning their result must either declare `any` or replace the bare callable with an exact signature. Explicit `ref` arguments remain references across this dynamic boundary. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
+Calls through bare `func` are checked by the runtime because their arity and result type are not statically known. Their compile-time result is `any`, which crosses into a typed slot under the runtime check described at the end of this section — a function returning their result may declare the concrete type, or `any`. Explicit `ref` arguments remain references across this dynamic boundary. This keeps dynamic callbacks, decorators, handlers, and heterogeneous callable collections available without pretending their results are statically known:
 
 ```noxy
 let callbacks: func[] = [no_arguments, two_arguments]
@@ -905,6 +932,55 @@ let factory: func(int) -> int[] = make_list   // one function returning int[]
 ```
 
 Exact function types may also appear in parameters, returns, struct fields, map values, channels, and references. `any`, native functions, plugins, and untyped module exports remain dynamic boundaries and retain runtime validation; an unknown native value cannot be implicitly narrowed to an exact function type.
+
+**The dynamic boundary is checked at runtime, in every position.** A value
+whose static type is `any` — an `any`-typed variable, field or parameter,
+the result of a function declared `-> any`, of `json_parse`, `task_await` or
+a bare `func` call — is accepted wherever a typed slot is expected: an
+annotated `let`, an assignment (`x = v`, `s.f = v`, `xs[i] = v`), an
+argument of an exact signature, a `return`. The runtime checks the value
+against the slot's type at that point and names both sides on mismatch:
+`expected int, got string`, `expected map[string, any][], got int[]`,
+`expected Point, got null` (§2.4). Typed code pays nothing — the check is
+emitted only where the static type is `any`. A wrapper around an
+`any`-returning function therefore returns it directly:
+
+```noxy
+func itens() -> any                       // e.g. a parsed JSON payload
+    return json_parse(corpo)
+end
+
+func scan() -> map[string, any][]
+    return itens()                        // checked here, at runtime
+end
+```
+
+The standard library honours the `any` contract on its own side: a wrapper
+whose native reports failure with `null` says so in its signature —
+`time.parse(s) -> DateTime?`, `time.parse_date(s) -> DateTime?`,
+`sqlite.prepare(db, sql) -> Statement?` — so `let dt = parse(s)` imported
+with `select` has the static type `DateTime?` and is tested with `if dt !=
+null then`.
+
+Three limits. `any` crosses only at the *top* of a type: element, key,
+value, channel payload and `ref` target are invariant, so `any[]` is not an
+`int[]`, `map[string, any]` is not a `map[string, int]`, and `ref a` with
+`a: any` is a `ref any`, never a `ref int`. An `any` value that *carries* a
+reference (R2) may fill a `ref T` slot or parameter — R5's dynamic
+boundary — and there the target is checked, not only the mode: `inc(a)`
+with `inc(r: ref int)` and `a` holding `ref s` (`s: string`) is `function
+'inc' argument 1: expected ref int, got ref string`; `let r: ref int = a`
+is `expected ref int, got ref string`. A `null` target is forwarded as
+before and fails on the read. And an exact function type is never a target: `any` is not
+narrowed to `func(int) -> int`, nor to a type containing one
+(`(func(int) -> int)[]`) — the rule above, no implicit narrowing to an exact
+signature, holds at every boundary.
+
+A value of *unknown* static type — an untyped native, a plugin, a module
+member called through a namespace (`m.f()`) — is accepted as before and is
+not checked by this guard: the natives declare no return contract yet, and
+checking every wrapper call measured at +35–55 % per call. Only a composite
+slot (array, map, chan) carries its runtime marker in every position.
 
 ### 4.3 Parameter Passing Semantics (CRITICAL)
 
@@ -2073,6 +2149,11 @@ let name: string = "Noxy"
 print(f"Hello, {name}!")
 ```
 
+Each `{e}` is compiled as `to_str(e)` and the pieces are joined with `+`.
+`to_str` is a core builtin, so an interpolation never ends a narrowing
+(§2.4): `if m != null then print(f"{m['a']} {m['b']}") end` compiles with `m`
+a global `map[string, any]?`.
+
 **Literal braces.** `{{` produces `{` and `}}` produces `}`:
 
 ```noxy
@@ -2174,6 +2255,8 @@ The core builtins have static return types where the result never varies —
 `keys(map[K, V]) -> K[]`, `slice` (same type as its first argument) — so a
 value of theirs is checked like any other expression (`let s: string =
 length(xs)` is a compile error) and can initialize an inferred `let` (§3).
+They — together with `print` and `range` — are pure natives that never run
+Noxy code, so a call to one of them never ends a narrowing (§2.4).
 `call_result` is typed by its callee (`errors.Result<R>`, §7). The others
 (`json_parse`, `task_await`, `make_chan`, ...) are dynamic-boundary builtins:
 their result is `any` or untyped and needs an annotation. A function the
@@ -2513,7 +2596,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.23.0`). It is a module binding, not a
+string `noxy --version` prints (`v0.23.1`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 

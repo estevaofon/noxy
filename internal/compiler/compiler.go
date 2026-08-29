@@ -138,6 +138,13 @@ type Compiler struct {
 	// narrowed: chaves estaveis provadas nao-nulas no ponto corrente
 	// (narrowing.go). Por compilador — cada corpo de funcao comeca vazio.
 	narrowed map[string]struct{}
+	// narrowLost: chaves cujo fato existiu e foi derrubado por uma chamada
+	// (dropAfterCall), com o motivo — so para o diagnostico dizer "foi
+	// testado, mas..." em vez de sugerir o `if` que ja esta ali (#118).
+	narrowLost map[string]lostFact
+	// narrowLostPending: perdas registradas por conditionFacts (que roda
+	// antes do pushFacts do ramo); pushFacts as move para o ramo e zera.
+	narrowLostPending map[string]lostFact
 	// warnings e a lista de avisos COMPARTILHADA pela arvore de compiladores
 	// (raiz + NewChild): ponteiro, como generics/instances, para que o aviso
 	// emitido dentro de um corpo de funcao suba ate o compilador raiz, que e
@@ -320,7 +327,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 	case *ast.AssignStmt:
 		defer c.noteAssignment(effect.Target)
 	case *ast.CallExpression:
-		defer c.dropAfterCall()
+		// Builtin central nao sombreado (print, to_str, length...) e nativo
+		// puro: nunca roda codigo Noxy, nada alcanca a raiz — o fato fica
+		// (#118; a f-string vira to_str no parser e cai aqui).
+		if !c.isPureBuiltinCall(effect) {
+			defer c.dropAfterCall()
+		}
 	}
 	switch n := node.(type) {
 	case *ast.Program:
@@ -469,7 +481,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !c.areTypesCompatible(n.Type, valType) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in '%s' declaration: expected %s, got %s%s%s", c.currentLine, n.Name.Value, n.Type.String(), noxyTypeName(valType), c.derefReadHint(n.Type, valType, n.Value), c.nullMismatchHint(n.Type, valType, n.Value))
 			}
-			if err := c.emitRuntimeValueType(n.Type); err != nil {
+			if err := c.emitSlotGuards(n.Type, valType); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -597,7 +609,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			if !c.areTypesCompatible(refT.ElementType, valType) {
 				return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment: expected %s, got %s%s", c.currentLine, refT.ElementType.String(), valType.String(), c.derefReadHint(refT.ElementType, valType, n.Value))
 			}
-			if err := c.emitRuntimeValueType(refT.ElementType); err != nil {
+			if err := c.emitSlotGuards(refT.ElementType, valType); err != nil {
 				return nil, nil, err
 			}
 
@@ -651,7 +663,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						if local.IsParam {
 							c.warn(fmt.Sprintf("rebinding ref parameter '%s' has no effect outside function", ident.Value))
 						}
-						if err := c.emitRuntimeValueType(localType); err != nil {
+						if err := c.emitSlotGuards(localType, valType); err != nil {
 							return nil, nil, err
 						}
 						// RC: rebind de local `ref` e troca de EMPRESTIMO, nao
@@ -674,7 +686,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if !c.areTypesCompatible(localType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to '%s': expected %s, got %s%s%s", c.currentLine, ident.Value, localType.String(), valType.String(), c.derefReadHint(localType, valType, n.Value), c.nullMismatchHint(localType, valType, n.Value))
 					}
-					if err := c.emitRuntimeValueType(localType); err != nil {
+					if err := c.emitSlotGuards(localType, valType); err != nil {
 						return nil, nil, err
 					}
 					// RC: mesma pergunta do gemeo MUT — so slot POSSUIDOR troca
@@ -701,7 +713,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						c.currentLine, ident.Value, noxyTypeName(upvalueType), noxyTypeName(valType), c.derefReadHint(upvalueType, valType, n.Value), c.nullMismatchHint(upvalueType, valType, n.Value),
 					)
 				}
-				if err := c.emitRuntimeValueType(upvalueType); err != nil {
+				if err := c.emitSlotGuards(upvalueType, valType); err != nil {
 					return nil, nil, err
 				}
 				c.emitBytes(byte(chunk.OP_SET_UPVALUE), byte(arg))
@@ -721,7 +733,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 							}
 
 							nameConstant := c.makeConstant(value.NewString(ident.Value))
-							if err := c.emitRuntimeValueType(globalType); err != nil {
+							if err := c.emitSlotGuards(globalType, valType); err != nil {
 								return nil, nil, err
 							}
 							// RC: rebind de global `ref` e troca de
@@ -743,7 +755,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					if !c.areTypesCompatible(globalType, valType) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in assignment to global '%s': expected %s, got %s%s%s", c.currentLine, ident.Value, globalType.String(), valType.String(), c.derefReadHint(globalType, valType, n.Value), c.nullMismatchHint(globalType, valType, n.Value))
 					}
-					if err := c.emitRuntimeValueType(globalType); err != nil {
+					if err := c.emitSlotGuards(globalType, valType); err != nil {
 						return nil, nil, err
 					}
 				} else if !c.globalIsKnown(ident.Value) {
@@ -846,7 +858,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 					return nil, nil, fmt.Errorf("[line %d] index assignment on non-array/map type: %s", c.currentLine, leftType.String())
 				}
 			}
-			if err := c.emitRuntimeValueType(assignedType); err != nil {
+			if err := c.emitSlotGuards(assignedType, valType); err != nil {
 				return nil, nil, err
 			}
 
@@ -941,7 +953,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 						return nil, nil, fmt.Errorf("[line %d] type mismatch in field assignment: expected %s, got %s%s%s", c.currentLine, fieldType.String(), valType.String(), c.derefReadHint(fieldType, valType, n.Value), c.nullMismatchHint(fieldType, valType, n.Value))
 					}
 				}
-				if err := c.emitRuntimeValueType(fieldType); err != nil {
+				if err := c.emitSlotGuards(fieldType, valType); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -1688,7 +1700,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// alternativo; depois do if, o fato do ramo que NAO termina sobrevive
 		// (early return: `if p == null then return end` estreita p adiante).
 		thenFacts, elseFacts := c.conditionFacts(n.Condition)
-		restoreThen := c.pushFacts(thenFacts)
+		// Perdas registradas pela condicao (`m != null && toca()`) valem nos
+		// dois ramos e depois do if — nunca fora dele por vazamento.
+		pendingLost := c.takePendingLost()
+		restoreThen := c.pushFactsWith(thenFacts, pendingLost)
 		_, _, err = c.Compile(n.Consequence)
 		restoreThen()
 		if err != nil {
@@ -1707,7 +1722,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 
 		// Compile Else block (Alternative)
 		if n.Alternative != nil {
-			restoreElse := c.pushFacts(elseFacts)
+			restoreElse := c.pushFactsWith(elseFacts, pendingLost)
 			_, _, err = c.Compile(n.Alternative)
 			restoreElse()
 			if err != nil {
@@ -1718,10 +1733,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// Patch End jump
 		c.patchJump(jumpToEnd)
 		if blockTerminates(n.Consequence) {
-			c.keepFacts(elseFacts)
+			c.keepFactsWith(elseFacts, pendingLost)
 		}
 		if n.Alternative != nil && blockTerminates(n.Alternative) {
-			c.keepFacts(thenFacts)
+			c.keepFactsWith(thenFacts, pendingLost)
 		}
 		return c.currentChunk, nil, nil
 
@@ -2307,7 +2322,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				c.derefReadHint(expected, actual, n.ReturnValue), c.nullMismatchHint(expected, actual, n.ReturnValue),
 			)
 		}
-		if err := c.emitRuntimeValueType(expected); err != nil {
+		if err := c.emitSlotGuards(expected, actual); err != nil {
 			return nil, nil, err
 		}
 		c.emitByte(byte(chunk.OP_RETURN))
@@ -2646,13 +2661,17 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 						c.currentLine, i+1, callableName(call.Function), funcType.Params[i].String(), nullable(&ast.RefType{ElementType: refArg.element}).String(), c.nullMismatchHint(funcType.Params[i], nullable(&ast.RefType{ElementType: refArg.element}), arg),
 					)
 				}
-				if refArg.element != nil && !c.areStrictTypesCompatible(expectedRef.ElementType, refArg.element) {
+				if refArg.element != nil && !c.strictCompatibleNested(expectedRef.ElementType, refArg.element) {
 					actual := &ast.RefType{ElementType: refArg.element}
 					return nil, nil, fmt.Errorf(
 						"[line %d] argument %d to '%s': expected %s, got %s",
 						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), actual.String(),
 					)
 				}
+				// Sem guarda dinamica aqui: `ref any` ja e recusado na
+				// compilacao (strictCompatibleNested) e um null encaminhado por
+				// um slot ref chega ao callee como null (convencao do
+				// ref-null-forwarding: falha na leitura, "cannot dereference").
 				if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
 					return nil, nil, err
 				}
@@ -2703,7 +2722,7 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			)
 		}
 		if isExact {
-			if err := c.emitRuntimeValueType(funcType.Params[i]); err != nil {
+			if err := c.emitSlotGuards(funcType.Params[i], argType); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -3074,6 +3093,10 @@ func (c *Compiler) endScope() {
 	c.scopeDepth--
 	// Pop locals from stack
 	for len(c.locals) > 0 && c.locals[len(c.locals)-1].Depth > c.scopeDepth {
+		// Spec §2.4: um fato sobre o local que sai de escopo morre com ele —
+		// uma chave morta nao pode ser reclassificada depois como upvalue ou
+		// global de mesmo nome (revisao do #119).
+		c.dropKey(c.locals[len(c.locals)-1].Name)
 		if c.locals[len(c.locals)-1].IsCaptured {
 			c.emitByte(byte(chunk.OP_CLOSE_UPVALUE))
 		} else {

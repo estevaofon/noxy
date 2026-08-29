@@ -12,20 +12,24 @@ print("=== Início do Showcase SQLite ===")
 // 1. Transação com Commit (Insert em massa)
 print("\n[1] Inserindo produtos em transação...")
 if begin(db) then
-    let stmt: Statement = prepare(db, "INSERT INTO produtos (nome, preco) VALUES (?, ?)")
-    
-    bind_text(stmt, 1, "Tablet")
-    bind_float(stmt, 2, 1200.50)
-    step_exec(stmt)
-    reset(stmt)
-    
-    bind_text(stmt, 1, "Smartphone")
-    bind_float(stmt, 2, 3500.00)
-    step_exec(stmt)
-    
-    finalize(stmt)
-    commit(db)
-    print("Transação commitada com sucesso.")
+    let stmt = prepare(db, "INSERT INTO produtos (nome, preco) VALUES (?, ?)")   // Statement? — null se o SQL falhar
+    if stmt != null then
+        bind_text(stmt, 1, "Tablet")
+        bind_float(stmt, 2, 1200.50)
+        step_exec(stmt)
+        reset(stmt)
+
+        bind_text(stmt, 1, "Smartphone")
+        bind_float(stmt, 2, 3500.00)
+        step_exec(stmt)
+
+        finalize(stmt)
+        commit(db)
+        print("Transação commitada com sucesso.")
+    else
+        print("Erro ao preparar o INSERT (a tabela 'produtos' existe?).")
+        rollback(db)
+    end
 else
     print("Erro ao iniciar transação.")
 end

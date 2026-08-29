@@ -30,12 +30,14 @@ func cleanup_sqlite() -> void
     let create: sqlite.ExecResult = sqlite.exec(db, "CREATE TABLE cleanup_values (value INTEGER NOT NULL)")
     assert(create.ok, "SQLite table must be created")
 
-    let statement: sqlite.Statement = sqlite.prepare(db, "INSERT INTO cleanup_values VALUES (?)")
-    assert(statement.handle > 0, "SQLite statement must prepare")
-    defer sqlite.finalize(statement)
-    sqlite.bind_int(statement, 1, 21)
-    let inserted: sqlite.ExecResult = sqlite.step_exec(statement)
-    assert(inserted.ok, "SQLite statement must execute")
+    let statement: sqlite.Statement? = sqlite.prepare(db, "INSERT INTO cleanup_values VALUES (?)")
+    assert(statement != null, "SQLite statement must prepare")
+    if statement != null then
+        defer sqlite.finalize(statement)
+        sqlite.bind_int(statement, 1, 21)
+        let inserted: sqlite.ExecResult = sqlite.step_exec(statement)
+        assert(inserted.ok, "SQLite statement must execute")
+    end
 end
 
 func cleanup_resources() -> void

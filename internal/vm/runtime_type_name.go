@@ -17,6 +17,41 @@ func displayStructName(name string) string {
 	return moduleQualifierPattern.ReplaceAllString(name, "")
 }
 
+// runtimeValueDescription e o nome de tipo de um valor nos diagnosticos de
+// fronteira dinamica (`expected T, got U`, #118): um composto ja etiquetado
+// mostra a etiqueta (`int[4]`, `map[string, int]`, `chan string`), uma
+// referencia mostra o alvo (`ref string`, `ref null`); o resto, o nome de
+// runtime de sempre (runtimeTypeName).
+func (vm *VM) runtimeValueDescription(val value.Value) string {
+	switch val.Type {
+	case value.VAL_REF:
+		if target, err := vm.resolveReferenceValue(val); err == nil {
+			return "ref " + vm.runtimeValueDescription(target)
+		}
+	case value.VAL_OBJ:
+		switch obj := val.Obj.(type) {
+		case *value.ObjArray:
+			if tag := obj.RuntimeType.Load(); tag != nil {
+				return tag.String()
+			}
+		case *value.ObjMap:
+			if tag := obj.RuntimeType.Load(); tag != nil {
+				return tag.String()
+			}
+		}
+	case value.VAL_CHANNEL:
+		if channel, ok := val.Obj.(*value.ObjChannel); ok && channel != nil {
+			channel.Lock.Lock()
+			elementType := channel.ElementType
+			channel.Lock.Unlock()
+			if elementType != nil {
+				return (&value.RuntimeTypeInfo{Kind: value.TYPE_CHANNEL, Element: elementType}).String()
+			}
+		}
+	}
+	return runtimeTypeName(val)
+}
+
 // runtimeTypeName e a fonte unica dos nomes de tipo em runtime, compartilhada
 // pelo builtin `type` e pelo verbo %T do fmt.
 func runtimeTypeName(val value.Value) string {

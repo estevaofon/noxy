@@ -22,6 +22,53 @@ func (c *Compiler) emitRuntimeValueType(t ast.NoxyType) error {
 	if !c.requiresRuntimeValueType(t, make(map[*ast.StructStatement]bool), "") {
 		return nil
 	}
+	return c.emitMarkRuntimeValueType(t)
+}
+
+// emitDynamicBoundaryGuard e a checagem de runtime da fronteira dinamica
+// (spec §4.2, #118/#120): quando o tipo estatico do valor e `any` e o slot
+// tem tipo concreto, o valor no topo da pilha e conferido contra o tipo do
+// slot — `expected int, got string`. Vale para let anotado, atribuicao,
+// argumento de assinatura exata e return. Tipos que ja carregam metadado
+// (array, map, chan) foram marcados — e validados — por emitRuntimeValueType;
+// o resto (primitivos, structs) so passa por aqui. Codigo tipado nao paga
+// nada.
+//
+// Tipo estatico DESCONHECIDO (nil: nativo sem assinatura, membro de
+// namespace `m.f()`, plugin) fica de fora de proposito (revisao do #119,
+// decisao B): 134 natives da stdlib nao declaram contrato de retorno, e a
+// guarda em cada `return native(...)` custava +35-55 % por chamada de
+// wrapper, alem de transformar nulls silenciosos de crypto/net em aborts
+// dentro da stdlib. Contrato de retorno dos natives e issue propria.
+func (c *Compiler) emitDynamicBoundaryGuard(expected, actual ast.NoxyType) error {
+	if expected == nil || isAny(expected) {
+		return nil
+	}
+	if !isAny(actual) {
+		return nil
+	}
+	if c.requiresRuntimeValueType(expected, make(map[*ast.StructStatement]bool), "") {
+		return nil
+	}
+	return c.emitMarkRuntimeValueType(expected)
+}
+
+// emitSlotGuards e o UNICO ponto de emissao das checagens de um slot tipado
+// que recebe um valor (let, atribuicao, argumento, return, elemento de
+// append, chave de delete...): metadado de composto (emitRuntimeValueType) e
+// guarda da fronteira dinamica (emitDynamicBoundaryGuard). Todo site de slot
+// passa por aqui — a revisao do #119 achou tres sites que emitiam so o
+// primeiro.
+func (c *Compiler) emitSlotGuards(expected, actual ast.NoxyType) error {
+	if err := c.emitRuntimeValueType(expected); err != nil {
+		return err
+	}
+	return c.emitDynamicBoundaryGuard(expected, actual)
+}
+
+// emitMarkRuntimeValueType emite OP_MARK_RUNTIME_VALUE_TYPE para o tipo t
+// sobre o valor no topo da pilha; no-op para tipos sem descricao de runtime.
+func (c *Compiler) emitMarkRuntimeValueType(t ast.NoxyType) error {
 	runtimeType := c.runtimeTypeInfo(t)
 	if runtimeType == nil {
 		return nil
