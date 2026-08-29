@@ -3,7 +3,7 @@
 ## 🎯 Visão Geral
 
 **Noxy VM** é uma máquina virtual baseada em bytecode para a linguagem Noxy,
-escrita em Go (módulo `noxy-vm`, Go 1.25). Versão corrente: `v0.22.0`
+escrita em Go (módulo `noxy-vm`, Go 1.25). Versão corrente: `v0.23.0`
 (`internal/version/version.go`, `CHANGELOG.md`).
 
 ### Características
@@ -631,6 +631,6 @@ da 1.0, **com** tabela de migração no CHANGELOG.
 ---
 
 **Última Atualização**: 2026-08-28  
-**Versão**: 1.1 (Noxy VM 0.22.0)
+**Versão**: 1.1 (Noxy VM 0.23.0)
 
 *Este documento é vivo - atualize ao adicionar features significativas.*

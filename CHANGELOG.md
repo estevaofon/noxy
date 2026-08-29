@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.23.0] - 2026-08-29
+
+Extensões por processo (tier B) como meio principal de I/O — issue #80
+(spec `docs/superpowers/specs/2026-08-29-process-extensions-design.md`,
+decisão na #110). Uma fronteira, dois transportes: o wasm continua para
+computação pura; I/O, SO, drivers e SDKs vão para um executável por
+plataforma que o usuário nunca compila.
+
+### Added
+- `kind = "process"` em `noxy_ext.toml`: a extensão é um executável falando
+  `noxy-plugin/1` — quadros NXB por stdin/stdout, handshake com binding de
+  exports por nome, `id` multiplexado, LOG, CANCEL. Mesmo `use`, mesmo
+  wrapper `.nx`, mesmos erros do wasm. Chaves novas: `[binaries]`,
+  `call_timeout_ms`, `handshake_timeout_ms`, `restart`, `timeout_ms` por
+  export, `concurrency = "concurrent"` (multiplexa e permite handles),
+  `capabilities` declarativa (só exibida no `--get`).
+- Ciclo de vida: o processo sobe no primeiro export chamado; prazo por
+  chamada com cancelamento cooperativo (`extension 'x' timed out: …`) —
+  só quem ignora o CANCEL é morto (`trapped` + poison); processo morto =
+  `trapped: process exited (status N)`, `restart = true` só com
+  `stateless`; todo backend é fechado na saída da VM (`runFile`, REPL,
+  `sys_exit`), com `PDEATHSIG` no Linux e job object no Windows.
+- SDK Go `github.com/estevaofon/noxy/sdk/noxyplugin` (módulo aninhado em
+  `sdk/noxyplugin`, sem dependência de `noxy-vm`): `New/Handle/Serve/Main`,
+  `Func0..Func5`, `Args`, `Logf`; protege o stdout do protocolo, recupera
+  panics em `failed`, cancela o `context` no CANCEL e no EOF.
+- `noxy --get` para extensões por processo: sem `@versão`, resolve a tag
+  semver mais nova; baixa `checksums.txt` e **só** o asset da plataforma
+  para `noxy_libs/<pkg>/bin/`, verifica o sha256 e grava em `noxy.sum` os
+  hashes de **todos** os assets publicados (lockfile portável entre SOs).
+  Sem asset para a plataforma = erro no `--get`, nunca em runtime.
+- Benchmarks `BenchmarkProcess*` em `internal/ext`; números em
+  `docs/EXTENSIONS.md`.
+
+### Changed
+- `noxy --get` substitui o diretório do pacote a cada execução (clone
+  fresco): o caminho "existe → git pull" não atualizava nada sem `.git`.
+- `noxy_ext.toml` presente mas inválido faz o `--get` falhar (antes só
+  pulava o registro no `noxy.sum`).
+- A verificação do `noxy.sum` cobre manifesto + o artefato que o backend
+  executa (`.wasm` ou `bin/<asset>`).
+
+### Deprecated
+- `sys_load_plugin` (JSON por linha): aviso no stderr na primeira chamada;
+  remoção na v0.25.0 junto com `internal/plugin` e
+  `compiler.PluginNativeNames`. Migração: `kind = "process"` + SDK
+  (`docs/EXTENSIONS.md`).
+
 ## [0.22.0] - 2026-08-28
 
 A distância entre o pitch e o produto fechada nos dois lugares apontados na
