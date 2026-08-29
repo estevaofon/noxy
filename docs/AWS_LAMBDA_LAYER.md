@@ -4,7 +4,7 @@ This walkthrough explains how to deploy Noxy as an AWS Lambda Layer and deploy y
 
 ## 1. Build the Layer
 
-Run the layer build script to create `noxy_layer.zip`. This archive contains the Noxy runtime, the `bootstrap` executable, and shared libraries (like DynamoDB).
+Run the layer build script to create `noxy_layer.zip`. This archive contains the Noxy runtime (built for Linux, `GOOS=linux GOARCH=amd64` — or `arm64` for Graviton) and the `bootstrap` executable.
 
 ```bash
 ./build_layer.sh
@@ -22,7 +22,7 @@ Run the layer build script to create `noxy_layer.zip`. This archive contains the
 
 ## 2. Build the Function
 
-Run the function build script to create `function.zip`. This archive contains ONLY your function code (`function.nx`).
+Run the function build script to create `function.zip`. This archive contains your function code (`function.nx`) and, when the function uses packages, its `noxy_libs/` and `noxy.sum` (see [Packages and extensions](#packages-and-extensions-dynamodb) below).
 
 ```bash
 ./build_function.sh
@@ -45,10 +45,40 @@ Run the function build script to create `function.zip`. This archive contains ON
 ## How it Works
 
 -   **Layer (`/opt`)**:
-    -   `/opt/bin`: Noxy interpreter (`noxy`) and Plugins (`noxy-plugin-dynamodb`).
+    -   `/opt/bin`: the Noxy interpreter (`noxy`).
     -   `/opt/bootstrap`: The entry point script.
     -   `/opt/runtime`: The Noxy runtime loop scripts (`exec_runtime.nx`, `runtime.nx`).
 -   **Function (`/var/task`)**:
-    -   Contains only your `function.nx`.
+    -   Your `function.nx`, plus `noxy_libs/` and `noxy.sum` when it uses packages.
 
-The `bootstrap` script ensures `/opt/bin` is in the `PATH`, allowing Noxy to find plugins automatically. It also sets `NOXY_PATH` so the runtime module can be found.
+The `bootstrap` script sets `NOXY_PATH` so the runtime module can be found. Nothing else goes on `PATH`: extensions are not looked up there (see below).
+
+## Packages and extensions (DynamoDB)
+
+Since v0.23.0, [`noxy_dynamodb`](DYNAMODB.md) is a process extension: a package directory holding the manifest, the wrapper and a per-platform binary under `bin/`, which the VM starts itself on the first call — it does **not** search `PATH` for plugins. The package is found by the module resolver like any other package, and its binary is verified against `noxy.sum` when the package lives under the VM root's `noxy_libs/`. The VM root is the directory of the script `noxy` was started with (`/var/task` when `bootstrap` runs the function script directly; `/opt/runtime` when it runs the runtime loop script, which then imports the function).
+
+Two layouts work:
+
+1. **Verified — under the root's `noxy_libs/`.** Ship the package as `noxy --get` installs it, next to the root's `noxy.sum`:
+
+   ```
+   <root>/noxy.sum
+   <root>/noxy_libs/github_com/estevaofon/noxy_dynamodb/
+   ├── noxy_ext.toml
+   ├── noxy_dynamodb.nx
+   └── bin/noxy-plugin-dynamodb-linux-amd64        # executable; -linux-arm64 on Graviton
+   ```
+
+   `noxy --get github.com/estevaofon/noxy_dynamodb@v0.2.0` on any workstation records the hashes of **all** published binaries in `noxy.sum`, so a `noxy.sum` generated on Windows or macOS verifies the Linux binary the Lambda runs. `--get` only downloads the workstation's own binary, though: fetch the Lambda's from the release page into `bin/` before zipping:
+
+   ```bash
+   curl -L -o noxy_libs/github_com/estevaofon/noxy_dynamodb/bin/noxy-plugin-dynamodb-linux-amd64 \
+     https://github.com/estevaofon/noxy_dynamodb/releases/download/v0.2.0/noxy-plugin-dynamodb-linux-amd64
+   chmod +x noxy_libs/github_com/estevaofon/noxy_dynamodb/bin/noxy-plugin-dynamodb-linux-amd64
+   ```
+
+   The execute bit must survive the zip (build the archive on Linux, or in a Linux step of your pipeline), and the binary's architecture must match the function's (`x86_64` → `linux-amd64`, `arm64` → `linux-arm64`).
+
+2. **Unverified — in a `NOXY_PATH` root.** Put the same package directory under a root listed in `NOXY_PATH` (for example `/opt/noxy_libs/github_com/estevaofon/noxy_dynamodb/` in the layer, with `NOXY_PATH=/opt/noxy_libs:/opt/runtime` in `bootstrap`). The resolver finds it, but `noxy.sum` is not consulted outside the root's `noxy_libs/` — a development layout, convenient for a shared layer, without the integrity check.
+
+Credentials come from the function's execution role through the default AWS chain; `capabilities = ["net", "env"]` in the manifest is exactly that. Give the role `dynamodb:*` permissions on the tables the function touches.
