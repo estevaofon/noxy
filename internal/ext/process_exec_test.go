@@ -71,9 +71,29 @@ func TestOrphanGuestDiesWithHost(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil {
-		t.Fatalf("helper host did not report the guest pid: %v", err)
+	// Falha precoce nao pode deixar o host auxiliar (e o guest) vivos.
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	type readResult struct {
+		line string
+		err  error
+	}
+	lineCh := make(chan readResult, 1)
+	go func() {
+		l, e := bufio.NewReader(stdout).ReadString('\n')
+		lineCh <- readResult{line: l, err: e}
+	}()
+	var line string
+	select {
+	case r := <-lineCh:
+		if r.err != nil {
+			t.Fatalf("helper host did not report the guest pid: %v", r.err)
+		}
+		line = r.line
+	case <-time.After(10 * time.Second):
+		t.Fatal("helper host did not report the guest pid within 10s")
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(line))
 	if err != nil {

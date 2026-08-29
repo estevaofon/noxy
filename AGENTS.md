@@ -17,7 +17,7 @@ escrita em Go (módulo `noxy-vm`, Go 1.25). Versão corrente: `v0.23.0`
   concorrência (`spawn`/channels/`when`/tasks supervisionadas)
 - Stdlib embutida (`io`, `sys`, `strings`, `json`, `net`, `http`, `sqlite`,
   `crypto`, `time`, `errors`, ...), gerenciador de pacotes (`noxy --get`),
-  extensões WASM (experimental) e plugins por processo
+  extensões WASM (computação pura) e por processo (I/O, SDKs — meio principal)
 
 ### Arquitetura
 ```

@@ -62,9 +62,10 @@ struct-shaped map either way.
 - Cancels the handler's `context.Context` on CANCEL and on stdin EOF;
   replies to cancelled calls with whatever the handler returns.
 - Recovers handler panics into ERROR `panic: <value>`.
-- **Protects stdout**: at start it duplicates fd 1 for the protocol and
-  points `os.Stdout` at stderr, so a stray print cannot corrupt the
-  stream.
+- `Main` takes the real stdout for the protocol and points `os.Stdout` at
+  stderr, so a stray `fmt.Println` cannot corrupt the stream (Go-level
+  writes only — a cgo `printf` or a raw `syscall.Write(1, …)` still reaches
+  the protocol stream).
 - Exits 0 on stdin EOF after a bounded wait for handlers; exits 2 on a
   malformed frame or a write error (EPIPE means the host is gone).
 - Run by hand (stdin is a terminal), prints `this program is a Noxy

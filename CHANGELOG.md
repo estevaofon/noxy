@@ -37,6 +37,10 @@ plataforma que o usuário nunca compila.
 ### Changed
 - `noxy --get` substitui o diretório do pacote a cada execução (clone
   fresco): o caminho "existe → git pull" não atualizava nada sem `.git`.
+- `noxy --get` faz clone/checkout com `core.autocrlf=false` e `core.eol=lf`:
+  todo pacote (não só extensões) chega com os bytes do repositório em qualquer
+  SO — o hash do `noxy_ext.toml` no `noxy.sum` passa a ser portável entre
+  Windows e Linux (antes seguia o `autocrlf` da máquina).
 - `noxy_ext.toml` presente mas inválido faz o `--get` falhar (antes só
   pulava o registro no `noxy.sum`).
 - A verificação do `noxy.sum` cobre manifesto + o artefato que o backend

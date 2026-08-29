@@ -159,7 +159,7 @@ func (p *Plugin) dispatch(f frame) {
 		p.sendError(f.ID, "invalid arguments: "+err.Error())
 		return
 	}
-	if int(f.Fn) >= len(p.table) {
+	if uint64(f.Fn) >= uint64(len(p.table)) {
 		p.sendError(f.ID, fmt.Sprintf("unknown export index %d", f.Fn))
 		return
 	}

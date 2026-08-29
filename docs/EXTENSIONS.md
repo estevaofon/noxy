@@ -266,10 +266,10 @@ BenchmarkProcessConcurrent8/single-8             1734      1414920 ns/op
 BenchmarkProcessConcurrent8/concurrent-8        13261       182567 ns/op
 ```
 
-Reading: the empty round trip costs ≈45 µs, against ≈4 µs for wasm (the
-extra cost is the OS pipe/process boundary, not the protocol); a 1 KB
-payload adds almost nothing (≈50 µs); a 1 MB payload costs ≈3.9 ms,
-dominated by the copy across the pipe. `concurrent` mode delivers ≈7.7×
-the throughput of `single` mode against a handler that sleeps 1 ms, since
-`single` serializes calls on one instance while `concurrent` multiplexes
-them over the same process.
+Reading: empty round trip ≈45 µs; 1 KB round trip ≈50 µs against ≈4 µs for
+the wasm 1 KB round trip (the extra cost is the OS pipe/process boundary,
+not the protocol); 1 MB ≈3.9 ms, dominated by the copy across the pipe;
+`concurrent` mode delivers ≈7.7× the throughput of `single` mode with a
+handler that sleeps 1 ms, since `single` serializes calls on one instance
+while `concurrent` multiplexes them over the same process (Windows, 8
+CPUs).

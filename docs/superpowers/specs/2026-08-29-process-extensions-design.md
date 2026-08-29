@@ -342,7 +342,11 @@ no deadline — required for calls that block by design, such as
 The host cannot preempt code inside another process, so on expiry it asks:
 it sends CANCEL with the call's `id`, moves the id to a "cancelled, awaiting
 reply" set, and returns `extension 'x' timed out: terminal_read_key exceeded
-30000 ms` to the caller immediately. The plugin must answer the cancelled
+30000 ms` to the caller immediately. In `single` mode the caller itself
+waits for the plugin's reply to CANCEL (at most the cancel grace) before
+returning, because the mode's mutex must not be released while the plugin
+is still busy; in the other modes the wait happens in the background. The
+plugin must answer the cancelled
 call (RESULT or ERROR — the SDK cancels the handler's `context.Context` and
 replies with whatever comes back) within a cancel grace period (1 s, host
 constant); the host drops that reply. A plugin that does not reply in time
@@ -496,7 +500,9 @@ map[K]V Struct void` unchanged):
   `handshake_timeout_ms`, `restart`, `timeout_ms`, and `concurrency =
   "concurrent"`; `capabilities` stays rejected there (M2 suspended).
 - `restart = true` requires `concurrency = "stateless"`.
-- Timeouts are non-negative integers of milliseconds.
+- Timeouts are non-negative integers of milliseconds. `handshake_timeout_ms
+  = 0` means no handshake deadline (an author's choice; the default is
+  5000).
 
 Exports, `params`, `returns` and `stateful` mean exactly what they mean for
 wasm; the wrapper `.nx` and `signatureTypeName` translation are shared.
@@ -671,8 +677,9 @@ struct-shaped map either way (wasm §3).
 - Cancels the handler's `context.Context` on CANCEL and on stdin EOF; replies
   to cancelled calls with whatever the handler returns.
 - Recovers handler panics into ERROR `panic: <value>` (§6).
-- **Protects stdout**: at start it duplicates fd 1 for the protocol and
-  points `os.Stdout` at stderr, so a stray print cannot corrupt the stream.
+- **Protects stdout**: at start it keeps the real stdout for the protocol
+  and points `os.Stdout` at stderr, so a stray Go-level print cannot
+  corrupt the stream (raw fd-1 writes from cgo are not intercepted).
 - Exits 0 on stdin EOF after a bounded wait for handlers; exits 2 on a
   malformed frame or a write error (EPIPE means the host is gone).
 - Run by hand (stdin is a terminal), prints `this program is a Noxy

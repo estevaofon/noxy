@@ -54,9 +54,29 @@ func TestSysExitClosesProcessExtensions(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
-	if err != nil {
-		t.Fatalf("script must print the guest pid: %v", err)
+	// Falha precoce nao pode deixar o go run (e o guest) vivos.
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	type readResult struct {
+		line string
+		err  error
+	}
+	lineCh := make(chan readResult, 1)
+	go func() {
+		l, e := bufio.NewReader(stdout).ReadString('\n')
+		lineCh <- readResult{line: l, err: e}
+	}()
+	var line string
+	select {
+	case r := <-lineCh:
+		if r.err != nil {
+			t.Fatalf("script must print the guest pid: %v", r.err)
+		}
+		line = r.line
+	case <-time.After(60 * time.Second):
+		t.Fatal("noxy did not print the guest pid within 60s")
 	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("noxy exited with %v", err)

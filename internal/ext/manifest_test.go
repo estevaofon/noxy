@@ -161,6 +161,8 @@ func TestProcessManifestRejects(t *testing.T) {
 	mustFail(t, strings.Replace(p, "[binaries]\nlinux-amd64 = \"noxy-plugin-term-linux-amd64\"\nwindows-amd64 = \"noxy-plugin-term-windows-amd64.exe\"\n", "", 1), "binaries")
 	mustFail(t, strings.Replace(p, `linux-amd64 =`, `Linux_AMD64 =`, 1), "binaries key")
 	mustFail(t, strings.Replace(p, `"noxy-plugin-term-linux-amd64"`, `"dist/noxy-plugin-term"`, 1), "asset name")
+	mustFail(t, strings.Replace(p, `"noxy-plugin-term-linux-amd64"`, `".."`, 1), "asset name")
+	mustFail(t, strings.Replace(p, `"noxy-plugin-term-linux-amd64"`, `"."`, 1), "asset name")
 	mustFail(t, strings.Replace(p, `"noxy-plugin-term-windows-amd64.exe"`, `"noxy-plugin-term-windows-amd64"`, 1), ".exe")
 	mustFail(t, strings.Replace(p, `kind = "process"`, "kind = \"process\"\nwasm = \"ext.wasm\"", 1), "wasm")
 	mustFail(t, strings.Replace(p, `kind = "process"`, "kind = \"process\"\nmemory_max_mb = 64", 1), "memory_max_mb")

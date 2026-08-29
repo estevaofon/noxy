@@ -55,7 +55,7 @@ var manifestNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 var (
 	binaryKeyRE  = regexp.MustCompile(`^[a-z0-9]+-[a-z0-9]+$`)
-	assetNameRE  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	assetNameRE  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	capabilityRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 )
 
