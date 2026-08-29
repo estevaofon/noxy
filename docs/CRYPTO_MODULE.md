@@ -23,6 +23,7 @@ let hash: string = crypto.sha256(b"hello")
 crypto.random_bytes(n: int) -> bytes
 ```
 Gera `n` bytes criptograficamente seguros usando o CSPRNG do sistema operacional.
+`n <= 0` é erro de runtime (`crypto_random_bytes: n must be > 0, got 0`), nunca `null`.
 
 ```noxy
 let salt: bytes = crypto.random_bytes(16)  // 16 bytes aleatórios
@@ -44,6 +45,9 @@ Deriva uma chave criptográfica a partir de uma senha usando PBKDF2 com HMAC-SHA
 | `iteracoes` | Número de iterações | 100.000+ para senhas |
 | `tamanho` | Tamanho da chave em bytes | 32 para AES-256 |
 
+`iteracoes <= 0` ou `tamanho <= 0` é erro de runtime (`crypto_pbkdf2_sha256:
+iterations must be > 0, got 0`), nunca `null`.
+
 ```noxy
 let salt: bytes = crypto.random_bytes(16)
 let chave: bytes = crypto.pbkdf2_sha256("senha_forte", salt, 200000, 32)
@@ -57,7 +61,8 @@ crypto.aes256_gcm_encrypt(chave: bytes, texto: bytes) -> bytes
 ```
 Criptografa dados usando AES-256-GCM (Authenticated Encryption).
 
-- **Chave**: Deve ter exatamente 32 bytes
+- **Chave**: Deve ter exatamente 32 bytes — outro tamanho é erro de runtime
+  (`crypto_aes256_gcm_encrypt: key must be 32 bytes, got 5`), nunca `null`
 - **Retorno**: `nonce (12 bytes) + ciphertext + tag (16 bytes)`
 - **Nonce**: Gerado automaticamente (único por operação)
 
@@ -69,19 +74,29 @@ let dados: bytes = crypto.aes256_gcm_encrypt(chave, b"segredo")
 
 ### AES-256-GCM Decrypt
 ```noxy
-crypto.aes256_gcm_decrypt(chave: bytes, dados: bytes) -> bytes
+crypto.aes256_gcm_decrypt(chave: bytes, dados: bytes) -> bytes?
 ```
 Descriptografa e valida dados criptografados com AES-256-GCM.
 
-- Retorna `null` se a autenticação falhar (dados corrompidos ou chave errada)
+- Retorna `null` se a autenticação falhar (dados corrompidos, chave errada ou
+  dados curtos demais para conter o nonce) — por isso o tipo é `bytes?`
 - Valida automaticamente o MAC/tag para detectar adulteração
+- Chave que não tem 32 bytes é erro de runtime (`crypto_aes256_gcm_decrypt:
+  key must be 32 bytes, got 5`), não `null`: o `null` é sempre sobre os dados
 
 ```noxy
-let texto: bytes = crypto.aes256_gcm_decrypt(chave, dados)
+let texto: bytes? = crypto.aes256_gcm_decrypt(chave, dados)
 if texto == null then
     print("Erro: descriptografia falhou")
+else
+    print(to_str(texto))
 end
 ```
+
+Com `use crypto select aes256_gcm_decrypt` o tipo estático é `bytes?`:
+`let texto: bytes = aes256_gcm_decrypt(chave, dados)` é erro de compilação
+(`expected bytes, got bytes?`) — escreva `let texto = aes256_gcm_decrypt(chave, dados)`
+e teste `if texto != null then`.
 
 ---
 
@@ -105,8 +120,10 @@ let hex_cifrado: string = hex_encode(cifrado)
 
 // 5. Recuperar
 let cifrado_bytes: bytes = hex_decode(hex_cifrado)
-let senha_original: bytes = crypto.aes256_gcm_decrypt(chave, cifrado_bytes)
-print(to_str(senha_original))  // "fb_password_123"
+let senha_original: bytes? = crypto.aes256_gcm_decrypt(chave, cifrado_bytes)
+if senha_original != null then
+    print(to_str(senha_original))  // "fb_password_123"
+end
 ```
 
 ---

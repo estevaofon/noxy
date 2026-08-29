@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.23.2] - 2026-08-29
+
+Issue #121 — natives que devolviam `null` como dado sob um wrapper `-> T`
+da stdlib (crypto e net; bug desde 0.23.0, achado na revisão do #119). O
+null passava em silêncio pela forma `m.f()` e pelo `select` (o tipo do
+wrapper mentia) e só quebrava depois, longe da causa. Decisão por função:
+`T?` na assinatura quando o null é resultado de dado; erro tipado do native
+quando é argumento inválido. Nunca null silencioso.
+
+### Changed
+- **`crypto.aes256_gcm_decrypt` → `bytes?` (BREAKING)**: null é resultado
+  de dado — os dados não autenticam (chave errada, adulteração, curtos
+  demais para conter o nonce). Migração: com `use crypto select …`,
+  `let texto: bytes = aes256_gcm_decrypt(k, d)` vira `expected bytes, got
+  bytes?` — escreva `let texto = aes256_gcm_decrypt(k, d)` e teste
+  `if texto != null then`; pela forma `m.f()` (sem tipo estático) compila
+  como antes, e a forma honesta é `let texto: bytes? =
+  crypto.aes256_gcm_decrypt(k, d)`. `password_manager/server.nx` e
+  `test_crypto_debug.nx` migrados; `docs/CRYPTO_MODULE.md` já prometia o
+  null, agora o tipo diz o mesmo.
+- **Argumento inválido em crypto é erro de runtime, não null**:
+  `random_bytes(0)` → `native 'crypto_random_bytes' failed:
+  crypto_random_bytes: n must be > 0, got 0`; `pbkdf2_sha256` com
+  `iteracoes <= 0` ou `tamanho <= 0` (`iterations must be > 0`, `key length
+  must be > 0`); `aes256_gcm_encrypt`/`aes256_gcm_decrypt` com chave que não
+  tem 32 bytes (`key must be 32 bytes, got 5`). Aridade e tipo errados numa
+  chamada dinâmica também erram (`expects exactly 4 arguments, got 3`, `n
+  must be an int, got string`). Em 0.23.0/0.23.1 os quatro devolviam null
+  num `-> bytes`, e `length(null)` = 0 escondia o problema.
+- **`net.socket_recv`/`socket_send`/`accept` aceitam qualquer `Socket` com
+  `fd` int** — inclusive o `Socket(...)` que `net.poll` reconstrói (achado
+  da revisão: `socket_recv(poll(...).read[0], n)` devolvia null desde
+  0.22.0, porque o native só aceitava o map que o runtime constrói). A
+  identidade do socket é o fd registrado, não a forma do valor — o mesmo
+  `networkSocketDescriptor` de `settimeout`: fd fora do registro (socket
+  construído pelo programa, ou já fechado) segue `NetResult{ok: false,
+  error: "invalid socket"}` / `Socket(fd: -1, open: false)`, como sempre foi
+  para o map; valor que não tem a forma de socket é erro tipado `invalid
+  socket`; aridade errada erra (`net_recv expects exactly 2 arguments`).
+  `net.socket_close` também aceita a instância.
+- Varredura dos demais `builtins_*.go` (o #120 cobriu io/sqlite/time/
+  strings/sys só para null de dado): fora crypto/net, todo `return null`
+  alcançável está atrás de `-> any`, de wrapper `-> void`, já vem com erro
+  tipado, ou é aridade/asserção interna que o wrapper tipado nunca produz.
+  `time.parse*`/`sqlite.prepare` (#120) e `crypto.aes256_gcm_decrypt` são
+  os únicos `T?` da stdlib. Fora do escopo: `hex()`/`slice()` sem argumentos
+  (null de aridade num builtin tipado pelo compilador, sem wrapper).
+
+### Docs
+- `docs/CRYPTO_MODULE.md` (assinatura `bytes?`, erros por argumento,
+  exemplos com `bytes?`), spec §4.2 (lista dos `T?` da stdlib; argumento
+  inválido é erro, nunca null sob `-> T`).
+
 ## [0.23.1] - 2026-08-29
 
 Issue #118 — dois atritos do wrapper de extensão (`noxy_dynamodb`): uma

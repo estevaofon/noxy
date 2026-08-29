@@ -1,4 +1,4 @@
-[![noxy 0.23.1](https://img.shields.io/badge/noxy-0.23.1-blue)](CHANGELOG.md)
+[![noxy 0.23.2](https://img.shields.io/badge/noxy-0.23.2-blue)](CHANGELOG.md)
 
 # Noxy
 
@@ -222,7 +222,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.23.1
+Noxy REPL v0.23.2
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
