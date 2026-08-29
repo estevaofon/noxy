@@ -182,22 +182,28 @@ end
 // Funções de Criptografia Simétrica (Nativas)
 // ============================================
 
-// Gera n bytes criptograficamente seguros
+// Argumento inválido é erro de runtime do native (issue #121): nenhum destes
+// wrappers devolve null por argumento — `-> bytes` é verdade.
+
+// Gera n bytes criptograficamente seguros. n <= 0 é erro.
 func random_bytes(n: int) -> bytes
     return crypto_random_bytes(n)
 end
 
-// Deriva chave usando PBKDF2 com HMAC-SHA256
+// Deriva chave usando PBKDF2 com HMAC-SHA256. iteracoes <= 0 ou tamanho <= 0 é erro.
 func pbkdf2_sha256(senha: string, salt: bytes, iteracoes: int, tamanho: int) -> bytes
     return crypto_pbkdf2_sha256(senha, salt, iteracoes, tamanho)
 end
 
-// Criptografa com AES-256-GCM (retorna nonce + ciphertext + tag)
+// Criptografa com AES-256-GCM (retorna nonce + ciphertext + tag). Chave que
+// não tem 32 bytes é erro.
 func aes256_gcm_encrypt(chave: bytes, texto: bytes) -> bytes
     return crypto_aes256_gcm_encrypt(chave, texto)
 end
 
-// Descriptografa AES-256-GCM (valida autenticação)
-func aes256_gcm_decrypt(chave: bytes, dados: bytes) -> bytes
+// Descriptografa AES-256-GCM (valida autenticação). null é resultado de
+// dado: os dados não autenticam (chave errada, adulteração, curtos demais
+// para conter o nonce) — por isso `bytes?`. Chave que não tem 32 bytes é erro.
+func aes256_gcm_decrypt(chave: bytes, dados: bytes) -> bytes?
     return crypto_aes256_gcm_decrypt(chave, dados)
 end

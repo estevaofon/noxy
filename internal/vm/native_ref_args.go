@@ -42,11 +42,20 @@ func rejectRefArgs(name string, args []value.Value) error {
 // mao porque value.NewContextualNative nao o guarda, e sem ele
 // stampReadonlyArgs perderia o flag CoW da native convertida.
 func (vm *VM) defineValueNative(name string, fn value.NativeFunc) {
+	vm.defineValueNativeErr(name, func(args []value.Value) (value.Value, error) {
+		return fn(args), nil
+	})
+}
+
+// defineValueNativeErr e defineValueNative para a native de valor que
+// devolve erro tipado (issue #121: argumento invalido nas natives de cripto
+// e erro, nao null) — mesmo registro, mesma rejectRefArgs antes de fn.
+func (vm *VM) defineValueNativeErr(name string, fn func(args []value.Value) (value.Value, error)) {
 	native := value.NewContextualNative(name, func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if err := rejectRefArgs(name, args); err != nil {
 			return value.NewNull(), err
 		}
-		return fn(args), nil
+		return fn(args)
 	})
 	if obj, ok := native.Obj.(*value.ObjNative); ok {
 		obj.Name = name

@@ -110,7 +110,8 @@ func decrypt(hex_str: string) -> string
         return ""
     end
     let encrypted_bytes: bytes = hex_decode(hex_str)
-    let decrypted: bytes = crypto.aes256_gcm_decrypt(master_key, encrypted_bytes)
+    // aes256_gcm_decrypt -> bytes?: null quando os dados nao autenticam
+    let decrypted: bytes? = crypto.aes256_gcm_decrypt(master_key, encrypted_bytes)
     if decrypted == null then
         return "[ERRO: falha na descriptografia]"
     end

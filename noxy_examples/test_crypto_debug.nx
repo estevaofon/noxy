@@ -97,7 +97,8 @@ else
     sys.exit(1)
 end
 
-let decrypted2: bytes = crypto.aes256_gcm_decrypt(chave, back_to_bytes)
+// aes256_gcm_decrypt -> bytes?: null quando os dados nao autenticam
+let decrypted2: bytes? = crypto.aes256_gcm_decrypt(chave, back_to_bytes)
 if decrypted2 == null then
     print("FAIL: Descriptografia após hex falhou")
     sys.exit(1)
