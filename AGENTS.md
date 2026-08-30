@@ -147,7 +147,9 @@ hashes de todos em `noxy.sum`. Ver `docs/EXTENSIONS.md` e
 - Antes de chamar um comportamento de bug: grep em `CHANGELOG.md`,
   `noxy_examples/` e `*_test.go` — costuma ser decisão registrada. Designs
   datados em `docs/superpowers/specs/`, planos em `docs/superpowers/plans/`.
-- Docs por tema em `docs/`: `REF_SEMANTICS.md`, `concurrency.md`,
+- Docs por tema em `docs/`: `REF_SEMANTICS.md`, `language_references.md`
+  (precedentes das escolhas arquiteturais — leia antes de propor trocar o
+  modelo de valor/COW/`ref`), `concurrency.md`,
   `JSON_SUPPORT.md`, `PACKAGE_MANAGER.md`, `EXTENSIONS.md`, `HTTP_SERVER.md`,
   `CRYPTO_MODULE.md`. Todo `docs/*.md` passa pelo Liquid do Pages: `{{`
   literal só dentro de `<!-- {% raw %} -->`.
