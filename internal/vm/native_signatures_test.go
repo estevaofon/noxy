@@ -243,6 +243,30 @@ test_report(length(values) * 10 + removed)`)
 	testExpectedObject(t, 12, got)
 }
 
+func TestTypedPopWithIndexAndSwapRemove(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let values: int[] = [10, 20, 30, 40]
+let a: int = pop(ref values, 1)
+let b: int = swap_remove(ref values, 0)
+let c: int = pop(ref values)
+test_report(a * 1000 + b * 10 + c + length(values) * 100000)`)
+	// a=20 (pop(ref values, 1)), b=10 (swap_remove(ref values, 0) devolve o
+	// elemento original no indice, nao o que entra no lugar dele — Rust
+	// Vec::swap_remove), c=30 (pop(ref values) tira o ultimo), length=1.
+	testExpectedObject(t, 100000+20000+100+30, got)
+}
+
+func TestPopOutOfRangeAndEmptyAreRuntimeErrors(t *testing.T) {
+	err := interpretOrCompileErr(t, New(), "let values: int[] = [1]\nlet x: int = pop(ref values, 5)\n")
+	if err == nil || !strings.Contains(err.Error(), "array index out of bounds") {
+		t.Fatalf("err = %v, want array index out of bounds", err)
+	}
+	err = interpretOrCompileErr(t, New(), "let values: int[] = []\nlet x: int = pop(ref values)\n")
+	if err == nil || !strings.Contains(err.Error(), "pop from empty array") {
+		t.Fatalf("err = %v, want pop from empty array", err)
+	}
+}
+
 func TestTypedDeleteMutatesCallerMap(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let mapping: map[string, int] = {"a": 1}

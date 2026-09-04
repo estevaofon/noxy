@@ -339,16 +339,16 @@ func (c *Compiler) dropSharedAfterCall(event, again string) {
 }
 
 // pureBuiltins sao os builtins centrais (builtin_return_types.go, mais os
-// sem tipo de retorno util — print/eprint/iprint/eiprint, append/pop/delete,
-// range/keys/slice) que nunca executam codigo Noxy: uma chamada a eles nao
-// pode reatribuir raiz nenhuma, entao nao encerra narrowing (#118).
-// call_result, spawn_task, task_await e chamadas via `func` bare ficam fora:
-// reentram em codigo do programa. json_loads tambem: escreve atraves do ref
-// e pode por null na raiz.
+// sem tipo de retorno util — print/eprint/iprint/eiprint,
+// append/pop/delete/swap_remove, range/keys/slice) que nunca executam codigo
+// Noxy: uma chamada a eles nao pode reatribuir raiz nenhuma, entao nao
+// encerra narrowing (#118). call_result, spawn_task, task_await e chamadas
+// via `func` bare ficam fora: reentram em codigo do programa. json_loads
+// tambem: escreve atraves do ref e pode por null na raiz.
 var pureBuiltins = func() map[string]struct{} {
 	set := map[string]struct{}{
 		"print": {}, "eprint": {}, "iprint": {}, "eiprint": {},
-		"append": {}, "pop": {}, "delete": {},
+		"append": {}, "pop": {}, "delete": {}, "swap_remove": {},
 		"range": {}, "keys": {}, "slice": {},
 	}
 	for name := range coreBuiltinReturnTypes {

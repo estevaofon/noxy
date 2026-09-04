@@ -19,7 +19,8 @@ func (c *Compiler) compileBuiltinValueArgument(expression ast.Expression) (ast.N
 }
 
 // compileBuiltinRefArgument aplica R5 aos builtins com parametro ref:
-// append/pop/delete (arg 1), json_loads (arg 2), append em (ref T)[] (arg 2).
+// append/pop/delete/swap_remove (arg 1), json_loads (arg 2), append em
+// (ref T)[] (arg 2).
 // `position` e "argument N to 'nome'"; `expected` e o texto do tipo esperado.
 func (c *Compiler) compileBuiltinRefArgument(arg ast.Expression, position, expected string) (ast.NoxyType, error) {
 	refArg, err := c.compileRefArgument(arg)
@@ -43,7 +44,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 	}
 
 	name := ident.Value
-	if name != "append" && name != "pop" && name != "delete" && name != "json_loads" && name != "range" && name != "call_result" {
+	switch name {
+	case "append", "pop", "delete", "json_loads", "range", "call_result", "swap_remove":
+	default:
 		return false, nil, nil
 	}
 	if slot, _ := c.resolveLocal(name); slot != -1 {
@@ -59,18 +62,29 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		resultType, err := c.compileCallResult(call, emission)
 		return true, resultType, err
 	}
-	if name == "range" {
+	switch {
+	case name == "range":
 		if len(call.Arguments) < 1 || len(call.Arguments) > 3 {
 			return true, nil, fmt.Errorf(
 				"[line %d] range expects 1 to 3 arguments, got %d",
 				c.currentLine, len(call.Arguments),
 			)
 		}
-	} else if wantArity := map[string]int{"append": 2, "pop": 1, "delete": 2, "json_loads": 2}[name]; len(call.Arguments) != wantArity {
-		return true, nil, fmt.Errorf(
-			"[line %d] %s expects %d arguments, got %d",
-			c.currentLine, name, wantArity, len(call.Arguments),
-		)
+	case name == "pop":
+		// Issue #126 item 4: indice opcional (Python list.pop([i])).
+		if len(call.Arguments) < 1 || len(call.Arguments) > 2 {
+			return true, nil, fmt.Errorf(
+				"[line %d] pop expects 1 or 2 arguments, got %d",
+				c.currentLine, len(call.Arguments),
+			)
+		}
+	default:
+		if wantArity := map[string]int{"append": 2, "delete": 2, "json_loads": 2, "swap_remove": 2}[name]; len(call.Arguments) != wantArity {
+			return true, nil, fmt.Errorf(
+				"[line %d] %s expects %d arguments, got %d",
+				c.currentLine, name, wantArity, len(call.Arguments),
+			)
+		}
 	}
 	if _, _, err := c.Compile(call.Function); err != nil {
 		return true, nil, err
@@ -122,16 +136,39 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		}
 		c.emitCall(2, emission, false)
 		return true, builtinType("void"), nil
-	case "pop":
-		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'pop'", "ref T[]")
+	case "pop", "swap_remove":
+		// Issue #126 item 4: pop(ref xs[, i]) e swap_remove(ref xs, i)
+		// devolvem o elemento (Python list.pop, Rust Vec::swap_remove).
+		// Mesmo contrato de ref no arg 1; arg 2, quando presente, e um int
+		// por valor.
+		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to '"+name+"'", "ref T[]")
 		if err != nil {
 			return true, nil, err
 		}
 		array, ok := container.(*ast.ArrayType)
 		if !ok {
-			return true, nil, fmt.Errorf("[line %d] pop expects an array, got %s", c.currentLine, noxyTypeName(container))
+			return true, nil, fmt.Errorf("[line %d] %s expects an array, got %s", c.currentLine, name, noxyTypeName(container))
 		}
-		c.emitCall(1, emission, false)
+		if len(call.Arguments) == 2 {
+			index, err := c.compileBuiltinValueArgument(call.Arguments[1])
+			if err != nil {
+				return true, nil, err
+			}
+			intType := &ast.PrimitiveType{Name: "int"}
+			if _, explicitRef := asRefType(index); explicitRef {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to '%s': expected int, got %s%s",
+					c.currentLine, name, noxyTypeName(index), c.derefReadHint(intType, index, call.Arguments[1]),
+				)
+			}
+			if !c.areStrictTypesCompatible(intType, index) {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to '%s': expected int, got %s",
+					c.currentLine, name, noxyTypeName(index),
+				)
+			}
+		}
+		c.emitCall(len(call.Arguments), emission, false)
 		return true, array.ElementType, nil
 	case "delete":
 		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'delete'", "ref map")

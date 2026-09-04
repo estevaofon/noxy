@@ -1,0 +1,49 @@
+// test_pop_index.nx — pop com índice opcional e swap_remove (issue #126 item 4)
+use sys select exit
+
+func assert(cond: bool, name: string) -> void
+    if cond then
+        print("PASS: " + name)
+    else
+        print("FAIL: " + name)
+        exit(1)
+    end
+end
+
+let xs: int[] = [10, 20, 30, 40]
+let removed: int = pop(ref xs, 1)
+assert(removed == 20, "pop(ref xs, i) devolve o elemento")
+assert(length(xs) == 3, "pop(ref xs, i) encolhe o array")
+assert(xs[0] == 10 && xs[1] == 30 && xs[2] == 40, "pop(ref xs, i) preserva a ordem")
+
+let last: int = pop(ref xs)
+assert(last == 40 && length(xs) == 2, "pop(ref xs) tira o ultimo")
+
+let swapped: int = swap_remove(ref xs, 0)
+assert(swapped == 10, "swap_remove devolve o elemento")
+assert(length(xs) == 1 && xs[0] == 30, "swap_remove traz o ultimo para o buraco")
+
+// Valor semantico: a copia feita antes nao muda (CoW)
+let ys: int[] = [1, 2, 3]
+let copia: int[] = ys
+let _r: int = pop(ref ys, 0)
+assert(length(copia) == 3, "copia anterior nao ve a remocao")
+assert(length(ys) == 2, "original encolheu")
+
+// Loop de jogo: remover mortos no meio, do fim para o inicio
+struct Bala
+    x: int
+    viva: bool
+end
+let balas: Bala[] = [Bala(1, true), Bala(2, false), Bala(3, true), Bala(4, false)]
+let i: int = length(balas) - 1
+while i >= 0 do
+    if !balas[i].viva then
+        let _b: Bala = swap_remove(ref balas, i)
+    end
+    i = i - 1
+end
+assert(length(balas) == 2, "so as vivas ficam")
+assert(balas[0].viva && balas[1].viva, "todas vivas")
+
+print("test_pop_index: OK")
