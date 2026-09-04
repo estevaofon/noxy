@@ -674,15 +674,17 @@ dist2(local, local)
 	}
 }
 
-func TestModuleVariableAssignmentViaNamespaceIsCompileError(t *testing.T) {
-	root := writeModuleFiles(t, map[string]string{"calc.nx": "let sp: int = 0\nfunc push() -> void\n    sp = sp + 1\nend\n"})
-	_, err := runModuleProgram(t, root, "use calc\ncalc.push()\ncalc.sp = 5\n")
-	if err == nil || !strings.Contains(err.Error(), "cannot assign to 'calc.sp': module variables are read-only outside the module") || !strings.Contains(err.Error(), "hint: expose a function in 'calc'") {
-		t.Fatalf("error=%v", err)
+func TestModuleVariableAssignmentViaNamespaceIsLiveAndTyped(t *testing.T) {
+	// Issue #133: a regra "read-only outside the module" (0.11.0) saiu; a
+	// escrita e tipada e vista pelo modulo.
+	root := writeModuleFiles(t, map[string]string{"calc.nx": "let sp: int = 0\nfunc push() -> void\n    sp = sp + 1\nend\nfunc read() -> int\n    return sp\nend\n"})
+	reported, err := runModuleProgram(t, root, "use calc\ncalc.push()\ncalc.sp = 5\ncalc.push()\ntest_report(calc.read() * 10 + calc.sp)\n")
+	if err != nil || reported.Int() != 66 {
+		t.Fatalf("live typed write via namespace: %v / %v", reported, err)
 	}
-	reported, err := runModuleProgram(t, root, "use calc\ncalc.push()\ntest_report(calc.sp)\n")
-	if err != nil || reported.Int() != 1 {
-		t.Fatalf("live read via namespace: %v / %v", reported, err)
+	_, err = runModuleProgram(t, root, "use calc\ncalc.sp = \"x\"\n")
+	if err == nil || !strings.Contains(err.Error(), "type mismatch in assignment to 'calc.sp': expected int, got string") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

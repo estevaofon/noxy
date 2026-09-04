@@ -72,7 +72,11 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 		}
 		name := c.makeConstant(value.NewString(n.Member))
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
-		return unwrapRefType(c.memberType(owner, n.Member)), nil
+		fieldType := c.memberType(owner, n.Member)
+		if fieldType == nil && owner == nil {
+			fieldType = c.namespaceMemberType(n) // issue #133: `ref m.x`
+		}
+		return unwrapRefType(fieldType), nil
 
 	case *ast.IndexExpression:
 		container, err := c.compileBorrowBase(n.Left)
@@ -106,7 +110,9 @@ func (c *Compiler) lvalueStaticType(expr ast.Expression) (ast.NoxyType, bool) {
 	case *ast.MemberAccessExpression:
 		owner, ok := c.lvalueStaticType(n.Left)
 		if !ok {
-			return nil, false
+			// Issue #133: `m.x` com m alias de namespace (sem tipo proprio).
+			t := c.namespaceMemberType(n)
+			return t, t != nil
 		}
 		t := c.memberType(unwrapRefType(owner), n.Member)
 		return t, t != nil

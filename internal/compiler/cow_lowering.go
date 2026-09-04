@@ -87,6 +87,14 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		// memberType: dono resolvido pela declaracao (`File` ≡ `io.File`) e
 		// tipo do campo ja na visao do programa (issue #58 item 1).
 		t := c.memberType(leftType, n.Member)
+		if t == nil && leftType == nil {
+			// Issue #133: raiz `m.a` de um lvalue pelo namespace — o tipo do
+			// membro traduzido, para que `m.a.b = v` e `m.xs[i] = v` entrem
+			// no funil tipado. namespaceMemberType ja exige alias nao
+			// sombreado; leftType nil garante que o global e o marcador de
+			// namespace (um global tipado homonimo teria tipo).
+			t = c.namespaceMemberType(n)
+		}
 		if key, ok := stableKey(n); ok {
 			t = c.narrowType(key, t)
 		}
