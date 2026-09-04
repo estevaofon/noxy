@@ -1,5 +1,89 @@
 # Changelog
 
+## [Unreleased]
+
+Issue #126 — achados do [Deadrail](https://github.com/estevaofon/deadrail)
+(shooter em Noxy): sem `math`, sem tipo em `m.f()`, sem remoção por índice,
+aspas dentro de `{}` fechavam a f-string, e `map`/`chan`/`any`/`str` reservados
+fora do §1.2.
+
+### Added
+- **Módulo `math`** (§12): `sqrt`, `cbrt`, `pow`, `abs`, `floor`, `ceil`,
+  `round`, `trunc`, `fmod`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
+  `atan2`, `hypot`, `exp`, `log`, `log2`, `log10`, `min`, `max`, `clamp`
+  (`float`), `abs_int`/`min_int`/`max_int`/`clamp_int` (`int`), `PI`, `E`.
+  Domínio inválido (`sqrt(-1.0)`, `log(0.0)`, `fmod(x, 0.0)`, `pow(0.0,
+  -1.0)`, `pow(-8.0, 0.5)`, `clamp` com `lo > hi`) é erro de runtime tipado
+  (`math.sqrt: domain error (x < 0), got x=-1`), como `1.0 / 0.0` e a #121 —
+  nunca NaN; overflow para `Inf` não é checado. `round` afasta de zero na
+  metade (Go). Um `math.nx` local continua sombreando a stdlib (regra de
+  resolução do `use`): `noxy_examples/math.nx` virou
+  `math_module_example.nx` por isso; o exemplo novo é
+  `noxy_examples/test_math_stdlib.nx`.
+- **`pop(ref arr, i)` e `swap_remove(ref arr, i) -> T`** (§10): remoção
+  por índice devolvendo o elemento — `pop` ganha o índice opcional de
+  `list.pop([i])` do Python (preserva a ordem); `swap_remove` é builtin
+  próprio (Rust `Vec::swap_remove`), O(1), não preserva ordem. Mesmo funil
+  de CoW do `append`. `delete` continua só de map, como em Go.
+- **Aspas iguais ao delimitador dentro de `{}` de f-string** (§9, regra da
+  PEP 701): `f"n = {fmt("%03d", n)}"` compila. O lexer conta a profundidade
+  de chaves; `{{`/`}}` e `f'...'` seguem iguais. Chave de expressão aberta no
+  fim da linha é `unclosed brace in f-string` com hint. Token ilegal do lexer
+  (string não terminada) agora aparece como `SyntaxError: <razão>` em vez de
+  `invalid syntax "..."`.
+- **Keyword em posição de nome** (`let map: int`, `use src.map as map`) é
+  **um** erro, `'map' is a keyword and cannot be used as a name` + hint, e o
+  parser sincroniza no fim da linha em vez de cascatear `invalid syntax`.
+  Vale para as palavras de tipo do §1.2 (`map`, `chan`, `any`, `int`,
+  `float`, `string`, `bool`, `bytes`, `void`, `ref`, ...) em posição de nome.
+
+### Changed (BREAKING)
+- **`m.f(...)`, `m.x` e `m.T(...)` pelo namespace têm tipo estático** (§3,
+  §11): a assinatura que o módulo declara — a mesma que `use m select f`
+  registra — traduzida para a visão do programa (`V` de `vec.nx` vira
+  `vec.V`; regra da #58). A chamada por namespace passa a conferir aridade,
+  tipo de argumento e retorno, e `let v = m.roll(6)` infere.
+
+  | Programa | Antes | Agora |
+  |---|---|---|
+  | `let v = m.roll(6)` | `cannot infer type for 'v'` | `v: int` |
+  | `let s: string = m.roll(6)` (`roll -> int`) | compilava; falhava em runtime | `type mismatch … expected string, got int` |
+  | `m.roll("x")`, `m.roll(1, 2)` | compilava; falhava em runtime | erro de argumento / aridade |
+  | `let t: bytes = crypto.aes256_gcm_decrypt(k, d)` | compilava e recebia null em silêncio (0.23.2) | `expected bytes, got bytes?` |
+  | `let n = counter.total` | `cannot infer` | `n: int` (leitura viva, como antes) |
+  | membro cujo tipo o programa não sabe nomear | dinâmico | dinâmico (inalterado) |
+
+  Migração: corrigir o tipo escrito (o erro diz qual é), ou `let t: bytes? =
+  crypto.aes256_gcm_decrypt(k, d)` e testar `!= null` para os `T?` da stdlib
+  (`time.parse*`, `sqlite.prepare`, `crypto.aes256_gcm_decrypt`). A classe
+  "tipo desconhecido" da fronteira dinâmica (#122) fica reduzida a plugin,
+  `any` e membro não nomeável. A mensagem `cannot infer type` não cita mais
+  "a namespace member 'm.x'": passa a dizer "a module member the program
+  cannot name".
+  - Corrigidos programas do corpus que estavam errados sob o tipo novo:
+    `noxy_examples/test_crypto_debug.nx` (`bytes` → `bytes?`),
+    `sqlite_demo.nx` (`Statement` → `Statement?` + teste de null),
+    `noxy_examples/test_file_hash.nx` (`io.write` com `bytes` →
+    `io.write_bytes`), `password_manager/server.nx`
+    (`http_server.serve` passa a exigir `ref server`).
+  - Correção de solidez achada na revisão adversarial: um argumento `ref`
+    cujo tipo do alvo o programa não sabe nomear (struct de um terceiro
+    módulo, campo de instância genérica) volta a passar pelo caminho
+    validado `OP_CALL` em vez de `OP_CALL_STATIC` — fecha um buraco
+    pré-existente em que `use m select f` + `f(ref h.b)` podia escrever um
+    valor do tipo errado através da referência; `function 'setstr' argument
+    1: expected ref string, got ref B` volta a ser levantado.
+- **`pop` em posição inexistente é erro de runtime** (§10): `pop(ref xs)`
+  em array vazio devolvia `null` sob um retorno tipado `T` — o "null de
+  aridade num builtin tipado" que a 0.23.2 deixou pendente. Agora é `pop
+  from empty array`; índice fora de `[0, length)` é `array index out of
+  bounds`, como indexar. Regra da #121: argumento inválido é erro, nunca
+  null sentinela. Migração: `if length(xs) > 0 then let v = pop(ref xs)
+  end` no lugar de testar o resultado contra `null`.
+- **`str` deixa de ser palavra reservada**: era `TYPE_STR` em `token.go`
+  sem nenhum uso no parser. `let str: string = ...` compila. `any`, `map` e
+  `chan` entram na tabela §1.2, onde faltavam.
+
 ## [0.23.2] - 2026-08-29
 
 Issue #121 — natives que devolviam `null` como dado sob um wrapper `-> T`

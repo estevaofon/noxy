@@ -49,10 +49,15 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 |----------|----------|
 | Declarations | `let`, `func`, `struct` |
 | Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in`, `defer`, `when`, `case`, `default`, `try` |
-| Types | `int`, `float`, `string`, `bool`, `void`, `ref`, `bytes`, `func` |
+| Types | `int`, `float`, `string`, `bool`, `void`, `bytes`, `any`, `ref`, `func`, `map`, `chan` |
 | Literals | `true`, `false`, `null` |
 | Modules | `use`, `select`, `as` |
 | Specials | `zeros` |
+
+`map` and `chan` are type constructors (`map[K, V]`, `chan T`), `any` is the
+dynamic type (§2.1); all three are reserved everywhere, so they cannot name a
+variable, a parameter or a module (`use src.map` → `'map' is a keyword and
+cannot be used as a name`). `str` is not a keyword.
 
 ### 1.3 Operators
 
@@ -721,8 +726,14 @@ annotated form:
 | a call to a `void` function | there is no value to bind | return a value, or annotate |
 | an expression of type `any` | the dynamic boundary must be spelled out (`any` *nested* in a type, such as `map[string, any]`, is an ordinary type and is inferred faithfully) | `let v: any = parse(s)` |
 | a name whose type is not known yet (`let a = b` with `b` declared later; also a later un-annotated global read inside the body of a generic function that a top-level `let y = id(...)` instantiates) | no static type at that point — top-level inferred `let`s are typed in file order | annotate, or reorder |
-| a namespace member — `m.x`, `m.f(...)` after `use m` | member access through a namespace carries no static type today | `use m select f` (imported names keep their declared type), or annotate |
 | a builtin outside the typed core set (§10) — `json_parse`, `task_await`, `make_chan`, ... | its result is `any` or has no static type | annotate (`let v: any = json_parse(s)`) |
+
+A member reached through a namespace import — `m.f(...)`, `m.x`, `m.T(...)`
+after `use m` — has the type the module declared for it, translated to the
+program's view exactly as a field of a module struct is (§11), so `let v =
+m.roll(6)` binds `v: int` and `let p = vec.norm(v)` binds `p: vec.V`. Only a
+member whose type the program cannot name (a struct of a third module that
+was never imported) stays dynamic and needs an annotation.
 
 The core builtins whose result type never varies — `length`, `to_str`,
 `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`, `hex`,
@@ -2065,6 +2076,10 @@ print(9223372036854775807 + 1)   // -9223372036854775808
 Division by zero and `%` by zero are runtime errors; overflow is not. When a
 range matters, check it before the operation (or work in `float`).
 
+`%` is defined for `int` only; the float remainder, roots, powers, rounding
+and trigonometry live in the `math` module (§12): `math.fmod(x, y)`,
+`math.sqrt(x)`, `math.floor(x)`, `math.atan2(y, x)`.
+
 ### Comparison
 `>`, `<`, `>=`, `<=`, `==`, `!=`
 
@@ -2174,14 +2189,22 @@ syntax error — there is no `:spec` mini-language, so `f"{name:>10}"` reports:
 ```
 
 Use `fmt` for width and precision: `fmt("%6.2f", value)`, or interpolate the
-call itself (see the quoting rule below): `f'{fmt("%10s", x)}'`.
+call itself: `f"{fmt("%10s", x)}"`.
 
-**Double quotes inside `{}`** close an `f"..."` string: use a single-quoted
-f-string when the interpolated expression contains a string literal.
+**Quotes inside `{}`.** An interpolated expression may contain string
+literals delimited by the same quote as the f-string (the Python 3.12 rule,
+PEP 701): the lexer tracks brace depth, so the inner quote opens a nested
+literal instead of closing the f-string.
 
 ```noxy
-print(f'{"a"}')               // a
+let n: int = 7
+print(f"n = {fmt("%03d", n)}")   // n = 007
+print(f"{"a"}")                   // a
 ```
+
+A `{` that is still open at the end of the line is reported where it starts:
+`SyntaxError: unclosed brace in f-string` with the hint `every '{' that starts
+an expression needs a matching '}'; write '{{' for a literal brace`.
 
 **An expression that starts with `{`** (a map literal) needs a space, otherwise
 the `{{` is read as an escape — the same rule as Python:
@@ -2269,7 +2292,17 @@ included.
 ### Collections
 - `length(arr_or_map) -> int`
 - `append(ref arr, val)`
-- `pop(ref arr)`
+- `pop(ref arr) -> T`, `pop(ref arr, i) -> T`: removes and returns the last
+  element, or the element at index `i` (the rest shifts down, order
+  preserved, O(n)) — Python's `list.pop([i])`. A position that does not
+  exist is a **runtime error**: `pop from empty array` for `pop(ref arr)` on
+  an empty array, `array index out of bounds` for an index outside
+  `[0, length)`. Test `length(arr) > 0` first; `pop` never returns `null`.
+- `swap_remove(ref arr, i) -> T`: removes and returns the element at `i` by
+  moving the **last** element into its place (O(1), order not preserved) —
+  what a game loop wants when order does not matter. Same range rule.
+  Both go through the same copy-on-write path as `append`: a copy taken
+  before the call does not see the removal. `delete` remains map-only.
 - `keys(map)`: Returns array of keys.
 - `has_key(map, key)`: Returns bool.
 - `delete(ref map, key)`
@@ -2476,6 +2509,27 @@ compile error — `let x: string = a.f.fd` (`expected string, got int`),
 `a.f.fd = "x"`, `inc(ref a.f.path)` against `inc(r: ref int)` — instead of a
 runtime failure.
 
+### Member access through a namespace
+
+`m.f(...)`, `m.x` and `m.T(...)` after `use m` (or `use m as alias`) are
+**statically typed** with the declaration the module exports — the same
+signature `use m select f` binds — translated to the program's view by the
+table above (`V` inside `vec.nx` reads as `vec.V`, or `V` after `select V`).
+Consequently a namespace call is checked like any typed call: arity,
+argument types (`argument 1 to 'm.roll': expected int, got string`) and
+result type (`let s: string = m.roll(6)` is `expected string, got int`), and
+`let v = m.roll(6)` infers `v: int`. A `T?` result is checked too: `let t:
+bytes = crypto.aes256_gcm_decrypt(k, d)` is `expected bytes, got bytes?`. A
+member whose type the program cannot name (a struct of a module it never
+imported, an instance of a module's generic struct) stays dynamic. A generic
+template is still not reachable through the namespace — import it with
+`select`. The module object itself has no type: `m` alone is not a value.
+
+A member that only reaches `m` by re-export — `m` itself does `use x select
+*` and never declares the member — stays dynamic through `m.g`, conservatively;
+`use m select g`, naming the re-exporting module directly, still resolves
+`g` to its declared type.
+
 ### Unknown type names
 
 Every type name in a `let` annotation, a parameter, a return type or a struct
@@ -2512,6 +2566,7 @@ Noxy comes with a comprehensive standard library. Available modules include:
 |--------|-------------|
 | `io` | Input/Output operations (read/write files) |
 | `strings` | String manipulation (upper, lower, replace, split) |
+| `math` | Floating-point math: roots, powers, rounding, trigonometry, `min`/`max`/`clamp`, `PI`/`E` |
 | `time` | Time and Date functions |
 | `sys` | System interactions (argv, exit, env) |
 | `net` | Network sockets (TCP/UDP) |
@@ -2521,6 +2576,46 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `sqlite` | SQLite database support |
 | `rand` | Random number generation |
 | `errors` | `Failure`, `Result<T>`, `Ok`/`Err`/`Fail`/`empty_failure` — the error-as-data vocabulary (§7) |
+
+### Math (`math`)
+
+Thin wrappers over the host's `math` library, all on `float`; angles are in
+radians. `PI` and `E` are module bindings (`math.PI`, or `use math select
+PI`).
+
+| Function | Contract |
+|----------|----------|
+| `sqrt(x)`, `cbrt(x)` | square and cube root; `sqrt` needs `x >= 0` |
+| `pow(x, y)` | `x` to the power `y`; errors for `x == 0 && y < 0` and for `x < 0` with a non-integer `y` |
+| `abs(x)` | absolute value |
+| `floor(x)`, `ceil(x)`, `round(x)`, `trunc(x)` | rounding, as `float`; `round` sends halves **away from zero** (`round(2.5) = 3.0`, `round(-2.5) = -3.0`), like Go — use `to_int` for an `int` |
+| `fmod(x, y)` | remainder with the sign of `x` (`fmod(-7.0, 3.0) = -1.0`); `y == 0` is an error |
+| `sin(x)`, `cos(x)`, `tan(x)`, `asin(x)`, `acos(x)`, `atan(x)` | trigonometry; `asin`/`acos` need `-1 <= x <= 1` |
+| `atan2(y, x)` | angle of the vector `(x, y)` in `(-PI, PI]` — note the argument order, as in C |
+| `hypot(x, y)` | `sqrt(x*x + y*y)` without intermediate overflow |
+| `exp(x)`, `log(x)`, `log2(x)`, `log10(x)` | exponential and logarithms; `log*` need `x > 0` |
+| `min(a, b)`, `max(a, b)`, `clamp(x, lo, hi)` | on `float`; `clamp` needs `lo <= hi` |
+| `abs_int(x)`, `min_int(a, b)`, `max_int(a, b)`, `clamp_int(x, lo, hi)` | the same on `int` (no overloading in the language, hence the suffix) |
+
+**Domain errors raise.** An argument outside the function's domain is a
+runtime error, never `NaN` — the same rule as `1.0 / 0.0` (§8) and as
+Python's `math`:
+
+```text
+Runtime error: native 'math_sqrt' failed: math.sqrt: domain error (x < 0), got x=-1
+```
+
+Overflow is not checked: `exp(1000.0)` and `pow(10.0, 400.0)` return `+Inf`,
+as `int` arithmetic wraps (§8). Arguments must be `float`: `sqrt(4)` is a
+compile-time error (`expected float, got int`); write `sqrt(4.0)` or
+`sqrt(to_float(n))`.
+
+```noxy
+use math
+let ang: float = math.atan2(dir.y, dir.x)     // radians → degrees: * 180.0 / math.PI
+let d: float = math.hypot(dx, dy)
+let speed: float = math.clamp(v, 0.0, MAX)
+```
 
 ### I/O (`io`)
 
