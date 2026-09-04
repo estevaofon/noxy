@@ -403,6 +403,53 @@ Em `parseFString` (linha ~1047), o erro residual passa a carregar o mesmo hint:
 			}
 ```
 
+- [ ] **Step 5b: Parser — a varredura de `{...}` também pula literais aninhados**
+
+O laço de `parseFString` que procura a `}` correspondente (`parser.go:1036-1048`) conta chaves sem olhar aspas: com o lexer novo, `f"{"}"}!"` chega ao parser como `{"}"}!` e a `}` dentro das aspas fecharia a expressão cedo demais. Substituir o laço por:
+
+```go
+			braceCount := 1
+			j := i + 1
+		scan:
+			for ; j < len(literal); j++ {
+				switch literal[j] {
+				case '{':
+					braceCount++
+				case '}':
+					braceCount--
+					if braceCount == 0 {
+						break scan
+					}
+				case '"', '\'':
+					// Literal aninhado (PEP 701, issue #126): a expressao pode
+					// conter strings; chaves dentro delas nao contam.
+					j = skipNestedQuoted(literal, j)
+				}
+			}
+```
+
+e adicionar, após `parseFString`:
+
+```go
+// skipNestedQuoted devolve o indice da aspa que fecha o literal de string
+// aberto em literal[start] (pulando `\x`), ou len(literal)-1 se ele nao
+// fecha — o chamador entao cai em "unclosed brace".
+func skipNestedQuoted(literal string, start int) int {
+	quote := literal[start]
+	for k := start + 1; k < len(literal); k++ {
+		switch literal[k] {
+		case '\\':
+			k++
+		case quote:
+			return k
+		}
+	}
+	return len(literal) - 1
+}
+```
+
+Caso de teste correspondente (adicionar à lista do Step 6): `"f\"{\"}\"}!\"\n"` deve compilar sem erro, e no teste ponta a ponta do Step 7 acrescentar `{"}"}` à f-string com saída `n = 007 ! }`.
+
 - [ ] **Step 6: Atualizar testes do parser**
 
 Em `internal/parser/parser_test.go`, `TestFStringBraceEscapesAndTrailingTokenError`: substituir o comentário e a lista de fontes por:
@@ -434,9 +481,9 @@ Adicionar em `internal/vm/builtins_core_test.go` (ou, se não houver um lugar de
 ```go
 // Issue #126 item 3: aspas duplas dentro de `{}` de uma f"..." (PEP 701).
 func TestFStringDoubleQuotesInsideBracesRunEndToEnd(t *testing.T) {
-	got := captureVMSource(t, "let n: int = 7\ntest_report(f\"n = {fmt(\"%03d\", n)} {\"!\"}\")\n")
-	if s, _ := got.Obj.(string); s != "n = 007 !" {
-		t.Fatalf("got %q, want %q", s, "n = 007 !")
+	got := captureVMSource(t, "let n: int = 7\ntest_report(f\"n = {fmt(\"%03d\", n)} {\"!\"} {\"}\"}\")\n")
+	if s, _ := got.Obj.(string); s != "n = 007 ! }" {
+		t.Fatalf("got %q, want %q", s, "n = 007 ! }")
 	}
 }
 ```
