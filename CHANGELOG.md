@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.23.4] - 2026-09-04
 
 Issue #133 — namespace tipado, parte 2: escrita pelo namespace e "tipo é a
 declaração, não a grafia".
