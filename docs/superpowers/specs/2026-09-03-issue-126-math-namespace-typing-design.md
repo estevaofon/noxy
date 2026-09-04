@@ -1,4 +1,4 @@
-# stdlib `math`, `m.f()` tipado por namespace, `remove_at`/`swap_remove`, aspas em `{}` de f-string e keywords do §1.2 (issue #126)
+# stdlib `math`, `m.f()` tipado por namespace, `pop` com índice/`swap_remove`, aspas em `{}` de f-string e keywords do §1.2 (issue #126)
 
 **Data:** 2026-09-03 · **Branch:** `feat/issue-126-math-namespace-typing`, a partir de `develop` (pós #125, v0.23.2)
 **Status:** aprovado, em implementação neste PR · **Issue:** [#126](https://github.com/estevaofon/noxy/issues/126) · **Relação:** #58 item 1 (tradução de tipo módulo → programa, `programViewType`), #121 (argumento inválido é erro tipado, nunca sentinela), #122 (contrato de retorno dos natives; a classe "tipo desconhecido" encolhe com o item 2).
@@ -126,14 +126,16 @@ Mensagem residual: `unclosed brace in f-string` ganha `hint: every '{' that star
 
 Escapes `\{` já existentes seguem iguais (não entram na contagem: são consumidos por `readEscape`).
 
-## 4. `remove_at(ref arr, i) -> T` e `swap_remove(ref arr, i) -> T`
+## 4. `pop(ref arr[, i]) -> T` com índice opcional e `swap_remove(ref arr, i) -> T`
 
-Precedentes: Rust `Vec::remove(i)` / `Vec::swap_remove(i)` (devolvem o elemento; `panic` fora do intervalo), Swift `remove(at:)`, C# `RemoveAt`. Go mantém `delete` só de map e põe remoção de slice em `slices.Delete`, então `delete` polimórfico fica descartado. Devolver o elemento é consistente com `pop`.
+Decisão (revisão do design, 2026-09-03): **não há `remove_at`**. `pop` passa a aceitar um índice opcional, como `list.pop([i])` do Python — `pop(ref xs)` tira o último, `pop(ref xs, i)` tira o de índice `i` preservando a ordem — e `swap_remove(ref arr, i)` fica como builtin próprio, porque O(1) sem preservar ordem é operação distinta (Rust `Vec::swap_remove`) e nenhuma linguagem funde as duas. Os dois devolvem o elemento removido.
 
-- **VM** (`builtins_collections.go`, `defineCollectionBuiltins`): `DefineContextualNativeWithSignature` com `Params: [{IsRef: true, TypeName: "ref array"}, {TypeName: "int"}]`, `ReturnType: "any"`. Corpo: `unicizeThroughRefValue(args[0])` (único funil de CoW, como `pop`), índice `VAL_INT`, `i < 0 || i >= len` → `error("array index out of bounds")` (mesma mensagem da indexação), remove (`remove_at`: `copy` + encolhe; `swap_remove`: troca com o último e encolhe), `value.Release` do removido (`// RC: o array solta a posse durável`), devolve o valor.
-- **Compilador** (`builtin_calls.go`): entram no filtro de nomes e na tabela de aridade (2). Argumento 1 por `compileBuiltinRefArgument(..., "ref T[]")`, erro `remove_at expects an array, got map[string, int]`; argumento 2 por `compileBuiltinValueArgument` com `int` estrito. Retorno `array.ElementType`, como `pop`. Entram em `pureBuiltins` (narrowing) e no snapshot do registry. Um `func remove_at` do programa sombreia o builtin (regra do `range`).
-- **Testes**: `builtins_collections_test.go` (unidade, inclusive fora do intervalo e negativo), `cow_builtins_test.go` (`TestRemoveAtUnicizesSharedTarget`, `TestSwapRemoveUnicizesSharedTarget`, molde de `TestPopUnicizesSharedTarget`), `native_signatures_test.go` (assinaturas fixadas), `builtin_calls_test.go` (contratos de aridade, endereçabilidade e tipo), `container_owners_test.go` para RC de elemento composto removido, `noxy_examples/type_errors/remove_at_without_ref.nx`.
-- **Spec §10 Collections**: duas linhas novas, com a nota de ordem (`swap_remove` não preserva ordem, O(1)).
+**Posição inexistente é erro de runtime**, inclusive `pop(ref xs)` em array vazio, que hoje devolve `null` sob um retorno tipado `T`. É a regra da #121 (argumento inválido é erro, nunca null sentinela) e fecha o "null de aridade num builtin tipado" que o CHANGELOG 0.23.2 deixou pendente. Mensagens: `pop from empty array` (sem índice, array vazio — Python: `pop from empty list`) e `array index out of bounds` (índice fora de `[0, len)`, negativo incluído — a mesma mensagem da indexação; sem índice negativo à la Python). Quebra deliberada: `Changed (BREAKING)` com Antes/Agora; programa que testava `pop(ref xs) != null` passa a testar `length(xs) > 0` antes.
+
+- **VM** (`builtins_collections.go`, `defineCollectionBuiltins`): `pop` com `NativeSignature{Arity: 1, Variadic: true, Params: [{IsRef: true, "ref array"}, {"int"}], ReturnType: "any"}` (`Variadic` + `Params` de tamanho 2 = 1 a 2 argumentos, a regra que `defer.go` já aplica); `swap_remove` com `{Arity: 2, Params: [{IsRef: true, "ref array"}, {"int"}], ReturnType: "any"}`. Corpo comum: `unicizeThroughRefValue(args[0])` (único funil de CoW), índice `VAL_INT` (`index must be an int, got string`), aridade (`pop: expects 1 or 2 arguments, got 3`; `swap_remove: expects exactly 2 arguments, got 1`), remoção (`pop`: `copy` + encolhe; `swap_remove`: troca com o último e encolhe), `value.Release` do removido, devolve o valor. Argumento que não é array é erro tipado.
+- **Compilador** (`builtin_calls.go`): `pop` aceita 1 ou 2 argumentos (`pop expects 1 or 2 arguments, got 3`, no molde do `range`); argumento 2, quando presente, por `compileBuiltinValueArgument` com `int` estrito. `swap_remove` entra no filtro de nomes, aridade 2, mesmo contrato. Retorno `array.ElementType` para os dois. `swap_remove` entra em `pureBuiltins` (narrowing) e no snapshot do registry; `pop` já está. Um `func swap_remove` do programa sombreia o builtin (regra do `range`).
+- **Testes**: `builtins_collections_test.go` (unidade: `pop` com índice, `pop` em vazio erra, índice fora do intervalo e negativo erram, índice string erra, aridade), `cow_builtins_test.go` (`TestPopWithIndexUnicizesSharedTarget`, `TestSwapRemoveUnicizesSharedTarget`), `native_signatures_test.go` (assinaturas fixadas, `pop` variádica), `builtin_calls_test.go` (contratos), `container_owners_test.go` para RC do composto removido, `noxy_examples/type_errors/swap_remove_without_ref.nx`. Varredura do corpus por `pop(` em array possivelmente vazio (`my_stack.nx`, `brainfuck.nx`, `language_semantics_test.nx`, `KandR_in_noxy/`).
+- **Spec §10 Collections**: `pop(ref arr[, i])` reescrito; linha nova para `swap_remove`, com a nota de ordem.
 
 ## 5. Keywords fora do §1.2 e keyword em posição de nome
 
@@ -151,10 +153,10 @@ Precedentes: Rust `Vec::remove(i)` / `Vec::swap_remove(i)` (devolvem o elemento;
 | spec §3 | linha da tabela "Write instead" do namespace: some (o caso deixa de ser erro); nota de que `m.f()` e `m.x` têm o tipo declarado pelo módulo, traduzido |
 | spec §8 | ponteiro: `%` é de `int`; `fmod`, `floor` etc. em `math` (§12) |
 | spec §9 | remove "Double quotes inside `{}`"; exemplo com aspas iguais; hint novo |
-| spec §10 | `remove_at`, `swap_remove` |
+| spec §10 | `pop(ref arr[, i])`, `swap_remove`; quebra do `pop` em vazio |
 | spec §11 | seção "Member access through a namespace": tipo do membro, tabela de tradução (reusa a da #58), quebra |
 | spec §12 | linha `math` na tabela; seção `### Math (\`math\`)` com assinaturas, domínio e `round` |
-| CHANGELOG | `Added` (math, remove_at/swap_remove, f-string, `str` livre, mensagem de keyword) e `Changed (BREAKING)` (item 2) com Antes/Agora e migração |
+| CHANGELOG | `Added` (math, `pop` com índice, `swap_remove`, f-string, `str` livre, mensagem de keyword) e `Changed (BREAKING)` (item 2; `pop` em array vazio erra) com Antes/Agora e migração |
 | README, `docs/index.html` | `math` nas listas de módulos |
 
 Sem bump de versão neste PR (fica para a release).

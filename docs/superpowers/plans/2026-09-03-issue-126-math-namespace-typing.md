@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fechar os cinco achados do Deadrail: módulo `math` na stdlib, `m.f()`/`m.x` tipados pelo namespace, `remove_at`/`swap_remove`, aspas dentro de `{}` em f-string, e `any`/`map`/`chan` no §1.2 com `str` livre e erro único para keyword em posição de nome.
+**Goal:** Fechar os cinco achados do Deadrail: módulo `math` na stdlib, `m.f()`/`m.x` tipados pelo namespace, `pop` com índice opcional e `swap_remove`, aspas dentro de `{}` em f-string, e `any`/`map`/`chan` no §1.2 com `str` livre e erro único para keyword em posição de nome.
 
 **Architecture:** Cada item é independente e segue o padrão que o repositório já usa para aquela camada: native `<mod>_nome` + wrapper `.nx` (stdlib), `compileBuiltinCall` + `unicizeThroughRefValue` (builtins mutáveis), `readQuoted` (lexer), `expectPeek` (parser), `importedBindingType` + `programViewType` (compilador). Item 2 é o único que altera comportamento observável de programas que hoje compilam (quebra deliberada, documentada).
 
@@ -21,7 +21,7 @@
 - `gofmt -d` limpo nos arquivos tocados; `git diff --numstat` sem arquivo reescrito por EOL.
 - Todo `docs/*.md` passa pelo Liquid do Pages: `{{` literal só dentro de `<!-- {% raw %} -->`.
 - Domínio inválido em `math` é erro de runtime (`math.sqrt: domain error (x < 0), got -1`), nunca NaN. Overflow para `±Inf` não é checado.
-- `delete` continua só de map. `remove_at`/`swap_remove` devolvem o elemento removido; fora do intervalo é `array index out of bounds`.
+- `delete` continua só de map. `pop(ref arr[, i])` e `swap_remove(ref arr, i)` devolvem o elemento removido; posição inexistente é erro de runtime (`pop from empty array` para `pop` sem índice em array vazio; `array index out of bounds` para índice fora de `[0, len)`), nunca `null`.
 - Item 2: tipo do membro de namespace = `importedBindingType` traduzido por `programViewType`; parte não nomeável ⇒ tipo inteiro `nil` (dinâmico), nunca meio-tipado.
 
 ---
@@ -502,39 +502,57 @@ git commit -m "feat(lexer): aspas iguais ao delimitador dentro de {} de f-string
 
 ---
 
-### Task 4: natives `remove_at` e `swap_remove` na VM
+### Task 4: `pop(ref arr[, i])` com índice opcional e native `swap_remove`
 
 **Files:**
-- Modify: `internal/vm/builtins_collections.go` (após o bloco de `pop`, linha ~226)
-- Modify: `internal/vm/builtins_registry_test.go:13-49` (snapshot)
-- Test: `internal/vm/builtins_collections_test.go`, `internal/vm/cow_builtins_test.go`
+- Modify: `internal/vm/builtins_collections.go:193-226` (bloco de `pop`)
+- Modify: `internal/vm/builtins_registry_test.go:13-49` (snapshot: `swap_remove`)
+- Modify: `internal/vm/builtins_collections_test.go:126-140` (expectativas antigas de `pop`)
+- Modify: `internal/vm/native_signatures_test.go` (assinatura fixada de `pop`)
+- Test: `internal/vm/builtins_collections_test.go`
 
 **Interfaces:**
-- Produces: natives globais `remove_at(ref arr, i) -> elemento` e `swap_remove(ref arr, i) -> elemento`, assinatura `{Arity: 2, Params: [{IsRef: true, "ref array"}, {"int"}], ReturnType: "any"}`; erro `array index out of bounds` fora do intervalo.
+- Produces: native `pop(ref arr[, i]) -> elemento` com `NativeSignature{Arity: 1, Variadic: true, Params: [{IsRef: true, "ref array"}, {"int"}], ReturnType: "any"}`; native `swap_remove(ref arr, i) -> elemento` com `{Arity: 2, Params: [{IsRef: true, "ref array"}, {"int"}], ReturnType: "any"}`. Erros: `pop from empty array` (sem índice, vazio), `array index out of bounds` (índice fora de `[0, len)`), `<nome>: index must be an int, got <tipo>`, `pop: expects 1 or 2 arguments, got N`, `swap_remove: expects exactly 2 arguments, got N`.
+
+Decisão registrada na spec (§4, revisão de 2026-09-03): **não há `remove_at`**. `pop` ganha índice opcional como `list.pop([i])` do Python; `pop` em posição inexistente — inclusive `pop(ref xs)` em array vazio, que hoje devolve `null` sob retorno tipado `T` — vira erro de runtime (regra da #121). `swap_remove` continua builtin próprio (Rust `Vec::swap_remove`).
 
 - [ ] **Step 1: Testes que falham**
 
-Adicionar em `internal/vm/builtins_collections_test.go`:
+Em `internal/vm/builtins_collections_test.go`, no teste existente (linhas ~126-140), trocar as duas expectativas antigas de `pop` em array vazio e de `pop` sobre não-ref:
 
 ```go
-// Issue #126 item 4: remocao por indice. Rust Vec::remove/swap_remove, Swift
-// remove(at:) — devolvem o elemento; fora do intervalo e erro, como indexar.
-func TestRemoveAtAndSwapRemoveBuiltins(t *testing.T) {
+	assertBuiltinValue(t, callBuiltin(t, machine, "pop", arrayRef), value.NewInt(1))
+	assertBuiltinArray(t, storedArray, nil)
+	// Issue #126 (regra da #121): pop em array vazio e erro, nao null sentinela.
+	if _, err := requireBuiltin(t, machine, "pop").Invoke(machine, []value.Value{arrayRef}); err == nil || !strings.Contains(err.Error(), "pop from empty array") {
+		t.Fatalf("pop on empty array: err = %v, want pop from empty array", err)
+	}
+```
+
+e, para o `invalidArray` (argumento que não é ref), trocar `assertBuiltinValue(t, callBuiltin(t, machine, "pop", invalidArray), value.NewNull())` por uma chamada via `Invoke` esperando erro (qualquer erro; o texto vem de `unicizeThroughRefValue`), mantendo `assertBuiltinArray(t, invalidArray, []value.Value{value.NewInt(9)})` logo depois. Se a suíte tiver outra asserção de `pop` vazio → null (`grep -n '"pop"' internal/vm/*_test.go`), aplicar a mesma troca.
+
+Adicionar a função nova:
+
+```go
+// Issue #126 item 4: pop com indice opcional (Python list.pop([i])) e
+// swap_remove (Rust Vec::swap_remove). Devolvem o elemento; posicao
+// inexistente e erro, como indexar.
+func TestPopWithIndexAndSwapRemoveBuiltins(t *testing.T) {
 	machine := New()
 	stored := value.NewArray([]value.Value{value.NewInt(10), value.NewInt(20), value.NewInt(30), value.NewInt(40)})
 	ref := pointerReference(&stored)
 
-	assertBuiltinValue(t, callBuiltin(t, machine, "remove_at", ref, value.NewInt(1)), value.NewInt(20))
+	assertBuiltinValue(t, callBuiltin(t, machine, "pop", ref, value.NewInt(1)), value.NewInt(20))
 	assertBuiltinArray(t, stored, []value.Value{value.NewInt(10), value.NewInt(30), value.NewInt(40)})
 
 	assertBuiltinValue(t, callBuiltin(t, machine, "swap_remove", ref, value.NewInt(0)), value.NewInt(10))
 	assertBuiltinArray(t, stored, []value.Value{value.NewInt(40), value.NewInt(30)})
 
-	assertBuiltinValue(t, callBuiltin(t, machine, "remove_at", ref, value.NewInt(1)), value.NewInt(30))
+	assertBuiltinValue(t, callBuiltin(t, machine, "pop", ref), value.NewInt(30))
 	assertBuiltinValue(t, callBuiltin(t, machine, "swap_remove", ref, value.NewInt(0)), value.NewInt(40))
 	assertBuiltinArray(t, stored, nil)
 
-	for _, name := range []string{"remove_at", "swap_remove"} {
+	for _, name := range []string{"pop", "swap_remove"} {
 		stored = value.NewArray([]value.Value{value.NewInt(1)})
 		ref = pointerReference(&stored)
 		for _, idx := range []int64{1, -1} {
@@ -547,39 +565,235 @@ func TestRemoveAtAndSwapRemoveBuiltins(t *testing.T) {
 		if _, err := requireBuiltin(t, machine, name).Invoke(machine, []value.Value{ref, value.NewString("0")}); err == nil || !strings.Contains(err.Error(), "index must be an int, got string") {
 			t.Fatalf("%s with string index: err = %v", name, err)
 		}
-		if _, err := requireBuiltin(t, machine, name).Invoke(machine, []value.Value{ref}); err == nil || !strings.Contains(err.Error(), "expects exactly 2 arguments, got 1") {
-			t.Fatalf("%s arity: err = %v", name, err)
+	}
+	if _, err := requireBuiltin(t, machine, "pop").Invoke(machine, []value.Value{ref, value.NewInt(0), value.NewInt(0)}); err == nil || !strings.Contains(err.Error(), "pop: expects 1 or 2 arguments, got 3") {
+		t.Fatalf("pop arity: err = %v", err)
+	}
+	if _, err := requireBuiltin(t, machine, "swap_remove").Invoke(machine, []value.Value{ref}); err == nil || !strings.Contains(err.Error(), "swap_remove: expects exactly 2 arguments, got 1") {
+		t.Fatalf("swap_remove arity: err = %v", err)
+	}
+}
+```
+
+(`strings` no import do arquivo: conferir com `head -12`.)
+
+Em `internal/vm/native_signatures_test.go`, no teste que fixa as assinaturas (`TestBuiltinNativeSignatures`, ~linha 85), atualizar a entrada de `pop` para `Arity: 1, Variadic: true, Params: [{IsRef: true, TypeName: "ref array"}, {IsRef: false, TypeName: "int"}], ReturnType: "any"` e adicionar `swap_remove` com `Arity: 2` e os mesmos `Params`/`ReturnType`, no formato das entradas existentes.
+
+Os testes de CoW e ponta a ponta (compilam fonte Noxy com `pop(ref a, 1)`/`swap_remove`) ficam para a Task 5, que ensina o compilador.
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `go test ./internal/vm -run 'TestPopWithIndexAndSwapRemoveBuiltins|TestBuiltinNativeSignatures' -count=1`
+Expected: FAIL (`builtin "swap_remove" is not registered`; `pop` com 2 args devolve null).
+
+- [ ] **Step 3: Implementar**
+
+Em `internal/vm/builtins_collections.go`, substituir o bloco de `pop` (de `popSignature := ...` até o fechamento do `DefineContextualNativeWithSignature("pop", ...)`) por:
+
+```go
+	// Issue #126 item 4: pop com indice opcional (Python list.pop([i])) e
+	// swap_remove (Rust Vec::swap_remove, O(1) sem preservar ordem). Posicao
+	// inexistente — inclusive pop em array vazio, que devolvia null sob um
+	// retorno tipado T — e erro de runtime (regra da #121). `delete`
+	// continua so de map, como em Go.
+	popSignature := value.NativeSignature{
+		Arity:    1,
+		Variadic: true, // 1 ou 2 argumentos: Variadic + len(Params) == 2 (defer.go)
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+			{IsRef: false, TypeName: "int"},
+		},
+		ReturnType: "any",
+	}
+	vm.DefineContextualNativeWithSignature("pop", popSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) < 1 || len(args) > 2 {
+			return value.NewNull(), fmt.Errorf("pop: expects 1 or 2 arguments, got %d", len(args))
+		}
+		return removeArrayElement(context, "pop", args, false)
+	})
+	swapRemoveSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+			{IsRef: false, TypeName: "int"},
+		},
+		ReturnType: "any",
+	}
+	vm.DefineContextualNativeWithSignature("swap_remove", swapRemoveSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 2 {
+			return value.NewNull(), fmt.Errorf("swap_remove: expects exactly 2 arguments, got %d", len(args))
+		}
+		return removeArrayElement(context, "swap_remove", args, true)
+	})
+```
+
+E, no fim do arquivo:
+
+```go
+// removeArrayElement e o corpo comum de pop (sem indice: o ultimo; com
+// indice: aquela posicao, preservando a ordem, O(n)) e swap_remove (troca com
+// o ultimo, O(1)). Passa pelo mesmo funil de CoW de append/delete
+// (unicizeThroughRefValue). Posicao inexistente e erro com a mesma mensagem
+// da indexacao; argumento invalido e erro tipado, nunca null (#121).
+func removeArrayElement(context value.NativeContext, name string, args []value.Value, swap bool) (value.Value, error) {
+	machine, contextErr := nativeVM(context)
+	if contextErr != nil {
+		return value.NewNull(), contextErr
+	}
+	if len(args) == 2 && args[1].Type != value.VAL_INT {
+		return value.NewNull(), fmt.Errorf("%s: index must be an int, got %s", name, runtimeTypeName(args[1]))
+	}
+	arrVal, err := machine.unicizeThroughRefValue(args[0])
+	if err != nil {
+		return value.NewNull(), err
+	}
+	arr, ok := arrVal.Obj.(*value.ObjArray)
+	if arrVal.Type != value.VAL_OBJ || !ok {
+		return value.NewNull(), fmt.Errorf("%s: expects an array, got %s", name, runtimeTypeName(arrVal))
+	}
+	last := len(arr.Elements) - 1
+	idx := int64(last)
+	if len(args) == 2 {
+		idx = args[1].Int()
+	}
+	if last < 0 && len(args) == 1 {
+		return value.NewNull(), fmt.Errorf("pop from empty array")
+	}
+	if idx < 0 || idx > int64(last) {
+		return value.NewNull(), fmt.Errorf("array index out of bounds")
+	}
+	removed := arr.Elements[idx]
+	if swap {
+		arr.Elements[idx] = arr.Elements[last]
+	} else {
+		copy(arr.Elements[idx:], arr.Elements[idx+1:])
+	}
+	arr.Elements[last] = value.NewNull()
+	arr.Elements = arr.Elements[:last]
+	value.Release(removed) // RC: o array solta a posse duravel do elemento removido; o chamador recebe o valor
+	return removed, nil
+}
+```
+
+Conferir que `fmt` está importado em `builtins_collections.go`; se não, adicionar. O `pop` antigo devolvia `null` para argumento não-ref (`unicizeThroughRefValue` com erro) — agora o erro sobe; é o comportamento desejado (#121).
+
+Em `internal/vm/builtins_registry_test.go`, inserir `"swap_remove"` em ordem lexicográfica (entre `"strings_to_upper"`/último `strings_*` e `"sys_argv"`); o teste imprime a ordem esperada se errar.
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `go test ./internal/vm -run 'TestPopWithIndexAndSwapRemoveBuiltins|TestBuiltinNativeSignatures|TestBuiltinRegistrySnapshot|TestBuiltinSourceLayout|TestEveryNativeIsRegisteredExactlyOnce|Collection' -count=1`
+Expected: PASS. Depois `go test ./internal/vm -count=1` inteiro: qualquer teste que dependia de `pop` vazio → `null` deve ser atualizado para esperar o erro (listar no relatório).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add internal/vm/builtins_collections.go internal/vm/builtins_collections_test.go internal/vm/native_signatures_test.go internal/vm/builtins_registry_test.go
+git commit -m "feat(vm): pop com índice opcional e swap_remove — posição inexistente é erro, inclusive pop em array vazio (issue #126)"
+```
+
+---
+
+### Task 5: `pop(ref arr[, i])` e `swap_remove` no compilador
+
+**Files:**
+- Modify: `internal/compiler/builtin_calls.go:46` (filtro), `:69` (aridade), `:125-134` (case `pop`)
+- Modify: `internal/compiler/narrowing.go:347-352` (`pureBuiltins`)
+- Test: `internal/compiler/builtin_calls_test.go`, `internal/compiler/function_conformance_examples_test.go`, `internal/vm/native_signatures_test.go`, `internal/vm/cow_builtins_test.go`, `noxy_examples/type_errors/swap_remove_without_ref.nx`, `noxy_examples/test_pop_index.nx`
+
+**Interfaces:**
+- Consumes: natives da Task 4.
+- Produces: `pop(ref xs)`, `pop(ref xs, i)` e `swap_remove(ref xs, i)` compilam com tipo de retorno `T` para `xs: T[]`.
+
+- [ ] **Step 1: Testes que falham**
+
+Em `internal/compiler/builtin_calls_test.go`, ver como `TestMutatingBuiltinTypeContracts` (linha ~327) e `TestMutatingBuiltinArityContracts` (~284) chamam o helper (nome e assinatura; tabela `{src, want}` ou chamadas diretas) e adicionar no mesmo estilo:
+
+```go
+	// Issue #126 item 4
+	{`let xs: int[] = [1]
+swap_remove(xs, 0)`, "argument 1 to 'swap_remove': expected ref T[], got int[]"},
+	{`let m: map[string, int] = {}
+swap_remove(ref m, 0)`, "swap_remove expects an array, got map[string, int]"},
+	{`let xs: int[] = [1]
+swap_remove(ref xs, "0")`, "argument 2 to 'swap_remove': expected int, got string"},
+	{`let xs: int[] = [1]
+pop(ref xs, "0")`, "argument 2 to 'pop': expected int, got string"},
+	{`let xs: int[] = [1]
+swap_remove(ref xs)`, "swap_remove expects 2 arguments, got 1"},
+	{`let xs: int[] = [1]
+pop(ref xs, 0, 0)`, "pop expects 1 or 2 arguments, got 3"},
+	{`let xs: string[] = ["a"]
+let n: int = pop(ref xs, 0)`, "expected int, got string"},
+```
+
+Se `TestMutatingBuiltinArityContracts` fixa `pop expects 1 arguments, got 2` para `pop(ref xs, 0)`, esse caso antigo sai (agora é válido) — substituí-lo pelo `pop(ref xs, 0, 0)` acima.
+
+Caso positivo:
+
+```go
+func TestPopWithIndexAndSwapRemoveReturnElementType(t *testing.T) {
+	src := `let xs: string[] = ["a", "b", "c"]
+let first = pop(ref xs, 0)
+let last = pop(ref xs)
+let only = swap_remove(ref xs, 0)
+`
+	for _, name := range []string{"first", "last", "only"} {
+		if got := inferredLetType(t, src, name); got != "string" {
+			t.Fatalf("%s: %s, want string", name, got)
 		}
 	}
 }
 ```
 
-(`strings` já é importado nesse arquivo? conferir com `head -12 internal/vm/builtins_collections_test.go`; adicionar `"strings"` ao import se faltar.)
-
-Adicionar em `internal/vm/cow_builtins_test.go`, após `TestDeleteUnicizesSharedTarget`:
+Em `internal/vm/native_signatures_test.go`, após `TestTypedMutatingBuiltinsPreserveSourceSyntax`:
 
 ```go
-func TestRemoveAtUnicizesSharedTarget(t *testing.T) {
+func TestTypedPopWithIndexAndSwapRemove(t *testing.T) {
+	got := runTypedFunctionProgram(t, `
+let values: int[] = [10, 20, 30, 40]
+let a: int = pop(ref values, 1)
+let b: int = swap_remove(ref values, 0)
+let c: int = pop(ref values)
+test_report(a * 1000 + b * 10 + c + length(values) * 100000)`)
+	testExpectedObject(t, 100000+20000+400+30, got)
+}
+
+func TestPopOutOfRangeAndEmptyAreRuntimeErrors(t *testing.T) {
+	err := interpretOrCompileErr(t, New(), "let values: int[] = [1]\nlet x: int = pop(ref values, 5)\n")
+	if err == nil || !strings.Contains(err.Error(), "array index out of bounds") {
+		t.Fatalf("err = %v, want array index out of bounds", err)
+	}
+	err = interpretOrCompileErr(t, New(), "let values: int[] = []\nlet x: int = pop(ref values)\n")
+	if err == nil || !strings.Contains(err.Error(), "pop from empty array") {
+		t.Fatalf("err = %v, want pop from empty array", err)
+	}
+}
+```
+
+Em `internal/vm/cow_builtins_test.go`, após `TestDeleteUnicizesSharedTarget`:
+
+```go
+func TestPopWithIndexUnicizesSharedTarget(t *testing.T) {
 	machine, original := newMarkingVM()
 	if err := interpretVMSource(t, machine, `let a: int[]
 append(ref a, 1)
 append(ref a, 2)
 append(ref a, 3)
 test_mark_shared(a)
-let removed: int = remove_at(ref a, 1)
+let removed: int = pop(ref a, 1)
 `); err != nil {
 		t.Fatalf("vm error: %v", err)
 	}
 	after, _ := machine.GetGlobal("a")
 	if after.Obj == original.Obj {
-		t.Fatal("remove_at em array Shared deveria ter clonado (CoW)")
+		t.Fatal("pop com indice em array Shared deveria ter clonado (CoW)")
 	}
 	if n := len(original.Obj.(*value.ObjArray).Elements); n != 3 {
 		t.Fatalf("o objeto original não pode ter sido mutado, tem %d elementos", n)
 	}
 	got := after.Obj.(*value.ObjArray).Elements
 	if len(got) != 2 || got[0].Int() != 1 || got[1].Int() != 3 {
-		t.Fatalf("o clone deve refletir o remove_at, tem %v", got)
+		t.Fatalf("o clone deve refletir o pop(ref a, 1), tem %v", got)
 	}
 	removed, _ := machine.GetGlobal("removed")
 	if removed.Int() != 2 {
@@ -613,10 +827,10 @@ let removed: int = swap_remove(ref a, 0)
 
 // O elemento composto removido continua vivo no chamador: o array solta a
 // posse (Release) e o valor devolvido e o mesmo objeto, sem double free.
-func TestRemoveAtReleasesCompositeElementOnce(t *testing.T) {
+func TestPopWithIndexReleasesCompositeElementOnce(t *testing.T) {
 	machine := New()
 	if err := interpretVMSource(t, machine, `let xs: int[][] = [[1], [2, 2], [3]]
-let mid: int[] = remove_at(ref xs, 1)
+let mid: int[] = pop(ref xs, 1)
 let n: int = length(mid) + length(xs)
 `); err != nil {
 		t.Fatalf("vm error: %v", err)
@@ -628,189 +842,27 @@ let n: int = length(mid) + length(xs)
 }
 ```
 
-Os dois últimos testes só passam depois da Task 5 (o compilador ainda não conhece `remove_at`); escrevê-los agora e marcá-los como dependentes: rodar só o de unidade neste passo.
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `go test ./internal/vm -run TestRemoveAtAndSwapRemoveBuiltins -count=1`
-Expected: FAIL com `builtin "remove_at" is not registered`.
-
-- [ ] **Step 3: Implementar**
-
-Em `internal/vm/builtins_collections.go`, logo após o `vm.DefineContextualNativeWithSignature("pop", ...)` (antes do fechamento de `defineCollectionBuiltins`), adicionar:
-
-```go
-	// Issue #126 item 4: remocao por indice (Rust Vec::remove/swap_remove,
-	// Swift remove(at:)). `delete` continua so de map, como em Go.
-	removeSignature := value.NativeSignature{
-		Arity: 2,
-		Params: []value.ParamInfo{
-			{IsRef: true, TypeName: "ref array"},
-			{IsRef: false, TypeName: "int"},
-		},
-		ReturnType: "any",
-	}
-	vm.DefineContextualNativeWithSignature("remove_at", removeSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
-		return removeArrayElement(context, "remove_at", args, false)
-	})
-	vm.DefineContextualNativeWithSignature("swap_remove", removeSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
-		return removeArrayElement(context, "swap_remove", args, true)
-	})
-```
-
-E, no fim do arquivo:
-
-```go
-// removeArrayElement e o corpo comum de remove_at (preserva a ordem, O(n)) e
-// swap_remove (troca com o ultimo, O(1)). Passa pelo mesmo funil de CoW de
-// pop (unicizeThroughRefValue); fora do intervalo e a mesma mensagem da
-// indexacao. Argumento invalido e erro tipado, nunca null (#121).
-func removeArrayElement(context value.NativeContext, name string, args []value.Value, swap bool) (value.Value, error) {
-	machine, contextErr := nativeVM(context)
-	if contextErr != nil {
-		return value.NewNull(), contextErr
-	}
-	if len(args) != 2 {
-		return value.NewNull(), fmt.Errorf("%s: expects exactly 2 arguments, got %d", name, len(args))
-	}
-	if args[1].Type != value.VAL_INT {
-		return value.NewNull(), fmt.Errorf("%s: index must be an int, got %s", name, runtimeTypeName(args[1]))
-	}
-	arrVal, err := machine.unicizeThroughRefValue(args[0])
-	if err != nil {
-		return value.NewNull(), err
-	}
-	arr, ok := arrVal.Obj.(*value.ObjArray)
-	if arrVal.Type != value.VAL_OBJ || !ok {
-		return value.NewNull(), fmt.Errorf("%s: expects an array, got %s", name, runtimeTypeName(arrVal))
-	}
-	idx := args[1].Int()
-	if idx < 0 || idx >= int64(len(arr.Elements)) {
-		return value.NewNull(), fmt.Errorf("array index out of bounds")
-	}
-	removed := arr.Elements[idx]
-	last := len(arr.Elements) - 1
-	if swap {
-		arr.Elements[idx] = arr.Elements[last]
-	} else {
-		copy(arr.Elements[idx:], arr.Elements[idx+1:])
-	}
-	arr.Elements[last] = value.NewNull()
-	arr.Elements = arr.Elements[:last]
-	value.Release(removed) // RC: o array solta a posse duravel do elemento removido (como pop)
-	return removed, nil
-}
-```
-
-Conferir que `fmt` está importado em `builtins_collections.go` (`head -15`); se não, adicionar.
-
-Em `internal/vm/builtins_registry_test.go`, inserir `"remove_at"` entre `"range"` e `"slice"`, e `"swap_remove"` entre `"strings_to_upper"` (ou o último `strings_*`) e `"sys_argv"` — a lista é ordenada; rodar o teste diz a posição exata se errar.
-
-- [ ] **Step 4: Rodar e ver passar**
-
-Run: `go test ./internal/vm -run 'TestRemoveAtAndSwapRemoveBuiltins|TestBuiltinRegistrySnapshot|TestBuiltinSourceLayout|TestEveryNativeIsRegisteredExactlyOnce' -count=1`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add internal/vm/builtins_collections.go internal/vm/builtins_collections_test.go internal/vm/cow_builtins_test.go internal/vm/builtins_registry_test.go
-git commit -m "feat(vm): natives remove_at e swap_remove — remoção por índice pelo funil de CoW de pop (issue #126)"
-```
-
----
-
-### Task 5: `remove_at`/`swap_remove` no compilador
-
-**Files:**
-- Modify: `internal/compiler/builtin_calls.go:46` (filtro), `:69` (aridade), `:125-134` (adicionar case)
-- Modify: `internal/compiler/narrowing.go:347-352` (`pureBuiltins`)
-- Test: `internal/compiler/builtin_calls_test.go`, `internal/vm/native_signatures_test.go`, `noxy_examples/type_errors/remove_at_without_ref.nx`
-
-**Interfaces:**
-- Consumes: natives da Task 4.
-- Produces: `remove_at(ref xs, i)` e `swap_remove(ref xs, i)` compilam com tipo de retorno `T` para `xs: T[]`.
-
-- [ ] **Step 1: Testes que falham**
-
-Em `internal/compiler/builtin_calls_test.go`, ver como `TestMutatingBuiltinTypeContracts` (linha ~327) chama o helper (nome e assinatura, ex.: `requireCompileError(t, src, want)` ou tabela `{src, want}`); adicionar no mesmo estilo os casos:
-
-```go
-	// Issue #126 item 4
-	{`let xs: int[] = [1]
-remove_at(xs, 0)`, "argument 1 to 'remove_at': expected ref T[], got int[]"},
-	{`let m: map[string, int] = {}
-remove_at(ref m, 0)`, "remove_at expects an array, got map[string, int]"},
-	{`let xs: int[] = [1]
-remove_at(ref xs, "0")`, "argument 2 to 'remove_at': expected int, got string"},
-	{`let xs: int[] = [1]
-swap_remove(ref xs)`, "swap_remove expects 2 arguments, got 1"},
-	{`let xs: string[] = ["a"]
-let n: int = remove_at(ref xs, 0)`, "expected int, got string"},
-```
-
-E um caso positivo (no teste de contratos que compila sem erro, ou novo):
-
-```go
-func TestRemoveAtReturnsElementType(t *testing.T) {
-	src := `let xs: string[] = ["a", "b"]
-let first = remove_at(ref xs, 0)
-let last = swap_remove(ref xs, 0)
-`
-	if got := inferredLetType(t, src, "first"); got != "string" {
-		t.Fatalf("first: %s, want string", got)
-	}
-	if got := inferredLetType(t, src, "last"); got != "string" {
-		t.Fatalf("last: %s, want string", got)
-	}
-}
-```
-
-Em `internal/vm/native_signatures_test.go`, após `TestTypedMutatingBuiltinsPreserveSourceSyntax`:
-
-```go
-func TestTypedRemoveAtAndSwapRemove(t *testing.T) {
-	got := runTypedFunctionProgram(t, `
-let values: int[] = [10, 20, 30, 40]
-let a: int = remove_at(ref values, 1)
-let b: int = swap_remove(ref values, 0)
-test_report(a * 1000 + b * 10 + length(values))`)
-	testExpectedObject(t, 20000+100+2, got)
-}
-
-func TestRemoveAtOutOfRangeIsRuntimeError(t *testing.T) {
-	err := interpretOrCompileErr(t, New(), `let values: int[] = [1]
-let x: int = remove_at(ref values, 5)
-`)
-	if err == nil || !strings.Contains(err.Error(), "array index out of bounds") {
-		t.Fatalf("err = %v, want array index out of bounds", err)
-	}
-}
-```
-
-Também localizar em `native_signatures_test.go` o teste que fixa as assinaturas de `pop`/`delete` (`TestBuiltinNativeSignatures`, ~linha 85) e adicionar `remove_at` e `swap_remove` com `Arity: 2`, `Params: [{IsRef: true, TypeName: "ref array"}, {IsRef: false, TypeName: "int"}]`, `ReturnType: "any"` no mesmo formato das entradas existentes.
-
-Criar `noxy_examples/type_errors/remove_at_without_ref.nx` (mesmo formato de `ref_builtin_without_ref.nx` — copiar o cabeçalho de comentário dele):
+Criar `noxy_examples/type_errors/swap_remove_without_ref.nx` (mesmo formato de `ref_builtin_without_ref.nx` — copiar o cabeçalho de comentário dele):
 
 ```noxy
-// remove_at exige `ref` no argumento 1 (spec §2.3 R5) — erro de compilação:
-// argument 1 to 'remove_at': expected ref T[], got int[]
+// swap_remove exige `ref` no argumento 1 (spec §2.3 R5) — erro de compilação:
+// argument 1 to 'swap_remove': expected ref T[], got int[]
 let xs: int[] = [1, 2, 3]
-let v: int = remove_at(xs, 1)
+let v: int = swap_remove(xs, 1)
 ```
 
-E registrar na tabela de `TestTypedFunctionInvalidConformanceExamplesFail` em `internal/compiler/function_conformance_examples_test.go` (linha ~48, após a entrada `"ref builtin without ref"`):
+E registrar na tabela de `TestTypedFunctionInvalidConformanceExamplesFail` em `internal/compiler/function_conformance_examples_test.go` (linha ~48, após `"ref builtin without ref"`):
 
 ```go
-		{"remove_at without ref", "remove_at_without_ref.nx", "argument 1 to 'remove_at': expected ref T[], got int[]\n  hint: use 'ref xs'"},
+		{"swap_remove without ref", "swap_remove_without_ref.nx", "argument 1 to 'swap_remove': expected ref T[], got int[]\n  hint: use 'ref xs'"},
 ```
 
 (`conformanceDiagnosticMatches` compara por sufixo, então o hint faz parte do `want`.)
 
 - [ ] **Step 2: Rodar e ver falhar**
 
-Run: `go test ./internal/compiler -run 'TestMutatingBuiltinTypeContracts|TestRemoveAtReturnsElementType' -count=1`
-Expected: FAIL (`remove_at` compila como global desconhecido / "undefined global").
+Run: `go test ./internal/compiler -run 'TestMutatingBuiltin|TestPopWithIndexAndSwapRemoveReturnElementType|Conformance' -count=1`
+Expected: FAIL (`swap_remove` é global desconhecido; `pop(ref xs, 0)` dá `pop expects 1 arguments, got 2`).
 
 - [ ] **Step 3: Implementar**
 
@@ -820,21 +872,49 @@ Linha 46, trocar o filtro por:
 
 ```go
 	switch name {
-	case "append", "pop", "delete", "json_loads", "range", "call_result", "remove_at", "swap_remove":
+	case "append", "pop", "delete", "json_loads", "range", "call_result", "swap_remove":
 	default:
 		return false, nil, nil
 	}
 ```
 
-Linha 69, tabela de aridade: `map[string]int{"append": 2, "pop": 1, "delete": 2, "json_loads": 2, "remove_at": 2, "swap_remove": 2}`.
-
-Após o `case "pop":`, adicionar:
+Linhas 62-75 (aridade), trocar o `if name == "range" {...} else if wantArity := ...` por:
 
 ```go
-	case "remove_at", "swap_remove":
-		// Issue #126 item 4: remocao por indice devolve o elemento (Rust
-		// Vec::remove/swap_remove). Mesmo contrato de ref do pop no arg 1;
-		// arg 2 e um int por valor.
+	switch {
+	case name == "range":
+		if len(call.Arguments) < 1 || len(call.Arguments) > 3 {
+			return true, nil, fmt.Errorf(
+				"[line %d] range expects 1 to 3 arguments, got %d",
+				c.currentLine, len(call.Arguments),
+			)
+		}
+	case name == "pop":
+		// Issue #126 item 4: indice opcional (Python list.pop([i])).
+		if len(call.Arguments) < 1 || len(call.Arguments) > 2 {
+			return true, nil, fmt.Errorf(
+				"[line %d] pop expects 1 or 2 arguments, got %d",
+				c.currentLine, len(call.Arguments),
+			)
+		}
+	default:
+		if wantArity := map[string]int{"append": 2, "delete": 2, "json_loads": 2, "swap_remove": 2}[name]; len(call.Arguments) != wantArity {
+			return true, nil, fmt.Errorf(
+				"[line %d] %s expects %d arguments, got %d",
+				c.currentLine, name, wantArity, len(call.Arguments),
+			)
+		}
+	}
+```
+
+Substituir o `case "pop":` (linhas ~125-134) por:
+
+```go
+	case "pop", "swap_remove":
+		// Issue #126 item 4: pop(ref xs[, i]) e swap_remove(ref xs, i)
+		// devolvem o elemento (Python list.pop, Rust Vec::swap_remove).
+		// Mesmo contrato de ref no arg 1; arg 2, quando presente, e um int
+		// por valor.
 		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to '"+name+"'", "ref T[]")
 		if err != nil {
 			return true, nil, err
@@ -843,40 +923,50 @@ Após o `case "pop":`, adicionar:
 		if !ok {
 			return true, nil, fmt.Errorf("[line %d] %s expects an array, got %s", c.currentLine, name, noxyTypeName(container))
 		}
-		index, err := c.compileBuiltinValueArgument(call.Arguments[1])
-		if err != nil {
-			return true, nil, err
+		if len(call.Arguments) == 2 {
+			index, err := c.compileBuiltinValueArgument(call.Arguments[1])
+			if err != nil {
+				return true, nil, err
+			}
+			intType := &ast.PrimitiveType{Name: "int"}
+			if _, explicitRef := asRefType(index); explicitRef {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to '%s': expected int, got %s%s",
+					c.currentLine, name, noxyTypeName(index), c.derefReadHint(intType, index, call.Arguments[1]),
+				)
+			}
+			if !c.areStrictTypesCompatible(intType, index) {
+				return true, nil, fmt.Errorf(
+					"[line %d] argument 2 to '%s': expected int, got %s",
+					c.currentLine, name, noxyTypeName(index),
+				)
+			}
 		}
-		intType := &ast.PrimitiveType{Name: "int"}
-		if _, explicitRef := asRefType(index); explicitRef {
-			return true, nil, fmt.Errorf(
-				"[line %d] argument 2 to '%s': expected int, got %s%s",
-				c.currentLine, name, noxyTypeName(index), c.derefReadHint(intType, index, call.Arguments[1]),
-			)
-		}
-		if !c.areStrictTypesCompatible(intType, index) {
-			return true, nil, fmt.Errorf(
-				"[line %d] argument 2 to '%s': expected int, got %s",
-				c.currentLine, name, noxyTypeName(index),
-			)
-		}
-		c.emitCall(2, emission, false)
+		c.emitCall(len(call.Arguments), emission, false)
 		return true, array.ElementType, nil
 ```
 
-Em `internal/compiler/narrowing.go`, na inicialização de `pureBuiltins`, trocar `"append": {}, "pop": {}, "delete": {},` por `"append": {}, "pop": {}, "delete": {}, "remove_at": {}, "swap_remove": {},` e ajustar o comentário acima (`append/pop/delete/remove_at/swap_remove`).
+Em `internal/compiler/narrowing.go`, na inicialização de `pureBuiltins`, trocar `"append": {}, "pop": {}, "delete": {},` por `"append": {}, "pop": {}, "delete": {}, "swap_remove": {},` e ajustar o comentário acima (`append/pop/delete/swap_remove`). Atualizar também o comentário de `compileBuiltinRefArgument` (`builtin_calls.go:21-23`) para citar `swap_remove`.
 
 - [ ] **Step 4: Rodar e ver passar**
 
-Run: `go test ./internal/compiler ./internal/vm -run 'RemoveAt|SwapRemove|MutatingBuiltin|NativeSignatures|Narrowing' -count=1`
-Expected: PASS, inclusive `TestRemoveAtUnicizesSharedTarget`, `TestSwapRemoveUnicizesSharedTarget`, `TestRemoveAtReleasesCompositeElementOnce` da Task 4.
+Run: `go test ./internal/compiler ./internal/vm -run 'Pop|SwapRemove|MutatingBuiltin|NativeSignatures|Narrowing|Conformance|Cow' -count=1`
+Expected: PASS, inclusive os testes de CoW e ponta a ponta do Step 1.
 
-- [ ] **Step 5: Exemplo no corpus**
+- [ ] **Step 5: Varredura do corpus por `pop` em array possivelmente vazio**
 
-Criar `noxy_examples/test_remove_at.nx`:
+`pop(ref xs)` em array vazio agora erra. Antes de rodar o runner, revisar cada uso: `grep -rn 'pop(ref' noxy_examples tests internal/stdlib noxy_libs --include='*.nx'`. Usos a olhar com atenção: `noxy_examples/my_stack.nx:14,21` (protegido por `length(...) >= 1`?), `brainfuck.nx:44`, `test_generics_basics.nx:36`, `language_semantics_test.nx:629`, `KandR_in_noxy/calc_stack.nx`. Um uso que dependia de `null` (testava `!= null` ou usava o `null` como "vazio") passa a checar `length(xs) > 0` antes; listar cada arquivo alterado no relatório e no CHANGELOG (Task 10).
+
+Run: `go run ./cmd/noxy noxy_examples/run_all_tests_concurrent.nx`
+Expected: exit 0.
+
+- [ ] **Step 6: Exemplo no corpus**
+
+Criar `noxy_examples/test_pop_index.nx` (adicionar `use sys select exit` no topo, como em `language_semantics_test.nx:19`; `!` é a negação booleana):
 
 ```noxy
-// test_remove_at.nx — remove_at / swap_remove (issue #126 item 4)
+// test_pop_index.nx — pop com índice opcional e swap_remove (issue #126 item 4)
+use sys select exit
 
 func assert(cond: bool, name: string) -> void
     if cond then
@@ -888,20 +978,22 @@ func assert(cond: bool, name: string) -> void
 end
 
 let xs: int[] = [10, 20, 30, 40]
-let removed: int = remove_at(ref xs, 1)
-assert(removed == 20, "remove_at devolve o elemento")
-assert(length(xs) == 3, "remove_at encolhe o array")
-assert(xs[0] == 10 && xs[1] == 30 && xs[2] == 40, "remove_at preserva a ordem")
+let removed: int = pop(ref xs, 1)
+assert(removed == 20, "pop(ref xs, i) devolve o elemento")
+assert(length(xs) == 3, "pop(ref xs, i) encolhe o array")
+assert(xs[0] == 10 && xs[1] == 30 && xs[2] == 40, "pop(ref xs, i) preserva a ordem")
+
+let last: int = pop(ref xs)
+assert(last == 40 && length(xs) == 2, "pop(ref xs) tira o ultimo")
 
 let swapped: int = swap_remove(ref xs, 0)
 assert(swapped == 10, "swap_remove devolve o elemento")
-assert(length(xs) == 2, "swap_remove encolhe o array")
-assert(xs[0] == 40 && xs[1] == 30, "swap_remove traz o ultimo para o buraco")
+assert(length(xs) == 1 && xs[0] == 30, "swap_remove traz o ultimo para o buraco")
 
 // Valor semantico: a copia feita antes nao muda (CoW)
 let ys: int[] = [1, 2, 3]
 let copia: int[] = ys
-let _r: int = remove_at(ref ys, 0)
+let _r: int = pop(ref ys, 0)
 assert(length(copia) == 3, "copia anterior nao ve a remocao")
 assert(length(ys) == 2, "original encolheu")
 
@@ -921,20 +1013,20 @@ end
 assert(length(balas) == 2, "so as vivas ficam")
 assert(balas[0].viva && balas[1].viva, "todas vivas")
 
-print("test_remove_at: OK")
+print("test_pop_index: OK")
 ```
 
-`exit` vem de `use sys select exit` (como em `noxy_examples/language_semantics_test.nx:19`): adicionar essa linha no topo do arquivo, antes de `func assert`. `!` é a negação booleana (`defer_lifo.nx:6` usa `if !condition then`).
+Run: `go run ./cmd/noxy noxy_examples/test_pop_index.nx`
+Expected: linhas `PASS: ...` e `test_pop_index: OK`, exit 0.
 
-Run: `go run ./cmd/noxy noxy_examples/test_remove_at.nx`
-Expected: linhas `PASS: ...` e `test_remove_at: OK`, exit 0.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add internal/compiler/builtin_calls.go internal/compiler/builtin_calls_test.go internal/compiler/narrowing.go internal/vm/native_signatures_test.go noxy_examples/type_errors/remove_at_without_ref.nx noxy_examples/test_remove_at.nx
-git commit -m "feat(compiler): remove_at e swap_remove tipados — ref T[] + int, devolvem T (issue #126)"
+git add internal/compiler/builtin_calls.go internal/compiler/builtin_calls_test.go internal/compiler/narrowing.go internal/compiler/function_conformance_examples_test.go internal/vm/native_signatures_test.go internal/vm/cow_builtins_test.go noxy_examples/type_errors/swap_remove_without_ref.nx noxy_examples/test_pop_index.nx
+git commit -m "feat(compiler): pop(ref xs[, i]) e swap_remove tipados — ref T[] + int, devolvem T (issue #126)"
 ```
+
+(incluir no `git add` os `.nx` do corpus ajustados no Step 5.)
 
 ---
 
@@ -2006,17 +2098,20 @@ Ajustar também a frase anterior "(see the quoting rule below): `f'{fmt("%10s", 
 
 - [ ] **Step 5: Spec §10 Collections**
 
-Após `- \`pop(ref arr)\``:
+Substituir a linha `- \`pop(ref arr)\`` por:
 
 ```markdown
-- `remove_at(ref arr, i) -> T`: removes and returns the element at index `i`,
-  shifting the rest down (order preserved, O(n)). Out of range is a runtime
-  error, `array index out of bounds`, like indexing.
+- `pop(ref arr) -> T`, `pop(ref arr, i) -> T`: removes and returns the last
+  element, or the element at index `i` (the rest shifts down, order
+  preserved, O(n)) — Python's `list.pop([i])`. A position that does not
+  exist is a **runtime error**: `pop from empty array` for `pop(ref arr)` on
+  an empty array, `array index out of bounds` for an index outside
+  `[0, length)`. Test `length(arr) > 0` first; `pop` never returns `null`.
 - `swap_remove(ref arr, i) -> T`: removes and returns the element at `i` by
   moving the **last** element into its place (O(1), order not preserved) —
   what a game loop wants when order does not matter. Same range rule.
-  Both go through the same copy-on-write path as `pop`: a copy taken before
-  the call does not see the removal. `delete` remains map-only.
+  Both go through the same copy-on-write path as `append`: a copy taken
+  before the call does not see the removal. `delete` remains map-only.
 ```
 
 - [ ] **Step 6: Spec §11**
@@ -2113,11 +2208,11 @@ fora do §1.2.
   metade (Go). Um `math.nx` local continua sombreando a stdlib (regra de
   resolução do `use`): `noxy_examples/math.nx` virou
   `math_module_example.nx` por isso.
-- **`remove_at(ref arr, i) -> T` e `swap_remove(ref arr, i) -> T`** (§10):
-  remoção por índice devolvendo o elemento (Rust `Vec::remove`/`swap_remove`,
-  Swift `remove(at:)`); `swap_remove` é O(1) e não preserva ordem. Fora do
-  intervalo é `array index out of bounds`. Mesmo funil de CoW do `pop`.
-  `delete` continua só de map, como em Go.
+- **`pop(ref arr, i)` e `swap_remove(ref arr, i) -> T`** (§10): remoção
+  por índice devolvendo o elemento — `pop` ganha o índice opcional de
+  `list.pop([i])` do Python (preserva a ordem); `swap_remove` é builtin
+  próprio (Rust `Vec::swap_remove`), O(1), não preserva ordem. Mesmo funil
+  de CoW do `append`. `delete` continua só de map, como em Go.
 - **Aspas iguais ao delimitador dentro de `{}` de f-string** (§9, regra da
   PEP 701): `f"n = {fmt("%03d", n)}"` compila. O lexer conta a profundidade
   de chaves; `{{`/`}}` e `f'...'` seguem iguais. Chave de expressão aberta no
@@ -2149,6 +2244,13 @@ fora do §1.2.
   (`time.parse*`, `sqlite.prepare`, `crypto.aes256_gcm_decrypt`). A classe
   "tipo desconhecido" da fronteira dinâmica (#122) fica reduzida a plugin,
   `any` e membro não nomeável.
+- **`pop` em posição inexistente é erro de runtime** (§10): `pop(ref xs)`
+  em array vazio devolvia `null` sob um retorno tipado `T` — o "null de
+  aridade num builtin tipado" que a 0.23.2 deixou pendente. Agora é `pop
+  from empty array`; índice fora de `[0, length)` é `array index out of
+  bounds`, como indexar. Regra da #121: argumento inválido é erro, nunca
+  null sentinela. Migração: `if length(xs) > 0 then let v = pop(ref xs)
+  end` no lugar de testar o resultado contra `null`.
 - **`str` deixa de ser palavra reservada**: era `TYPE_STR` em `token.go`
   sem nenhum uso no parser. `let str: string = ...` compila. `any`, `map` e
   `chan` entram na tabela §1.2, onde faltavam.
@@ -2168,7 +2270,7 @@ Se o repositório não usa `[Unreleased]` (Keep a Changelog aceita), trocar pelo
 
 ```bash
 git add docs/NOXY_LANGUAGE_SPEC.md CHANGELOG.md README.md docs/index.html
-git commit -m "docs(spec,changelog): math, namespace tipado, remove_at/swap_remove, aspas em {} de f-string, keywords do §1.2 (issue #126)"
+git commit -m "docs(spec,changelog): math, namespace tipado, pop com índice/swap_remove, aspas em {} de f-string, keywords do §1.2 (issue #126)"
 ```
 
 ---
@@ -2185,7 +2287,7 @@ go test ./cmd/... -count=1
 go run ./cmd/noxy noxy_examples/run_all_tests_concurrent.nx
 ```
 
-Expected: tudo verde; o runner termina com exit 0 e inclui `test_math_stdlib.nx`, `test_remove_at.nx`, `test_import.nx`, `test_import_all.nx`.
+Expected: tudo verde; o runner termina com exit 0 e inclui `test_math_stdlib.nx`, `test_pop_index.nx`, `test_import.nx`, `test_import_all.nx`.
 
 - [ ] **Step 2: gofmt e EOL**
 
@@ -2204,11 +2306,11 @@ S=/tmp/claude-1000/-home-estevao-Documents-go-projects-noxy/c5c780cf-1484-4085-a
 printf 'use math\nprint(math.sqrt(2.0))\nlet l = math.floor(2.5)\nprint(l)\n' > $S/r1.nx && go run ./cmd/noxy $S/r1.nx
 printf 'func roll(n: int) -> int\n    return n * 2\nend\n' > $S/m.nx && printf 'use m\nlet v = m.roll(6)\nprint(v)\n' > $S/r2.nx && go run ./cmd/noxy $S/r2.nx
 printf 'let n: int = 7\nprint(f"n = {fmt("%%03d", n)}")\n' > $S/r3.nx && go run ./cmd/noxy $S/r3.nx
-printf 'let xs: int[] = [10, 20, 30]\nlet r: int = remove_at(ref xs, 1)\nprint(xs)\nprint(r)\n' > $S/r4.nx && go run ./cmd/noxy $S/r4.nx
+printf 'let xs: int[] = [10, 20, 30]\nlet r: int = pop(ref xs, 1)\nprint(xs)\nprint(r)\nlet e: int[] = []\nlet z: int = pop(ref e)\n' > $S/r4.nx; go run ./cmd/noxy $S/r4.nx; echo "exit=$?"
 printf 'use src.map as map\n' > $S/r5.nx; go run ./cmd/noxy $S/r5.nx; echo "exit=$?"
 ```
 
-Expected: `1.414214` / `2.000000`; `12`; `n = 007`; `[10, 30]` / `20`; um único `SyntaxError: 'map' is a keyword and cannot be used as a name`.
+Expected: `1.414214` / `2.000000`; `12`; `n = 007`; `[10, 30]` / `20` seguido de `pop from empty array` com exit ≠ 0; um único `SyntaxError: 'map' is a keyword and cannot be used as a name`.
 
 - [ ] **Step 4: Commit final (se algo mudou) e resumo para o PR**
 
