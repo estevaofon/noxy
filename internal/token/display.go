@@ -69,9 +69,10 @@ var tokenDisplay = map[TokenType]string{
 	QUESTION: "'?'",
 	DOT:      "'.'",
 
-	NEWLINE: "newline",
-	EOF:     "end of file",
-	ILLEGAL: "illegal token",
+	NEWLINE:     "newline",
+	EOF:         "end of file",
+	ILLEGAL:     "illegal token",
+	LEXER_ERROR: "lexer error",
 }
 
 func (t TokenType) Display() string {

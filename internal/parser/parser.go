@@ -1820,14 +1820,13 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	switch p.curToken.Type {
 	case token.EOF:
 		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
-	case token.ILLEGAL:
-		if lexer.IsReason(p.curToken.Literal) {
-			// O literal de um ILLEGAL e a razao que o lexer escreveu
-			// ("unterminated string", lexer.UnclosedBraceReason + hint).
-			msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
-		}
-		// Caso contrario o literal e um caractere desconhecido isolado
-		// (ex.: "@") e o msg generico "invalid syntax %q" acima ja serve.
+	case token.LEXER_ERROR:
+		// O literal e a razao que o lexer escreveu ("unterminated string",
+		// lexer.UnclosedBraceReason + hint) e vira o diagnostico. Um
+		// ILLEGAL (caractere desconhecido, ex.: "@") fica com o
+		// "invalid syntax %q" generico acima. A distincao e por TIPO de
+		// token (issue #134), nao mais por comprimento do literal.
+		msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
 	}
 	p.errors = append(p.errors, msg)
 }

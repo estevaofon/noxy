@@ -25,11 +25,11 @@ func requireLiteral(t *testing.T, source string, wantType token.TokenType, want 
 	}
 }
 
-func requireIllegal(t *testing.T, source string, wantReason string) {
+func requireLexerError(t *testing.T, source string, wantReason string) {
 	t.Helper()
 	got := firstToken(t, source)
-	if got.Type != token.ILLEGAL {
-		t.Fatalf("lexing %s produced %s (%q), want ILLEGAL", source, got.Type, got.Literal)
+	if got.Type != token.LEXER_ERROR {
+		t.Fatalf("lexing %s produced %s (%q), want LEXER_ERROR", source, got.Type, got.Literal)
 	}
 	if !strings.Contains(got.Literal, wantReason) {
 		t.Fatalf("lexing %s reported %q, want it to mention %q", source, got.Literal, wantReason)
@@ -79,7 +79,7 @@ func TestUnicodeEscapeRejectsInvalidCodepoints(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			requireIllegal(t, test.source, test.reason)
+			requireLexerError(t, test.source, test.reason)
 		})
 	}
 }
@@ -89,8 +89,8 @@ func TestUnicodeEscapeRejectsInvalidCodepoints(t *testing.T) {
 // to protect. It is refused, and the message points at the escape that does
 // work.
 func TestHexEscapeIsRejectedInStrings(t *testing.T) {
-	requireIllegal(t, `"a\xffb"`, `\u`)
-	requireIllegal(t, `f"a\xffb"`, `\u`)
+	requireLexerError(t, `"a\xffb"`, `\u`)
+	requireLexerError(t, `f"a\xffb"`, `\u`)
 }
 
 func TestHexEscapeInBytes(t *testing.T) {
@@ -113,8 +113,8 @@ func TestHexEscapeInBytes(t *testing.T) {
 }
 
 func TestHexEscapeRejectsMalformedDigits(t *testing.T) {
-	requireIllegal(t, `b"\xZZ"`, "hex")
-	requireIllegal(t, `b"\xf"`, "hex")
+	requireLexerError(t, `b"\xZZ"`, "hex")
+	requireLexerError(t, `b"\xf"`, "hex")
 }
 
 // The escapes that already worked must keep working, and an unknown escape
@@ -149,7 +149,7 @@ func TestEscapesApplyToSingleQuotedAndFStrings(t *testing.T) {
 }
 
 func TestUnterminatedLiteralsStillReported(t *testing.T) {
-	requireIllegal(t, `"abc`, "unterminated")
-	requireIllegal(t, `b"abc`, "unterminated")
-	requireIllegal(t, `f"abc`, "unterminated")
+	requireLexerError(t, `"abc`, "unterminated")
+	requireLexerError(t, `b"abc`, "unterminated")
+	requireLexerError(t, `f"abc`, "unterminated")
 }
