@@ -234,3 +234,18 @@ func TestInstanceOfImportedTemplateNeedsItsStructDependencyImported(t *testing.T
 	err = compileSourceAtRoot(t, root, "use caixas select Caixa, Meta, make_meta\nlet c: Caixa<int> = Caixa(1, make_meta(2))\nlet k: int = c.meta.k\n")
 	requireNoError(t, err)
 }
+
+func TestUnknownTypeHintNamesTheDeclaringAndReexportingModules(t *testing.T) {
+	// Issue #133 (spec §1.7): so a anotacao ESCRITA exige grafia; quando
+	// falta, o hint diz de onde importar — o declarante e quem reexporta.
+	root := t.TempDir()
+	writeModuleFile(t, root, "base.nx", "struct V\n    x: int\nend\nfunc mkv() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "mid.nx", "use base select *\n")
+	err := compileSourceAtRoot(t, root, "use mid select mkv\nlet v: V = mkv()\n")
+	requireErrorMentions(t, err, "variable 'v': unknown type 'V'", "add 'use base' or 'use mid select V' to name this type")
+	err = compileSourceAtRoot(t, root, "use base select mkv\nlet v: V = mkv()\n")
+	requireErrorMentions(t, err, "unknown type 'V'", "add 'use base' or 'use base select V' to name this type")
+	// Sem candidato: hint generico de hoje.
+	err = compileSourceAtRoot(t, root, "let v: Nada = 1\n")
+	requireErrorMentions(t, err, "unknown type 'Nada'", "declare 'struct Nada' or import it with 'use m select Nada'")
+}

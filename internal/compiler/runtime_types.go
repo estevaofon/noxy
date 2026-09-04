@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -332,6 +333,9 @@ func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, imp
 		return nil
 	}
 	if !isQualifiedTypeName(name) {
+		if hint := c.importHintFor(name); hint != "" {
+			return fmt.Errorf("[line %d] %s: unknown type '%s'\n  hint: %s", line, position, name, hint)
+		}
 		module := importFrom
 		if module == "" {
 			module = "m"
@@ -357,6 +361,47 @@ func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, imp
 	}
 	return fmt.Errorf("[line %d] %s: cannot resolve type '%s': %s\n  hint: %s",
 		line, position, name, reason, hint)
+}
+
+// importHintFor monta o hint de `unknown type 'name'` quando alguma
+// dependencia ja carregada declara um struct chamado name (issue #133,
+// spec §1.7): `add 'use <origem>' or 'use <reexportador> select name' to
+// name this type`. Dois passos, porque origins aponta sempre para o modulo
+// DECLARANTE: (1) a origem vem de moduleDiscovery.origins; (2) os
+// reexportadores sao os modulos descobertos (moduleDiscovery.exported) cujos
+// exports contem a MESMA declaracao. "" sem candidato. Ordem deterministica
+// (sort) porque os dois mapas nao tem ordem.
+func (c *Compiler) importHintFor(name string) string {
+	if c.moduleDiscovery == nil {
+		return ""
+	}
+	var origins []string
+	declarations := make(map[*ast.StructStatement]bool)
+	for decl, module := range c.moduleDiscovery.origins {
+		if decl.Name == name {
+			origins = append(origins, module)
+			declarations[decl] = true
+		}
+	}
+	if len(origins) == 0 {
+		return ""
+	}
+	sort.Strings(origins)
+	origin := origins[0]
+	var reexporters []string
+	for module, exported := range c.moduleDiscovery.exported {
+		if module != origin && declarations[exported[name]] {
+			reexporters = append(reexporters, module)
+		}
+	}
+	sort.Strings(reexporters)
+	options := []string{fmt.Sprintf("'use %s'", origin)}
+	if len(reexporters) > 0 {
+		options = append(options, fmt.Sprintf("'use %s select %s'", reexporters[0], name))
+	} else {
+		options = append(options, fmt.Sprintf("'use %s select %s'", origin, name))
+	}
+	return fmt.Sprintf("add %s to name this type", strings.Join(options, " or "))
 }
 
 // firstUnknownTypeName procura em t (inclusive dentro de array, map, ref,
