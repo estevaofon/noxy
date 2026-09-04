@@ -41,7 +41,7 @@ func substituteType(t ast.NoxyType, b map[string]ast.NoxyType) ast.NoxyType {
 		}
 		return &ast.TypeParamType{Name: n.Name}
 	case *ast.PrimitiveType:
-		return &ast.PrimitiveType{Name: n.Name}
+		return &ast.PrimitiveType{Name: n.Name, Decl: n.Decl}
 	case *ast.ArrayType:
 		return &ast.ArrayType{ElementType: substituteType(n.ElementType, b), Size: n.Size}
 	case *ast.MapType:

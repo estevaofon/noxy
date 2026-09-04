@@ -49,6 +49,14 @@ type NoxyType interface {
 
 type PrimitiveType struct {
 	Name string
+	// Decl e a identidade da declaracao de struct que este tipo designa
+	// (issue #133): nil para primitivos (int, string, any...), para
+	// instancias genericas monomorfizadas (`main::Caixa<int>`) e para
+	// anotacoes que nenhum ponto de resolucao tocou ainda. Name e SO a grafia
+	// de exibicao/anotacao: dois nos com o mesmo Decl sao o mesmo tipo mesmo
+	// com Name diferente (`V` e `base.V`), e dois Decl distintos nunca sao o
+	// mesmo tipo mesmo com Name igual.
+	Decl *StructStatement
 }
 
 func (t *PrimitiveType) String() string { return t.Name }

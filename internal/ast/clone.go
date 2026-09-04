@@ -155,7 +155,7 @@ func CloneType(t NoxyType) NoxyType {
 	}
 	switch n := t.(type) {
 	case *PrimitiveType:
-		return &PrimitiveType{Name: n.Name}
+		return &PrimitiveType{Name: n.Name, Decl: n.Decl}
 	case *ArrayType:
 		return &ArrayType{ElementType: CloneType(n.ElementType), Size: n.Size}
 	case *MapType:
