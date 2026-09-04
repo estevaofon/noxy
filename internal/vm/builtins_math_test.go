@@ -115,3 +115,30 @@ func TestMathClampIntBuiltin(t *testing.T) {
 		}
 	}
 }
+
+func TestMathModuleViaSelectIsTyped(t *testing.T) {
+	got := captureVMSource(t, `use math select sqrt, atan2, floor, PI, abs_int, clamp_int, hypot
+let d: float = hypot(3.0, 4.0)
+let ang: float = atan2(1.0, 1.0) * 4.0
+let f: float = floor(2.7)
+let n: int = abs_int(-3) + clamp_int(50, 0, 10)
+test_report(f"{d} {ang == PI} {f} {n} {sqrt(16.0)}")
+`)
+	if s, _ := got.Obj.(string); s != "5.000000 true 2.000000 13 4.000000" {
+		t.Fatalf("got %q", s)
+	}
+}
+
+func TestMathModuleSelectRejectsIntArgumentAtCompileTime(t *testing.T) {
+	err := interpretOrCompileErr(t, New(), "use math select sqrt\nlet x: float = sqrt(4)\n")
+	if err == nil || !strings.Contains(err.Error(), "expected float, got int") {
+		t.Fatalf("err = %v, want compile-time float/int mismatch", err)
+	}
+}
+
+func TestMathModuleDomainErrorSurfacesAsRuntimeError(t *testing.T) {
+	err := interpretOrCompileErr(t, New(), "use math select sqrt\nlet x: float = sqrt(-1.0)\n")
+	if err == nil || !strings.Contains(err.Error(), "math.sqrt: domain error (x < 0)") {
+		t.Fatalf("err = %v, want domain error", err)
+	}
+}
