@@ -2646,7 +2646,16 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), noxyTypeName(refArg.plain), refArgumentHint(arg),
 					)
 				}
-				if !refArg.proven {
+				// `ref x` e sintaticamente provado (refArg.proven), mas isso
+				// so prova o MODO quando o tipo do alvo e conhecido: com
+				// element == nil (campo de um struct que o programa nao
+				// consegue nomear, campo de instancia generica, fronteira
+				// dinamica) a checagem estatica abaixo nao roda e ninguem
+				// conferiu que o alvo e mesmo um `T`. Cair para OP_CALL
+				// devolve a validacao ao runtime (validateParameterModes e,
+				// desde a revisao do #119, validateRefTargets) — sem isso a
+				// escrita entra num campo de outro tipo em silencio.
+				if !refArg.proven || refArg.element == nil {
 					modesProven = false
 				}
 				if _, isNull := arg.(*ast.NullLiteral); isNull {
