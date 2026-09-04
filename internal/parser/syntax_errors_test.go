@@ -137,22 +137,24 @@ func TestSyntaxErrorMessages(t *testing.T) {
 	}
 }
 
-// Issue #126 item 5: keyword onde se espera um nome (`use src.map as map`,
-// `let map: int = 1`) dizia "expected identifier, found map" e, como o parser
-// nao sincroniza, cada token seguinte virava mais um "invalid syntax". Agora e
-// UM erro que nomeia a keyword, e o parser pula o resto da linha (recuperacao
-// em modo panico com ponto de sincronizacao — Crafting Interpreters §6.3.3).
+// Issue #126 item 5 / #134: keyword em posicao de TIPO onde se espera um
+// nome (`struct map`, `struct Box<map>`, `func f<int>()`) e `ref` em
+// qualquer posicao de nome dizem UM erro que nomeia a keyword, e o parser
+// pula o resto da linha (recuperacao em modo panico com ponto de
+// sincronizacao — Crafting Interpreters §6.3.3). As keywords de tipo em
+// posicao de VALOR (`let map`, `use src.map as map`, `func f(any: int)`)
+// sao nomes desde a #134 e nao chegam aqui.
 func TestKeywordAsNameIsASingleError(t *testing.T) {
 	cases := []struct {
 		name   string
 		source string
 		want   string
 	}{
-		{"use module named map", "use src.map as map\nlet x: int = 1\n", "[1:9] SyntaxError: 'map' is a keyword and cannot be used as a name"},
-		{"use alias named map", "use src.level as map\nlet x: int = 1\n", "[1:18] SyntaxError: 'map' is a keyword and cannot be used as a name"},
-		{"let named map", "let map: int = 1\nlet y: int = 2\n", "[1:5] SyntaxError: 'map' is a keyword and cannot be used as a name"},
-		{"let named chan inside block", "func f()\n    let chan: int = 1\n    let y: int = 2\nend\n", "[2:9] SyntaxError: 'chan' is a keyword and cannot be used as a name"},
-		{"param named any", "func f(any: int)\nend\n", "'any' is a keyword and cannot be used as a name"},
+		{"struct named map", "struct map end\nlet y: int = 2\n", "[1:8] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"struct type parameter named map", "struct Box<map> end\nlet y: int = 2\n", "[1:12] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"func type parameter named int", "func f<int>() end\nlet y: int = 2\n", "[1:8] SyntaxError: 'int' is a keyword and cannot be used as a name"},
+		{"let named ref", "let ref: int = 1\nlet y: int = 2\n", "[1:5] SyntaxError: 'ref' is a keyword and cannot be used as a name"},
+		{"param named ref", "func f(ref: int)\nend\n", "'ref' is a keyword and cannot be used as a name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -174,9 +176,9 @@ func TestKeywordAsNameIsASingleError(t *testing.T) {
 
 // Revisão da issue #126 item 5: resyncToLine só pode valer para o statement
 // que a ligou. peekError liga a marca quando um expectPeek(IDENTIFIER)
-// aninhado falha por causa de keyword de tipo — mas em `y = obj.map` quem
-// falha é parseMemberAccess (chamado de dentro da expressão do lado direito
-// do `=`), e o AssignStmt que envolve essa expressão ainda volta non-nil; em
+// aninhado falha por causa de keyword de tipo — em `let x: Caixa<io.map> = 5`
+// quem falha é o ramo de tipo qualificado dentro do argumento genérico, e
+// parseLetStatement ainda volta non-nil (com Type incompleto); em
 // `let x: io.map = 5` quem falha é o ramo de tipo qualificado dentro de
 // parseValueType, e parseLetStatement também volta non-nil (com Type
 // incompleto). Em nenhum dos dois casos ParseProgram vê o statement como
@@ -200,8 +202,8 @@ func TestResyncFlagDoesNotLeakAcrossStatements(t *testing.T) {
 		keywordWant string
 	}{
 		{
-			"member access inside assignment RHS",
-			"y = obj.map\n",
+			"qualified type inside generic argument",
+			"let x: Caixa<io.map> = 5\n",
 			"'map' is a keyword and cannot be used as a name",
 		},
 		{

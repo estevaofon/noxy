@@ -235,8 +235,10 @@ func TestNumberLiteralsWithExponent(t *testing.T) {
 
 // Issue #126 item 5: `str` era reservado em token.go (TYPE_STR) mas o parser
 // nunca o consumia — reserva morta que so custava o identificador. Agora e
-// um nome comum; `map`, `chan` e `any` continuam keywords (spec §1.2).
-func TestStrIsAnIdentifierAndTypeKeywordsStayReserved(t *testing.T) {
+// um nome comum. `map`, `chan`, `any`, `string`... continuam a SAIR do lexer
+// como tokens de tipo (o parser de tipo depende deles); desde a #134 e o
+// parser quem os aceita como nome em posicao de valor (spec §1.2).
+func TestStrIsAnIdentifierAndTypeKeywordsKeepTheirTokens(t *testing.T) {
 	if got := token.LookupIdent("str"); got != token.IDENTIFIER {
 		t.Fatalf("LookupIdent(\"str\") = %s, want IDENTIFIER", got)
 	}

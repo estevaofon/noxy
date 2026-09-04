@@ -98,6 +98,16 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccess)
 
+	// Keyword de tipo contextual em posicao de EXPRESSAO e um identificador
+	// (`print(map)`, `int + 1` com `let int = 5`): o literal do token ja e
+	// o nome (issue #134, spec §1.2). O parser de tipo nunca passa por aqui.
+	for _, t := range []token.TokenType{
+		token.TYPE_INT, token.TYPE_FLOAT, token.TYPE_STRING, token.TYPE_BOOL,
+		token.TYPE_BYTES, token.TYPE_VOID, token.TYPE_ANY, token.MAP, token.CHAN,
+	} {
+		p.registerPrefix(t, p.parseIdentifier)
+	}
+
 	return p
 }
 
@@ -109,11 +119,11 @@ func (p *Parser) peekError(t token.TokenType) {
 	if t == token.IDENTIFIER && isTypeKeyword(p.peekToken.Type) {
 		// Keyword de TIPO em posicao de nome (issue #126 item 5): map, chan,
 		// any etc. sao justamente as palavras que alguem tentaria usar como
-		// nome de variavel/modulo/parametro (`let map: int`, `use src.map`,
-		// `func f(any: int)`). Palavras de controle de fluxo (in, do, then,
-		// as...) ficam de fora deste desvio: elas aparecem na posicao de
-		// identificador exatamente quando a construcao foi truncada
-		// (`for in [1] do` sem a variavel do laco), e ali "expected
+		// nome de variavel/modulo/parametro (`struct map`, `struct Box<map>`,
+		// `let x: io.map`, `let ref: int`). Palavras de controle de fluxo (in,
+		// do, then, as...) ficam de fora deste desvio: elas aparecem na
+		// posicao de identificador exatamente quando a construcao foi
+		// truncada (`for in [1] do` sem a variavel do laco), e ali "expected
 		// identifier, found in" — a mensagem generica abaixo — e' o
 		// diagnostico correto, nao "'in' is a keyword and cannot be used as
 		// a name".
@@ -130,7 +140,9 @@ func (p *Parser) peekError(t token.TokenType) {
 // isTypeKeyword reporta se t e' uma das palavras-chave de tipo (grupo
 // "Palavras-chave - Tipos" em internal/token/token.go): map, chan, any, int,
 // float, string, bool, bytes, void, ref. Sao as reservadas que um usuario
-// plausivelmente tentaria usar como nome (issue #126 item 5) — ao contrario
+// plausivelmente tentaria usar como nome (issue #126 item 5); desde a #134
+// as nove contextuais (isContextualTypeKeyword) so chegam aqui em posicao de
+// TIPO — nome de struct, parametro de tipo, tipo qualificado — ao contrario
 // das palavras de controle de fluxo (in, do, then, as, ...), que so aparecem
 // em posicao de identificador quando a construcao foi truncada.
 func isTypeKeyword(t token.TokenType) bool {
@@ -142,6 +154,41 @@ func isTypeKeyword(t token.TokenType) bool {
 	default:
 		return false
 	}
+}
+
+// isContextualTypeKeyword reporta se t e' uma das NOVE keywords de tipo
+// contextuais (issue #134, spec §1.2): reservadas so em posicao de tipo,
+// nome livre em toda posicao de valor — como int/string/any em Go, que sao
+// identificadores pre-declarados. `ref` e `func` ficam de fora: sao
+// operadores de prefixo em expressao alem de tipo, com significado nas duas
+// posicoes. E' um subconjunto de isTypeKeyword.
+func isContextualTypeKeyword(t token.TokenType) bool {
+	switch t {
+	case token.TYPE_INT, token.TYPE_FLOAT, token.TYPE_STRING, token.TYPE_BOOL,
+		token.TYPE_BYTES, token.TYPE_VOID, token.TYPE_ANY, token.MAP, token.CHAN:
+		return true
+	default:
+		return false
+	}
+}
+
+// isNameToken reporta se t pode nomear variavel, funcao, parametro, campo,
+// modulo ou membro: IDENTIFIER ou keyword de tipo contextual.
+func isNameToken(t token.TokenType) bool {
+	return t == token.IDENTIFIER || isContextualTypeKeyword(t)
+}
+
+// expectName e' o expectPeek(IDENTIFIER) das posicoes de VALOR. Falha pelo
+// mesmo peekError(IDENTIFIER): o que sobra ali e' keyword de controle
+// (`let if` → "expected identifier, found if"), pontuacao, ou `ref` (que
+// ainda recebe o erro do #126) — nenhuma mensagem muda.
+func (p *Parser) expectName() bool {
+	if isNameToken(p.peekToken.Type) {
+		p.nextToken()
+		return true
+	}
+	p.peekError(token.IDENTIFIER)
+	return false
 }
 
 // resyncAfterFailedStatement consome a marca resyncToLine: avanca ate o
@@ -378,7 +425,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 func (p *Parser) parseLetStatement() *ast.LetStmt {
 	stmt := &ast.LetStmt{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 
@@ -493,7 +540,7 @@ func (p *Parser) parseContinueStatement() *ast.ContinueStmt {
 func (p *Parser) parseUseStatement() *ast.UseStmt {
 	stmt := &ast.UseStmt{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 	// Parse dot-separated module path: pkg.sub.mod
@@ -501,7 +548,7 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 
 	for p.peekTokenIs(token.DOT) {
 		p.nextToken() // eat .
-		if !p.expectPeek(token.IDENTIFIER) {
+		if !p.expectName() {
 			return nil
 		}
 		stmt.Module += "." + p.curToken.Literal
@@ -510,7 +557,7 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 	// Check for 'as' Alias
 	if p.peekTokenIs(token.AS) {
 		p.nextToken() // eat as
-		if !p.expectPeek(token.IDENTIFIER) {
+		if !p.expectName() {
 			return nil
 		}
 		stmt.Alias = p.curToken.Literal
@@ -532,7 +579,7 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 				}
 				start = false
 
-				if !p.expectPeek(token.IDENTIFIER) {
+				if !p.expectName() {
 					return nil
 				}
 				stmt.Selectors = append(stmt.Selectors, p.curToken.Literal)
@@ -1384,7 +1431,7 @@ func (p *Parser) parseTypeParameters() []string {
 func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 	stmt := &ast.FunctionStatement{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 	stmt.Name = p.curToken.Literal
@@ -1441,8 +1488,9 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 func (p *Parser) parseFunctionLiteral() ast.Expression {
 	lit := &ast.FunctionLiteral{Token: p.curToken}
 
-	// Optional Name (e.g. func myName(...) ...)
-	if p.peekTokenIs(token.IDENTIFIER) {
+	// Optional Name (e.g. func myName(...) ...) — keyword de tipo contextual
+	// tambem e' nome aqui (issue #134).
+	if isNameToken(p.peekToken.Type) {
 		p.nextToken()
 		lit.Name = p.curToken.Literal
 	}
@@ -1489,7 +1537,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 		return parameters
 	}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 
@@ -1519,7 +1567,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken() // eat COMMA
-		if !p.expectPeek(token.IDENTIFIER) {
+		if !p.expectName() {
 			return nil
 		}
 		// ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
@@ -1772,11 +1820,15 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 			continue
 		}
 
-		if p.curToken.Type != token.IDENTIFIER {
-			// Error or break?
-			// If not identifier, maybe illegal.
-			p.nextToken()
-			continue
+		if !isNameToken(p.curToken.Type) {
+			// Issue #134: antes, um token que nao era IDENTIFIER aqui era
+			// pulado em silencio — um campo `map: int` sumia da struct e
+			// o erro so aparecia no construtor ("expects 1 arguments, got
+			// 2"). peekError formata a partir de peekToken; o ofensor aqui
+			// e' curToken.
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected identifier, found %s",
+				p.curToken.Line, p.curToken.Column, p.curToken.Type.Display()))
+			return nil
 		}
 
 		field := &ast.StructField{Name: p.curToken.Literal}
@@ -1807,7 +1859,7 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 func (p *Parser) parseMemberAccess(left ast.Expression) ast.Expression {
 	exp := &ast.MemberAccessExpression{Token: p.curToken, Left: left}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 	exp.Member = p.curToken.Literal
@@ -1834,7 +1886,7 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 func (p *Parser) parseForStatement() *ast.ForStatement {
 	stmt := &ast.ForStatement{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 
