@@ -15,8 +15,9 @@ type bindingStore struct {
 // store.gen.Add(1), sempre DEPOIS de aplicar a mutação — nunca antes. Um
 // bump visível antes da escrita deixaria um leitor concorrente observar a
 // nova geração com o valor velho ainda no map e cachear esse valor como se
-// fosse atual; um quinto funil que esqueça o bump reintroduz leitura
-// obsoleta em silêncio, sem nenhum teste acusando.
+// fosse atual; um sexto funil que esqueça o bump reintroduz leitura
+// obsoleta em silêncio, sem nenhum teste acusando. Os cinco de hoje: set,
+// swap, defineIfAbsent, delete e replace.
 func newBindingStore(values map[interface{}]Value) *bindingStore {
 	if values == nil {
 		values = make(map[interface{}]Value)

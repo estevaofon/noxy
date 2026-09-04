@@ -55,6 +55,20 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 
 	switch n := expr.(type) {
 	case *ast.Identifier:
+		if _, isNamespace := c.pureNamespaceAlias(n.Value); isNamespace {
+			// Objeto do namespace: visao do modulo, nunca unicizado — issue
+			// #133. OP_REF_GLOBAL faria a escrita unicizar a celula global, e
+			// copyValue clona um ObjMap para um store NOVO: com mais de um
+			// dono do mapa (dois `use` do mesmo modulo, ou `let m: any = st`)
+			// o empréstimo cairia num orfao destacado do modulo. Empilhamos o
+			// MAPA em si, por leitura simples; OP_REF_PROPERTY sobre uma base
+			// nao-ref congela o container (Base vazia, borrowContainer devolve
+			// ref.Container), o que aqui e exatamente certo: o CoW nunca move
+			// esse mapa, porque nunca o unicizamos.
+			nameConstant := c.makeConstant(value.NewString(n.Value))
+			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
+			return nil, nil
+		}
 		// Nome comum: ref de célula. É a raiz da cadeia e o ponto em que a
 		// recursão para.
 		return c.compileReferenceArgumentValue(n)

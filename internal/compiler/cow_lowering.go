@@ -35,6 +35,19 @@ func (c *Compiler) compileLValueBase(expr ast.Expression) (ast.NoxyType, bool, e
 		} else if arg, upvalueType := c.resolveUpvalue(n.Value); arg != -1 {
 			c.emitBytes(byte(chunk.OP_GET_UPVALUE_MUT), byte(arg))
 			t = upvalueType
+		} else if _, isNamespace := c.pureNamespaceAlias(n.Value); isNamespace {
+			// Objeto do namespace: visao do modulo, nunca unicizado — issue
+			// #133. O ObjMap do alias COMPARTILHA o bindingStore do modulo, e
+			// copyValue clona um ObjMap para um store NOVO: se a raiz
+			// entrasse pelo caminho _MUT e o mapa tivesse mais de um dono
+			// (dois `use` do mesmo modulo — o cache entrega o MESMO valor —,
+			// ou `let m: any = st`), a escrita cairia num orfao destacado e o
+			// modulo nunca a veria. Leitura simples, entao: o FILHO ainda e
+			// unicizado por OP_GET_PROP_MUT e gravado de volta com Set no
+			// MESMO objeto de mapa, que e o que o store compartilhado ve.
+			nameConstant := c.makeConstant(value.NewString(n.Value))
+			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
+			t = nil // o caso MemberAccessExpression tipa `m.a` por namespaceMemberType
 		} else {
 			if !c.globalIsKnown(n.Value) {
 				return nil, false, c.undefinedGlobalError(n.Value)

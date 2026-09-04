@@ -49,8 +49,11 @@ func TestNamespaceWriteRejectsMissingMemberFunctionAndStruct(t *testing.T) {
 
 func TestNamespaceWriteToRefMemberOnlyRebinds(t *testing.T) {
 	requireNoError(t, compileSourceAtRoot(t, stateRoot(t), "use st\nlet other: int = 1\nst.link = ref other\n"))
+	// `int` e compativel com o elemento do alvo, entao a mensagem e a de
+	// referenceAssignmentTypeError — a MESMA de um global `ref int`, com o
+	// hint que mostra a forma correta de escrever no referente.
 	err := compileSourceAtRoot(t, stateRoot(t), "use st\nst.link = 5\n")
-	requireErrorMentions(t, err, "st.link")
+	requireErrorMentions(t, err, "cannot assign int to ref int", "hint: use '*st.link = ...' to update the referenced value")
 	requireErrorLacks(t, err, "has no member")
 }
 

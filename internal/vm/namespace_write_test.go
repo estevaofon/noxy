@@ -125,3 +125,46 @@ test_report(st.read_count())
 		t.Fatalf("count must be one of the written ids, got %d", got)
 	}
 }
+
+// Issue #133: o objeto do namespace e uma VISAO do modulo, nunca um valor com
+// semantica de copia. Com mais de um dono do ObjMap (dois `use` do mesmo
+// modulo — o cache entrega o MESMO valor de ExportMap —, ou um `let m: any =
+// st2`), o caminho de escrita aninhada/indexada/por ref unicizava o global e
+// copyValue clonava o mapa para um store NOVO, destacado do modulo: a escrita
+// caia no orfao e o modulo nunca a via. O compilador nao pode unicizar essa
+// base.
+func TestNamespaceWritesSurviveMultipleOwners(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{"st2.nx": liveStateModule})
+	reported, err := runModuleProgram(t, root, `use st2
+use st2 as s
+func bump(c: ref int) -> void
+    *c = *c + 1
+end
+let m: any = st2
+st2.origin.x = 99
+st2.xs[0] = 77
+append(ref st2.xs, 3)
+bump(ref st2.count)
+st2.count = st2.count + 1
+test_report(st2.read_origin_x() * 1000000 + s.read_origin_x() * 10000 + st2.xs[0] * 100 + s.read_xs_len() * 10 + st2.read_count())
+`)
+	// origin.x=99 pelos dois aliases; xs[0]=77; xs cresce para 3; count = 1 (bump) + 1 = 2.
+	if err != nil || reported.Int() != 99990000+7700+30+2 {
+		t.Fatalf("reported=%v err=%v (want %d)", reported, err, 99990000+7700+30+2)
+	}
+}
+
+// Issue #133: rebind de um membro `ref T` do modulo e escrita ATRAVES dele.
+func TestNamespaceRefMemberRebindsAndWritesThroughIt(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{"st3.nx": "let count: int = 5\nlet link: ref int = ref count\nfunc read_count() -> int\n    return count\nend\nfunc read_link() -> int\n    return *link\nend\n"})
+	reported, err := runModuleProgram(t, root, `use st3
+let other: int = 10
+st3.link = ref other
+*st3.link = *st3.link + 1
+test_report(other * 100 + st3.read_count() * 10 + st3.read_link())
+`)
+	// other passa a 11; count do modulo intacto em 5; o link do modulo ve other.
+	if err != nil || reported.Int() != 1161 {
+		t.Fatalf("reported=%v err=%v (want 1161)", reported, err)
+	}
+}
