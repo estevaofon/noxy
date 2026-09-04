@@ -151,7 +151,6 @@ func TestStructsPersistedAcrossCompilationsAreKnown(t *testing.T) {
 }
 
 func TestReplCarriesNamespaceImportsAcrossLines(t *testing.T) {
-	t.Skip("inverte na Task 5")
 	// REPL: cada linha e um compilador novo que compartilha globals/structs;
 	// o estado de modulos (aliases de `use m` e o cache de descoberta) tem de
 	// acompanhar, senao `use io` numa linha e `let f: io.File` na seguinte
@@ -167,12 +166,12 @@ func TestReplCarriesNamespaceImportsAcrossLines(t *testing.T) {
 		"let f: io.File = io.stdin()\n",
 		"let p: string = f.path\n",
 		// Struct importado por select numa linha anterior: a ORIGEM (db) tem
-		// de ser lembrada para `res.rows` ser traduzido (Row nao nomeavel ->
-		// dinamico) em vez de vazar `Row[]` cru — que faria `let s: string`
-		// falhar com "got Row[]".
+		// de ser lembrada para `res.rows` ser traduzido para o caminho
+		// canonico `db.Row[]` (issue #133: Row nao nomeavel pelo programa,
+		// mas o valor continua tipado) — senao a mensagem vazaria `Row[]` cru.
 		"use db select QueryResult, q\n",
 		"let res: QueryResult = q()\n",
-		"let s: string = res.rows\n",
+		"let bad1: string = res.rows\n",
 		"use db\n",
 		"let r2: db.QueryResult = db.q()\n",
 		"let bad: string = r2.rows\n",
