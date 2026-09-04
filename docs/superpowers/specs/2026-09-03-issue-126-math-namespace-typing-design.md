@@ -28,7 +28,7 @@ Mesmo molde de `strings`: `internal/vm/builtins_math.go` registra natives `math_
 | `clamp` | `(x: float, lo: float, hi: float) -> float` | `math_clamp` |
 | `abs_int` | `(x: int) -> int` | Noxy puro, sem native |
 | `min_int`, `max_int` | `(a: int, b: int) -> int` | Noxy puro |
-| `clamp_int` | `(x: int, lo: int, hi: int) -> int` | Noxy puro |
+| `clamp_int` | `(x: int, lo: int, hi: int) -> int` | `math_clamp_int` (native: código Noxy não levanta erro de runtime, e `lo > hi` tem de errar como no `clamp` de float) |
 | `PI`, `E` | `float` | `let` no wrapper |
 
 Precedentes: Go `math` (float-only; `round` afasta de zero na metade), C# `Math.Abs/Min/Max/Clamp` e Rust `i64::abs/min/max/clamp` para as versões inteiras. Noxy não tem sobrecarga, então o sufixo `_int` segue o que Go faz com `strconv.Itoa`/`FormatInt`. `clamp(x, lo, hi)` com `lo > hi` é erro de domínio (Rust faz `panic`; C# lança).
@@ -44,7 +44,7 @@ Regra: cada native checa a precondição do domínio antes de chamar o Go e devo
 | `asin`, `acos` | `-1 <= x <= 1` |
 | `fmod` | `y != 0` |
 | `pow` | não (`x == 0 && y < 0`) e não (`x < 0 && y` não inteiro) |
-| `clamp` | `lo <= hi` |
+| `clamp`, `clamp_int` | `lo <= hi` |
 
 Overflow para `±Inf` (`exp(1000.0)`, `pow(10.0, 400.0)`) **não** é checado, como o overflow de `int` da spec §8. Consequência: NaN não nasce do `math`; só de aritmética com `Inf`. Por isso não há `is_nan`/`is_inf` nesta rodada.
 
@@ -78,7 +78,7 @@ O bytecode não muda: continua `OP_GET_PROPERTY` no objeto módulo. Só o tipo e
 
 ### Efeito em cadeia
 
-Com `c.Compile(call.Function)` devolvendo `*ast.FunctionType`, `compileCallExpression` entra no caminho `isExact`: aridade, `areStrictTypesCompatible` por argumento, `emitSlotGuards`, e tipo de retorno. Nada de novo é escrito ali; o caminho já existe para o `select`.
+Com `c.Compile(call.Function)` devolvendo `*ast.FunctionType`, `compileCallExpression` entra no caminho `isExact`: aridade, `areStrictTypesCompatible` por argumento, `emitSlotGuards`, e tipo de retorno. Nada de novo é escrito ali; o caminho já existe para o `select`. Único ajuste de mensagem: `callableName` passa a imprimir `m.roll` (hoje `MemberAccessExpression.String()` dá `(m.roll)`), para `argument 1 to 'm.roll': expected int, got string`.
 
 | Programa | Antes | Depois |
 |---|---|---|
