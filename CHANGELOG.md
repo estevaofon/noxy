@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
+Issue #134 — frontend: keywords de tipo contextuais, identificadores Unicode e
+token de erro tipado no lexer.
+
+### Added
+- **Keywords de tipo são contextuais** (§1.2): `int`, `float`, `string`,
+  `bool`, `bytes`, `void`, `any`, `map` e `chan` ficam reservadas só em
+  posição de tipo — nome de struct (`struct map`), parâmetro de tipo
+  (`Box<map>`) e membro de tipo qualificado (`io.map`) continuam com o erro
+  `'map' is a keyword and cannot be used as a name`. Em toda posição de valor
+  são nomes comuns: `let int: int = 5`, `let map = {}`, `func any() -> int`,
+  parâmetro `map: Tile[][]`, `use src.map as map` com `map.tile()` e
+  `let t: map.Tile`, campo `map: int` com `s.map`, `s.map = v`, `ref s.map` e
+  `{s.map}` em f-string. Precedente: `int`, `string` e `any` são
+  identificadores pré-declarados em Go; C#, Swift e Kotlin reservam keywords
+  só onde têm significado. Um campo de struct com esses nomes era
+  **descartado em silêncio** (o erro só aparecia no construtor); agora
+  compila — e qualquer token que não é nome em posição de campo é erro de
+  sintaxe. `ref` e `func` continuam reservados em toda posição.
+- **Identificadores Unicode** (§1.3): `let café = 1`, `func área()` — letra
+  e dígito por `unicode.IsLetter`/`IsDigit`, como Go, Python, Swift e Rust.
+  Sem normalização: nomes comparam byte a byte.
+
+### Changed
+- **Caractere fora do alfabeto é um diagnóstico por caractere**, não por
+  byte: `“abc”` colado de um editor dá dois `invalid syntax "“"`/`"”"`, não
+  seis. A coluna de `[linha:coluna]` passa a contar caracteres — em linha
+  com acento ela apontava o byte.
+- Interno: o lexer distingue razão de erro (`token.LEXER_ERROR`:
+  `unterminated string`, chave aberta em f-string) de caractere ilegal
+  (`token.ILLEGAL`) pelo tipo do token; `lexer.IsReason` (contagem de runas
+  do literal, 0.23.3) sai. `Display()` do novo tipo é `lexer error`.
+
 ## [0.23.4] - 2026-09-04
 
 Issue #133 — namespace tipado, parte 2: escrita pelo namespace e "tipo é a

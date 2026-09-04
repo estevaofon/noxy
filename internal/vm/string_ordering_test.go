@@ -7,7 +7,7 @@ import (
 	"noxy-vm/internal/value"
 )
 
-// A spec (§1.3/§8) lista `>`, `<`, `>=`, `<=` como operadores de comparacao
+// A spec (§1.4/§8) lista `>`, `<`, `>=`, `<=` como operadores de comparacao
 // sem restringi-los a numeros, e define comparacao de strings como byte-exata
 // (sem normalizacao Unicode, como Python). Ate aqui o executor so aceitava
 // numeros em OP_GREATER/OP_LESS, entao `"a" < "b"` compilava e estourava em
