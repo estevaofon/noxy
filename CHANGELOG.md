@@ -1,5 +1,68 @@
 # Changelog
 
+## [Unreleased]
+
+Issue #133 — namespace tipado, parte 2: escrita pelo namespace e "tipo é a
+declaração, não a grafia".
+
+### Added
+- **`m.x = v` pelo namespace é escrita tipada e viva** (§11): atribuir a um
+  `let` de módulo pela forma de namespace compila com o tipo declarado
+  (`type mismatch in assignment to 'm.count': expected int, got string`) e
+  escreve no estado vivo do módulo — uma função do módulo lê o valor novo.
+  Erro só para membro inexistente (`'m' has no member 'y'`) e para
+  função/struct (`cannot assign to 'm.f': it is a function`). `m.a.b = v`,
+  `m.xs[i] = v`, `ref m.x`, `append(ref m.xs, v)` e `pop(ref m.xs)` passam a
+  ter o tipo do lvalue conhecido (`ref m.x` morria em runtime com "Target is
+  not an instance"). `select` continua snapshot. Uma escrita através do
+  namespace é uma troca sincronizada (`ObjMap.Swap`, um lock); a regra de
+  `docs/concurrency.md` continua valendo — leitura-modificação-escrita não é
+  atômica. Sai a regra "module variables are read-only outside the module"
+  da 0.11.0 (precedente: Python, Go, Nim, Swift permitem escrever num global
+  de outro módulo).
+- **Hint de `unknown type` nomeia o módulo real** (§11): `add 'use base' or
+  'use mid select V' to name this type` quando alguma dependência carregada
+  declara o struct.
+
+### Changed (BREAKING)
+- **Tipo é a declaração, não a grafia** (§3, §11). O compilador passa a
+  identificar um struct pela declaração (`Decl`), não pelo nome; um valor
+  cujo tipo o programa não sabe escrever continua totalmente tipado e é
+  exibido pelo caminho canônico (`base.V`), como Go e Rust fazem. Só a
+  anotação escrita exige grafia. Cobre o reexport pelo namespace
+  (`use mid` com `mid.nx` = `use base select *`: `let v = mid.mkv()` infere,
+  `mid.mkv("x")` é erro de aridade/tipo) e pelo `select` (`use mid select
+  mkv` deixa de dar `unknown type 'V'`), o campo de struct de módulo com
+  tipo de terceiro módulo (`res.rows` é `db.Row[]`, não dinâmico) e a
+  assinatura importada por `select` (um `struct Point` local já não captura
+  o `Point` de `geometry` numa função importada). Mensagens usam o alias
+  visível não sombreado no ponto em que o tipo foi inferido — no nível do
+  módulo, qualquer `use` do arquivo conta; dentro de uma função, só os
+  `use` que precedem aquele ponto.
+
+  | Antes | Agora |
+  |---|---|
+  | `let s: string = res.rows` compila e falha em runtime (`Row` não importado) | `expected string, got db.Row[]` em compilação |
+  | `let v = mid.mkv()` → `cannot infer type for 'v'` | `v: mid.V` inferido com `use mid` (`v: base.V` com `use mid select mkv`); `v.x` checado |
+  | `use mid select mkv; let v = mkv()` → `unknown type 'V'` | compila; `let s: string = v` é erro |
+  | `use geometry select dist2` + `struct Point` local: `dist2(local, local)` compila | `expected geometry.Point, got Point` |
+
+  Migração: programa que escrevia tipo errado sobre um valor não grafável
+  passa a não compilar — corrija o tipo; se o valor era `any` de fato,
+  anote `any`. Instância genérica interna de um módulo (`c: Caixa<int>` em
+  `g.nx`) continua dinâmica (§6.4). Identidade nominal em **runtime**
+  continua sendo o nome cru mais o layout (dois módulos com `struct V` de
+  mesmo layout são indistinguíveis no VM; a mensagem `expected V, got V`
+  é defeito de exibição) — bug pré-existente, follow-up registrado na #133.
+- **Array de tamanho fixo: verificação de compatibilidade volta a passar
+  pelo runtime.** O atalho de string removido de `areTypesCompatible`
+  aceitava por acidente, em compilação, `let a: int[5] = <valor any[]>`; a
+  checagem agora acontece em runtime (guarda do slot: `expected int[5], got
+  any[]`). Atribuição entre array de tamanho fixo e dinâmico
+  (`let fixed: int[5] = [1, 2, 3, 4, 5]`, `let a: int[15] = xs`) continua
+  compilando como antes — o tamanho nunca foi checado estaticamente nesses
+  casos.
+
 ## [0.23.3] - 2026-09-04
 
 Issue #126 — achados do [Deadrail](https://github.com/estevaofon/deadrail)

@@ -1,0 +1,25 @@
+// Issue #133: escrita tipada pelo namespace cai no estado vivo do módulo.
+use namespace_state_module as st
+use sys select exit
+
+func assert(cond: bool, msg: string) -> void
+    if !cond then
+        print("namespace state: FAIL - " + msg)
+        exit(1)
+    end
+end
+
+st.count = 9
+assert(st.read_count() == 9, "direct write is live")
+st.origin.x = 99
+assert(st.read_origin_x() == 99, "nested write is live")
+st.xs[0] = 10
+append(ref st.xs, 3)
+assert(length(st.xs) == 3 && st.xs[0] == 10, "index write and append through ref")
+
+func bump(c: ref int) -> void
+    *c = *c + 1
+end
+bump(ref st.count)
+assert(st.read_count() == 10, "ref to module member mutates the module")
+print("namespace state: ok")

@@ -1,0 +1,13 @@
+// Módulo de estado para test_namespace_state.nx (issue #133).
+struct P
+    x: int
+end
+let origin: P = P(0)
+let count: int = 0
+let xs: int[] = [1, 2]
+func read_count() -> int
+    return count
+end
+func read_origin_x() -> int
+    return origin.x
+end
