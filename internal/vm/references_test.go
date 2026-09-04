@@ -50,7 +50,9 @@ func TestLookupReferenceValueRejectsNilReference(t *testing.T) {
 	}
 }
 
-func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
+// Duas metades: append/delete continuam no no-op legado (devolvem null) e
+// pop, desde a #126 item 4, propaga o erro — o nome cobre as duas.
+func TestMutatingNativesOnMalformedReferences(t *testing.T) {
 	machine := New()
 	malformed := []struct {
 		name  string
@@ -74,12 +76,14 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 			}},
 		},
 	}
+	// append e delete continuam engolindo o erro de unicizeThroughRefValue
+	// (no-op legado); pop, desde a #126 item 4, propaga o erro em vez de
+	// devolver null (regra da #121) — verificado abaixo, fora deste loop.
 	natives := []struct {
 		name string
 		args func(value.Value) []value.Value
 	}{
 		{name: "append", args: func(target value.Value) []value.Value { return []value.Value{target, value.NewInt(1)} }},
-		{name: "pop", args: func(target value.Value) []value.Value { return []value.Value{target} }},
 		{name: "delete", args: func(target value.Value) []value.Value { return []value.Value{target, value.NewString("key")} }},
 	}
 
@@ -99,6 +103,21 @@ func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
 				}
 			})
 		}
+	}
+
+	// Issue #126 item 4: pop sobre uma referencia malformada e erro de
+	// runtime, nao mais o no-op legado que devolvia null.
+	popNative, ok := machine.GetGlobal("pop")
+	if !ok {
+		t.Fatal("missing native pop")
+	}
+	for _, target := range malformed {
+		t.Run(target.name+"/pop", func(t *testing.T) {
+			_, err := popNative.Obj.(*value.ObjNative).Invoke(machine, []value.Value{target.value})
+			if err == nil {
+				t.Fatal("pop on malformed reference resolved without error")
+			}
+		})
 	}
 }
 

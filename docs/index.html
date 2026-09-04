@@ -55,7 +55,7 @@
             <div class="hero-content">
                 <a href="https://github.com/estevaofon/noxy/blob/main/CHANGELOG.md" class="version-badge"
                     target="_blank">
-                    <span class="version-badge-tag">v0.23.2</span>
+                    <span class="version-badge-tag">v0.23.3</span>
                     Latest release &middot; changelog
                     <i class="fas fa-arrow-right"></i>
                 </a>
@@ -200,7 +200,7 @@ print(f"Product: {product.name}")</code></pre>
                         <i class="fas fa-microchip"></i>
                     </div>
                     <h3>Standard Library &amp; VM</h3>
-                    <p>io, strings, time, sys, net, http, json, crypto, sqlite, rand and errors — on a bytecode
+                    <p>io, strings, math, time, sys, net, http, json, crypto, sqlite, rand and errors — on a bytecode
                         compiler and stack-based VM written in Go, with an interactive REPL, diagnostics on
                         stderr and proper exit codes.</p>
                 </div>
@@ -375,14 +375,14 @@ print(info.exists)</code></pre>
                 </div>
                 <div class="syntax-card">
                     <h3>Standard Library</h3>
-                    <pre><code class="language-go">// io, strings, time, sys, net, http,
+                    <pre><code class="language-go">// io, strings, math, time, sys, net, http,
 // json, crypto, sqlite, rand, errors
 use time
 use sys
 
 print(time.now())            // unix timestamp
 print(length(sys.argv()))    // command-line args
-print(sys.version)           // v0.23.2
+print(sys.version)           // v0.23.3
 
 let user: map[string, any] = {"name": "Ana", "age": 30}
 print(json_dumps(user))      // {"age":30,"name":"Ana"}</code></pre>

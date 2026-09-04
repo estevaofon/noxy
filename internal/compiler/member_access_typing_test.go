@@ -54,6 +54,23 @@ func requireErrorMentions(t *testing.T, err error, wants ...string) {
 	}
 }
 
+// requireErrorLacks e o par negativo de requireErrorMentions: a mensagem
+// existe mas NAO pode conter certos trechos. Necessario porque a checagem e
+// por Contains e uma mensagem pode ser prefixo de outra — `got o.V` cabe
+// dentro de `got o.V?`, entao so o par positivo nao distingue narrowing de
+// ausencia de narrowing.
+func requireErrorLacks(t *testing.T, err error, unwanted ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected a compile error, got none")
+	}
+	for _, unwant := range unwanted {
+		if strings.Contains(err.Error(), unwant) {
+			t.Fatalf("error %q should not mention %q", err.Error(), unwant)
+		}
+	}
+}
+
 func requireNoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
@@ -150,8 +167,8 @@ let m: map[string, db.Row] = res.by_name
 }
 
 func TestModuleFieldTypeUsesNamespaceAlias(t *testing.T) {
-	// (`m.f(...)` via namespace e chamada dinamica — sem tipo de retorno
-	// estatico —, por isso o resultado passa por um `let` anotado.)
+	// (o `let` anotado continua valido: desde a #126 item 2 `d.q()` tem tipo
+	// estatico `d.QueryResult`, que bate com a anotacao por igualdade.)
 	err := compileSourceAtRoot(t, dbRoot(t), `use db as d
 let res: d.QueryResult = d.q()
 let s: string = res.rows

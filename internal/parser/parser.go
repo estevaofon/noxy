@@ -29,6 +29,16 @@ type Parser struct {
 	// splitCompositeGT (ex.: SHIFT_RIGHT dividido em dois GT). nextToken
 	// drena esta fila antes de pedir um novo token ao lexer.
 	pendingTokens []token.Token
+
+	// resyncToLine e ligado por peekError quando uma KEYWORD aparece onde
+	// se esperava um identificador (`let map: int`, `use src.map`): o
+	// statement falhou com um erro que ja nomeia a causa, e os tokens que
+	// sobram na linha so produziriam "invalid syntax" em cascata. ParseProgram
+	// e parseBlockStatement consomem a marca pulando ate o fim da linha
+	// (recuperacao em modo panico com ponto de sincronizacao). E especifica
+	// deste erro para nao mudar as demais mensagens que syntax_errors_test
+	// fixa.
+	resyncToLine bool
 }
 
 func New(l *lexer.Lexer) *Parser {
@@ -96,11 +106,56 @@ func (p *Parser) Errors() []string {
 }
 
 func (p *Parser) peekError(t token.TokenType) {
-	msg := fmt.Sprintf("  File \"%s\", line %d\n    %s\nSyntaxError: expected %s, found %s",
-		"file", p.peekToken.Line, "code line here...", t.Display(), p.peekToken.Type.Display())
-	msg = fmt.Sprintf("[%d:%d] SyntaxError: expected %s, found %s",
+	if t == token.IDENTIFIER && isTypeKeyword(p.peekToken.Type) {
+		// Keyword de TIPO em posicao de nome (issue #126 item 5): map, chan,
+		// any etc. sao justamente as palavras que alguem tentaria usar como
+		// nome de variavel/modulo/parametro (`let map: int`, `use src.map`,
+		// `func f(any: int)`). Palavras de controle de fluxo (in, do, then,
+		// as...) ficam de fora deste desvio: elas aparecem na posicao de
+		// identificador exatamente quando a construcao foi truncada
+		// (`for in [1] do` sem a variavel do laco), e ali "expected
+		// identifier, found in" — a mensagem generica abaixo — e' o
+		// diagnostico correto, nao "'in' is a keyword and cannot be used as
+		// a name".
+		p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: '%s' is a keyword and cannot be used as a name\n  hint: rename it (e.g. '%s_' or a more specific word)",
+			p.peekToken.Line, p.peekToken.Column, p.peekToken.Literal, p.peekToken.Literal))
+		p.resyncToLine = true
+		return
+	}
+	msg := fmt.Sprintf("[%d:%d] SyntaxError: expected %s, found %s",
 		p.peekToken.Line, p.peekToken.Column, t.Display(), p.peekToken.Type.Display())
 	p.errors = append(p.errors, msg)
+}
+
+// isTypeKeyword reporta se t e' uma das palavras-chave de tipo (grupo
+// "Palavras-chave - Tipos" em internal/token/token.go): map, chan, any, int,
+// float, string, bool, bytes, void, ref. Sao as reservadas que um usuario
+// plausivelmente tentaria usar como nome (issue #126 item 5) — ao contrario
+// das palavras de controle de fluxo (in, do, then, as, ...), que so aparecem
+// em posicao de identificador quando a construcao foi truncada.
+func isTypeKeyword(t token.TokenType) bool {
+	switch t {
+	case token.TYPE_INT, token.TYPE_FLOAT, token.TYPE_STRING, token.TYPE_BOOL,
+		token.TYPE_BYTES, token.TYPE_VOID, token.TYPE_ANY, token.REF,
+		token.MAP, token.CHAN:
+		return true
+	default:
+		return false
+	}
+}
+
+// resyncAfterFailedStatement consome a marca resyncToLine: avanca ate o
+// NEWLINE (ou EOF) da linha em que o statement falhou, para que o laco
+// chamador retome no proximo statement em vez de reinterpretar o resto da
+// linha. Sem marca, nao faz nada.
+func (p *Parser) resyncAfterFailedStatement() {
+	if !p.resyncToLine {
+		return
+	}
+	p.resyncToLine = false
+	for !p.curTokenIs(token.NEWLINE) && !p.curTokenIs(token.EOF) {
+		p.nextToken()
+	}
 }
 
 func (p *Parser) nextToken() {
@@ -127,6 +182,8 @@ func (p *Parser) ParseProgram() *ast.Program {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			program.Statements = append(program.Statements, stmt)
+		} else {
+			p.resyncAfterFailedStatement()
 		}
 		p.nextToken()
 	}
@@ -135,31 +192,82 @@ func (p *Parser) ParseProgram() *ast.Program {
 }
 
 func (p *Parser) parseStatement() ast.Statement {
+	// resyncToLine so deve valer para O STATEMENT que esta comecando agora.
+	// Sem este reset, uma falha de expectPeek(IDENTIFIER) dentro de um helper
+	// aninhado cuja falha NAO propaga como nil do statement (parseMemberAccess
+	// dentro de uma expressao de atribuicao — `y = obj.map` — ou o ramo de
+	// tipo qualificado em parseValueType — `let x: io.map = 5`) deixaria a
+	// marca ligada; o statement seguinte, mesmo com um erro completamente
+	// diferente e sem keyword nenhuma, entraria por engano no atalho de pular
+	// ate o fim da linha em vez do seu proprio caminho de erro (issue #126
+	// item 5, achado de revisao).
+	p.resyncToLine = false
+
+	// As chamadas para *StmtType (e nao ast.Statement) sao verificadas contra
+	// nil e so entao devolvidas como ast.Statement: retornar diretamente um
+	// ponteiro concreto nil (`return p.parseLetStatement()`) empacota esse
+	// nil numa interface NAO nil (a pegadinha classica de nil-em-interface do
+	// Go), e "if stmt != nil" no chamador (ParseProgram, parseBlockStatement,
+	// parseCaseBody) deixaria de detectar a falha — resyncAfterFailedStatement
+	// nunca rodaria e um statement fantasma entraria em Statements.
 	switch p.curToken.Type {
 	case token.LET:
-		return p.parseLetStatement()
+		if stmt := p.parseLetStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.RETURN:
-		return p.parseReturnStatement()
+		if stmt := p.parseReturnStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.DEFER:
 		return p.parseDeferStatement()
 	case token.IF:
-		return p.parseIfStatement()
+		if stmt := p.parseIfStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.WHILE:
-		return p.parseWhileStatement()
+		if stmt := p.parseWhileStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.FOR:
-		return p.parseForStatement()
+		if stmt := p.parseForStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.STRUCT:
-		return p.parseStructStatement()
+		if stmt := p.parseStructStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.FUNC:
-		return p.parseFunctionStatement()
+		if stmt := p.parseFunctionStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.BREAK:
-		return p.parseBreakStatement()
+		if stmt := p.parseBreakStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.CONTINUE:
-		return p.parseContinueStatement()
+		if stmt := p.parseContinueStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.USE:
-		return p.parseUseStatement()
+		if stmt := p.parseUseStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.WHEN:
-		return p.parseWhenStatement()
+		if stmt := p.parseWhenStatement(); stmt != nil {
+			return stmt
+		}
+		return nil
 	case token.NEWLINE:
 		return nil // Skip empty lines / separators
 	default:
@@ -1033,18 +1141,24 @@ func (p *Parser) parseFString() ast.Expression {
 		case ch == '{':
 			braceCount := 1
 			j := i + 1
+		scan:
 			for ; j < len(literal); j++ {
-				if literal[j] == '{' {
+				switch literal[j] {
+				case '{':
 					braceCount++
-				} else if literal[j] == '}' {
+				case '}':
 					braceCount--
 					if braceCount == 0 {
-						break
+						break scan
 					}
+				case '"', '\'':
+					// Literal aninhado (PEP 701, issue #126): a expressao pode
+					// conter strings; chaves dentro delas nao contam.
+					j = skipNestedQuoted(literal, j)
 				}
 			}
 			if j >= len(literal) {
-				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unclosed brace in f-string", line, column))
+				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: %s", line, column, lexer.UnclosedBraceReason))
 				return nil
 			}
 			flush()
@@ -1094,6 +1208,22 @@ func (p *Parser) parseFString() ast.Expression {
 		}
 	}
 	return combined
+}
+
+// skipNestedQuoted devolve o indice da aspa que fecha o literal de string
+// aberto em literal[start] (pulando `\x`), ou len(literal)-1 se ele nao
+// fecha — o chamador entao cai em "unclosed brace".
+func skipNestedQuoted(literal string, start int) int {
+	quote := literal[start]
+	for k := start + 1; k < len(literal); k++ {
+		switch literal[k] {
+		case '\\':
+			k++
+		case quote:
+			return k
+		}
+	}
+	return len(literal) - 1
 }
 
 // parseTryExpression: `try expr` com a precedencia de prefixo — `try f(x).ok`
@@ -1189,6 +1319,8 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
+		} else {
+			p.resyncAfterFailedStatement()
 		}
 		p.nextToken()
 	}
@@ -1218,6 +1350,8 @@ func (p *Parser) parseCaseBody() *ast.BlockStatement {
 		stmt := p.parseStatement()
 		if stmt != nil {
 			block.Statements = append(block.Statements, stmt)
+		} else {
+			p.resyncAfterFailedStatement()
 		}
 		p.nextToken()
 	}
@@ -1355,7 +1489,9 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 		return parameters
 	}
 
-	p.nextToken() // Eat first identifier
+	if !p.expectPeek(token.IDENTIFIER) {
+		return nil
+	}
 
 	// ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	paramName := p.curToken.Literal
@@ -1383,7 +1519,9 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken() // eat COMMA
-		p.nextToken() // eat next IDENTIFIER
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
 		// ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 		paramName = p.curToken.Literal
 
@@ -1679,9 +1817,17 @@ func (p *Parser) parseMemberAccess(left ast.Expression) ast.Expression {
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	msg := fmt.Sprintf("[%d:%d] SyntaxError: invalid syntax %q", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
-	// If literal is empty (e.g. EOF), might be weird.
-	if p.curToken.Type == token.EOF {
+	switch p.curToken.Type {
+	case token.EOF:
 		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
+	case token.ILLEGAL:
+		if lexer.IsReason(p.curToken.Literal) {
+			// O literal de um ILLEGAL e a razao que o lexer escreveu
+			// ("unterminated string", lexer.UnclosedBraceReason + hint).
+			msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
+		}
+		// Caso contrario o literal e um caractere desconhecido isolado
+		// (ex.: "@") e o msg generico "invalid syntax %q" acima ja serve.
 	}
 	p.errors = append(p.errors, msg)
 }

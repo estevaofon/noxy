@@ -14,9 +14,10 @@ import (
 // sem tipo, f-string com chave aberta.
 func TestSyntaxErrorMessages(t *testing.T) {
 	cases := []struct {
-		name   string
-		source string
-		want   []string
+		name    string
+		source  string
+		want    []string
+		notWant []string
 	}{
 		{
 			name:   "missing let keyword",
@@ -76,7 +77,7 @@ func TestSyntaxErrorMessages(t *testing.T) {
 		{
 			name:   "f-string with unclosed brace",
 			source: "print(f\"{x\")\n",
-			want:   []string{"SyntaxError: unclosed brace in f-string"},
+			want:   []string{"SyntaxError: unclosed brace in f-string", "hint: every '{' that starts an expression"},
 		},
 		{
 			name:   "f-string with broken inner expression",
@@ -93,6 +94,29 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			source: "let q: ref ref int\n",
 			want:   []string{"SyntaxError: 'ref ref' is not a type", "hint: a reference is never taken to a reference"},
 		},
+		{
+			name:   "unterminated string is a SyntaxError with the lexer reason",
+			source: "let s: string = \"abc\n",
+			want:   []string{"SyntaxError: unterminated string"},
+		},
+		{
+			name:   "unknown character keeps the generic invalid-syntax message",
+			source: "let x: int = 1 @ 2\n",
+			want:   []string{`invalid syntax "@"`},
+		},
+		{
+			// Issue #126: aspas curvas coladas de um editor de texto. Cada
+			// byte de U+201C vira um ILLEGAL cujo literal e a conversao
+			// int->rune daquele byte ("\u00e2" para 0xE2), com mais de um
+			// BYTE — lexer.IsReason contava bytes e tratava isso como uma
+			// "razao" escrita pelo lexer, imprimindo o caractere cru sem
+			// aspas nem diagnostico. Agora conta RUNAS e a mensagem generica
+			// volta.
+			name:    "pasted curly quotes report invalid syntax, not a bare byte",
+			source:  "let s: string = \u201cabc\u201d\n",
+			want:    []string{"invalid syntax"},
+			notWant: []string{"SyntaxError: \u00e2"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,8 +131,129 @@ func TestSyntaxErrorMessages(t *testing.T) {
 					t.Fatalf("source %q: errors=%q, want %q", tc.source, joined, want)
 				}
 			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(joined, notWant) {
+					t.Fatalf("source %q: errors=%q, must not contain %q", tc.source, joined, notWant)
+				}
+			}
 		})
 	}
+}
+
+// Issue #126 item 5: keyword onde se espera um nome (`use src.map as map`,
+// `let map: int = 1`) dizia "expected identifier, found map" e, como o parser
+// nao sincroniza, cada token seguinte virava mais um "invalid syntax". Agora e
+// UM erro que nomeia a keyword, e o parser pula o resto da linha (recuperacao
+// em modo panico com ponto de sincronizacao — Crafting Interpreters §6.3.3).
+func TestKeywordAsNameIsASingleError(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"use module named map", "use src.map as map\nlet x: int = 1\n", "[1:9] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"use alias named map", "use src.level as map\nlet x: int = 1\n", "[1:18] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"let named map", "let map: int = 1\nlet y: int = 2\n", "[1:5] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"let named chan inside block", "func f()\n    let chan: int = 1\n    let y: int = 2\nend\n", "[2:9] SyntaxError: 'chan' is a keyword and cannot be used as a name"},
+		{"param named any", "func f(any: int)\nend\n", "'any' is a keyword and cannot be used as a name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(lexer.New(tc.source))
+			_ = p.ParseProgram()
+			errs := p.Errors()
+			if len(errs) != 1 {
+				t.Fatalf("want exactly 1 error, got %d: %v", len(errs), errs)
+			}
+			if !strings.Contains(errs[0], tc.want) {
+				t.Fatalf("error %q does not contain %q", errs[0], tc.want)
+			}
+			if !strings.Contains(errs[0], "hint: rename it") {
+				t.Fatalf("error %q has no rename hint", errs[0])
+			}
+		})
+	}
+}
+
+// Revisão da issue #126 item 5: resyncToLine só pode valer para o statement
+// que a ligou. peekError liga a marca quando um expectPeek(IDENTIFIER)
+// aninhado falha por causa de keyword de tipo — mas em `y = obj.map` quem
+// falha é parseMemberAccess (chamado de dentro da expressão do lado direito
+// do `=`), e o AssignStmt que envolve essa expressão ainda volta non-nil; em
+// `let x: io.map = 5` quem falha é o ramo de tipo qualificado dentro de
+// parseValueType, e parseLetStatement também volta non-nil (com Type
+// incompleto). Em nenhum dos dois casos ParseProgram vê o statement como
+// nil, então resyncAfterFailedStatement nunca roda para ELE — sem o reset no
+// topo de parseStatement, a marca ficava ligada e vazava para o PRÓXIMO
+// statement, fazendo-o (por engano) pular até o fim da linha em vez de
+// seguir seu próprio caminho de erro, comendo o resto do seu diagnóstico.
+func TestResyncFlagDoesNotLeakAcrossStatements(t *testing.T) {
+	const nextStmt = "let : int = 1\n"
+
+	baseline := New(lexer.New(nextStmt))
+	_ = baseline.ParseProgram()
+	baselineErrs := baseline.Errors()
+	if len(baselineErrs) == 0 {
+		t.Fatalf("baseline sem erro: %q deveria falhar sozinho", nextStmt)
+	}
+
+	cases := []struct {
+		name        string
+		leakingStmt string
+		keywordWant string
+	}{
+		{
+			"member access inside assignment RHS",
+			"y = obj.map\n",
+			"'map' is a keyword and cannot be used as a name",
+		},
+		{
+			"qualified type inside let annotation",
+			"let x: io.map = 5\n",
+			"'map' is a keyword and cannot be used as a name",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(lexer.New(tc.leakingStmt + nextStmt))
+			_ = p.ParseProgram()
+			errs := p.Errors()
+
+			joined := strings.Join(errs, "\n")
+			if !strings.Contains(joined, tc.keywordWant) {
+				t.Fatalf("errors=%q: falta o erro de keyword %q", errs, tc.keywordWant)
+			}
+
+			// O que sobra depois do(s) erro(s) da primeira linha tem que
+			// bater exatamente com o baseline do segundo statement rodando
+			// sozinho (ignorando o prefixo [linha:coluna], que muda porque
+			// "let : int = 1" está na linha 2 aqui e na linha 1 no
+			// baseline). Se a marca vazou, resyncAfterFailedStatement pula
+			// direto até a NEWLINE e engole os erros em cascata de
+			// "let : int = 1" — a lista final fica mais curta que o
+			// baseline.
+			if len(errs) < len(baselineErrs) {
+				t.Fatalf("errors=%q: tem menos erros que o baseline sozinho %q — resyncToLine vazou e pulou a linha seguinte", errs, baselineErrs)
+			}
+			got := errs[len(errs)-len(baselineErrs):]
+			for i, want := range baselineErrs {
+				if stripPosition(got[i]) != stripPosition(want) {
+					t.Fatalf("erro final [%d] = %q, want %q (deveria ser igual ao statement rodando sozinho, exceto a posição) — resyncToLine vazou", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// stripPosition remove o prefixo "[linha:coluna] " de uma mensagem de erro,
+// para comparar o conteúdo do diagnóstico ignorando a posição (que muda
+// conforme a linha em que o statement aparece).
+func stripPosition(err string) string {
+	_, rest, found := strings.Cut(err, "] ")
+	if !found {
+		return err
+	}
+	return rest
 }
 
 // Cada diagnóstico carrega a posição [linha:coluna] do ponto do erro — é o

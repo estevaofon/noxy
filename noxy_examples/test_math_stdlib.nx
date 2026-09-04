@@ -1,0 +1,45 @@
+// test_math_stdlib.nx — módulo math da stdlib (issue #126 item 1)
+use sys select exit
+use math
+use math select sqrt, PI
+
+func assert(cond: bool, name: string) -> void
+    if cond then
+        print("PASS: " + name)
+    else
+        print("FAIL: " + name)
+        exit(1)
+    end
+end
+
+func near(a: float, b: float) -> bool
+    return math.abs(a - b) < 0.000001
+end
+
+assert(near(sqrt(2.0) * sqrt(2.0), 2.0), "sqrt")
+assert(near(math.hypot(3.0, 4.0), 5.0), "hypot")
+assert(near(math.atan2(1.0, 1.0) * 4.0, PI), "atan2 e PI")
+assert(near(math.sin(PI / 2.0), 1.0), "sin")
+assert(near(math.cos(0.0), 1.0), "cos")
+assert(math.floor(2.7) == 2.0 && math.ceil(2.1) == 3.0, "floor/ceil")
+assert(math.round(2.5) == 3.0 && math.round(-2.5) == -3.0, "round afasta de zero")
+assert(math.trunc(-2.7) == -2.0, "trunc")
+assert(near(math.fmod(7.5, 2.0), 1.5), "fmod")
+assert(math.pow(2.0, 10.0) == 1024.0, "pow")
+assert(near(math.log(math.E), 1.0) && math.log2(8.0) == 3.0 && math.log10(1000.0) == 3.0, "log/log2/log10")
+assert(math.min(1.0, -1.0) == -1.0 && math.max(1.0, -1.0) == 1.0, "min/max")
+assert(math.clamp(50.0, 0.0, 10.0) == 10.0 && math.clamp(-5.0, 0.0, 10.0) == 0.0, "clamp")
+assert(math.abs_int(-3) == 3 && math.min_int(2, 9) == 2 && math.max_int(2, 9) == 9 && math.clamp_int(50, 0, 10) == 10, "versões int")
+
+// Leque de tiros: rotação de vetor por ângulo (o que o Deadrail pré-computava fora da linguagem)
+let ang: float = 12.0 * PI / 180.0
+let c: float = math.cos(ang)
+let s: float = math.sin(ang)
+let vx: float = 1.0
+let vy: float = 0.0
+let rx: float = vx * c - vy * s
+let ry: float = vx * s + vy * c
+assert(near(math.hypot(rx, ry), 1.0), "rotação preserva o módulo")
+assert(near(math.atan2(ry, rx), ang), "atan2 recupera o ângulo")
+
+print("test_math_stdlib: OK")

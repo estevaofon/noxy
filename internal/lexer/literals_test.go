@@ -63,3 +63,75 @@ func TestUnknownCharacterIsIllegalToken(t *testing.T) {
 		t.Fatalf("tokens ILLEGAL = %q, want [\"@\"]", illegal)
 	}
 }
+
+// Issue #126 item 3 (PEP 701): dentro de `{...}` de uma f-string, uma aspa
+// igual a do delimitador abre um literal aninhado em vez de fechar a
+// f-string. O lexer conta a profundidade de chaves; o parser continua
+// recebendo o literal inteiro e re-lexando cada `{...}`.
+func TestFStringQuotesInsideBraces(t *testing.T) {
+	cases := []struct {
+		name, source, want string
+	}{
+		{"double inside double", `f"n = {fmt("%03d", n)}"`, `n = {fmt("%03d", n)}`},
+		{"single inside single", `f'{fmt('%d', n)}'`, `{fmt('%d', n)}`},
+		{"map literal with space", `f"{ {"a": 1}["a"] }"`, `{ {"a": 1}["a"] }`},
+		{"escaped quote inside nested string stays verbatim", `f"{s + "a\"b"}"`, `{s + "a\"b"}`},
+		{"literal braces still escape at depth zero", `f"{{x}} = {x}"`, `{{x}} = {x}`},
+		{"nested braces close in order", `f"{{{x}}}"`, `{{{x}}}`},
+		{"brace char inside nested string does not count", `f"{"}"}!"`, `{"}"}!`},
+		{"text after the expression", `f"{a}: {b}"`, `{a}: {b}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requireLiteral(t, tc.source, token.FSTRING, tc.want)
+		})
+	}
+}
+
+func TestFStringUnclosedBraceIsReportedByTheLexer(t *testing.T) {
+	requireIllegal(t, "f\"{x\"\n", "unclosed brace in f-string")
+	requireIllegal(t, "f\"{x\"\n", "hint:")
+	requireIllegal(t, `f"{x`, "unclosed brace in f-string")
+	// The nested literal "abc}" closes fine (its own quote matches at the
+	// end); what never closes is the `{` opened before it, so EOF arrives
+	// with depth 1 and the diagnosis is "unclosed brace", same as CPython
+	// 3.12 ("f-string: expecting '}'") for the equivalent input.
+	requireIllegal(t, `f"{"abc}"`, "unclosed brace in f-string")
+	// Here the nested literal itself never closes either (no matching `"`
+	// before EOF) — still reported as "unclosed brace in f-string": the `{`
+	// is also open, and that's the actionable fix regardless of which quote
+	// is missing.
+	requireIllegal(t, `f"{"abc`, "unclosed brace in f-string")
+}
+
+// The parser duplicates this text nowhere anymore (it references
+// lexer.UnclosedBraceReason directly, issue #126); pin the exact wording
+// here so a future edit can't silently drift the hint.
+func TestUnclosedBraceReasonIsThePinnedSpecText(t *testing.T) {
+	want := "unclosed brace in f-string\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"
+	if UnclosedBraceReason != want {
+		t.Fatalf("UnclosedBraceReason = %q, want %q", UnclosedBraceReason, want)
+	}
+}
+
+// Issue #126: IsReason separa a razao escrita pelo lexer (uma frase em
+// ingles, sempre com mais de uma runa) do caractere desconhecido copiado
+// verbatim por newToken. Contar BYTES confundia os dois: `string(l.ch)`
+// converte o byte para runa, entao qualquer byte nao-ASCII (o 0xE2 de uma
+// aspa curva colada, por exemplo) vira uma string de 2 bytes e passava por
+// "razao", fazendo o parser imprimir o caractere cru em vez de
+// `invalid syntax "..."`.
+func TestIsReasonCountsRunesNotBytes(t *testing.T) {
+	if IsReason("â") {
+		t.Fatalf("IsReason(%q) = true, want false: e um unico caractere desconhecido", "â")
+	}
+	if IsReason("@") {
+		t.Fatalf("IsReason(\"@\") = true, want false")
+	}
+	if !IsReason(UnclosedBraceReason) {
+		t.Fatalf("IsReason(UnclosedBraceReason) = false, want true")
+	}
+	if !IsReason("unterminated string") {
+		t.Fatalf("IsReason(\"unterminated string\") = false, want true")
+	}
+}

@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"noxy-vm/internal/value"
@@ -128,16 +129,63 @@ func TestMutatingCollectionBuiltinsUseReferencedTarget(t *testing.T) {
 	assertBuiltinValue(t, popped, value.NewInt(2))
 	assertBuiltinArray(t, storedArray, []value.Value{value.NewInt(1)})
 	assertBuiltinValue(t, callBuiltin(t, machine, "pop", arrayRef), value.NewInt(1))
-	assertBuiltinValue(t, callBuiltin(t, machine, "pop", arrayRef), value.NewNull())
 	assertBuiltinArray(t, storedArray, nil)
+	// Issue #126 (regra da #121): pop em array vazio e erro, nao null sentinela.
+	if _, err := requireBuiltin(t, machine, "pop").Invoke(machine, []value.Value{arrayRef}); err == nil || !strings.Contains(err.Error(), "pop from empty array") {
+		t.Fatalf("pop on empty array: err = %v, want pop from empty array", err)
+	}
 
 	invalidArray := value.NewArray([]value.Value{value.NewInt(9)})
 	assertBuiltinValue(t, callBuiltin(t, machine, "append", invalidArray, value.NewInt(10)), value.NewNull())
 	assertBuiltinArray(t, invalidArray, []value.Value{value.NewInt(9)})
-	assertBuiltinValue(t, callBuiltin(t, machine, "pop", invalidArray), value.NewNull())
+	// Issue #126 (regra da #121): pop sobre argumento nao-ref e erro (o texto
+	// vem de unicizeThroughRefValue), nao null sentinela.
+	if _, err := requireBuiltin(t, machine, "pop").Invoke(machine, []value.Value{invalidArray}); err == nil {
+		t.Fatalf("pop on non-ref argument: err = %v, want an error", err)
+	}
 	assertBuiltinArray(t, invalidArray, []value.Value{value.NewInt(9)})
 	assertBuiltinValue(t, callBuiltin(t, machine, "append", arrayRef), value.NewNull())
 	assertBuiltinValue(t, callBuiltin(t, machine, "delete", mapRef), value.NewNull())
+}
+
+// Issue #126 item 4: pop com indice opcional (Python list.pop([i])) e
+// swap_remove (Rust Vec::swap_remove). Devolvem o elemento; posicao
+// inexistente e erro, como indexar.
+func TestPopWithIndexAndSwapRemoveBuiltins(t *testing.T) {
+	machine := New()
+	stored := value.NewArray([]value.Value{value.NewInt(10), value.NewInt(20), value.NewInt(30), value.NewInt(40)})
+	ref := pointerReference(&stored)
+
+	assertBuiltinValue(t, callBuiltin(t, machine, "pop", ref, value.NewInt(1)), value.NewInt(20))
+	assertBuiltinArray(t, stored, []value.Value{value.NewInt(10), value.NewInt(30), value.NewInt(40)})
+
+	assertBuiltinValue(t, callBuiltin(t, machine, "swap_remove", ref, value.NewInt(0)), value.NewInt(10))
+	assertBuiltinArray(t, stored, []value.Value{value.NewInt(40), value.NewInt(30)})
+
+	assertBuiltinValue(t, callBuiltin(t, machine, "pop", ref), value.NewInt(30))
+	assertBuiltinValue(t, callBuiltin(t, machine, "swap_remove", ref, value.NewInt(0)), value.NewInt(40))
+	assertBuiltinArray(t, stored, nil)
+
+	for _, name := range []string{"pop", "swap_remove"} {
+		stored = value.NewArray([]value.Value{value.NewInt(1)})
+		ref = pointerReference(&stored)
+		for _, idx := range []int64{1, -1} {
+			_, err := requireBuiltin(t, machine, name).Invoke(machine, []value.Value{ref, value.NewInt(idx)})
+			if err == nil || !strings.Contains(err.Error(), "array index out of bounds") {
+				t.Fatalf("%s(%d): err = %v, want array index out of bounds", name, idx, err)
+			}
+		}
+		assertBuiltinArray(t, stored, []value.Value{value.NewInt(1)})
+		if _, err := requireBuiltin(t, machine, name).Invoke(machine, []value.Value{ref, value.NewString("0")}); err == nil || !strings.Contains(err.Error(), "index must be an int, got string") {
+			t.Fatalf("%s with string index: err = %v", name, err)
+		}
+	}
+	if _, err := requireBuiltin(t, machine, "pop").Invoke(machine, []value.Value{ref, value.NewInt(0), value.NewInt(0)}); err == nil || !strings.Contains(err.Error(), "pop: expects 1 or 2 arguments, got 3") {
+		t.Fatalf("pop arity: err = %v", err)
+	}
+	if _, err := requireBuiltin(t, machine, "swap_remove").Invoke(machine, []value.Value{ref}); err == nil || !strings.Contains(err.Error(), "swap_remove: expects exactly 2 arguments, got 1") {
+		t.Fatalf("swap_remove arity: err = %v", err)
+	}
 }
 
 func TestSliceBuiltin(t *testing.T) {

@@ -1095,6 +1095,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// desconhecido, campo inexistente ou tipo que o programa nao consegue
 		// nomear).
 		fieldType := c.memberType(leftType, n.Member)
+		if fieldType == nil && leftType == nil {
+			// `m.x` / `m.f` com m namespace (issue #126 item 2).
+			fieldType = c.namespaceMemberType(n)
+		}
 		if key, ok := stableKey(n); ok {
 			fieldType = c.narrowType(key, fieldType)
 		}
@@ -2642,7 +2646,16 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 						c.currentLine, i+1, callableName(call.Function), expectedRef.String(), noxyTypeName(refArg.plain), refArgumentHint(arg),
 					)
 				}
-				if !refArg.proven {
+				// `ref x` e sintaticamente provado (refArg.proven), mas isso
+				// so prova o MODO quando o tipo do alvo e conhecido: com
+				// element == nil (campo de um struct que o programa nao
+				// consegue nomear, campo de instancia generica, fronteira
+				// dinamica) a checagem estatica abaixo nao roda e ninguem
+				// conferiu que o alvo e mesmo um `T`. Cair para OP_CALL
+				// devolve a validacao ao runtime (validateParameterModes e,
+				// desde a revisao do #119, validateRefTargets) — sem isso a
+				// escrita entra num campo de outro tipo em silencio.
+				if !refArg.proven || refArg.element == nil {
 					modesProven = false
 				}
 				if _, isNull := arg.(*ast.NullLiteral); isNull {
@@ -2705,6 +2718,18 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			return nil, nil, err
 		}
 		argTypes = append(argTypes, argType)
+		// Tipo estatico desconhecido (campo de um `any`, retorno que
+		// programViewType zerou por ser inominavel pelo programa) ⇒ o MODO do
+		// argumento tambem NAO foi provado: asRefType(nil) e falso,
+		// areStrictTypesCompatible aceita nil contra qualquer parametro e as
+		// guardas de slot pulam nil, entao ninguem conferiu que o valor nao e
+		// uma referencia. Mesma regra do ramo `ref` acima: cair para OP_CALL
+		// devolve a checagem ao runtime (validateParameterModes, "expected
+		// int, got ref") — sem isso a referencia entra num slot por valor em
+		// silencio.
+		if isExact && argType == nil {
+			modesProven = false
+		}
 		if isExact {
 			if _, stillRef := asRefType(argType); stillRef {
 				if _, expectedIsRef := asRefType(funcType.Params[i]); !expectedIsRef {

@@ -22,7 +22,12 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"io_read_n", "io_remove", "io_rename", "io_seek", "io_stat", "io_stdin", "io_tell", "io_write",
 		"io_write_result", "iprint", "json_dumps",
 		"json_dumps_result", "json_loads", "json_parse", "keys", "length", "make_chan",
-		"make_wg", "net_accept", "net_close", "net_connect", "net_listen",
+		"make_wg", "math_abs", "math_acos", "math_asin", "math_atan", "math_atan2",
+		"math_cbrt", "math_ceil", "math_clamp", "math_clamp_int", "math_cos",
+		"math_exp", "math_floor", "math_fmod", "math_hypot", "math_log",
+		"math_log10", "math_log2", "math_max", "math_min", "math_pow",
+		"math_round", "math_sin", "math_sqrt", "math_tan", "math_trunc",
+		"net_accept", "net_close", "net_connect", "net_listen",
 		"net_recv", "net_select", "net_send", "net_setblocking", "net_settimeout", "net_socket_set", "ord",
 		"pop", "print", "range", "slice", "spawn", "spawn_task", "sqlite_bind_float",
 		"sqlite_bind_int", "sqlite_bind_text", "sqlite_close", "sqlite_exec",
@@ -35,7 +40,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"strings_join_count", "strings_pad_left", "strings_repeat", "strings_replace",
 		"strings_replace_first", "strings_reverse", "strings_split",
 		"strings_starts_with", "strings_substring", "strings_to_lower",
-		"strings_to_upper", "strings_trim", "sys_argv", "sys_exec",
+		"strings_to_upper", "strings_trim", "swap_remove", "sys_argv", "sys_exec",
 		"sys_exec_output", "sys_exit", "sys_getcwd", "sys_getenv",
 		"sys_load_plugin", "sys_os", "sys_setenv", "sys_signal_notify", "sys_signal_stop", "sys_sleep", "sys_version", "task_await",
 		"time_add_days", "time_add_seconds", "time_after", "time_before",
@@ -67,6 +72,7 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 	tests := []struct {
 		name       string
 		arity      int
+		variadic   bool
 		params     []value.ParamInfo
 		returnType string
 	}{
@@ -81,8 +87,22 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 			returnType: "void",
 		},
 		{
-			name: "pop", arity: 1,
-			params:     []value.ParamInfo{{IsRef: true, TypeName: "ref array"}},
+			// Issue #126 item 4: pop(ref arr[, i]) — indice opcional (Python
+			// list.pop([i])); 1 ou 2 argumentos via Variadic (defer.go).
+			name: "pop", arity: 1, variadic: true,
+			params: []value.ParamInfo{
+				{IsRef: true, TypeName: "ref array"},
+				{IsRef: false, TypeName: "int"},
+			},
+			returnType: "any",
+		},
+		{
+			// Issue #126 item 4: swap_remove(ref arr, i) — Rust Vec::swap_remove.
+			name: "swap_remove", arity: 2,
+			params: []value.ParamInfo{
+				{IsRef: true, TypeName: "ref array"},
+				{IsRef: false, TypeName: "int"},
+			},
 			returnType: "any",
 		},
 		{
@@ -101,8 +121,8 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 			if native.Signature.Arity != tt.arity {
 				t.Errorf("arity = %d, want %d", native.Signature.Arity, tt.arity)
 			}
-			if native.Signature.Variadic {
-				t.Error("signature is variadic, want fixed arity")
+			if native.Signature.Variadic != tt.variadic {
+				t.Errorf("variadic = %v, want %v", native.Signature.Variadic, tt.variadic)
 			}
 			if !reflect.DeepEqual(native.Signature.Params, tt.params) {
 				t.Errorf("params = %#v, want %#v", native.Signature.Params, tt.params)
@@ -117,7 +137,7 @@ func TestBuiltinNativeSignatures(t *testing.T) {
 func TestStatefulBuiltinsUseContextualHandlers(t *testing.T) {
 	machine := New()
 	for _, name := range []string{
-		"spawn", "spawn_task", "task_await", "delete", "append", "pop", "json_loads", "sys_load_plugin",
+		"spawn", "spawn_task", "task_await", "delete", "append", "pop", "swap_remove", "json_loads", "sys_load_plugin",
 		"io_open", "net_listen", "net_settimeout", "sqlite_open",
 	} {
 		native := requireBuiltin(t, machine, name)

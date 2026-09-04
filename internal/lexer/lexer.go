@@ -497,19 +497,50 @@ func appendValidatedRune(out []byte, code int) ([]byte, string) {
 
 // readQuoted scans the body of a quoted literal. An empty reason means
 // success; otherwise it describes why the literal is illegal.
+//
+// F-strings are brace-aware (issue #126, the PEP 701 rule): inside a `{...}`
+// expression a `"` or a `'` — either quote character, not just the one
+// matching the f-string's own delimiter (needed for e.g. f"{a['k']}") —
+// opens a nested string literal (copied verbatim, escapes included — the
+// parser re-lexes the expression) instead of closing the f-string. At depth
+// 0 `{{` and `}}` are literal braces and do not change the depth. A `{`
+// still open at a raw newline or at EOF is reported here, next to its
+// cause.
 func (l *Lexer) readQuoted(quote byte, kind literalKind) (string, string) {
 	l.readChar() // Skip opening quote
 
 	var out []byte
+	depth := 0 // f-string only: `{` of expressions still open
 
 	for {
 		if l.ch == 0 {
+			if depth > 0 {
+				return string(out), UnclosedBraceReason
+			}
 			return string(out), "unterminated " + kind.name()
 		}
-		if l.ch == quote {
+		if l.ch == quote && depth == 0 {
 			break
 		}
-		if l.ch == '\\' {
+		switch {
+		case kind == literalFString && depth > 0 && l.ch == '\n':
+			return string(out), UnclosedBraceReason
+		case kind == literalFString && depth == 0 && (l.ch == '{' || l.ch == '}') && l.peekChar() == l.ch:
+			out = append(out, l.ch, l.ch)
+			l.readChar()
+		case kind == literalFString && l.ch == '{':
+			depth++
+			out = append(out, '{')
+		case kind == literalFString && depth > 0 && l.ch == '}':
+			depth--
+			out = append(out, '}')
+		case kind == literalFString && depth > 0 && (l.ch == '"' || l.ch == '\''):
+			var reason string
+			out, reason = l.readNestedQuoted(out, l.ch)
+			if reason != "" {
+				return string(out), reason
+			}
+		case l.ch == '\\':
 			l.readChar() // Skip backslash
 			if l.ch == 0 {
 				return string(out), "unterminated " + kind.name()
@@ -519,12 +550,65 @@ func (l *Lexer) readQuoted(quote byte, kind literalKind) (string, string) {
 			if reason != "" {
 				return string(out), reason
 			}
-		} else {
+		default:
 			out = append(out, l.ch)
 		}
 		l.readChar()
 	}
 	return string(out), ""
+}
+
+const UnclosedBraceReason = "unclosed brace in f-string\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"
+
+// IsReason reports whether an ILLEGAL token's literal is a reason the lexer
+// wrote out (e.g. "unterminated string", UnclosedBraceReason) rather than a
+// single unrecognized character copied verbatim by newToken. Every reason
+// this package writes is an English sentence — always more than one RUNE —
+// and newToken (the `else` branch of NextToken, ~line 236) is this package's
+// only producer of single-character ILLEGAL literals. Counting bytes was
+// wrong: newToken does `string(ch)` on a byte, which Go converts as an
+// integer to a rune, so a non-ASCII byte such as the 0xE2 of a pasted curly
+// quote becomes the two-byte "â" and passed for a reason — the parser then
+// printed the raw character instead of `invalid syntax "â"` (issue #126).
+// Callers (the parser's diagnostics) use this to decide whether to surface
+// the literal as-is or quote it as `invalid syntax`.
+func IsReason(literal string) bool {
+	return utf8.RuneCountInString(literal) > 1
+}
+
+// readNestedQuoted copies a string literal that appears INSIDE an f-string
+// expression, verbatim (opening quote, body with escapes untouched, closing
+// quote), leaving l.ch on the closing quote. The parser re-lexes the
+// expression, so the escapes are interpreted there.
+//
+// A raw newline here means the nested literal — and therefore the `{`
+// expression around it — cannot close on this line, same as an unescaped
+// newline anywhere else at depth > 0: reported as UnclosedBraceReason rather
+// than a plain "unterminated string", since the actionable fix is the same
+// missing `}`.
+func (l *Lexer) readNestedQuoted(out []byte, quote byte) ([]byte, string) {
+	out = append(out, quote)
+	l.readChar()
+	for {
+		if l.ch == 0 {
+			return out, UnclosedBraceReason
+		}
+		if l.ch == '\n' {
+			return out, UnclosedBraceReason
+		}
+		if l.ch == quote {
+			return append(out, quote), ""
+		}
+		if l.ch == '\\' {
+			out = append(out, '\\')
+			l.readChar()
+			if l.ch == 0 {
+				return out, UnclosedBraceReason
+			}
+		}
+		out = append(out, l.ch)
+		l.readChar()
+	}
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {

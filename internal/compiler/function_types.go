@@ -98,8 +98,16 @@ func noxyTypeName(t ast.NoxyType) string {
 }
 
 func callableName(expression ast.Expression) string {
-	if identifier, ok := expression.(*ast.Identifier); ok {
-		return identifier.Value
+	// Caminho rapido do caso comum.
+	if ident, ok := expression.(*ast.Identifier); ok {
+		return ident.Value
+	}
+	// `m.roll(...)` (issue #126 item 2): "argument 1 to 'm.roll'", nao
+	// "(m.roll)" como MemberAccessExpression.String() imprime — e o mesmo
+	// vale para cadeias mais fundas (`o.inner.cb`), que stableKey ja
+	// canoniza (nullable.go) para os hints.
+	if key, ok := stableKey(expression); ok {
+		return key
 	}
 	return expression.String()
 }

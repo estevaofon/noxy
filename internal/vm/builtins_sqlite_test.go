@@ -148,9 +148,12 @@ func TestDeferredSQLiteCleanupFinalizesStatementBeforeDatabaseOnEveryExit(t *tes
 				})
 				return value.NewNull(), nil
 			})
+			// issue #126 item 2: `sqlite.prepare` devolve Statement? tambem
+			// pelo namespace, entao o binding e nullable e o uso passa pelo
+			// teste de null (o defer continua do FRAME, nao do bloco).
 			source := "use sqlite\nlet db: sqlite.Database = sqlite.open(" + strconv.Quote(path) + ")\n" +
-				"defer sqlite.close(db)\nlet stmt: sqlite.Statement = sqlite.prepare(db, \"SELECT 1\")\n" +
-				"defer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\nrecord_sqlite_resources(db, stmt)" + test.suffix
+				"defer sqlite.close(db)\nlet stmt: sqlite.Statement? = sqlite.prepare(db, \"SELECT 1\")\n" +
+				"if stmt != null then\ndefer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\nrecord_sqlite_resources(db, stmt)\nend" + test.suffix
 
 			err := interpretVMSource(t, machine, source)
 			if (err != nil) != test.wantError {
@@ -182,9 +185,9 @@ func TestDeferredSQLiteResourceCleanupContinuesAfterFailure(t *testing.T) {
 	sentinel := errors.New("sentinel cleanup failure")
 	defineCleanupFailureNative(machine, sentinel)
 	source := "use sqlite\nlet db: sqlite.Database = sqlite.open(" + strconv.Quote(path) + ")\n" +
-		"defer sqlite.close(db)\nlet stmt: sqlite.Statement = sqlite.prepare(db, \"SELECT 1\")\n" +
-		"defer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\n" +
-		"record_sqlite_resources(db, stmt)\ndefer cleanup_fail()"
+		"defer sqlite.close(db)\nlet stmt: sqlite.Statement? = sqlite.prepare(db, \"SELECT 1\")\n" +
+		"if stmt != null then\ndefer assert_statement_finalized()\ndefer sqlite.finalize(stmt)\n" +
+		"record_sqlite_resources(db, stmt)\nend\ndefer cleanup_fail()"
 
 	err := interpretVMSource(t, machine, source)
 	if !errors.Is(err, sentinel) {

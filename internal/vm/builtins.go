@@ -40,6 +40,7 @@ func (vm *VM) defineBuiltins() {
 	vm.defineTimeBuiltins()
 	vm.defineIOBuiltins()
 	vm.defineStringBuiltins()
+	vm.defineMathBuiltins()
 	vm.defineCryptoBuiltins()
 	vm.defineSystemBuiltins()
 	vm.defineCollectionBuiltins()

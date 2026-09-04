@@ -232,3 +232,26 @@ func TestNumberLiteralsWithExponent(t *testing.T) {
 		}
 	}
 }
+
+// Issue #126 item 5: `str` era reservado em token.go (TYPE_STR) mas o parser
+// nunca o consumia — reserva morta que so custava o identificador. Agora e
+// um nome comum; `map`, `chan` e `any` continuam keywords (spec §1.2).
+func TestStrIsAnIdentifierAndTypeKeywordsStayReserved(t *testing.T) {
+	if got := token.LookupIdent("str"); got != token.IDENTIFIER {
+		t.Fatalf("LookupIdent(\"str\") = %s, want IDENTIFIER", got)
+	}
+	for _, kw := range []struct {
+		word string
+		want token.TokenType
+	}{{"map", token.MAP}, {"chan", token.CHAN}, {"any", token.TYPE_ANY}, {"string", token.TYPE_STRING}} {
+		if got := token.LookupIdent(kw.word); got != kw.want {
+			t.Fatalf("LookupIdent(%q) = %s, want %s", kw.word, got, kw.want)
+		}
+	}
+	l := New("let str: int = 1\n")
+	first := l.NextToken()
+	second := l.NextToken()
+	if first.Type != token.LET || second.Type != token.IDENTIFIER || second.Literal != "str" {
+		t.Fatalf("tokens = %s %s(%q), want LET IDENTIFIER(\"str\")", first.Type, second.Type, second.Literal)
+	}
+}

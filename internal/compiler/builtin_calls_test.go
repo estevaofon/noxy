@@ -289,9 +289,12 @@ func TestMutatingBuiltinArityContracts(t *testing.T) {
 	}{
 		{name: "append too few", source: "append([])", want: "append expects 2 arguments, got 1"},
 		{name: "append too many", source: "append([], 1, 2)", want: "append expects 2 arguments, got 3"},
-		{name: "pop", source: "pop()", want: "pop expects 1 arguments, got 0"},
+		{name: "pop", source: "pop()", want: "pop expects 1 or 2 arguments, got 0"},
 		{name: "delete", source: "delete({})", want: "delete expects 2 arguments, got 1"},
 		{name: "json_loads", source: `json_loads("{}")`, want: "json_loads expects 2 arguments, got 1"},
+		// Issue #126 item 4
+		{name: "swap_remove too few", source: "let xs: int[] = [1]\nswap_remove(ref xs)", want: "swap_remove expects 2 arguments, got 1"},
+		{name: "pop too many", source: "let xs: int[] = [1]\npop(ref xs, 0, 0)", want: "pop expects 1 or 2 arguments, got 3"},
 	}
 
 	for _, tt := range tests {
@@ -358,6 +361,42 @@ let target: map[string, int] = {}
 json_loads(42, ref target)`,
 			want: "expected string, got int",
 		},
+		// Issue #126 item 4
+		{
+			name: "swap_remove without ref",
+			source: `
+let xs: int[] = [1]
+swap_remove(xs, 0)`,
+			want: "argument 1 to 'swap_remove': expected ref T[], got int[]",
+		},
+		{
+			name: "swap_remove container",
+			source: `
+let m: map[string, int] = {}
+swap_remove(ref m, 0)`,
+			want: "swap_remove expects an array, got map[string, int]",
+		},
+		{
+			name: "swap_remove index type",
+			source: `
+let xs: int[] = [1]
+swap_remove(ref xs, "0")`,
+			want: "argument 2 to 'swap_remove': expected int, got string",
+		},
+		{
+			name: "pop index type",
+			source: `
+let xs: int[] = [1]
+pop(ref xs, "0")`,
+			want: "argument 2 to 'pop': expected int, got string",
+		},
+		{
+			name: "pop with index preserves element type",
+			source: `
+let xs: string[] = ["a"]
+let n: int = pop(ref xs, 0)`,
+			want: "expected int, got string",
+		},
 	}
 
 	for _, tt := range tests {
@@ -367,6 +406,30 @@ json_loads(42, ref target)`,
 				t.Fatalf("error=%v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestPopWithIndexAndSwapRemoveReturnElementType(t *testing.T) {
+	src := `let xs: string[] = ["a", "b", "c"]
+let first = pop(ref xs, 0)
+let last = pop(ref xs)
+let only = swap_remove(ref xs, 0)
+`
+	for _, name := range []string{"first", "last", "only"} {
+		if got := inferredLetType(t, src, name); got != "string" {
+			t.Fatalf("%s: %s, want string", name, got)
+		}
+	}
+}
+
+func TestPopRejectsExplicitReferenceIndex(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let xs: int[] = [1, 2, 3]
+let i: int = 0
+let removed: int = pop(ref xs, ref i)`)
+	want := "argument 2 to 'pop': expected int, got ref int\n  hint: use '*' to read the referenced value"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error=%v, want %q", err, want)
 	}
 }
 

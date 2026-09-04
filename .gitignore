@@ -38,3 +38,6 @@ noxy_libs/github_com/estevaofon/noxy_dynamodb/
 log_alias.txt
 build_function.sh
 build_layer.sh
+
+# superpowers SDD scratch (ledger, briefs, review packages)
+.superpowers/

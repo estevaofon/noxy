@@ -29,9 +29,11 @@ func inferLetType(name string, valType ast.NoxyType, line int) (ast.NoxyType, er
 	}
 	if valType == nil {
 		// Fontes usuais de tipo desconhecido: global declarado mais adiante,
-		// membro acessado por namespace (`m.x`, `m.f()`), builtin sem tipo
-		// de retorno estatico (ver builtin_return_types.go).
-		return nil, fail("its type is not known here (a global declared later, a namespace member 'm.x', or a builtin without a static return type)", "<type> = ...")
+		// membro de modulo cujo tipo o programa nao consegue nomear (issue
+		// #126 item 2: o membro de namespace passou a ser tipado, exceto
+		// quando programViewType nao acha nome para alguma parte do tipo),
+		// builtin sem tipo de retorno estatico (ver builtin_return_types.go).
+		return nil, fail("its type is not known here (a global declared later, a module member the program cannot name, or a builtin without a static return type)", "<type> = ...")
 	}
 	if isNullType(valType) {
 		return nil, fail("'null' has no type of its own", "<type> = null")

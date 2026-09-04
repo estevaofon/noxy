@@ -1,4 +1,4 @@
-// math.nx - Módulo de funções matemáticas
+// math_module_example.nx - módulo de exemplo (renomeado: `math` agora é a stdlib, issue #126)
 
 func add(a: int, b: int) -> int
     return a + b

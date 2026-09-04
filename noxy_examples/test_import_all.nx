@@ -1,7 +1,7 @@
 // test_import_all.nx - Testa import de todos os símbolos
 
-// Importa TUDO do módulo math
-use math select *
+// Importa TUDO do módulo de exemplo math_module_example (o `math` da stdlib é outro módulo, issue #126)
+use math_module_example select *
 
 // Usa todas as funções
 print(f"add(3, 7) = {add(3, 7)}")

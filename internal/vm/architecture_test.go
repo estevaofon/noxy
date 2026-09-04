@@ -65,6 +65,7 @@ func TestBuiltinSourceLayout(t *testing.T) {
 		"builtins_concurrency.go": {"defineConcurrencyBuiltins"},
 		"builtins_time.go":        {"defineTimeBuiltins"},
 		"builtins_strings.go":     {"defineStringBuiltins"},
+		"builtins_math.go":        {"defineMathBuiltins"},
 		"builtins_io.go":          {"defineIOBuiltins"},
 		"builtins_sys.go":         {"defineSystemBuiltins"},
 		"builtins_crypto.go":      {"defineCryptoBuiltins"},

@@ -43,7 +43,6 @@ const (
 	TYPE_INT    TokenType = "TYPE_INT"
 	TYPE_FLOAT  TokenType = "TYPE_FLOAT"
 	TYPE_STRING TokenType = "TYPE_STRING"
-	TYPE_STR    TokenType = "TYPE_STR"
 	TYPE_BOOL   TokenType = "TYPE_BOOL"
 	TYPE_BYTES  TokenType = "TYPE_BYTES"
 	TYPE_VOID   TokenType = "TYPE_VOID"
@@ -135,7 +134,6 @@ var keywords = map[string]TokenType{
 	"int":      TYPE_INT,
 	"float":    TYPE_FLOAT,
 	"string":   TYPE_STRING,
-	"str":      TYPE_STR,
 	"bool":     TYPE_BOOL,
 	"bytes":    TYPE_BYTES,
 	"void":     TYPE_VOID,

@@ -51,6 +51,7 @@ func TestTypedFunctionInvalidConformanceExamplesFail(t *testing.T) {
 		{"ref read without star", "ref_read_without_star.nx", "operand of '+' cannot be ref int: a ref is never read implicitly\n  hint: use '*r' to read the referenced value"},
 		{"ref for without star", "ref_for_without_star.nx", "cannot iterate over ref int[]: a ref is never read implicitly\n  hint: use 'for x in *r'"},
 		{"ref builtin without ref", "ref_builtin_without_ref.nx", "argument 1 to 'append': expected ref T[], got int[]\n  hint: use 'ref xs'"},
+		{"swap_remove without ref", "swap_remove_without_ref.nx", "argument 1 to 'swap_remove': expected ref T[], got int[]\n  hint: use 'ref xs'"},
 		{"ref of ref", "ref_of_ref.nx", "'r' is already a reference\n  hint: pass 'r' directly, without 'ref'"},
 		{"deref assign ref prefix", "deref_assign_ref_prefix.nx", "cannot assign ref int to int through '*r'\n  hint: use 'r = ref z' to rebind the reference, or '*r = z' to write the value"},
 		{"nullable member without test", "nullable_member_without_test.nx", "'p' may be null; test it first\n  hint: use 'if p != null then ... end'"},

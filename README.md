@@ -127,7 +127,7 @@ print(first(["b", "a"]))      // first<string> — no runtime dispatch
 Noxy compiles to bytecode and runs on a stack-based VM written in Go. The
 core is deliberately small — structs, arrays, maps, closures, generics,
 routines and channels, `defer` — and the standard library covers the usual
-scripting ground (io, net, http, sqlite, json, strings, crypto, time) plus a
+scripting ground (io, net, http, sqlite, json, strings, math, crypto, time) plus a
 [package manager](docs/PACKAGE_MANAGER.md). Performance today sits around
 CPython for call-heavy code and is
 [measured against every release](benchmarks/RESULTS.md) — without changing
@@ -222,7 +222,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.23.2
+Noxy REPL v0.23.3
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
