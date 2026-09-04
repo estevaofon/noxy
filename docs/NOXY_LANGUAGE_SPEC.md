@@ -2602,7 +2602,7 @@ runtime error, never `NaN` — the same rule as `1.0 / 0.0` (§8) and as
 Python's `math`:
 
 ```text
-Runtime error: native 'math_sqrt' failed: math.sqrt: domain error (x < 0), got x=-1
+Runtime error: [math:line 12] native 'math_sqrt' failed: math.sqrt: domain error (x < 0), got x=-1
 ```
 
 Overflow is not checked: `exp(1000.0)` and `pow(10.0, 400.0)` return `+Inf`,

@@ -113,3 +113,25 @@ func TestUnclosedBraceReasonIsThePinnedSpecText(t *testing.T) {
 		t.Fatalf("UnclosedBraceReason = %q, want %q", UnclosedBraceReason, want)
 	}
 }
+
+// Issue #126: IsReason separa a razao escrita pelo lexer (uma frase em
+// ingles, sempre com mais de uma runa) do caractere desconhecido copiado
+// verbatim por newToken. Contar BYTES confundia os dois: `string(l.ch)`
+// converte o byte para runa, entao qualquer byte nao-ASCII (o 0xE2 de uma
+// aspa curva colada, por exemplo) vira uma string de 2 bytes e passava por
+// "razao", fazendo o parser imprimir o caractere cru em vez de
+// `invalid syntax "..."`.
+func TestIsReasonCountsRunesNotBytes(t *testing.T) {
+	if IsReason("â") {
+		t.Fatalf("IsReason(%q) = true, want false: e um unico caractere desconhecido", "â")
+	}
+	if IsReason("@") {
+		t.Fatalf("IsReason(\"@\") = true, want false")
+	}
+	if !IsReason(UnclosedBraceReason) {
+		t.Fatalf("IsReason(UnclosedBraceReason) = false, want true")
+	}
+	if !IsReason("unterminated string") {
+		t.Fatalf("IsReason(\"unterminated string\") = false, want true")
+	}
+}

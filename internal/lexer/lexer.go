@@ -563,13 +563,17 @@ const UnclosedBraceReason = "unclosed brace in f-string\n  hint: every '{' that 
 // IsReason reports whether an ILLEGAL token's literal is a reason the lexer
 // wrote out (e.g. "unterminated string", UnclosedBraceReason) rather than a
 // single unrecognized character copied verbatim by newToken. Every reason
-// this package writes is an English sentence — always more than one byte —
-// while an unrecognized character becomes an ILLEGAL token whose literal is
-// exactly that one byte. Callers (the parser's diagnostics) use this to
-// decide whether to surface the literal as-is or quote it as `invalid
-// syntax`.
+// this package writes is an English sentence — always more than one RUNE —
+// and newToken (the `else` branch of NextToken, ~line 236) is this package's
+// only producer of single-character ILLEGAL literals. Counting bytes was
+// wrong: newToken does `string(ch)` on a byte, which Go converts as an
+// integer to a rune, so a non-ASCII byte such as the 0xE2 of a pasted curly
+// quote becomes the two-byte "â" and passed for a reason — the parser then
+// printed the raw character instead of `invalid syntax "â"` (issue #126).
+// Callers (the parser's diagnostics) use this to decide whether to surface
+// the literal as-is or quote it as `invalid syntax`.
 func IsReason(literal string) bool {
-	return len(literal) > 1
+	return utf8.RuneCountInString(literal) > 1
 }
 
 // readNestedQuoted copies a string literal that appears INSIDE an f-string

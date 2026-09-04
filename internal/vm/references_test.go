@@ -50,7 +50,9 @@ func TestLookupReferenceValueRejectsNilReference(t *testing.T) {
 	}
 }
 
-func TestMutatingNativesTreatMalformedReferencesAsLegacyNoOps(t *testing.T) {
+// Duas metades: append/delete continuam no no-op legado (devolvem null) e
+// pop, desde a #126 item 4, propaga o erro — o nome cobre as duas.
+func TestMutatingNativesOnMalformedReferences(t *testing.T) {
 	machine := New()
 	malformed := []struct {
 		name  string

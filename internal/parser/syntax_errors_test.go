@@ -14,9 +14,10 @@ import (
 // sem tipo, f-string com chave aberta.
 func TestSyntaxErrorMessages(t *testing.T) {
 	cases := []struct {
-		name   string
-		source string
-		want   []string
+		name    string
+		source  string
+		want    []string
+		notWant []string
 	}{
 		{
 			name:   "missing let keyword",
@@ -103,6 +104,19 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			source: "let x: int = 1 @ 2\n",
 			want:   []string{`invalid syntax "@"`},
 		},
+		{
+			// Issue #126: aspas curvas coladas de um editor de texto. Cada
+			// byte de U+201C vira um ILLEGAL cujo literal e a conversao
+			// int->rune daquele byte ("\u00e2" para 0xE2), com mais de um
+			// BYTE — lexer.IsReason contava bytes e tratava isso como uma
+			// "razao" escrita pelo lexer, imprimindo o caractere cru sem
+			// aspas nem diagnostico. Agora conta RUNAS e a mensagem generica
+			// volta.
+			name:    "pasted curly quotes report invalid syntax, not a bare byte",
+			source:  "let s: string = \u201cabc\u201d\n",
+			want:    []string{"invalid syntax"},
+			notWant: []string{"SyntaxError: \u00e2"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,6 +129,11 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			for _, want := range tc.want {
 				if !strings.Contains(joined, want) {
 					t.Fatalf("source %q: errors=%q, want %q", tc.source, joined, want)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(joined, notWant) {
+					t.Fatalf("source %q: errors=%q, must not contain %q", tc.source, joined, notWant)
 				}
 			}
 		})

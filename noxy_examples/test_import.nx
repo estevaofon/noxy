@@ -1,6 +1,6 @@
 // test_import.nx - Testa o sistema de imports
 
-// Importa funções específicas do módulo math
+// Importa funções específicas do módulo de exemplo math_module_example (o `math` da stdlib é outro módulo, issue #126)
 use math_module_example select add, multiply, factorial
 
 // Usa as funções importadas
