@@ -3450,8 +3450,16 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	}
 	if expectedArray, ok := expected.(*ast.ArrayType); ok {
 		actualArray, ok := actual.(*ast.ArrayType)
-		return ok && (expectedArray.Size == 0 || expectedArray.Size == actualArray.Size) &&
-			c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
+		// O tamanho NUNCA foi checado estaticamente aqui: ArrayType.String
+		// omite Size, entao o atalho `expected.String() == actual.String()`
+		// que a #133 removeu aceitava qualquer par de arrays do mesmo
+		// elemento — `int[15] = [1, 2, 3]`, `int[3] = [1, 2, 3, 4, 5]` e
+		// `int[100] = zeros(100)` (spec §2, "Fixed Size Arrays") compilavam
+		// todos. Um literal carrega Size = numero de elementos (nao 0), entao
+		// aceitar so o lado dinamico nao reproduziria isso. A checagem de
+		// dimensao, se um dia existir, e mudanca de linguagem com spec — nao
+		// efeito colateral da identidade por Decl.
+		return ok && c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
 	}
 	return false
 }
