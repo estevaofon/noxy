@@ -453,7 +453,18 @@ type ObjMap struct {
 	store       *bindingStore
 	storeOnce   sync.Once
 	RuntimeType atomic.Pointer[RuntimeTypeInfo]
+	// moduleView marca o ObjMap devolvido por GlobalEnvironment.ExportMap: ele
+	// nao e um valor com semantica de copia, e uma VISAO do estado vivo do
+	// modulo (compartilha o bindingStore). Precedente: em Python, Go e Nim um
+	// modulo e uma referencia — atribui-lo a outro nome nao copia o estado.
+	// So o construtor da visao liga a marca; nada a desliga.
+	moduleView bool
 }
+
+// IsModuleView informa se este ObjMap e a visao do estado vivo de um modulo
+// (ExportMap). O CoW da VM nunca clona uma visao: copiar destacaria a escrita
+// do store do modulo e ela sumiria em silencio (issue #133, caso 1).
+func (om *ObjMap) IsModuleView() bool { return om != nil && om.moduleView }
 
 func (om *ObjMap) String() string {
 	s := "{"

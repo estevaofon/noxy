@@ -168,3 +168,53 @@ test_report(other * 100 + st3.read_count() * 10 + st3.read_link())
 		t.Fatalf("reported=%v err=%v (want 1161)", reported, err)
 	}
 }
+
+// Issue #133 (revisao adversarial, caso 1): o objeto do namespace e uma VISAO
+// do estado vivo do modulo, nao um valor com semantica de copia. Guardado num
+// slot `any` (`let s: any = m`) ou passado a um `func(x: any)` ele ganhava
+// outros donos duraveis, e a primeira escrita unicizava o slot: copyValue
+// clonava o ObjMap para um bindingStore NOVO e a escrita sumia em silencio
+// (antes do #133 era erro de runtime — barulhento). Precedente: em Python, Go
+// e Nim um modulo e uma referencia; atribui-lo a outro nome nao copia o
+// estado.
+func TestNamespaceViewIsNeverCopiedOnWrite(t *testing.T) {
+	t.Run("slot any", func(t *testing.T) {
+		root := writeModuleFiles(t, map[string]string{"st4.nx": liveStateModule})
+		reported, err := runModuleProgram(t, root, `use st4
+let s: any = st4
+s.count = 3
+test_report(st4.read_count())
+`)
+		if err != nil || reported.Int() != 3 {
+			t.Fatalf("reported=%v err=%v (want 3)", reported, err)
+		}
+	})
+
+	t.Run("parametro any", func(t *testing.T) {
+		root := writeModuleFiles(t, map[string]string{"st5.nx": liveStateModule})
+		reported, err := runModuleProgram(t, root, `use st5
+func w(x: any) -> void
+    x.count = 3
+end
+w(st5)
+test_report(st5.read_count())
+`)
+		if err != nil || reported.Int() != 3 {
+			t.Fatalf("reported=%v err=%v (want 3)", reported, err)
+		}
+	})
+
+	t.Run("map comum em any continua copiando", func(t *testing.T) {
+		// Controle: a isencao vale SO para a visao de modulo. Um map comum
+		// com dois donos duraveis mantem a copia na escrita (spec §3).
+		root := writeModuleFiles(t, map[string]string{"st6.nx": liveStateModule})
+		reported, err := runModuleProgram(t, root, `let a: any = {"x": 1}
+let b: any = a
+b.x = 2
+test_report(a["x"] * 10 + b["x"])
+`)
+		if err != nil || reported.Int() != 12 {
+			t.Fatalf("reported=%v err=%v (want 12)", reported, err)
+		}
+	})
+}
