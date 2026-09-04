@@ -67,11 +67,30 @@ func (vm *VM) setPropertyGeneric(c *chunk.Chunk, ip int, name string) error {
 	}
 
 	if instanceVal.Type != value.VAL_OBJ {
-		return vm.runtimeError(c, ip, "only instances have properties")
+		return vm.runtimeError(c, ip, "only instances and maps have properties")
+	}
+	if mapping, isMap := instanceVal.Obj.(*value.ObjMap); isMap && mapping != nil {
+		// Issue #133: membro de modulo pelo namespace (ObjMap sobre o
+		// bindingStore do modulo) e map acessado como propriedade. Chave
+		// inexistente e erro como na leitura; RC: retain-antes-de-release —
+		// ObjMap.Set nao toca contadores. Set e mutexado e avanca a geracao
+		// do store (invalida caches de leitura do modulo).
+		old, exists := mapping.Get(name)
+		if !exists {
+			return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
+		}
+		if old.Type == value.VAL_REF && val.Type != value.VAL_REF && val.Type != value.VAL_NULL {
+			return vm.runtimeError(c, ip, "slot '%s' already holds a reference\n  hint: pass it directly, without 'ref'", name)
+		}
+		value.Retain(val)
+		mapping.Set(name, val)
+		value.Release(old)
+		vm.push(val)
+		return nil
 	}
 	instance, ok := instanceVal.Obj.(*value.ObjInstance)
 	if !ok {
-		return vm.runtimeError(c, ip, "only instances have properties")
+		return vm.runtimeError(c, ip, "only instances and maps have properties")
 	}
 
 	// Struct e nominal, de campos fixos (spec §5): escrever num nome fora da

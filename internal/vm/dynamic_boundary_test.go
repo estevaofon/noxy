@@ -29,7 +29,7 @@ func TestDynamicIndexingAndPropertyErrorsAtRuntime(t *testing.T) {
 		{"property of an int", "let x: any = 1\nlet v: any = x.foo\n", "only instances/maps have properties"},
 		{"property of a string", "let s: any = \"s\"\nlet v: any = s.foo\n", "only instances and maps have properties"},
 		{"undefined property read", "let p: any = Point(1, 2)\nlet v: any = p.zzz\n", "undefined property 'zzz'"},
-		{"set property on an int", "let x: any = 1\nx.foo = 1\n", "only instances have properties"},
+		{"set property on an int", "let x: any = 1\nx.foo = 1\n", "only instances and maps have properties"},
 		{"nested write through property of an int", "let x: any = 1\nx.foo[0] = 1\n", "only instances/maps have properties"},
 		{"nested write through missing property", "let p: any = Point(1, 2)\np.zzz[0] = 1\n", "undefined property 'zzz'"},
 		{"nested write through property of a string", "let s: any = \"s\"\ns.foo[0] = 1\n", "only instances and maps have properties"},

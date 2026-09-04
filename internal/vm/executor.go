@@ -447,6 +447,11 @@ func (vm *VM) run(minFrameCount int, terminalResult *value.Value) (err error) {
 			if instance, ok := container.Obj.(*value.ObjInstance); ok && instance != nil && instance.Struct.FieldIsRef(name) {
 				return vm.runtimeError(c, ip, "slot '%s' already holds a reference\n  hint: pass it directly, without 'ref'", name)
 			}
+			if mapping, ok := container.Obj.(*value.ObjMap); ok && mapping != nil {
+				if stored, exists := mapping.Get(name); exists && stored.Type == value.VAL_REF {
+					return vm.runtimeError(c, ip, "slot '%s' already holds a reference\n  hint: pass it directly, without 'ref'", name)
+				}
+			}
 
 			// Push a reference wrapping the container and property name,
 			// so a later dereference or assignment can resolve this field.

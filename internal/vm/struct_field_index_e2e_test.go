@@ -157,7 +157,7 @@ func TestFieldIndexErrorsMatchByName(t *testing.T) {
 		{"write through null base",
 			"let c: Caixa = Caixa(\"t\", Ponto(1, 2))\ncorrupt_field(c, \"p\", null)\nc.p.x = 1\n",
 			"let p: any = null\np.x = 1\n",
-			"only instances have properties"},
+			"only instances and maps have properties"},
 		{"nested write through null base",
 			"struct Saco\n    c: Caixa\nend\nlet s: Saco = Saco(Caixa(\"t\", Ponto(1, 2)))\ncorrupt_field(s, \"c\", null)\ns.c.p.x = 1\n",
 			"let c: any = null\nc.p.x = 1\n",
