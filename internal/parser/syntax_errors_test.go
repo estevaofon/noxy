@@ -111,6 +111,41 @@ func TestSyntaxErrorMessages(t *testing.T) {
 	}
 }
 
+// Issue #126 item 5: keyword onde se espera um nome (`use src.map as map`,
+// `let map: int = 1`) dizia "expected identifier, found map" e, como o parser
+// nao sincroniza, cada token seguinte virava mais um "invalid syntax". Agora e
+// UM erro que nomeia a keyword, e o parser pula o resto da linha (recuperacao
+// em modo panico com ponto de sincronizacao — Crafting Interpreters §6.3.3).
+func TestKeywordAsNameIsASingleError(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{"use module named map", "use src.map as map\nlet x: int = 1\n", "[1:9] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"use alias named map", "use src.level as map\nlet x: int = 1\n", "[1:18] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"let named map", "let map: int = 1\nlet y: int = 2\n", "[1:5] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"let named chan inside block", "func f()\n    let chan: int = 1\n    let y: int = 2\nend\n", "[2:9] SyntaxError: 'chan' is a keyword and cannot be used as a name"},
+		{"param named any", "func f(any: int)\nend\n", "'any' is a keyword and cannot be used as a name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(lexer.New(tc.source))
+			_ = p.ParseProgram()
+			errs := p.Errors()
+			if len(errs) != 1 {
+				t.Fatalf("want exactly 1 error, got %d: %v", len(errs), errs)
+			}
+			if !strings.Contains(errs[0], tc.want) {
+				t.Fatalf("error %q does not contain %q", errs[0], tc.want)
+			}
+			if !strings.Contains(errs[0], "hint: rename it") {
+				t.Fatalf("error %q has no rename hint", errs[0])
+			}
+		})
+	}
+}
+
 // Cada diagnóstico carrega a posição [linha:coluna] do ponto do erro — é o
 // que o usuário usa para achar a linha; garante que a linha não é sempre 1.
 func TestSyntaxErrorsCarryLineAndColumn(t *testing.T) {
