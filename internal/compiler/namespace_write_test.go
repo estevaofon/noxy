@@ -96,3 +96,20 @@ func TestNamespaceWriteToUnloadableModuleIsDynamic(t *testing.T) {
 	// dinamica, sem erro novo.
 	requireNoError(t, compileSourceAtRoot(t, stateRoot(t), "use nope\nnope.x = 1\n"))
 }
+
+func TestNamespaceWriteToGenericInstanceMemberIsRefused(t *testing.T) {
+	// Issue #133 (revisao adversarial, caso 2): o tipo declarado do membro e
+	// uma instancia de struct generico do modulo, que a visao do programa nao
+	// consegue nomear (spec §1.6). Ler assim e conservador; ESCREVER assim
+	// gravava um int num global de tipo `Caixa<int>` e o proprio modulo
+	// falhava depois, com o erro apontando para uma linha DENTRO do modulo.
+	root := t.TempDir()
+	writeModuleFile(t, root, "genm.nx", "struct Caixa<T>\n    value: T\nend\nlet c: Caixa<int> = Caixa(1)\nfunc read() -> int\n    return c.value\nend\n")
+	err := compileSourceAtRoot(t, root, "use genm\ngenm.c = 5\n")
+	requireErrorMentions(t, err,
+		"[line 2]",
+		"cannot assign to 'genm.c': its type is an instance of a generic struct of 'genm' and cannot be checked here",
+		"hint: expose a function in 'genm' that updates it")
+	// Controle: a LEITURA continua permitida (dinamica).
+	requireNoError(t, compileSourceAtRoot(t, root, "use genm\nlet x: any = genm.c\n"))
+}

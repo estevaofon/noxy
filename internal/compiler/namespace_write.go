@@ -38,8 +38,11 @@ func (c *Compiler) pureNamespaceAlias(name string) (string, bool) {
 //     ramo Identifier): membro `ref T` so aceita rebind por ref/null;
 //     membro comum exige areTypesCompatible; emitSlotGuards; e a escrita e
 //     OP_SET_PROPERTY no objeto do namespace (ramo ObjMap do VM);
-//   - modulo nao carregavel ou tipo nao traduzivel: escrita dinamica, sem
-//     checagem estatica e sem erro novo (como um global `any`).
+//   - tipo declarado que a visao do programa nao traduz (instancia de struct
+//     generico do modulo): RECUSADA (issue #133, caso 2) — escrever sem
+//     checagem quebrava o modulo por dentro;
+//   - modulo nao carregavel (ou `let` sem tipo declarado): escrita dinamica,
+//     sem checagem estatica e sem erro novo (como um global `any`).
 //
 // Pilha: OP_GET_GLOBAL alias (leitura simples — a escrita e no store
 // compartilhado, nao numa copia), valor, OP_SET_PROPERTY ([base, val] ->
@@ -50,13 +53,24 @@ func (c *Compiler) compileNamespaceMemberAssignment(n *ast.AssignStmt, alias, mo
 	var memberType ast.NoxyType
 	if origin := c.declaringModule(module, member); origin != "" {
 		bindings, _ := c.moduleTopLevelBindings(origin)
-		switch bindings[member].(type) {
+		switch declaration := bindings[member].(type) {
 		case *ast.FunctionStatement:
 			return nil, nil, fmt.Errorf("[line %d] cannot assign to '%s': it is a function\n  hint: only module variables ('let') can be assigned", c.currentLine, targetName)
 		case *ast.StructStatement:
 			return nil, nil, fmt.Errorf("[line %d] cannot assign to '%s': it is a struct\n  hint: only module variables ('let') can be assigned", c.currentLine, targetName)
 		case *ast.LetStmt:
 			memberType = c.namespaceMemberType(target)
+			// Issue #133 (caso 2): o membro TEM tipo declarado, mas a visao do
+			// programa nao consegue traduzi-lo (instancia de struct generico
+			// do modulo, spec §1.6 — importedBindingType devolve o tipo do
+			// `let` inalterado, entao aqui so programViewType pode ter
+			// falhado). Ler assim continua dinamico e conservador; escrever
+			// nao: a escrita dinamica gravava um valor de outro tipo no global
+			// do modulo e o proprio modulo falhava depois, com o erro numa
+			// linha DENTRO dele. Compilador fala primeiro.
+			if memberType == nil && declaration.Type != nil {
+				return nil, nil, fmt.Errorf("[line %d] cannot assign to '%s': its type is an instance of a generic struct of '%s' and cannot be checked here\n  hint: expose a function in '%s' that updates it", c.currentLine, targetName, origin, origin)
+			}
 		}
 	} else if _, loadable := c.moduleTopLevelBindings(module); loadable {
 		return nil, nil, fmt.Errorf("[line %d] '%s' has no member '%s'", c.currentLine, alias, member)
