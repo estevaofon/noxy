@@ -736,9 +736,13 @@ value is fully typed even when the program has no way to *write* its type
 (a struct of a module it never imported, and not reachable by any visible
 alias): with `use mid select mkv` alone — `mid.nx` itself does `use base
 select *` without declaring `V` — `let v = mkv()` binds `v` to the
-declaration of `V` in `base.nx`, `v.x` is checked, and a mismatch prints
-the canonical path (`expected string, got base.V`). Only a written
-annotation needs a name (§11, *Unknown type names*).
+declaration of `V` in `base.nx`, and `v.x`'s type is checked (`let s: string
+= v.x` is a compile error, `expected string, got int`) exactly as for a
+locally declared struct; a field name that `V` does not declare is still a
+runtime error (`undefined property 'y'`), as for any struct value. A
+mismatch on `v` itself prints the canonical path (`expected string, got
+base.V`). Only a written annotation needs a name (§11, *Unknown type
+names*).
 
 The core builtins whose result type never varies — `length`, `to_str`,
 `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`, `hex`,
@@ -2517,11 +2521,13 @@ each step).
 annotation.** Two names that designate the same declaration are the same
 type (`Row`, `sqlite.Row`, `db.Row`, and the canonical `sqlite.Row` printed
 for a program that imported none of them); a local `struct Row` is a
-different type from any of them. Messages print the alias the program can
-see at the point where the type was inferred — skipping an alias shadowed
-by a local or parameter there; at top level any `use` in the file counts,
-inside a function body only the `use` lines that precede it — and fall back
-to the canonical path (`sqlite.Row`).
+different type from any of them. Messages print an alias the program can
+see: an alias counts when its `use` line precedes the line that imports the
+value's binding (a `select`) or the point where the type is inferred,
+skipping an alias shadowed by a local or parameter there; otherwise they
+print the canonical path (`sqlite.Row`). Write `use m` before `use m select
+…` if you want `m.V` in messages — with `mid.nx` re-exporting `V`: `use mid
+select mkv` then `use mid` prints `base.V`; swapped, it prints `mid.V`.
 
 A field whose type is an instance of a generic struct of
 the module itself (`c: Caixa<int>` declared inside the module) stays

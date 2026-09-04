@@ -35,10 +35,11 @@ declaração, não a grafia".
   mkv` deixa de dar `unknown type 'V'`), o campo de struct de módulo com
   tipo de terceiro módulo (`res.rows` é `db.Row[]`, não dinâmico) e a
   assinatura importada por `select` (um `struct Point` local já não captura
-  o `Point` de `geometry` numa função importada). Mensagens usam o alias
-  visível não sombreado no ponto em que o tipo foi inferido — no nível do
-  módulo, qualquer `use` do arquivo conta; dentro de uma função, só os
-  `use` que precedem aquele ponto.
+  o `Point` de `geometry` numa função importada). Mensagens usam um alias
+  visível não sombreado: o alias conta quando sua linha `use` precede a
+  linha que importa o binding do valor (um `select`) ou o ponto em que o
+  tipo foi inferido; senão, cai no caminho canônico (`base.V`). `use mid`
+  antes de `use mid select mkv` mostra `mid.V`; na ordem inversa, `base.V`.
 
   | Antes | Agora |
   |---|---|
