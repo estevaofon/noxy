@@ -23,7 +23,6 @@ var tokenDisplay = map[TokenType]string{
 	TYPE_INT:    "int",
 	TYPE_FLOAT:  "float",
 	TYPE_STRING: "string",
-	TYPE_STR:    "str",
 	TYPE_BOOL:   "bool",
 	TYPE_BYTES:  "bytes",
 	TYPE_VOID:   "void",
