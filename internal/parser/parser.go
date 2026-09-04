@@ -864,11 +864,11 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return t
 	}
 
-	// Issue #134 (spec §1.5): keyword de tipo contextual seguida de '.' e'
+	// Issue #134 (design §1.5): keyword de tipo contextual seguida de '.' e'
 	// um alias de modulo qualificando um tipo (`use src.map as map` +
 	// `let t: map.Tile`). Um token de lookahead decide: `map[` e `chan T`
 	// caem no switch abaixo como antes. Parametro de tipo nunca e' keyword
-	// (spec §1.4), entao activeTypeParams nao e' consultado aqui.
+	// (design §1.4), entao activeTypeParams nao e' consultado aqui.
 	if isContextualTypeKeyword(p.curToken.Type) && p.peekTokenIs(token.DOT) {
 		return p.parseNamedType(p.curToken.Literal)
 	}
@@ -1845,6 +1845,10 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 			// e' curToken.
 			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected identifier, found %s",
 				p.curToken.Line, p.curToken.Column, p.curToken.Type.Display()))
+			// skipUntilEnd consome o corpo ate o `end` da struct: um erro
+			// por campo invalido, nao uma cascata (mesmo padrao de
+			// parseFunctionStatement).
+			p.skipUntilEnd()
 			return nil
 		}
 

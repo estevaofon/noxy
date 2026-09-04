@@ -52,14 +52,14 @@ func TestDigitThenUnicodeLetterIsNumberThenIdentifier(t *testing.T) {
 }
 
 // Caractere fora do alfabeto vira UM ILLEGAL por caractere, nao um por byte:
-// aspas curvas coladas de um editor sao dois tokens, nao seis (spec §2.3).
+// aspas curvas coladas de um editor sao dois tokens, nao seis (design §2.3).
 func TestUnknownCharacterIsOneIllegalPerRune(t *testing.T) {
 	requireTokens(t, "“abc”", []wantToken{
 		{token.ILLEGAL, "“"}, {token.IDENTIFIER, "abc"}, {token.ILLEGAL, "”"},
 	})
 }
 
-// Column conta caracteres, nao bytes (spec §2.4): o '@' de `let s = "aé" @`
+// Column conta caracteres, nao bytes (design §2.4): o '@' de `let s = "aé" @`
 // esta na coluna 14; em bytes seria 15.
 func TestColumnCountsRunes(t *testing.T) {
 	lex := New("let s = \"aé\" @\ncafé x")

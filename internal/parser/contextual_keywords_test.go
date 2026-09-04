@@ -72,7 +72,7 @@ func TestContextualKeywordNodesAreIdentifiers(t *testing.T) {
 	}
 }
 
-// Spec §1.5: com `use src.map as map` legal, `map.Tile` em anotacao e' um
+// design §1.5: com `use src.map as map` legal, `map.Tile` em anotacao e' um
 // tipo qualificado — `map.` e `map[` se distinguem por um token de
 // lookahead. `chan T` e `map[K, V]` continuam construtores de tipo.
 func TestContextualKeywordAliasQualifiesAType(t *testing.T) {
@@ -116,9 +116,12 @@ func TestStructFieldThatIsNotANameIsAnError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := New(lexer.New(tc.source))
 			_ = p.ParseProgram()
-			joined := strings.Join(p.Errors(), "\n")
-			if !strings.Contains(joined, tc.want) {
-				t.Fatalf("source %q: errors=%q, want %q", tc.source, joined, tc.want)
+			errs := p.Errors()
+			if len(errs) != 1 {
+				t.Fatalf("source %q: want exactly 1 error, got %d: %q", tc.source, len(errs), errs)
+			}
+			if !strings.Contains(errs[0], tc.want) {
+				t.Fatalf("source %q: error %q does not contain %q", tc.source, errs[0], tc.want)
 			}
 		})
 	}

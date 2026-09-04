@@ -251,6 +251,7 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Line = startLine
 			tok.Column = startColumn
 			return tok
+			// Numero continua ASCII de proposito (design §2.2): nao trocar por unicode.IsDigit — digito Unicode cai em ILLEGAL, como em Go.
 		} else if isDigit(l.ch) {
 			tok.Type, tok.Literal = l.readNumber()
 			tok.Line = startLine

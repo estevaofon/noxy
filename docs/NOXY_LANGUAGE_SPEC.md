@@ -71,9 +71,11 @@ everywhere. `str` is not a keyword.
 An identifier starts with a letter or `_` and continues with letters, digits
 or `_`. Letters and digits are Unicode (`unicode.IsLetter`, `unicode.IsDigit`),
 as in Go: `let café = 1`, `func área() -> float`. Identifiers are compared
-byte for byte — no Unicode normalization is applied, so `é` written as one
-code point and as `e` plus a combining accent are different names. Numeric
-literals use ASCII digits only.
+byte for byte — no Unicode normalization is applied. A combining mark is
+neither a letter nor a digit, so `é` must be written as the single
+precomposed code point: `e` followed by a combining accent is a syntax
+error, not a different name (the same rule as Go). Numeric literals use
+ASCII digits only.
 
 A character outside the language's alphabet is one diagnostic per character
 (`invalid syntax "“"` for a pasted curly quote), and the column in a
@@ -1545,7 +1547,7 @@ print(recebida.valor * 6) // 42 — the whole Caixa<int> traveled through the
                            // channel, not just its field
 ```
 
-> **Note:** `map` was reserved in every position before v0.23.5, which is why
+> **Note:** `map` was reserved in every position in earlier versions, which is why
 > the `collections` module's transformation function is called `map_arr`.
 > `map` is a contextual keyword now (§1.2) and `func map<A, B>(...)` parses;
 > `map_arr` keeps its name for compatibility.

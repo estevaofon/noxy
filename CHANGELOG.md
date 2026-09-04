@@ -16,13 +16,28 @@ token de erro tipado no lexer.
   `let t: map.Tile`, campo `map: int` com `s.map`, `s.map = v`, `ref s.map` e
   `{s.map}` em f-string. Precedente: `int`, `string` e `any` são
   identificadores pré-declarados em Go; C#, Swift e Kotlin reservam keywords
-  só onde têm significado. Um campo de struct com esses nomes era
-  **descartado em silêncio** (o erro só aparecia no construtor); agora
-  compila — e qualquer token que não é nome em posição de campo é erro de
-  sintaxe. `ref` e `func` continuam reservados em toda posição.
+  só onde têm significado. `ref` e `func` continuam reservados em toda
+  posição.
 - **Identificadores Unicode** (§1.3): `let café = 1`, `func área()` — letra
   e dígito por `unicode.IsLetter`/`IsDigit`, como Go, Python, Swift e Rust.
   Sem normalização: nomes comparam byte a byte.
+
+### Changed (BREAKING)
+- **Campo de struct que não é um nome é erro de sintaxe** (§5). Antes,
+  `parseStructStatement` pulava em silêncio qualquer token que não fosse
+  identificador: um campo `map: int` sumia da struct (o erro só aparecia no
+  construtor, `function 'S' expects 1 arguments, got 2`) e um campo `ref: int`
+  compilava sem o campo. Agora `map: int` é um campo legal e qualquer outro
+  token em posição de campo é `SyntaxError: expected identifier, found X`, um
+  erro por struct.
+
+  | Antes | Agora |
+  |---|---|
+  | `struct P` com campo `ref: int` compila; o campo não existe | `SyntaxError: expected identifier, found ref` |
+  | `struct P` com linha `5: int` compila; a linha é ignorada | `SyntaxError: expected identifier, found integer` |
+
+  Migração: renomear o campo (`ref` e `func` continuam reservados em toda
+  posição) ou remover a linha que não é um campo.
 
 ### Changed
 - **Caractere fora do alfabeto é um diagnóstico por caractere**, não por
