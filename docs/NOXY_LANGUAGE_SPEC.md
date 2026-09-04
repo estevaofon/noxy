@@ -242,6 +242,17 @@ scores["Bob"] = 50
 **Pass-by-Value Behavior**:
 Maps are passed by **VALUE**: the callee's map is independent at any depth through value entries (copy-on-write; a `map[K, ref T]` value is a shared edge — §2.2 rule 6). Use `ref` when the function must modify the caller's map.
 
+**Writing with a dot**: on a value whose static type is `map[K, V]`,
+`m.key = v` is checked exactly like `m["key"] = v` — the key type must accept
+`string` (`m.a = 2` on a `map[int, int]` is `[line N] type mismatch in map
+key: expected int, got string`) and the value must match `V` (`m.a = "boom"`
+on a `map[string, int]` is `[line N] type mismatch in map value: expected
+int, got string`). The two forms differ in what they do to a key that is not
+there: the index form **inserts** it, while the dot form only addresses an
+**existing** entry, in both directions — reading or writing a missing key is
+the runtime error `undefined property 'b' in module/map`. A dot *read* on a
+map stays dynamically typed: unlike the write, it is not checked against `V`.
+
 **Iteration order is undefined**: a map is backed by a Go map, so `for k in m`,
 `keys(m)` and printing a map may produce a different order on each run and
 across versions. Never depend on it — sort `keys(m)` when the output has to be
@@ -731,9 +742,18 @@ annotated form:
 A member reached through a namespace import — `m.f(...)`, `m.x`, `m.T(...)`
 after `use m` — has the type the module declared for it, translated to the
 program's view exactly as a field of a module struct is (§11), so `let v =
-m.roll(6)` binds `v: int` and `let p = vec.norm(v)` binds `p: vec.V`. Only a
-member whose type the program cannot name (a struct of a third module that
-was never imported) stays dynamic and needs an annotation.
+m.roll(6)` binds `v: int` and `let p = vec.norm(v)` binds `p: vec.V`. The
+value is fully typed even when the program has no way to *write* its type
+(a struct of a module it never imported, and not reachable by any visible
+alias): with `use mid select mkv` alone — `mid.nx` itself does `use base
+select *` without declaring `V` — `let v = mkv()` binds `v` to the
+declaration of `V` in `base.nx`, and `v.x`'s type is checked (`let s: string
+= v.x` is a compile error, `expected string, got int`) exactly as for a
+locally declared struct; a field name that `V` does not declare is still a
+runtime error (`undefined property 'y'`), as for any struct value. A
+mismatch on `v` itself prints the canonical path (`expected string, got
+base.V`). Only a written annotation needs a name (§11, *Unknown type
+names*).
 
 The core builtins whose result type never varies — `length`, `to_str`,
 `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`, `hex`,
@@ -2437,18 +2457,50 @@ use counter select total    // snapshot of counter.total at import time
 use counter                 // counter.total reads the live value
 ```
 
-### Module state is read-only from outside
+### Module state is writable through the namespace
 
-Assigning to a module variable through the namespace is a compile-time error:
+Assigning to a module variable through the namespace is legal and typed
+with the member's declared type, and the write lands in the module's live
+state — reads through the namespace were already live; writes are too.
+`select` still binds a snapshot.
 
-```text
-[line 7] cannot assign to 'counter.total': module variables are read-only outside the module
-  hint: expose a function in 'counter' that updates it
+```noxy
+use counter
+counter.total = 9          // OK: total is `let total: int` in counter.nx
+print(counter.read())      // 9 — the module sees the new value
+counter.total = "a"        // ERROR: type mismatch in assignment to
+                           // 'counter.total': expected int, got string
+counter.nope = 1           // ERROR: 'counter' has no member 'nope'
+counter.read = 1           // ERROR: cannot assign to 'counter.read': it is a function
 ```
 
-Expose a function in the module that performs the update. (The rule covers the
-direct form `m.x = v`; a global `let` that shadows the namespace name is a
-different binding and is unaffected.)
+Nested writes (`m.origin.x = 99`, `m.xs[i] = v`), `ref m.x`, `append(ref
+m.xs, v)` and `pop(ref m.xs)` follow the same rule with the member's type.
+A `ref T` member accepts only a rebind (`m.link = ref other`), like a `ref`
+global. A global `let` that shadows the namespace name is a different
+binding and is unaffected. As with any shared global, concurrent writers
+must coordinate (docs/concurrency.md): a single write is synchronized, a
+read-modify-write is not.
+
+A write through a namespace reaches the binding of **that alias's module**,
+even when the member's *type* resolves through the module that declared it:
+a member that only reaches `mid` by re-export (`mid.nx` does `use base
+select *`) is `mid`'s own snapshot, so `mid.x = 5` makes `mid.x` read 5 while
+`base.read_x()` still returns 1. Write through the declaring module's own
+namespace (`use base` and `base.x = 5`) to change the live state.
+
+The namespace object is a **view of the module's live state**, not a value
+with copy semantics: binding it to another name (`let s: any = m`) or passing
+it to a `func(x: any)` never detaches it, so a write through that name is
+still seen inside the module (in Python, Go and Nim a module is likewise a
+reference).
+
+A member whose declared type the program cannot write — an instance of a
+generic struct of the module (§1.6) — is **read** dynamically but cannot be
+**assigned**: `cannot assign to 'g.c': its type cannot be translated here (it
+involves an instance of a generic struct of 'g')`, with a hint to expose a
+function in the module that updates it. An unchecked write there would store another type
+in the module's own global and break the module from the inside.
 
 ### Struct identity across import forms
 
@@ -2490,14 +2542,26 @@ program's view**, name by name, before using it:
 |---|---|
 | `use sqlite select Row` (or `select *`) | `Row[]` — the name the program wrote |
 | `use sqlite` / `use sqlite as db` (namespace only) | `sqlite.Row[]` / `db.Row[]` — the first alias declared, when there are several |
-| neither (the program cannot name `Row`) | dynamic (unknown), as before |
+| neither (the program cannot write `Row`) | `sqlite.Row[]` — the canonical path (module + name); the value is fully typed, the name is display only |
 
 The translation applies to nested types (`Row[]`, `map[string, Row]`,
 `ref Row`, `func(Row) -> Row`) and along a chain (`w.o.i.v` re-applies it at
-each step). A type that is only *partially* nameable (`map[string, Row]` with
-no way to write `Row`) becomes dynamic as a whole — never a half-typed
-`map[string, ???]`. A field whose type is an instance of a generic struct of
-the module itself (`c: Caixa<int>` declared inside the module) is also
+each step).
+
+**A value's type is its declaration; a name is needed only to write an
+annotation.** Two names that designate the same declaration are the same
+type (`Row`, `sqlite.Row`, `db.Row`, and the canonical `sqlite.Row` printed
+for a program that imported none of them); a local `struct Row` is a
+different type from any of them. Messages print an alias the program can
+see: an alias counts when its `use` line precedes the line that imports the
+value's binding (a `select`) or the point where the type is inferred,
+skipping an alias shadowed by a local or parameter there; otherwise they
+print the canonical path (`sqlite.Row`). Write `use m` before `use m select
+…` if you want `m.V` in messages — with `mid.nx` re-exporting `V`: `use mid
+select mkv` then `use mid` prints `base.V`; swapped, it prints `mid.V`.
+
+A field whose type is an instance of a generic struct of
+the module itself (`c: Caixa<int>` declared inside the module) stays
 dynamic: the instance's internal name is not an identity across compilation
 units. `null` is accepted wherever such a (qualified or translated) struct
 type is expected, as for a local struct. In the REPL, `use` aliases and the
@@ -2520,15 +2584,15 @@ argument types (`argument 1 to 'm.roll': expected int, got string`) and
 result type (`let s: string = m.roll(6)` is `expected string, got int`), and
 `let v = m.roll(6)` infers `v: int`. A `T?` result is checked too: `let t:
 bytes = crypto.aes256_gcm_decrypt(k, d)` is `expected bytes, got bytes?`. A
-member whose type the program cannot name (a struct of a module it never
-imported, an instance of a module's generic struct) stays dynamic. A generic
-template is still not reachable through the namespace — import it with
-`select`. The module object itself has no type: `m` alone is not a value.
+member whose type is an instance of a module's own generic struct stays
+dynamic (§6.4); a struct the program merely cannot name is typed as above.
+A generic template is still not reachable through the namespace — import it
+with `select`. The module object itself has no type: `m` alone is not a
+value.
 
-A member that only reaches `m` by re-export — `m` itself does `use x select
-*` and never declares the member — stays dynamic through `m.g`, conservatively;
-`use m select g`, naming the re-exporting module directly, still resolves
-`g` to its declared type.
+A member that only reaches `m` by re-export (`m` does `use x select *` and
+never declares it) resolves to its declaration in `x`, through `m.g` and
+through `use m select g` alike.
 
 ### Unknown type names
 
@@ -2546,6 +2610,9 @@ a parameter or return type. Anything else is a compile error:
 [line 2] struct 'A' field 'b': unknown type 'Inexistente'
   hint: declare 'struct Inexistente' or import it with 'use m select Inexistente'
 ```
+
+When a loaded dependency declares that name, the hint says where to get it:
+`add 'use base' or 'use mid select V' to name this type`.
 
 The position reads `struct 'A' field 'b'`, `function 'f' parameter 'x'`,
 `function 'f' return type` or `variable 'x'`. A module struct is only nameable

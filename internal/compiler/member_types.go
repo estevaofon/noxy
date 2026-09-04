@@ -28,7 +28,7 @@ func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
 	if !ok {
 		return nil
 	}
-	definition := c.structDeclaration(primitive.Name)
+	definition := c.structDeclarationOf(primitive)
 	if definition == nil {
 		return nil
 	}
@@ -55,10 +55,11 @@ func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
 
 // programViewType traduz um tipo escrito dentro do modulo origin para a visao
 // do programa: cada nome de struct e reescrito para o nome pelo qual o
-// PROGRAMA consegue designar aquela declaracao (programStructName). Devolve
-// ok=false quando alguma parte do tipo nao e nomeavel pelo programa — o
-// chamador trata o tipo INTEIRO como dinamico, nunca um `map[string, ???]`
-// meio-tipado. Nunca muta t (que pertence ao AST memoizado do modulo):
+// PROGRAMA exibe aquela declaracao (programStructName), que agora nunca
+// devolve "". Devolve ok=false so para instancia generica (isGenericInstanceName)
+// e tipo residual (GenericType/TypeParamType/nil) — struct sempre traduz, com
+// Decl (issue #133: o valor continua tipado mesmo quando o programa nao tem
+// grafia para ele). Nunca muta t (que pertence ao AST memoizado do modulo):
 // devolve nos novos so quando algo muda.
 func (c *Compiler) programViewType(t ast.NoxyType, origin string) (ast.NoxyType, bool) {
 	switch typed := t.(type) {
@@ -79,18 +80,17 @@ func (c *Compiler) programViewType(t ast.NoxyType, origin string) (ast.NoxyType,
 			// sem como reconstrui-lo na visao do programa, o campo e dinamico.
 			return nil, false
 		}
-		definition := c.lookupStructFrom(origin, typed.Name)
+		definition := typed.Decl
+		if definition == nil {
+			definition = c.lookupStructFrom(origin, typed.Name)
+		}
 		if definition == nil {
 			return nil, false
 		}
-		name := c.programStructName(definition)
-		if name == "" {
-			return nil, false
-		}
-		if name == typed.Name {
-			return typed, true
-		}
-		return &ast.PrimitiveType{Name: name}, true
+		// Issue #133: sempre um no novo com a identidade; Name e so a
+		// grafia escolhida por programStructName. Nunca devolve typed (AST
+		// do modulo).
+		return &ast.PrimitiveType{Name: c.programStructName(definition), Decl: definition}, true
 	case *ast.ArrayType:
 		element, ok := c.programViewType(typed.ElementType, origin)
 		if !ok {
@@ -146,27 +146,27 @@ func (c *Compiler) programViewType(t ast.NoxyType, origin string) (ast.NoxyType,
 	}
 }
 
-// programStructName devolve o nome pelo qual o programa (este compilador)
-// designa a declaracao definition, ou "" quando nao ha como nomea-la:
+// programStructName devolve a GRAFIA pela qual o programa exibe definition
+// (issue #133: so exibicao — a identidade e o Decl), nesta ordem:
 //
 //  1. o nome simples, se o programa importou ESSA declaracao por `select`
-//     (`use db select Row` — c.structs["Row"] e o mesmo ponteiro). E o nome
-//     que o programa escreveu, entao e o que aparece nas mensagens;
-//  2. `alias.Nome`, para o PRIMEIRO `use m [as alias]` em ordem de declaracao
-//     cujo modulo exporta a declaracao (diretamente ou reexportada por
-//     `select *`);
-//  3. "" — nem namespace nem select: o programa nao consegue escrever esse
-//     tipo, e o chamador o trata como dinamico.
+//     (c.structs[nome] e o mesmo ponteiro) ou se e struct do proprio programa;
+//  2. `alias.Nome`, para o PRIMEIRO `use m [as alias]` de namespaceOrder cujo
+//     modulo exporta a declaracao e cujo alias NAO esta sombreado por local
+//     ou upvalue no ponto em que o tipo e produzido (item (c) da #133);
+//  3. o caminho canonico `origem.Nome` (`base.V`), como Go imprime — nao e
+//     grafia que o programa consegue escrever sem `use base`; e so exibicao.
 //
-// Identidade sempre por PONTEIRO de declaracao: um `struct Row` local
-// homonimo nao captura o `Row` do modulo.
+// A grafia e fixada quando o tipo e PRODUZIDO (inferencia, traducao), nao
+// quando e impresso: um `let` de topo guarda `m.V` mesmo que uma funcao
+// sombreie `m` depois.
 func (c *Compiler) programStructName(definition *ast.StructStatement) string {
 	if selected, ok := c.structs[definition.Name]; ok && selected == definition {
 		return definition.Name
 	}
 	for _, alias := range c.namespaceOrder {
 		module, isNamespace := c.namespaceImports[alias]
-		if !isNamespace {
+		if !isNamespace || c.isShadowedByLocal(alias) {
 			continue
 		}
 		exported, loadable := c.discoverModuleStructs(module)
@@ -177,7 +177,10 @@ func (c *Compiler) programStructName(definition *ast.StructStatement) string {
 			return alias + "." + definition.Name
 		}
 	}
-	return ""
+	if origin := c.structOrigin(definition); origin != "" {
+		return origin + "." + definition.Name
+	}
+	return definition.Name
 }
 
 // isBuiltinTypeName reconhece os nomes de tipo que nao designam struct: os

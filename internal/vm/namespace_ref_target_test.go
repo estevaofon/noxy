@@ -12,6 +12,12 @@ import (
 // continuava true (a assinatura da funcao era exata), o call site emitia
 // OP_CALL_STATIC e pulava validateParameterModes/validateRefTargets — a
 // escrita entrava no campo errado e o programa seguia com lixo.
+//
+// Issue #133: um struct que o programa nao consegue nomear saiu da classe
+// dinamica — programViewType sempre traduz um struct (com Decl), entao o
+// campo `h.b` agora e `base.B` tipado e o mismatch e pego em COMPILACAO, nao
+// em runtime. So a instancia generica (Caixa<int>, sem grafia possivel na
+// visao do programa) continua sem tipo e cai para a checagem em runtime.
 
 const refTargetBaseModule = `struct B
     n: int
@@ -37,22 +43,9 @@ func setb(b: ref base.B) -> void
 end
 `
 
-func requireRefTargetError(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("expected runtime error, got none")
-	}
-	const want = "function 'setstr' argument 1: expected ref string, got ref B"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("expected error mentioning %q, got %v", want, err)
-	}
-}
-
-func TestNamespaceRefArgumentWithUnnameableTargetIsCheckedAtRuntime(t *testing.T) {
-	// `h.b` e um `base.B`, nome que um programa que so faz `use mid` nao
-	// consegue escrever: o campo fica com tipo nil e nada e conferido em
-	// compilacao. O modo tem de cair para OP_CALL, onde validateRefTargets
-	// recusa a escrita.
+func TestNamespaceRefArgumentWithUnnameableTargetIsCheckedAtCompileTime(t *testing.T) {
+	// `h.b` e um `base.B`: com a #133, o campo e tipado (mesmo sem grafia no
+	// programa) e o mismatch de `ref` e recusado em COMPILACAO.
 	root := writeModuleFiles(t, map[string]string{
 		"base.nx": refTargetBaseModule,
 		"mid.nx":  refTargetMidModule,
@@ -61,13 +54,16 @@ func TestNamespaceRefArgumentWithUnnameableTargetIsCheckedAtRuntime(t *testing.T
 let h: mid.Holder = mid.mk()
 mid.setstr(ref h.b)
 `)
-	requireRefTargetError(t, err)
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'mid.setstr': expected ref string, got ref base.B") {
+		t.Fatalf("error=%v, want compile-time ref target mismatch", err)
+	}
 }
 
-func TestSelectRefArgumentWithUnnameableTargetIsCheckedAtRuntime(t *testing.T) {
+func TestSelectRefArgumentWithUnnameableTargetIsCheckedAtCompileTime(t *testing.T) {
 	// Mesmo programa pela forma `select`: este buraco JA EXISTIA antes da
 	// tipagem por namespace (select sempre deu assinatura exata), e a mesma
-	// correcao no ramo `ref` de compileCallExpression o fecha.
+	// correcao no ramo `ref` de compileCallExpression o fecha — agora tambem
+	// em compilacao.
 	root := writeModuleFiles(t, map[string]string{
 		"base.nx": refTargetBaseModule,
 		"mid.nx":  refTargetMidModule,
@@ -76,7 +72,9 @@ func TestSelectRefArgumentWithUnnameableTargetIsCheckedAtRuntime(t *testing.T) {
 let h: Holder = mk()
 setstr(ref h.b)
 `)
-	requireRefTargetError(t, err)
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'setstr': expected ref string, got ref base.B") {
+		t.Fatalf("error=%v, want compile-time ref target mismatch", err)
+	}
 }
 
 func TestNamespaceRefArgumentIntoGenericInstanceFieldIsCheckedAtRuntime(t *testing.T) {
@@ -176,7 +174,10 @@ func takestring(s: string) -> string
 end
 `
 
-func TestNamespaceByValueArgumentWithUnnameableTypeIsCheckedAtRuntime(t *testing.T) {
+func TestNamespaceByValueArgumentWithUnnameableTypeIsCheckedAtCompileTime(t *testing.T) {
+	// Issue #133: `mid.getref()` devolve `ref base.B`, tipo agora nomeavel
+	// (base.B com Decl) mesmo sem grafia no programa — o mismatch de modo
+	// (por valor esperado, ref recebido) e pego em compilacao.
 	root := writeModuleFiles(t, map[string]string{
 		"base.nx": refTargetBaseModule,
 		"mid.nx":  byValueUnknownMidModule,
@@ -184,17 +185,13 @@ func TestNamespaceByValueArgumentWithUnnameableTypeIsCheckedAtRuntime(t *testing
 	_, err := runModuleProgram(t, root, `use mid
 test_report(mid.takeint(mid.getref()))
 `)
-	if err == nil {
-		t.Fatalf("expected runtime error, got none")
-	}
-	const want = "function 'takeint' argument 1: expected int, got ref"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("expected error mentioning %q, got %v", want, err)
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'mid.takeint': expected int, got ref base.B") {
+		t.Fatalf("error=%v, want compile-time mode mismatch", err)
 	}
 }
 
-func TestNamespaceByValueStringArgumentWithUnnameableTypeIsCheckedAtRuntime(t *testing.T) {
-	// Mesmo buraco com parametro `string`: a mensagem de runtime nomeia o
+func TestNamespaceByValueStringArgumentWithUnnameableTypeIsCheckedAtCompileTime(t *testing.T) {
+	// Mesmo buraco com parametro `string`: a mensagem de compilacao nomeia o
 	// parametro esperado, entao o sabor confirma que a validacao roda para
 	// qualquer tipo, nao so int.
 	root := writeModuleFiles(t, map[string]string{
@@ -204,11 +201,7 @@ func TestNamespaceByValueStringArgumentWithUnnameableTypeIsCheckedAtRuntime(t *t
 	_, err := runModuleProgram(t, root, `use mid
 test_report(mid.takestring(mid.getref()))
 `)
-	if err == nil {
-		t.Fatalf("expected runtime error, got none")
-	}
-	const want = "function 'takestring' argument 1: expected string, got ref"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("expected error mentioning %q, got %v", want, err)
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'mid.takestring': expected string, got ref base.B") {
+		t.Fatalf("error=%v, want compile-time mode mismatch", err)
 	}
 }

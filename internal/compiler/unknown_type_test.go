@@ -166,12 +166,12 @@ func TestReplCarriesNamespaceImportsAcrossLines(t *testing.T) {
 		"let f: io.File = io.stdin()\n",
 		"let p: string = f.path\n",
 		// Struct importado por select numa linha anterior: a ORIGEM (db) tem
-		// de ser lembrada para `res.rows` ser traduzido (Row nao nomeavel ->
-		// dinamico) em vez de vazar `Row[]` cru — que faria `let s: string`
-		// falhar com "got Row[]".
+		// de ser lembrada para `res.rows` ser traduzido para o caminho
+		// canonico `db.Row[]` (issue #133: Row nao nomeavel pelo programa,
+		// mas o valor continua tipado) — senao a mensagem vazaria `Row[]` cru.
 		"use db select QueryResult, q\n",
 		"let res: QueryResult = q()\n",
-		"let s: string = res.rows\n",
+		"let bad1: string = res.rows\n",
 		"use db\n",
 		"let r2: db.QueryResult = db.q()\n",
 		"let bad: string = r2.rows\n",
@@ -233,4 +233,63 @@ func TestInstanceOfImportedTemplateNeedsItsStructDependencyImported(t *testing.T
 	requireErrorMentions(t, err, "[line 2]", "struct 'Caixa<int>' field 'meta': unknown type 'Meta'", "hint:", "use caixas select Meta")
 	err = compileSourceAtRoot(t, root, "use caixas select Caixa, Meta, make_meta\nlet c: Caixa<int> = Caixa(1, make_meta(2))\nlet k: int = c.meta.k\n")
 	requireNoError(t, err)
+}
+
+func TestUnknownTypeHintNamesTheDeclaringAndReexportingModules(t *testing.T) {
+	// Issue #133 (spec §1.7): so a anotacao ESCRITA exige grafia; quando
+	// falta, o hint diz de onde importar — o declarante e quem reexporta.
+	root := t.TempDir()
+	writeModuleFile(t, root, "base.nx", "struct V\n    x: int\nend\nfunc mkv() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "mid.nx", "use base select *\n")
+	err := compileSourceAtRoot(t, root, "use mid select mkv\nlet v: V = mkv()\n")
+	requireErrorMentions(t, err, "variable 'v': unknown type 'V'", "add 'use base' or 'use mid select V' to name this type")
+	err = compileSourceAtRoot(t, root, "use base select mkv\nlet v: V = mkv()\n")
+	requireErrorMentions(t, err, "unknown type 'V'", "add 'use base' or 'use base select V' to name this type")
+	// Sem candidato: hint generico de hoje.
+	err = compileSourceAtRoot(t, root, "let v: Nada = 1\n")
+	requireErrorMentions(t, err, "unknown type 'Nada'", "declare 'struct Nada' or import it with 'use m select Nada'")
+}
+
+func TestUnknownTypeHintReexporterMatchesTheChosenOriginsDeclarationNotJustTheName(t *testing.T) {
+	// Issue #133 (review round 1): dois modulos DIFERENTES podem cada um
+	// declarar o seu proprio `struct V` sem serem a MESMA declaracao. O
+	// reexportador so pode entrar no hint se o export dele apontar para o
+	// MESMO ponteiro da declaracao do modulo escolhido como origem — nao
+	// para qualquer decl de outro modulo que por acaso tenha o mesmo nome.
+	root := t.TempDir()
+	writeModuleFile(t, root, "a.nx", "struct V\n    x: int\nend\nfunc f() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "b.nx", "struct V\n    y: int\nend\nfunc g() -> void\nend\n")
+	writeModuleFile(t, root, "bridge.nx", "use b select *\n")
+	// bridge reexporta a V de b (nao relacionada a de a) — nao pode aparecer
+	// no hint como se reexportasse a V de a, mesmo com "a" < "b" ordenando
+	// "a" como origem escolhida. Desde a revisao adversarial do #133 (caso 5)
+	// esta forma tem DUAS origens carregadas (a declara V, e b tambem, pela
+	// cadeia de bridge), entao o hint lista as duas em vez de escolher uma:
+	// a garantia que interessa continua sendo que bridge nunca e apresentado
+	// como reexportador da V de a.
+	err := compileSourceAtRoot(t, root, "use a select f\nuse bridge select g\nlet v: V = f()\n")
+	requireErrorMentions(t, err, "unknown type 'V'", "'V' is declared by modules a and b")
+	requireNotMentions(t, err, "use b select V")
+	requireNotMentions(t, err, "use bridge select V")
+
+	// bridge2 reexporta a MESMA V de a: agora sim entra no hint.
+	writeModuleFile(t, root, "bridge2.nx", "use a select *\nfunc g2() -> void\nend\n")
+	err = compileSourceAtRoot(t, root, "use a select f\nuse bridge2 select g2\nlet v: V = f()\n")
+	requireErrorMentions(t, err, "unknown type 'V'", "add 'use a' or 'use bridge2 select V' to name this type")
+}
+
+func TestUnknownTypeHintNamesEveryDeclaringModuleWhenSeveralDeclareTheName(t *testing.T) {
+	// Issue #133 (revisao adversarial, caso 5): com DOIS modulos carregados
+	// declarando `struct V`, o hint escolhia um por ordem alfabetica e
+	// apontava, metade das vezes, para a declaracao errada — seguir o hint
+	// trocava `unknown type 'V'` por `expected V, got otherdiff.V`. Sem o
+	// contexto que produziu o erro, a resposta honesta e listar os
+	// candidatos e deixar a escolha com quem escreve.
+	root := t.TempDir()
+	writeModuleFile(t, root, "base.nx", "struct V\n    x: int\nend\nfunc f() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "otherdiff.nx", "struct V\n    s: string\nend\nfunc g() -> V\n    return V(\"hi\")\nend\n")
+	err := compileSourceAtRoot(t, root, "use base select f\nuse otherdiff select g\nlet v: V = f()\n")
+	requireErrorMentions(t, err,
+		"variable 'v': unknown type 'V'",
+		"'V' is declared by modules base and otherdiff; add 'use <module>' or 'use <module> select V' for the one you mean")
 }

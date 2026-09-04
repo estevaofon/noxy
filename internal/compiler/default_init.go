@@ -24,7 +24,7 @@ func (c *Compiler) typeWithoutDefault(t ast.NoxyType) ast.NoxyType {
 		if isBareFunctionType(typed) {
 			return t
 		}
-		if c.structDeclaration(typed.Name) != nil {
+		if c.structDeclarationOf(typed) != nil {
 			return t
 		}
 	case *ast.ArrayType:

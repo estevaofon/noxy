@@ -574,7 +574,7 @@ func (c *Compiler) importBindingFrom(module string, declarations map[string]ast.
 		if len(declaration.TypeParams) > 0 {
 			return c.registerFuncTemplate(name, &FuncTemplate{Decl: declaration, Module: moduleQualifier(module)}, declaration.Token.Line)
 		}
-		c.globals[name] = newFunctionType(declaration.Parameters, declaration.ReturnType)
+		c.globals[name] = c.importedView(module, newFunctionType(declaration.Parameters, declaration.ReturnType))
 	case *ast.StructStatement:
 		if len(declaration.TypeParams) > 0 {
 			return c.registerStructTemplate(name, &StructTemplate{Decl: declaration, Module: moduleQualifier(module)}, declaration.Token.Line)
@@ -583,9 +583,9 @@ func (c *Compiler) importBindingFrom(module string, declarations map[string]ast.
 		for index, field := range declaration.FieldsList {
 			params[index] = field.Type
 		}
-		c.globals[name] = newStructFunctionType(declaration.Name, params)
+		c.globals[name] = c.importedView(module, newStructFunctionType(declaration, params))
 	case *ast.LetStmt:
-		c.globals[name] = declaration.Type
+		c.globals[name] = c.importedView(module, declaration.Type)
 	default:
 		// Re-export transitivo (`use convert select *` traz o que convert
 		// importou de errors por select *): resolve no modulo que DECLARA o
@@ -665,12 +665,49 @@ func (c *Compiler) importedBindingType(module, name string) (ast.NoxyType, bool)
 		for index, field := range declaration.FieldsList {
 			params[index] = field.Type
 		}
-		return newStructFunctionType(declaration.Name, params), true
+		return newStructFunctionType(declaration, params), true
 	case *ast.LetStmt:
 		return declaration.Type, true
 	default:
 		return nil, false
 	}
+}
+
+// declaringModule devolve o modulo que DECLARA name no top level: module,
+// ou o modulo que module reexporta (`use X select *` / `use X select name`),
+// seguindo a cadeia com corte de ciclo. "" quando nenhum declara. E o mesmo
+// passo que importBindingFrom ja dava para o select; namespace e escrita
+// pelo namespace (issue #133) passam a usa-lo tambem.
+func (c *Compiler) declaringModule(module, name string) string {
+	visited := map[string]bool{module: true}
+	for {
+		bindings, ok := c.moduleTopLevelBindings(module)
+		if !ok {
+			return ""
+		}
+		if _, declared := bindings[name]; declared {
+			return module
+		}
+		source, ok := c.reexportSource(module, name, visited)
+		if !ok {
+			return ""
+		}
+		visited[source] = true
+		module = source
+	}
+}
+
+// importedView traduz um tipo escrito dentro de module para a visao do
+// programa (programViewType). O que nao traduz — instancia generica interna
+// do modulo, spec §1.6 — volta CRU, exatamente como antes da #133.
+func (c *Compiler) importedView(module string, declared ast.NoxyType) ast.NoxyType {
+	if declared == nil {
+		return nil
+	}
+	if translated, ok := c.programViewType(declared, module); ok {
+		return translated
+	}
+	return declared
 }
 
 // importNamespace registra `use m [as alias]` (forma de namespace, sem

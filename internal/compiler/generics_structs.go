@@ -43,6 +43,9 @@ type structInstanceKey struct {
 // ponteiro, sem alocar. E o que mantem o custo de programa sem genericos em
 // exatamente zero (§5) mesmo com o hook em todo ponto de entrada de anotacao.
 func (c *Compiler) resolveAnnotation(t ast.NoxyType, line int) (ast.NoxyType, error) {
+	// Issue #133: identidade da declaracao em todo struct da anotacao, in
+	// place, ANTES do fast path — que nao muda.
+	c.bindStructDecls(t)
 	if !needsAnnotationResolution(t) {
 		return t, nil
 	}
@@ -273,6 +276,27 @@ func (c *Compiler) ensureStructInstance(tpl *StructTemplate, args []ast.NoxyType
 	if err != nil {
 		return "", instantiationChainError(displayInstanceName(base, args), line, err)
 	}
+	// Issue #133: com Decl, um campo cujo nome nao resolve no escopo do
+	// importador (struct nao importado, #58) fica com Decl nil — e agora e
+	// candidato a vencer o typesEquivalent do call site (que so ve "nao
+	// designa declaracao") em vez do diagnostico especifico daqui. Confere
+	// AQUI, antes do call site normal usar os campos, para que o erro
+	// continue sendo o "unknown type" com hint, nao um mismatch generico.
+	//
+	// So para template IMPORTADO (mesma condicao de unknownFieldTypeError
+	// para o hint, runtime_types.go): um template LOCAL pode referenciar um
+	// struct declarado MAIS ADIANTE no mesmo programa (`c: Caixa<B>` com
+	// `struct B` depois) — nesse caso B so entra em c.structs quando
+	// predeclareStructs chega nele (function_types.go), o que ainda nao
+	// aconteceu aqui; conferir agora acusaria "unknown type" numa
+	// referencia adiantada legitima. O caminho de sempre (compiler.go, case
+	// *ast.StructStatement, DEPOIS do registro) continua cobrindo o
+	// template local quando a instancia e finalmente compilada.
+	if tpl.Module != c.moduleName {
+		if err := c.unknownFieldTypeError(instance); err != nil {
+			return "", instantiationChainError(displayInstanceName(base, args), line, err)
+		}
+	}
 	// Re-registra: os campos mudaram (GenericType -> nome qualificado) e o tipo
 	// do construtor derivado deles tem de acompanhar.
 	c.registerStructInstance(instance)
@@ -289,7 +313,7 @@ func (c *Compiler) registerStructInstance(instance *ast.StructStatement) {
 	for index, field := range instance.FieldsList {
 		params[index] = field.Type
 	}
-	c.globals[instance.Name] = newStructFunctionType(instance.Name, params)
+	c.globals[instance.Name] = newStructFunctionType(instance, params)
 }
 
 // compileGenericConstructorSite e o hook de call site do §4 para construtor de

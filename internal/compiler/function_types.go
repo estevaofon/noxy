@@ -48,7 +48,7 @@ func (c *Compiler) acceptsNull(t ast.NoxyType) bool {
 	return isAny(t) || isNullType(t) || isNullable(t)
 }
 
-func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool) bool {
+func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[*ast.StructStatement]bool) bool {
 	switch typed := t.(type) {
 	case *ast.FunctionType:
 		return true
@@ -56,18 +56,20 @@ func (c *Compiler) containsCallableType(t ast.NoxyType, visiting map[string]bool
 		if typed.Name == "func" {
 			return true
 		}
-		definition := c.structDeclaration(typed.Name)
+		definition := c.structDeclarationOf(typed)
 		if definition == nil {
 			return false
 		}
 		if visiting == nil {
-			visiting = make(map[string]bool)
+			visiting = make(map[*ast.StructStatement]bool)
 		}
-		if visiting[typed.Name] {
+		// Issue #133: marca de ciclo por DECLARACAO — dois homonimos de
+		// modulos distintos nao compartilham a marca.
+		if visiting[definition] {
 			return false
 		}
-		visiting[typed.Name] = true
-		defer delete(visiting, typed.Name)
+		visiting[definition] = true
+		defer delete(visiting, definition)
 		for _, field := range definition.FieldsList {
 			if c.containsCallableType(field.Type, visiting) {
 				return true
@@ -133,7 +135,7 @@ var arithmeticOperators = map[string]bool{
 func (c *Compiler) structOperandName(leftType, rightType ast.NoxyType) (string, bool) {
 	for _, t := range [...]ast.NoxyType{leftType, rightType} {
 		if prim, ok := t.(*ast.PrimitiveType); ok {
-			if c.structDeclaration(prim.Name) != nil {
+			if c.structDeclarationOf(prim) != nil {
 				return prim.Name, true
 			}
 		}
@@ -262,7 +264,7 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 		a, ok := actual.(*ast.RefType)
 		return ok && c.strictCompatibleNested(e.ElementType, a.ElementType)
 	default:
-		return expected.String() == actual.String() || c.typesEquivalent(expected, actual)
+		return c.typesEquivalent(expected, actual)
 	}
 }
 
@@ -431,7 +433,7 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 			for _, field := range declaration.FieldsList {
 				params = append(params, field.Type)
 			}
-			c.globals[declaration.Name] = newStructFunctionType(declaration.Name, params)
+			c.globals[declaration.Name] = newStructFunctionType(declaration, params)
 		}
 	}
 	// Segunda varredura: `let` de topo SEM anotacao (issue #41) — infere o
@@ -440,11 +442,15 @@ func (c *Compiler) predeclareGlobalBindings(statements []ast.Statement) error {
 	return c.inferGlobalLetTypes(statements)
 }
 
-func newStructFunctionType(name string, params []ast.NoxyType) *ast.FunctionType {
-	return &ast.FunctionType{
-		Params: params,
-		Return: &ast.PrimitiveType{Name: name},
+// newStructFunctionType e o tipo do construtor de decl: o retorno carrega a
+// DECLARACAO (issue #133), exceto para instancia generica, que segue por
+// nome (spec §1.6).
+func newStructFunctionType(decl *ast.StructStatement, params []ast.NoxyType) *ast.FunctionType {
+	result := &ast.PrimitiveType{Name: decl.Name}
+	if !isGenericInstanceName(decl.Name) {
+		result.Decl = decl
 	}
+	return &ast.FunctionType{Params: params, Return: result}
 }
 
 func (c *Compiler) predeclareStructs(statements []ast.Statement) error {

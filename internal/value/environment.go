@@ -83,7 +83,9 @@ func (environment *GlobalEnvironment) ReplaceLocal(values map[string]Value) {
 }
 
 func (environment *GlobalEnvironment) ExportMap() Value {
-	return Value{Type: VAL_OBJ, kind: objKindMap, Obj: &ObjMap{store: environment.local}}
+	// moduleView: o mapa exportado compartilha o bindingStore do modulo, entao
+	// e uma visao viva e nao um valor copiavel — ver ObjMap.IsModuleView.
+	return Value{Type: VAL_OBJ, kind: objKindMap, Obj: &ObjMap{store: environment.local, moduleView: true}}
 }
 
 // Generation soma as gerações dos stores da cadeia de ambientes. Qualquer

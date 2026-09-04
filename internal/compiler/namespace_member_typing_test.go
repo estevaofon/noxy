@@ -96,18 +96,19 @@ func TestNamespaceFunctionAsValueIsTyped(t *testing.T) {
 	requireErrorMentions(t, err, "expected string, got int")
 }
 
-func TestNamespaceMemberStaysDynamicWhenStructIsUnnameable(t *testing.T) {
-	// n.nx usa m pela forma de NAMESPACE: V nao entra nos exports de n, e um
-	// programa que so faz `use n` nao tem nome para o retorno de n.make().
-	// Tipo inteiro dinamico (nunca meio-tipado): o `let` anotado nao e
-	// conferido (como antes da #126) e o inferido erra por falta de tipo.
+func TestNamespaceMemberIsTypedWhenStructIsUnnameable(t *testing.T) {
+	// n.nx usa m pela forma de NAMESPACE: V nao entra nos exports de n, e o
+	// programa que so faz `use n` nao tem grafia para o retorno de n.make().
+	// Issue #133: o valor e tipado mesmo assim; a mensagem exibe `m.V`
+	// (caminho canonico: modulo declarante + nome).
 	root := t.TempDir()
 	writeModuleFile(t, root, "m.nx", rollModule)
 	writeModuleFile(t, root, "n.nx", "use m\nfunc make() -> m.V\n    return m.norm(m.V(0.0, 0.0))\nend\n")
 	err := compileSourceAtRoot(t, root, "use n\nlet s: string = n.make()\n")
-	requireNoError(t, err)
-	err = compileSourceAtRoot(t, root, "use n\nlet p = n.make()\n")
-	requireErrorMentions(t, err, "cannot infer type for 'p'")
+	requireErrorMentions(t, err, "expected string, got m.V")
+	requireNoError(t, compileSourceAtRoot(t, root, "use n\nlet p = n.make()\nlet x: float = p.x\n"))
+	err = compileSourceAtRoot(t, root, "use n\nlet p = n.make()\nlet x: string = p.x\n")
+	requireErrorMentions(t, err, "expected string, got float")
 }
 
 func TestNamespaceMemberIsNameableWhenModuleReexportsTheStruct(t *testing.T) {
@@ -253,17 +254,131 @@ func TestNamespaceMemberOfUnloadableModuleStaysDynamic(t *testing.T) {
 	requireNoError(t, compileSourceAtRoot(t, root, "use nope\nlet v: int = nope.f(1)\n"))
 }
 
-func TestNamespaceMemberReexportedByWildcardStaysDynamic(t *testing.T) {
-	// Caracterizacao da assimetria documentada em namespace_member_types.go:
-	// `g` chega a m so por REEXPORTACAO (`use x select *`), e
-	// moduleTopLevelBindings enxerga apenas as declaracoes do proprio m —
-	// entao `m.g(1)` fica dinamico (nenhum erro) enquanto `use m select g`
-	// resolve a assinatura e acusa. Conservador, nunca tipo errado; fechar a
-	// assimetria e follow-up.
+func TestNamespaceMemberReexportedByWildcardIsTyped(t *testing.T) {
+	// Issue #133: `g` chega a m so por REEXPORTACAO (`use x select *`);
+	// namespaceMemberType segue reexportSource ate o modulo declarante, como
+	// `use m select g` ja fazia.
 	root := t.TempDir()
 	writeModuleFile(t, root, "x.nx", "func g(n: int) -> int\n    return n\nend\n")
 	writeModuleFile(t, root, "m.nx", "use x select *\n")
-	requireNoError(t, compileSourceAtRoot(t, root, "use m\nlet s: string = m.g(1)\n"))
-	err := compileSourceAtRoot(t, root, "use m select g\nlet s: string = g(1)\n")
+	err := compileSourceAtRoot(t, root, "use m\nlet s: string = m.g(1)\n")
 	requireErrorMentions(t, err, "expected string, got int")
+	err = compileSourceAtRoot(t, root, "use m\nlet v: int = m.g(\"x\")\n")
+	requireErrorMentions(t, err, "argument 1 to 'm.g': expected int, got string")
+	err = compileSourceAtRoot(t, root, "use m\nlet v: int = m.g(1, 2)\n")
+	requireErrorMentions(t, err, "function 'm.g' expects 1 arguments, got 2")
+}
+
+func TestReexportedStructReturnIsTypedThroughNamespaceAndSelect(t *testing.T) {
+	// Caso (a) da issue: mid reexporta base por `select *`; o valor e tipado
+	// nos dois caminhos (namespace e select) mesmo sem `struct V` local.
+	//
+	// A grafia exibida difere dos dois lados por uma razao real, nao um
+	// capricho de implementacao: `use mid` (namespace) da ao programa uma
+	// grafia PROPRIA para V — `mid.V` — porque discoverModuleStructs("mid")
+	// segue o `select *` de mid.nx e enxerga V; programStructName prefere
+	// esse alias visivel sobre o caminho canonico (regra 2, member_types.go).
+	// `use mid select mkv` (so a FUNCAO, sem struct nenhum) nao registra
+	// nenhum alias de namespace para V, entao cai no caminho canonico
+	// `base.V`.
+	root := t.TempDir()
+	writeModuleFile(t, root, "base.nx", "struct V\n    x: int\nend\nfunc mkv() -> V\n    return V(1)\nend\nfunc usa(v: V) -> int\n    return v.x\nend\n")
+	writeModuleFile(t, root, "mid.nx", "use base select *\n")
+	requireNoError(t, compileSourceAtRoot(t, root, "use mid\nlet v = mid.mkv()\nlet n: int = v.x\nlet k: int = mid.usa(v)\n"))
+	err := compileSourceAtRoot(t, root, "use mid\nlet v = mid.mkv()\nlet s: string = v\n")
+	requireErrorMentions(t, err, "expected string, got mid.V")
+	err = compileSourceAtRoot(t, root, "use mid select mkv\nlet v = mkv()\nlet s: string = v\n")
+	requireErrorMentions(t, err, "expected string, got base.V")
+	requireNoError(t, compileSourceAtRoot(t, root, "use mid select mkv, usa\nlet v = mkv()\nlet k: int = usa(v)\n"))
+}
+
+func TestSelectedFunctionSignatureDoesNotCaptureLocalHomonym(t *testing.T) {
+	// O buraco documentado em vm/module_exports_test.go (~641): a assinatura
+	// importada por select carregava o nome CRU `V`, que um `struct V` local
+	// capturava. Com Decl, `use m select norm` + `struct V` local recusa
+	// passar o V local para norm.
+	root := rollRoot(t)
+	err := compileSourceAtRoot(t, root, "use m select norm\nstruct V\n    x: float\n    y: float\nend\nlet p: V = norm(V(1.0, 2.0))\n")
+	requireErrorMentions(t, err, "argument 1 to 'norm': expected m.V, got V")
+}
+
+func TestSelectDisplayNameIsOrderIndependentAtTopLevel(t *testing.T) {
+	// Caracterizacao adversarial (spec §1.5, achado 4 previa sensibilidade a
+	// ordem textual; investigado e refutado para o programa de topo): um
+	// `use` do TOPO passa por importBindingFrom DUAS vezes — no predeclare
+	// (predeclareGlobalBindings) e de novo no compile-pass (o case
+	// *ast.UseStmt que emite bytecode, compiler.go). O predeclare roda
+	// INTEIRO — para TODOS os `use` do topo — antes do compile-pass tocar o
+	// primeiro. Como e o compile-pass que fixa o valor final em c.globals, a
+	// segunda traducao de `mkv` sempre enxerga o namespaceOrder JA COMPLETO
+	// do programa inteiro — a alias `b` aparece no nome exibido nos DOIS
+	// sentidos, mesmo quando `use base as b` vem DEPOIS de `use mid select
+	// mkv` no texto fonte.
+	root := t.TempDir()
+	writeModuleFile(t, root, "base.nx", "struct V\n    x: int\nend\nfunc mkv() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "mid.nx", "use base select *\n")
+	err := compileSourceAtRoot(t, root, "use mid select mkv\nuse base as b\nlet s: string = mkv()\n")
+	requireErrorMentions(t, err, "expected string, got b.V")
+	err = compileSourceAtRoot(t, root, "use base as b\nuse mid select mkv\nlet s: string = mkv()\n")
+	requireErrorMentions(t, err, "expected string, got b.V")
+}
+
+func TestNamespaceStructNameSkipsAliasShadowedWhereTypeIsInferred(t *testing.T) {
+	// Item (c) da issue: dentro de f, `m` e o parametro Box; a grafia do
+	// tipo de w.make() e escolhida no ponto em que o tipo e PRODUZIDO, entao
+	// pula o alias sombreado e exibe `w.V`.
+	root := t.TempDir()
+	writeModuleFile(t, root, "m.nx", rollModule)
+	writeModuleFile(t, root, "w.nx", "use m select V, norm\nfunc make() -> V\n    return norm(V(0.0, 0.0))\nend\n")
+	err := compileSourceAtRoot(t, root, `use m
+use w
+struct Box
+    q: int
+end
+func f(m: Box) -> int
+    let p = w.make()
+    let s: string = p
+    return 0
+end
+`)
+	requireErrorMentions(t, err, "expected string, got w.V")
+	requireErrorLacks(t, err, "got m.V")
+}
+
+func TestNamespaceStructNameIsFixedWhereInferredNotWherePrinted(t *testing.T) {
+	// Caracterizacao (spec §1.5): o `let` de topo grava `m.V`; a mensagem
+	// dentro de f, onde `m` esta sombreado, ainda imprime `m.V` — nao ha
+	// re-traducao na impressao.
+	root := t.TempDir()
+	writeModuleFile(t, root, "m.nx", rollModule)
+	writeModuleFile(t, root, "w.nx", "use m select V, norm\nfunc make() -> V\n    return norm(V(0.0, 0.0))\nend\n")
+	err := compileSourceAtRoot(t, root, `use m
+use w
+struct Box
+    q: int
+end
+let v = w.make()
+func f(m: Box) -> int
+    let s: string = v
+    return 0
+end
+`)
+	requireErrorMentions(t, err, "expected string, got m.V")
+}
+
+func TestQualifiedAnnotationStillResolvesWhenAliasIsShadowedByParameter(t *testing.T) {
+	// Anotacao e espaco de tipos: `m.V` dentro de f(m: Box) continua o struct
+	// do modulo (comportamento atual, preservado).
+	requireNoError(t, compileSourceAtRoot(t, rollRoot(t), `use m
+struct Box
+    q: int
+end
+func mk() -> m.V
+    return m.V(1.0, 2.0)
+end
+func f(m: Box) -> int
+    let q: m.V = mk()
+    return 0
+end
+`))
 }

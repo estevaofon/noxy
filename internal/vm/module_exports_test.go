@@ -634,19 +634,18 @@ test_report(to_str(viaSelect) + "|" + to_str(viaNamespace) + "|" + to_str(viaFun
 
 // O struct `Point` declarado no importador NAO e o `Point` de geometry:
 // typesEquivalent so aproxima dois nomes que resolvem para a MESMA
-// *ast.StructStatement, entao `geometry.Point` (declaracao do modulo) continua
-// recusado onde se espera o `Point` local. E o guard contra a versao frouxa da
-// regra (looselySameType, que compara so o nome sem qualificador, aceitaria os
-// dois como iguais).
-//
-// O caminho inverso — `use geometry select dist2` com um `Point` local, sem o
-// namespace — nao e detectavel: a assinatura importada carrega o nome NU
-// `Point`, que o importador resolve para o proprio struct. Qualificar os tipos
-// das assinaturas importadas esta fora do §8c ("c.structs nao passa a indexar
-// nomes qualificados").
+// *ast.StructStatement, entao um `Point` LOCAL continua recusado onde se
+// espera o `Point` de geometry, e vice-versa — nos dois sentidos, porque a
+// assinatura importada por select carrega a DECLARACAO de geometry.Point
+// (Decl), nao o nome cru: `geometry.Point` passado para `dist2` (que quer o
+// Point de geometry) e legitimamente a MESMA declaracao e compila; um
+// `Point` local passado no lugar e uma declaracao DIFERENTE e e recusado. E
+// o guard contra a versao frouxa da regra (looselySameType, que compara so o
+// nome sem qualificador, aceitaria os dois como iguais nos dois sentidos).
 func TestLocalStructIsNotTheModuleStructOfTheSameName(t *testing.T) {
 	root := writeModuleFiles(t, map[string]string{"geometry.nx": geometryModule})
-	_, err := runModuleProgram(t, root, `use geometry
+	// Sentido 1: geometry.Point (a MESMA declaracao que dist2 quer) compila.
+	if _, err := runModuleProgram(t, root, `use geometry
 use geometry select dist2
 struct Point
     x: int
@@ -654,21 +653,38 @@ struct Point
 end
 let fromModule: geometry.Point = geometry.Point(0, 0)
 dist2(fromModule, fromModule)
+`); err != nil {
+		t.Fatalf("geometry.Point passed to geometry's own dist2 must compile: %v", err)
+	}
+	// Sentido 2 (o guard de identidade cross-modulo): um Point LOCAL, com o
+	// MESMO nome mas uma declaracao DIFERENTE, e recusado no lugar do Point
+	// de geometry. Issue #133: a assinatura importada por select carrega a
+	// DECLARACAO de geometry.Point (nao o nome cru "Point"), entao a mensagem
+	// exibe o caminho canonico qualificado.
+	_, err := runModuleProgram(t, root, `use geometry select dist2
+struct Point
+    x: int
+    y: int
+end
+let local: Point = Point(0, 0)
+dist2(local, local)
 `)
-	if err == nil || !strings.Contains(err.Error(), "expected Point, got geometry.Point") {
-		t.Fatalf("error=%v, want nominal mismatch", err)
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'dist2': expected geometry.Point, got Point") {
+		t.Fatalf("error=%v, want nominal mismatch on the local Point", err)
 	}
 }
 
-func TestModuleVariableAssignmentViaNamespaceIsCompileError(t *testing.T) {
-	root := writeModuleFiles(t, map[string]string{"calc.nx": "let sp: int = 0\nfunc push() -> void\n    sp = sp + 1\nend\n"})
-	_, err := runModuleProgram(t, root, "use calc\ncalc.push()\ncalc.sp = 5\n")
-	if err == nil || !strings.Contains(err.Error(), "cannot assign to 'calc.sp': module variables are read-only outside the module") || !strings.Contains(err.Error(), "hint: expose a function in 'calc'") {
-		t.Fatalf("error=%v", err)
+func TestModuleVariableAssignmentViaNamespaceIsLiveAndTyped(t *testing.T) {
+	// Issue #133: a regra "read-only outside the module" (0.11.0) saiu; a
+	// escrita e tipada e vista pelo modulo.
+	root := writeModuleFiles(t, map[string]string{"calc.nx": "let sp: int = 0\nfunc push() -> void\n    sp = sp + 1\nend\nfunc read() -> int\n    return sp\nend\n"})
+	reported, err := runModuleProgram(t, root, "use calc\ncalc.push()\ncalc.sp = 5\ncalc.push()\ntest_report(calc.read() * 10 + calc.sp)\n")
+	if err != nil || reported.Int() != 66 {
+		t.Fatalf("live typed write via namespace: %v / %v", reported, err)
 	}
-	reported, err := runModuleProgram(t, root, "use calc\ncalc.push()\ntest_report(calc.sp)\n")
-	if err != nil || reported.Int() != 1 {
-		t.Fatalf("live read via namespace: %v / %v", reported, err)
+	_, err = runModuleProgram(t, root, "use calc\ncalc.sp = \"x\"\n")
+	if err == nil || !strings.Contains(err.Error(), "type mismatch in assignment to 'calc.sp': expected int, got string") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

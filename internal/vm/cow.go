@@ -20,7 +20,13 @@ func (vm *VM) unicize(v value.Value) (value.Value, bool) {
 	if !value.IsShared(v) {
 		return v, false
 	}
-	return vm.copyValue(v), true
+	copied := vm.copyValue(v)
+	if copied.Obj == v.Obj {
+		// copyValue recusou o clone (visao de modulo, issue #133 caso 1):
+		// nada mudou, e quem chama nao deve fazer a troca de posse.
+		return v, false
+	}
+	return copied, true
 }
 
 // unicizeOwnedSlot e a semantica de OP_GET_LOCAL_MUT para um slot POSSUIDOR:

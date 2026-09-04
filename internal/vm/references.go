@@ -265,6 +265,26 @@ func (vm *VM) descend(container value.Value, step *value.ObjRef, forWrite bool) 
 		return value.Value{}, fmt.Errorf("Target is not indexable")
 	}
 	if step.RefType == value.REF_PROPERTY {
+		if mapping, isMap := container.Obj.(*value.ObjMap); isMap && mapping != nil {
+			// Issue #133: propriedade de mapa (membro de modulo pelo
+			// namespace) como passo do caminho — mesmo protocolo do ramo de
+			// mapa de REF_INDEX abaixo: para escrita, uniciza o filho e
+			// regrava com retain-antes-de-release.
+			child, exists := mapping.Get(step.Name)
+			if !exists {
+				return value.Value{}, fmt.Errorf("undefined property '%s'", step.Name)
+			}
+			if !forWrite {
+				return child, nil
+			}
+			if unique, changed := vm.unicize(child); changed {
+				value.Retain(unique)
+				mapping.Set(step.Name, unique)
+				value.Release(child)
+				return unique, nil
+			}
+			return child, nil
+		}
 		instance, ok := container.Obj.(*value.ObjInstance)
 		if !ok || instance == nil {
 			return value.Value{}, fmt.Errorf("Target is not an instance")
@@ -369,6 +389,16 @@ func (vm *VM) referenceStorageMode(ref *value.ObjRef, forWrite bool) (stored val
 		container, err := vm.borrowContainer(ref, forWrite)
 		if err != nil {
 			return value.Value{}, false, referenceSetter{}, err
+		}
+		if mapping, isMap := container.Obj.(*value.ObjMap); container.Type == value.VAL_OBJ && isMap && mapping != nil {
+			// Issue #133: passo final sobre mapa — o setter e o de mapa com
+			// chave string; o RC da escrita fica no funil de
+			// storeReferenceValue, que ja atende setterMap.
+			stored, exists := mapping.Get(ref.Name)
+			if !exists {
+				return value.Value{}, false, referenceSetter{}, fmt.Errorf("undefined property '%s'", ref.Name)
+			}
+			return stored, true, referenceSetter{kind: setterMap, mapping: mapping, key: ref.Name}, nil
 		}
 		instance, ok := container.Obj.(*value.ObjInstance)
 		if container.Type != value.VAL_OBJ || !ok || instance == nil {

@@ -30,7 +30,7 @@ func (c *Compiler) fieldSlot(owner ast.NoxyType, member string) (int, bool) {
 	if !ok {
 		return 0, false
 	}
-	definition := c.structDeclaration(primitive.Name)
+	definition := c.structDeclarationOf(primitive)
 	if definition == nil || c.structOrigin(definition) != "" {
 		return 0, false
 	}

@@ -215,25 +215,32 @@ let s: string = res.rows
 	requireErrorMentions(t, err, "expected string, got db.Row[]")
 }
 
-func TestModuleFieldTypeUnnameableStructStaysDynamic(t *testing.T) {
-	// Sem `use db` e sem `select Row`, o programa nao tem como escrever o
-	// tipo de `rows`: o campo fica dinamico (nil), nunca `Row[]` vazado do
-	// escopo do modulo — este programa compila (e falharia so em runtime).
+func TestModuleFieldTypeUnnameableStructIsTypedWithCanonicalName(t *testing.T) {
+	// Issue #133: sem `use db` e sem `select Row` o programa nao tem grafia
+	// para `Row`, mas o VALOR continua tipado — a identidade e a declaracao;
+	// a mensagem exibe o caminho canonico `db.Row`.
 	err := compileSourceAtRoot(t, dbRoot(t), `use db select QueryResult, q
 let res: QueryResult = q()
 let s: string = res.rows
 `)
-	requireNoError(t, err)
+	requireErrorMentions(t, err, "expected string, got db.Row[]")
 }
 
-func TestModuleFieldTypePartiallyUnnameableStaysDynamic(t *testing.T) {
-	// `map[string, Row]` com Row nao nomeavel: o tipo INTEIRO vira dinamico,
-	// nao um `map[string, ???]` meio-tipado.
+func TestModuleFieldTypePartiallyUnnameableIsFullyTyped(t *testing.T) {
 	err := compileSourceAtRoot(t, dbRoot(t), `use db select QueryResult, q
 let res: QueryResult = q()
 let s: string = res.by_name
 `)
-	requireNoError(t, err)
+	requireErrorMentions(t, err, "expected string, got map[string, db.Row]")
+}
+
+func TestUnnameableStructValueIsCheckedOnFieldAccess(t *testing.T) {
+	err := compileSourceAtRoot(t, dbRoot(t), `use db select QueryResult, q
+let res: QueryResult = q()
+let r = res.rows[0]
+let s: string = r.v
+`)
+	requireErrorMentions(t, err, "expected string, got int")
 }
 
 func TestModuleFieldTypeSelectedNameWithoutNamespaceIsKept(t *testing.T) {

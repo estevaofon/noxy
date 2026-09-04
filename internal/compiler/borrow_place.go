@@ -55,6 +55,20 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 
 	switch n := expr.(type) {
 	case *ast.Identifier:
+		if _, isNamespace := c.pureNamespaceAlias(n.Value); isNamespace {
+			// Objeto do namespace: visao do modulo, nunca unicizado — issue
+			// #133. OP_REF_GLOBAL faria a escrita unicizar a celula global, e
+			// copyValue clona um ObjMap para um store NOVO: com mais de um
+			// dono do mapa (dois `use` do mesmo modulo, ou `let m: any = st`)
+			// o empréstimo cairia num orfao destacado do modulo. Empilhamos o
+			// MAPA em si, por leitura simples; OP_REF_PROPERTY sobre uma base
+			// nao-ref congela o container (Base vazia, borrowContainer devolve
+			// ref.Container), o que aqui e exatamente certo: o CoW nunca move
+			// esse mapa, porque nunca o unicizamos.
+			nameConstant := c.makeConstant(value.NewString(n.Value))
+			c.emitOpWithConstantIndex(chunk.OP_GET_GLOBAL, nameConstant)
+			return nil, nil
+		}
 		// Nome comum: ref de célula. É a raiz da cadeia e o ponto em que a
 		// recursão para.
 		return c.compileReferenceArgumentValue(n)
@@ -72,7 +86,11 @@ func (c *Compiler) compileBorrowBase(expr ast.Expression) (ast.NoxyType, error) 
 		}
 		name := c.makeConstant(value.NewString(n.Member))
 		c.emitOpWithConstantIndex(chunk.OP_REF_PROPERTY, name)
-		return unwrapRefType(c.memberType(owner, n.Member)), nil
+		fieldType := c.memberType(owner, n.Member)
+		if fieldType == nil && owner == nil {
+			fieldType = c.namespaceMemberType(n) // issue #133: `ref m.x`
+		}
+		return unwrapRefType(fieldType), nil
 
 	case *ast.IndexExpression:
 		container, err := c.compileBorrowBase(n.Left)
@@ -106,7 +124,9 @@ func (c *Compiler) lvalueStaticType(expr ast.Expression) (ast.NoxyType, bool) {
 	case *ast.MemberAccessExpression:
 		owner, ok := c.lvalueStaticType(n.Left)
 		if !ok {
-			return nil, false
+			// Issue #133: `m.x` com m alias de namespace (sem tipo proprio).
+			t := c.namespaceMemberType(n)
+			return t, t != nil
 		}
 		t := c.memberType(unwrapRefType(owner), n.Member)
 		return t, t != nil

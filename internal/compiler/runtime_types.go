@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -105,7 +106,10 @@ func (c *Compiler) requiresRuntimeValueType(t ast.NoxyType, visiting map[*ast.St
 		// named by that signature are not values embedded in the callable object.
 		return false
 	case *ast.PrimitiveType:
-		definition := c.lookupStructFrom(origin, typed.Name)
+		definition := typed.Decl
+		if definition == nil {
+			definition = c.lookupStructFrom(origin, typed.Name)
+		}
 		if definition == nil || visiting[definition] {
 			return false
 		}
@@ -155,7 +159,10 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 		case "func":
 			return &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, CallableBare: true}, true
 		}
-		definition := c.lookupStructFrom(origin, typed.Name)
+		definition := typed.Decl
+		if definition == nil {
+			definition = c.lookupStructFrom(origin, typed.Name)
+		}
 		if definition == nil {
 			return nil, false
 		}
@@ -319,13 +326,16 @@ func (c *Compiler) checkDeclaredType(t ast.NoxyType, line int, position string) 
 // importacao (`use <importFrom> select T`) quando o chamador sabe de onde o
 // nome veio; "" usa o `m` generico.
 func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, importFrom string) error {
-	name, found := firstUnknownTypeName(t, func(candidate string) bool {
-		return c.structDeclaration(candidate) != nil
+	name, found := firstUnknownTypeName(t, func(candidate *ast.PrimitiveType) bool {
+		return c.structDeclarationOf(candidate) != nil
 	})
 	if !found {
 		return nil
 	}
 	if !isQualifiedTypeName(name) {
+		if hint := c.importHintFor(name); hint != "" {
+			return fmt.Errorf("[line %d] %s: unknown type '%s'\n  hint: %s", line, position, name, hint)
+		}
 		module := importFrom
 		if module == "" {
 			module = "m"
@@ -353,14 +363,81 @@ func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, imp
 		line, position, name, reason, hint)
 }
 
+// importHintFor monta o hint de `unknown type 'name'` quando alguma
+// dependencia ja carregada declara um struct chamado name (issue #133,
+// spec §1.7): `add 'use <origem>' or 'use <reexportador> select name' to
+// name this type`. Tres passos, porque origins aponta sempre para o modulo
+// DECLARANTE e nomes de struct podem colidir entre modulos DIFERENTES sem
+// serem a MESMA declaracao (dois modulos distintos podem cada um declarar o
+// seu proprio `struct V`): (1) originDecls guarda, por modulo, o *ponteiro*
+// da declaracao chamada name naquele modulo — nao so o nome; (2) a origem
+// escolhida (origin) e deterministica (sort) entre os modulos candidatos;
+// (3) so entao um reexportador qualifica: seu export de name tem de ser o
+// MESMO ponteiro de originDecl, nao qualquer decl com o mesmo nome em outro
+// modulo. "" sem candidato. Ordem deterministica (sort) porque os dois mapas
+// nao tem ordem.
+func (c *Compiler) importHintFor(name string) string {
+	if c.moduleDiscovery == nil {
+		return ""
+	}
+	originDecls := make(map[string]*ast.StructStatement)
+	for decl, module := range c.moduleDiscovery.origins {
+		if decl.Name == name {
+			originDecls[module] = decl
+		}
+	}
+	if len(originDecls) == 0 {
+		return ""
+	}
+	var origins []string
+	for module := range originDecls {
+		origins = append(origins, module)
+	}
+	sort.Strings(origins)
+	if len(origins) > 1 {
+		// Issue #133 (caso 5): mais de um modulo carregado declara este nome, e
+		// sao declaracoes DIFERENTES. Escolher uma por ordem alfabetica
+		// apontava para a errada metade das vezes — seguir o hint so trocava
+		// `unknown type 'V'` por `expected V, got outro.V`. Nada aqui conhece o
+		// contexto que produziu o erro (o tipo do inicializador, por exemplo),
+		// entao a resposta honesta e listar os candidatos e deixar a escolha
+		// com quem escreve.
+		return fmt.Sprintf("'%s' is declared by modules %s; add 'use <module>' or 'use <module> select %s' for the one you mean", name, joinWithAnd(origins), name)
+	}
+	origin := origins[0]
+	originDecl := originDecls[origin]
+	var reexporters []string
+	for module, exported := range c.moduleDiscovery.exported {
+		if module != origin && exported[name] == originDecl {
+			reexporters = append(reexporters, module)
+		}
+	}
+	sort.Strings(reexporters)
+	options := []string{fmt.Sprintf("'use %s'", origin)}
+	if len(reexporters) > 0 {
+		options = append(options, fmt.Sprintf("'use %s select %s'", reexporters[0], name))
+	} else {
+		options = append(options, fmt.Sprintf("'use %s select %s'", origin, name))
+	}
+	return fmt.Sprintf("add %s to name this type", strings.Join(options, " or "))
+}
+
+// joinWithAnd escreve uma lista em prosa: "a", "a and b", "a, b and c".
+func joinWithAnd(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
+}
+
 // firstUnknownTypeName procura em t (inclusive dentro de array, map, ref,
 // chan, assinatura e argumentos genericos) o primeiro nome de tipo que nao e
 // primitivo e que resolves rejeita. TypeParamType nao conta: fora de template
 // resolveAnnotation ja o recusou; dentro de instancia ja foi substituido.
-func firstUnknownTypeName(t ast.NoxyType, resolves func(string) bool) (string, bool) {
+func firstUnknownTypeName(t ast.NoxyType, resolves func(*ast.PrimitiveType) bool) (string, bool) {
 	switch typed := t.(type) {
 	case *ast.PrimitiveType:
-		if !isBuiltinTypeName(typed.Name) && !resolves(typed.Name) {
+		if !isBuiltinTypeName(typed.Name) && !resolves(typed) {
 			return typed.Name, true
 		}
 	case *ast.ArrayType:

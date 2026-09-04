@@ -26,12 +26,6 @@ import "noxy-vm/internal/ast"
 // `ref x` cujo tipo do alvo e desconhecido derruba modesProven e volta para
 // OP_CALL, para validateParameterModes/validateRefTargets conferirem o alvo
 // em runtime (compileCallExpression, ramo do parametro `ref`).
-//
-// Assimetria conhecida com `select`: um nome que chega a m so por
-// REEXPORTACAO (`use x select *` dentro de m.nx) continua dinamico pelo
-// namespace — moduleTopLevelBindings enxerga apenas as declaracoes do
-// proprio m —, enquanto `use m select g` o resolve. Conservador (dinamico,
-// nunca tipo errado) e documentado como follow-up.
 func (c *Compiler) namespaceMemberType(access *ast.MemberAccessExpression) ast.NoxyType {
 	base, ok := access.Left.(*ast.Identifier)
 	// A guarda de sombreamento e a mesma de compileCallExpression (o hook do
@@ -47,11 +41,17 @@ func (c *Compiler) namespaceMemberType(access *ast.MemberAccessExpression) ast.N
 	if !isNamespace {
 		return nil
 	}
-	declared, ok := c.importedBindingType(module, access.Member)
+	// Issue #133: um nome que chega a `module` por reexportacao resolve no
+	// modulo DECLARANTE — e o mesmo passo que o select ja dava.
+	origin := c.declaringModule(module, access.Member)
+	if origin == "" {
+		return nil
+	}
+	declared, ok := c.importedBindingType(origin, access.Member)
 	if !ok || declared == nil {
 		return nil
 	}
-	translated, ok := c.programViewType(declared, module)
+	translated, ok := c.programViewType(declared, origin)
 	if !ok {
 		return nil
 	}

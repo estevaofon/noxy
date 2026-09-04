@@ -82,7 +82,7 @@ func (vm *VM) callPreparedValue(callee value.Value, argCount int, c *chunk.Chunk
 			instObj := instance.Obj.(*value.ObjInstance)
 			for i := 0; i < argCount; i++ {
 				arg := vm.peek(argCount - 1 - i)
-				value.Retain(arg) // RC: campo e dono duravel
+				value.Retain(arg)      // RC: campo e dono duravel
 				instObj.Slots[i] = arg // arity == len(Fields), checado acima
 			}
 			vm.stackTop -= argCount + 1
@@ -181,6 +181,15 @@ func (vm *VM) copyValue(v value.Value) value.Value {
 		copied.Obj.(*value.ObjArray).RuntimeType.Store(obj.RuntimeType.Load())
 		return copied
 	case *value.ObjMap:
+		// Issue #133 (caso 1): o objeto do namespace e uma VISAO do estado
+		// vivo do modulo, nao um valor com semantica de copia (precedente:
+		// Python, Go, Nim — um modulo e uma referencia). Clona-lo produziria
+		// um bindingStore orfao e a escrita seguinte sumiria em silencio.
+		// Aqui e o funil unico do CoW: unicize, unicizeOwnedSlot,
+		// unicizeBorrowedSlot e todo copyValue direto passam por este ponto.
+		if obj.IsModuleView() {
+			return v
+		}
 		cloneCount.Add(1)
 		newData := obj.Snapshot()
 		for _, val := range newData {

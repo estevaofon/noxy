@@ -877,25 +877,12 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// Only REBIND allowed for Ref Fields.
 			// *obj.field = val is handled by PrefixExpression.
 
-			// Variavel de modulo via namespace (`calc.sp = 5`): leitura e viva,
-			// escrita de fora e recusada — o modulo expoe uma funcao (#56 §8b).
-			//
-			// O nome precisa ainda ser um binding PURO de namespace: alem de nao
-			// ser sombreado por local/upvalue, o global tem de ser o marcador que
-			// importNamespace deixou (presente e com tipo nil). Um `let calc: P`
-			// de topo homonimo ao `use calc` e legal hoje (a regra de redeclaracao
-			// so compara nomes de *ast.LetStmt entre si) e sobrescreve esse global
-			// com o tipo declarado — tanto no predeclare quanto no proprio
-			// LetStmt —, entao `calc.x = 2` ali e escrita numa struct do usuario,
-			// nao no modulo, e nao pode ser recusada.
+			// Issue #133: `m.x = v` pelo namespace e escrita tipada no store
+			// vivo do modulo (namespace_write.go). A regra "read-only outside
+			// the module" (0.11.0) saiu.
 			if leftIdent, isIdent := memberExp.Left.(*ast.Identifier); isIdent {
-				globalType, isGlobal := c.globals[leftIdent.Value]
-				pureNamespaceBinding := isGlobal && globalType == nil
-				if module, isNamespace := c.namespaceImports[leftIdent.Value]; isNamespace && pureNamespaceBinding && !c.isShadowedByLocal(leftIdent.Value) {
-					return nil, nil, fmt.Errorf(
-						"[line %d] cannot assign to '%s.%s': module variables are read-only outside the module\n  hint: expose a function in '%s' that updates it",
-						c.currentLine, leftIdent.Value, memberExp.Member, module,
-					)
+				if module, isNamespace := c.pureNamespaceAlias(leftIdent.Value); isNamespace {
+					return c.compileNamespaceMemberAssignment(n, leftIdent.Value, module, memberExp)
 				}
 			}
 
@@ -908,6 +895,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			leftType, _, err := c.compileLValueBase(memberExp.Left)
 			if err != nil {
 				return nil, nil, err
+			}
+
+			// Issue #133 (caso 3): dono de tipo estatico map[K, V]. `m.chave =
+			// v` e a MESMA escrita que `m["chave"] = v` (o OP_SET_PROPERTY do
+			// VM tem ramo de mapa desde o #133) e recebe a MESMA checagem do
+			// caminho indexado — sem ela um `map[string, int]` passava a
+			// guardar uma string. A leitura com ponto sobre mapa continua
+			// dinamica (memberType devolve nil para dono map): so a escrita
+			// muda aqui.
+			if mapType, isMap := unwrapRefType(leftType).(*ast.MapType); isMap {
+				return c.compileMapMemberAssignment(n, memberExp, mapType)
 			}
 
 			// RESOLVE FIELD TYPE (antes de compilar o valor: §3 target-typing,
@@ -1037,7 +1035,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		for _, f := range n.FieldsList {
 			paramTypes = append(paramTypes, f.Type)
 		}
-		structType := newStructFunctionType(n.Name, paramTypes)
+		structType := newStructFunctionType(n, paramTypes)
 		structDefinition.ConstructorType = c.runtimeTypeInfo(structType)
 
 		if c.scopeDepth > 0 {
@@ -2719,8 +2717,10 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 		argTypes = append(argTypes, argType)
 		// Tipo estatico desconhecido (campo de um `any`, retorno que
-		// programViewType zerou por ser inominavel pelo programa) ⇒ o MODO do
-		// argumento tambem NAO foi provado: asRefType(nil) e falso,
+		// programViewType zerou por ser instancia generica de modulo ou tipo
+		// residual — issue #133: struct nao nomeavel pelo programa continua
+		// tipado, exibido pelo caminho canonico) ⇒ o MODO do argumento tambem
+		// NAO foi provado: asRefType(nil) e falso,
 		// areStrictTypesCompatible aceita nil contra qualquer parametro e as
 		// guardas de slot pulam nil, entao ninguem conferiu que o valor nao e
 		// uma referencia. Mesma regra do ramo `ref` acima: cair para OP_CALL
@@ -2859,6 +2859,16 @@ func (c *Compiler) compileReferenceArgumentValue(expression ast.Expression) (ast
 			return nil, err
 		}
 		element := c.memberType(owner, target.Member)
+		if element == nil && owner == nil {
+			// Issue #133: `ref m.x` — o membro do namespace so tem tipo por
+			// namespaceMemberType (o alias e um global sem tipo, entao o dono
+			// volta nil e memberType nao tem de onde tirar o campo). E o mesmo
+			// fallback dos outros dois hooks de raiz de lvalue
+			// (compileBorrowBase e lvalueStaticType, borrow_place.go); este
+			// aqui e o caminho de `ref` DIRETO sobre o membro, que nao passa
+			// por nenhum dos dois.
+			element = c.namespaceMemberType(target)
+		}
 		name := c.makeConstant(value.NewString(target.Member))
 		if _, ok := asRefType(element); ok {
 			return nil, alreadyReferenceError(c.currentLine, target)
@@ -3438,9 +3448,6 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if _, ok := expected.(*ast.FunctionType); ok {
 		return c.areStrictTypesCompatible(expected, actual)
 	}
-	if expected.String() == actual.String() {
-		return true
-	}
 	if c.typesEquivalent(expected, actual) {
 		return true
 	}
@@ -3454,10 +3461,51 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	}
 	if expectedArray, ok := expected.(*ast.ArrayType); ok {
 		actualArray, ok := actual.(*ast.ArrayType)
-		return ok && (expectedArray.Size == 0 || expectedArray.Size == actualArray.Size) &&
-			c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
+		// O tamanho NUNCA foi checado estaticamente aqui: ArrayType.String
+		// omite Size, entao o atalho `expected.String() == actual.String()`
+		// que a #133 removeu aceitava qualquer par de arrays do mesmo
+		// elemento — `int[15] = [1, 2, 3]`, `int[3] = [1, 2, 3, 4, 5]` e
+		// `int[100] = zeros(100)` (spec §2, "Fixed Size Arrays") compilavam
+		// todos. Um literal carrega Size = numero de elementos (nao 0), entao
+		// aceitar so o lado dinamico nao reproduziria isso. A checagem de
+		// dimensao, se um dia existir, e mudanca de linguagem com spec — nao
+		// efeito colateral da identidade por Decl.
+		return ok && c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
+	}
+	if expectedRef, ok := expected.(*ast.RefType); ok {
+		// `ref` e invariante — typesEquivalent acima ja decidiu todo par de
+		// alvos iguais, e um alvo diferente continua incompativel. A UNICA
+		// folga e a mesma do ramo de array logo acima: typesEquivalent compara
+		// ArrayType.Size, e ArrayType.String o omite, entao sem este ramo
+		// `let r: ref int[] = ref a` com `a: int[5]` (que develop aceitava)
+		// morria com o erro impossivel "expected ref int[], got ref int[]".
+		// A comparacao aqui e invariante: elementos equivalentes (Decl-aware),
+		// so o tamanho e ignorado. Usar areTypesCompatible (a regra de
+		// ATRIBUICAO, que alarga) deixaria `ref (int?)[] = r` e `ref any[] = r`
+		// passarem com `r: ref int[]` — e escrever null/string dentro do
+		// `int[]` do dono.
+		if actualRef, ok := actual.(*ast.RefType); ok {
+			expectedElem, expectedIsArray := expectedRef.ElementType.(*ast.ArrayType)
+			actualElem, actualIsArray := actualRef.ElementType.(*ast.ArrayType)
+			if expectedIsArray && actualIsArray {
+				return c.arraysEquivalentIgnoringSize(expectedElem, actualElem)
+			}
+		}
+		return false
 	}
 	return false
+}
+
+// arraysEquivalentIgnoringSize e typesEquivalent para arrays com UMA excecao: o
+// Size nao conta, em nenhum nivel de aninhamento. Nada mais e afrouxado — o
+// elemento final compara por typesEquivalent (identidade por Decl).
+func (c *Compiler) arraysEquivalentIgnoringSize(a, b *ast.ArrayType) bool {
+	innerA, aIsArray := a.ElementType.(*ast.ArrayType)
+	innerB, bIsArray := b.ElementType.(*ast.ArrayType)
+	if aIsArray && bIsArray {
+		return c.arraysEquivalentIgnoringSize(innerA, innerB)
+	}
+	return c.typesEquivalent(a.ElementType, b.ElementType)
 }
 
 // typesEquivalent compara dois tipos estruturalmente, tratando como iguais
@@ -3473,11 +3521,16 @@ func (c *Compiler) typesEquivalent(a, b ast.NoxyType) bool {
 		if !ok {
 			return false
 		}
-		if x.Name == y.Name {
-			return true
+		// Issue #133: Decl e a identidade; Name nunca. Se qualquer lado
+		// designa uma declaracao, decide o ponteiro (o outro lado resolve por
+		// Decl ou, sem ele, pelo nome — structDeclarationOf). So dois nomes
+		// que nao designam struct (primitivos, nomes ainda nao resolvidos)
+		// comparam por Name.
+		da, db := c.structDeclarationOf(x), c.structDeclarationOf(y)
+		if da != nil || db != nil {
+			return da == db
 		}
-		da := c.structDeclaration(x.Name)
-		return da != nil && da == c.structDeclaration(y.Name)
+		return x.Name == y.Name
 	case *ast.ArrayType:
 		y, ok := b.(*ast.ArrayType)
 		return ok && x.Size == y.Size && c.typesEquivalent(x.ElementType, y.ElementType)
@@ -3548,7 +3601,9 @@ func (c *Compiler) structDeclaration(name string) *ast.StructStatement {
 // (unify/bindTypeParam, sem *Compiler): iguais quando as strings coincidem
 // apos remover qualificadores de namespace dos nomes (geometry.Point ~ Point).
 // Mais permissiva que typesEquivalent — unify nunca e mais estrita que a
-// checagem da pass 2, que decide com o compilador completo.
+// checagem da pass 2, que decide com o compilador completo. Decl NAO e
+// consultado aqui de proposito: e a comparacao pura do unificador; a pass 2
+// decide com typesEquivalent.
 func looselySameType(a, b ast.NoxyType) bool {
 	return unqualifiedTypeString(a) == unqualifiedTypeString(b)
 }
