@@ -69,7 +69,7 @@ func (c *Compiler) compileNamespaceMemberAssignment(n *ast.AssignStmt, alias, mo
 			// do modulo e o proprio modulo falhava depois, com o erro numa
 			// linha DENTRO dele. Compilador fala primeiro.
 			if memberType == nil && declaration.Type != nil {
-				return nil, nil, fmt.Errorf("[line %d] cannot assign to '%s': its type is an instance of a generic struct of '%s' and cannot be checked here\n  hint: expose a function in '%s' that updates it", c.currentLine, targetName, origin, origin)
+				return nil, nil, fmt.Errorf("[line %d] cannot assign to '%s': its type cannot be translated here (it involves an instance of a generic struct of '%s')\n  hint: expose a function in '%s' that updates it", c.currentLine, targetName, origin, origin)
 			}
 		}
 	} else if _, loadable := c.moduleTopLevelBindings(module); loadable {

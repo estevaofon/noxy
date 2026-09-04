@@ -108,7 +108,7 @@ func TestNamespaceWriteToGenericInstanceMemberIsRefused(t *testing.T) {
 	err := compileSourceAtRoot(t, root, "use genm\ngenm.c = 5\n")
 	requireErrorMentions(t, err,
 		"[line 2]",
-		"cannot assign to 'genm.c': its type is an instance of a generic struct of 'genm' and cannot be checked here",
+		"cannot assign to 'genm.c': its type cannot be translated here (it involves an instance of a generic struct of 'genm')",
 		"hint: expose a function in 'genm' that updates it")
 	// Controle: a LEITURA continua permitida (dinamica).
 	requireNoError(t, compileSourceAtRoot(t, root, "use genm\nlet x: any = genm.c\n"))

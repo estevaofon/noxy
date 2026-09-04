@@ -109,3 +109,32 @@ test_report(mm["a"])
 		t.Fatalf("got %v, want 2", reported)
 	}
 }
+
+// Issue #133: as duas guardas de R1 (spec §2.3) sobre uma ENTRADA de mapa que
+// ja guarda uma referencia — a escrita (field_ops.go, OP_SET_PROPERTY) e o
+// `ref` sobre ela (executor.go, OP_REF_PROPERTY). O `*m.r = 5` continua fora
+// daqui: OP_SET_PROPERTY_DEREF tem panic pre-existente, em issue proprio.
+func TestMapEntryHoldingRefRefusesRawWrite(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{})
+	_, err := runModuleProgram(t, root, `let n: int = 1
+let m: any = {"r": ref n}
+m.r = 5
+`)
+	if err == nil || !strings.Contains(err.Error(), "slot 'r' already holds a reference") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestMapEntryHoldingRefRefusesReReference(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{})
+	_, err := runModuleProgram(t, root, `let n: int = 1
+let m: any = {"r": ref n}
+func bump(x: ref int) -> void
+    *x = *x + 1
+end
+bump(ref m.r)
+`)
+	if err == nil || !strings.Contains(err.Error(), "slot 'r' already holds a reference") {
+		t.Fatalf("error=%v", err)
+	}
+}

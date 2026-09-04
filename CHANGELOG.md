@@ -21,8 +21,8 @@ declaração, não a grafia".
   da 0.11.0 (precedente: Python, Go, Nim, Swift permitem escrever num global
   de outro módulo). Membro cujo tipo declarado o programa não consegue
   traduzir (instância de struct genérico do módulo, §1.6) é **recusado** na
-  escrita — `cannot assign to 'g.c': its type is an instance of a generic
-  struct of 'g' and cannot be checked here`, com hint para expor uma função
+  escrita — `cannot assign to 'g.c': its type cannot be translated here (it
+  involves an instance of a generic struct of 'g')`, com hint para expor uma função
   no módulo; escrever sem checagem gravava outro tipo no global e quebrava o
   módulo por dentro. A leitura continua dinâmica.
 - **O objeto do namespace é uma visão viva, nunca copiada**: `let s: any = m`

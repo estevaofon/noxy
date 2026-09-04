@@ -2497,9 +2497,9 @@ reference).
 
 A member whose declared type the program cannot write — an instance of a
 generic struct of the module (§1.6) — is **read** dynamically but cannot be
-**assigned**: `cannot assign to 'g.c': its type is an instance of a generic
-struct of 'g' and cannot be checked here`, with a hint to expose a function in
-the module that updates it. An unchecked write there would store another type
+**assigned**: `cannot assign to 'g.c': its type cannot be translated here (it
+involves an instance of a generic struct of 'g')`, with a hint to expose a
+function in the module that updates it. An unchecked write there would store another type
 in the module's own global and break the module from the inside.
 
 ### Struct identity across import forms

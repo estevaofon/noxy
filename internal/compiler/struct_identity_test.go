@@ -35,8 +35,22 @@ end
 let a: P[] = []
 let b: map[string, P] = {}
 let f: func(P) -> P? = func(p: P) -> P? return null end
+let p: P = P(1)
+let r: ref P = ref p
 `
 	program := parseForTest(t, src)
+	// Os ponteiros das anotacoes ANTES de compilar: e a propriedade "in place"
+	// do nome do teste — resolveAnnotation preenche Decl no proprio no, nunca
+	// devolve um no novo.
+	before := make(map[*ast.LetStmt]ast.NoxyType)
+	for _, statement := range program.Statements {
+		if let, ok := statement.(*ast.LetStmt); ok && let.Type != nil {
+			before[let] = let.Type
+		}
+	}
+	if len(before) != 5 {
+		t.Fatalf("anotacoes capturadas: %d, want 5", len(before))
+	}
 	c := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), "main.nx")
 	if _, _, err := c.Compile(program); err != nil {
 		t.Fatalf("compile: %v", err)
@@ -49,6 +63,10 @@ let f: func(P) -> P? = func(p: P) -> P? return null end
 		let, ok := statement.(*ast.LetStmt)
 		if !ok {
 			continue
+		}
+		if original, seen := before[let]; seen && let.Type != original {
+			t.Fatalf("let %s: anotacao trocada de no (%p -> %p), nao foi resolvida in place",
+				let.Name.Value, original, let.Type)
 		}
 		var prims []*ast.PrimitiveType
 		collectStructPrimitives(let.Type, &prims)

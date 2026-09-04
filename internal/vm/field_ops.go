@@ -28,7 +28,7 @@ func (vm *VM) getPropertyGeneric(c *chunk.Chunk, ip int, name string) error {
 	}
 
 	if instanceVal.Type != value.VAL_OBJ {
-		return vm.runtimeError(c, ip, "only instances/maps have properties")
+		return vm.runtimeError(c, ip, "only instances and maps have properties")
 	}
 
 	if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
@@ -133,7 +133,7 @@ func (vm *VM) getPropMutGeneric(c *chunk.Chunk, ip int, name string) error {
 		instanceVal = uniq
 	}
 	if instanceVal.Type != value.VAL_OBJ {
-		return vm.runtimeError(c, ip, "only instances/maps have properties")
+		return vm.runtimeError(c, ip, "only instances and maps have properties")
 	}
 	if instance, ok := instanceVal.Obj.(*value.ObjInstance); ok {
 		slot, ok := instance.Struct.FieldIndex(name)
