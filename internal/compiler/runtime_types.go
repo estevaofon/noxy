@@ -105,7 +105,10 @@ func (c *Compiler) requiresRuntimeValueType(t ast.NoxyType, visiting map[*ast.St
 		// named by that signature are not values embedded in the callable object.
 		return false
 	case *ast.PrimitiveType:
-		definition := c.lookupStructFrom(origin, typed.Name)
+		definition := typed.Decl
+		if definition == nil {
+			definition = c.lookupStructFrom(origin, typed.Name)
+		}
 		if definition == nil || visiting[definition] {
 			return false
 		}
@@ -155,7 +158,10 @@ func (c *Compiler) runtimeTypeInfoWithStructs(t ast.NoxyType, structs map[*ast.S
 		case "func":
 			return &value.RuntimeTypeInfo{Kind: value.TYPE_CALLABLE, CallableBare: true}, true
 		}
-		definition := c.lookupStructFrom(origin, typed.Name)
+		definition := typed.Decl
+		if definition == nil {
+			definition = c.lookupStructFrom(origin, typed.Name)
+		}
 		if definition == nil {
 			return nil, false
 		}
@@ -319,8 +325,8 @@ func (c *Compiler) checkDeclaredType(t ast.NoxyType, line int, position string) 
 // importacao (`use <importFrom> select T`) quando o chamador sabe de onde o
 // nome veio; "" usa o `m` generico.
 func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, importFrom string) error {
-	name, found := firstUnknownTypeName(t, func(candidate string) bool {
-		return c.structDeclaration(candidate) != nil
+	name, found := firstUnknownTypeName(t, func(candidate *ast.PrimitiveType) bool {
+		return c.structDeclarationOf(candidate) != nil
 	})
 	if !found {
 		return nil
@@ -357,10 +363,10 @@ func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, imp
 // chan, assinatura e argumentos genericos) o primeiro nome de tipo que nao e
 // primitivo e que resolves rejeita. TypeParamType nao conta: fora de template
 // resolveAnnotation ja o recusou; dentro de instancia ja foi substituido.
-func firstUnknownTypeName(t ast.NoxyType, resolves func(string) bool) (string, bool) {
+func firstUnknownTypeName(t ast.NoxyType, resolves func(*ast.PrimitiveType) bool) (string, bool) {
 	switch typed := t.(type) {
 	case *ast.PrimitiveType:
-		if !isBuiltinTypeName(typed.Name) && !resolves(typed.Name) {
+		if !isBuiltinTypeName(typed.Name) && !resolves(typed) {
 			return typed.Name, true
 		}
 	case *ast.ArrayType:

@@ -1037,7 +1037,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		for _, f := range n.FieldsList {
 			paramTypes = append(paramTypes, f.Type)
 		}
-		structType := newStructFunctionType(n.Name, paramTypes)
+		structType := newStructFunctionType(n, paramTypes)
 		structDefinition.ConstructorType = c.runtimeTypeInfo(structType)
 
 		if c.scopeDepth > 0 {

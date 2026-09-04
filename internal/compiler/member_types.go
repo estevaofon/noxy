@@ -28,7 +28,7 @@ func (c *Compiler) memberType(owner ast.NoxyType, member string) ast.NoxyType {
 	if !ok {
 		return nil
 	}
-	definition := c.structDeclaration(primitive.Name)
+	definition := c.structDeclarationOf(primitive)
 	if definition == nil {
 		return nil
 	}

@@ -313,7 +313,7 @@ func (c *Compiler) registerStructInstance(instance *ast.StructStatement) {
 	for index, field := range instance.FieldsList {
 		params[index] = field.Type
 	}
-	c.globals[instance.Name] = newStructFunctionType(instance.Name, params)
+	c.globals[instance.Name] = newStructFunctionType(instance, params)
 }
 
 // compileGenericConstructorSite e o hook de call site do §4 para construtor de

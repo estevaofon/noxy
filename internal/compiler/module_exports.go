@@ -583,7 +583,7 @@ func (c *Compiler) importBindingFrom(module string, declarations map[string]ast.
 		for index, field := range declaration.FieldsList {
 			params[index] = field.Type
 		}
-		c.globals[name] = newStructFunctionType(declaration.Name, params)
+		c.globals[name] = newStructFunctionType(declaration, params)
 	case *ast.LetStmt:
 		c.globals[name] = declaration.Type
 	default:
@@ -665,7 +665,7 @@ func (c *Compiler) importedBindingType(module, name string) (ast.NoxyType, bool)
 		for index, field := range declaration.FieldsList {
 			params[index] = field.Type
 		}
-		return newStructFunctionType(declaration.Name, params), true
+		return newStructFunctionType(declaration, params), true
 	case *ast.LetStmt:
 		return declaration.Type, true
 	default:

@@ -147,6 +147,49 @@ func TestTypesEquivalentUsesDeclNotName(t *testing.T) {
 	}
 }
 
+func TestMemberTypeFollowsDeclNotName(t *testing.T) {
+	// Um no com Decl e Name canonico (`base.V`, que structDeclaration NAO
+	// resolve: `base` nao e alias) tem de resolver campo, slot e default
+	// pela declaracao.
+	program := parseForTest(t, "struct V\n    x: int\nend\n")
+	c := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), "main.nx")
+	if _, _, err := c.Compile(program); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	decl := c.structs["V"]
+	canonical := &ast.PrimitiveType{Name: "base.V", Decl: decl}
+	if got := c.memberType(canonical, "x"); got == nil || got.String() != "int" {
+		t.Fatalf("memberType via Decl: got %v, want int", got)
+	}
+	if _, ok := c.fieldSlot(canonical, "x"); !ok {
+		t.Fatal("fieldSlot must resolve via Decl for a program struct")
+	}
+	if c.typeWithoutDefault(canonical) == nil {
+		t.Fatal("struct via Decl has no default value (spec §3)")
+	}
+	if err := c.checkDeclaredType(canonical, 1, "variable 'v'"); err != nil {
+		t.Fatalf("a type with Decl is known regardless of its Name: %v", err)
+	}
+}
+
+// Caracterizacao (spec §1.5, no orfao): um no com grafia canonica e SEM Decl
+// nao resolve — e por isso que todo site que reconstroi um PrimitiveType a
+// partir de outro tem de carregar Decl junto.
+func TestCanonicalNameWithoutDeclDoesNotResolve(t *testing.T) {
+	program := parseForTest(t, "struct V\n    x: int\nend\n")
+	c := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), "main.nx")
+	if _, _, err := c.Compile(program); err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	orphan := &ast.PrimitiveType{Name: "base.V"}
+	if c.structDeclarationOf(orphan) != nil {
+		t.Fatal("an orphan canonical name must not resolve by name")
+	}
+	if c.typesEquivalent(orphan, &ast.PrimitiveType{Name: "V", Decl: c.structs["V"]}) {
+		t.Fatal("orphan must not be equivalent to the declaration")
+	}
+}
+
 func TestForwardReferenceThroughGenericArgumentCompiles(t *testing.T) {
 	// Issue #133 (achado de revisao, round 1): um struct LOCAL pode nomear
 	// outro struct declarado MAIS ADIANTE no mesmo programa atraves do
