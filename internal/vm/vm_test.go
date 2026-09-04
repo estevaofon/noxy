@@ -65,8 +65,11 @@ func TestRuntimeConditionOnAnyMustBeBool(t *testing.T) {
 }
 
 func TestFStringBraceEscapesRender(t *testing.T) {
-	// f-string de aspas simples porque o segmento `{"a": 2}` tem aspas duplas
-	// (lexer nao e brace-aware; ver mesma nota em parser_test.go).
+	// Cobertura de `{{`/`}}` como chaves literais e de uma expressao que
+	// COMECA por `{` (mapa literal, precisa de espaco: `{ {"a": 2}["a"] }`).
+	// Esta usa f-string de aspas simples so por variedade — aspas duplas
+	// dentro de `{...}` de uma f-string de aspas duplas tem cobertura propria
+	// em TestFStringDoubleQuotesInsideBracesRunEndToEnd (issue #126 item 3).
 	reported := captureVMSource(t, "let x: int = 1\ntest_report(f'{{x}}|{{{x}}}|{ {\"a\": 2}[\"a\"] }|' + f'{\"a\"}')\n")
 	if got := reported.Obj.(string); got != "{x}|{1}|2|a" {
 		t.Fatalf("got %q", got)

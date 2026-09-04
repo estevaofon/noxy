@@ -103,3 +103,13 @@ func TestFStringUnclosedBraceIsReportedByTheLexer(t *testing.T) {
 	// is missing.
 	requireIllegal(t, `f"{"abc`, "unclosed brace in f-string")
 }
+
+// The parser duplicates this text nowhere anymore (it references
+// lexer.UnclosedBraceReason directly, issue #126); pin the exact wording
+// here so a future edit can't silently drift the hint.
+func TestUnclosedBraceReasonIsThePinnedSpecText(t *testing.T) {
+	want := "unclosed brace in f-string\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"
+	if UnclosedBraceReason != want {
+		t.Fatalf("UnclosedBraceReason = %q, want %q", UnclosedBraceReason, want)
+	}
+}

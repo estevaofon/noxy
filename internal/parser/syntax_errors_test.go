@@ -98,6 +98,11 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			source: "let s: string = \"abc\n",
 			want:   []string{"SyntaxError: unterminated string"},
 		},
+		{
+			name:   "unknown character keeps the generic invalid-syntax message",
+			source: "let x: int = 1 @ 2\n",
+			want:   []string{`invalid syntax "@"`},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

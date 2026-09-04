@@ -1158,7 +1158,7 @@ func (p *Parser) parseFString() ast.Expression {
 				}
 			}
 			if j >= len(literal) {
-				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: %s", line, column, "unclosed brace in f-string\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"))
+				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: %s", line, column, lexer.UnclosedBraceReason))
 				return nil
 			}
 			flush()
@@ -1821,9 +1821,13 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	case token.EOF:
 		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
 	case token.ILLEGAL:
-		// O literal de um ILLEGAL e a razao que o lexer escreveu
-		// ("unterminated string", "unclosed brace in f-string" + hint).
-		msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
+		if lexer.IsReason(p.curToken.Literal) {
+			// O literal de um ILLEGAL e a razao que o lexer escreveu
+			// ("unterminated string", lexer.UnclosedBraceReason + hint).
+			msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
+		}
+		// Caso contrario o literal e um caractere desconhecido isolado
+		// (ex.: "@") e o msg generico "invalid syntax %q" acima ja serve.
 	}
 	p.errors = append(p.errors, msg)
 }
