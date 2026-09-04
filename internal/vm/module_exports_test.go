@@ -658,9 +658,9 @@ dist2(fromModule, fromModule)
 	}
 	// Sentido 2 (o guard de identidade cross-modulo): um Point LOCAL, com o
 	// MESMO nome mas uma declaracao DIFERENTE, e recusado no lugar do Point
-	// de geometry. So a substring do argumento e conferida — a mensagem
-	// completa ("expected geometry.Point, got Point") depende da exibicao
-	// qualificada que a Task 5 acrescenta.
+	// de geometry. Issue #133: a assinatura importada por select carrega a
+	// DECLARACAO de geometry.Point (nao o nome cru "Point"), entao a mensagem
+	// exibe o caminho canonico qualificado.
 	_, err := runModuleProgram(t, root, `use geometry select dist2
 struct Point
     x: int
@@ -669,7 +669,7 @@ end
 let local: Point = Point(0, 0)
 dist2(local, local)
 `)
-	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'dist2'") {
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'dist2': expected geometry.Point, got Point") {
 		t.Fatalf("error=%v, want nominal mismatch on the local Point", err)
 	}
 }
