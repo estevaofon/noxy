@@ -50,7 +50,7 @@ Um projeto clonado com `noxy.mod` e `noxy.sum` deve ficar pronto para rodar com 
 
 ### 3.0 Raiz do projeto
 
-`pkgmanager.FindRoot(start string) (string, error)` sobe de `start` até encontrar um diretório com `noxy.mod`; é a **única** definição de raiz, usada pelos dois lados:
+`pkgmanager.FindRoot(start string) (root string, ok bool)` sobe de `start` até encontrar um diretório com `noxy.mod`; é a **única** definição de raiz, usada pelos dois lados:
 
 - `--sync`/`--get`: `start` é o cwd. Sem `noxy.mod` acima, `--sync` é erro `no noxy.mod in <cwd> or any parent`; `--get` cria um no cwd, como hoje.
 - VM: `start` é `RootPath` (diretório do script). O resultado vai em `VMConfig.ProjectRoot` (vazio se não há `noxy.mod`), calculado uma vez em `NewWithConfig`. `resolveModule` ganha os candidatos `<ProjectRoot>/noxy_libs/...` **antes** dos de `RootPath`; `verifyExtensionSum` usa `<ProjectRoot>/noxy_libs` e `<ProjectRoot>/noxy.sum`; a dica de §6 lê `<ProjectRoot>/noxy.mod`. Os candidatos relativos ao cwd continuam existindo para o layout sem `noxy.mod`.
@@ -204,7 +204,7 @@ Tudo em `internal/pkgmanager`, arquivos por tema como o compilador:
 | `semver.go` (novo) | parse, comparação (tags e pseudo-versões), `PseudoVersion(ts, sha)`; `semverTagRE` migra de `release.go` |
 | `resolve.go` (novo) | §4: `resolveVersion`, `closure` (MVS), cache de clones temporários |
 | `sync.go` (novo) | §5.1–5.3: `Sync(root string, opts SyncOptions) error` com `root` de `FindRoot(cwd)`, carimbo, poda, saída |
-| `root.go` (novo) | `FindRoot` (§3.0) |
+| `root.go` (novo) | `FindRoot(start) (string, bool)` (§3.0); ausência de `noxy.mod` é caso normal para VM e compilador, o erro é do `--sync` |
 | `manager.go` | `Get` reduzido a §5.4; `gitClone`/`gitCheckout`/`readManifest` ficam |
 | `release.go` | inalterado além da migração do regex |
 | `cmd/noxy/main.go` | flags `--sync` (bool) e `--locked` (bool); erro de `--locked` sem `--sync` |
