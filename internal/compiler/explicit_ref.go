@@ -122,7 +122,7 @@ func (spec valueNativeSpec) checksArg(pos int) bool {
 // valueNatives sao as nativas centrais sem assinatura (DefineNative /
 // DefineContextualNative sem NativeSignature) cujos argumentos sao sempre um
 // VALOR, nunca uma referencia: nao passam por compileBuiltinCall (nao sao
-// append/pop/delete/json_loads/range) nem tem ast.FunctionType para
+// append/pop/delete/json_loads/range/swap_remove) nem tem ast.FunctionType para
 // areStrictTypesCompatible barrar um `ref T` — sem este check dedicado um
 // `ref T` estatico chegaria a native, que responderia com o default
 // silencioso (0, [], false) ou codificaria o String() da referencia

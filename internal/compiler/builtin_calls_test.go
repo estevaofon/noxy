@@ -422,6 +422,17 @@ let only = swap_remove(ref xs, 0)
 	}
 }
 
+func TestPopRejectsExplicitReferenceIndex(t *testing.T) {
+	_, err := compileFunctionSource(t, `
+let xs: int[] = [1, 2, 3]
+let i: int = 0
+let removed: int = pop(ref xs, ref i)`)
+	want := "argument 2 to 'pop': expected int, got ref int\n  hint: use '*' to read the referenced value"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("error=%v, want %q", err, want)
+	}
+}
+
 func TestDeleteRejectsExplicitReferenceForOrdinaryAnyKey(t *testing.T) {
 	_, err := compileFunctionSource(t, `
 let key: string = "a"

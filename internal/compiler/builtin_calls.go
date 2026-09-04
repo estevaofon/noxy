@@ -154,7 +154,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			if err != nil {
 				return true, nil, err
 			}
-			intType := &ast.PrimitiveType{Name: "int"}
+			intType := builtinType("int")
 			if _, explicitRef := asRefType(index); explicitRef {
 				return true, nil, fmt.Errorf(
 					"[line %d] argument 2 to '%s': expected int, got %s%s",
@@ -166,6 +166,9 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 					"[line %d] argument 2 to '%s': expected int, got %s",
 					c.currentLine, name, noxyTypeName(index),
 				)
+			}
+			if err := c.emitSlotGuards(intType, index); err != nil {
+				return true, nil, err
 			}
 		}
 		c.emitCall(len(call.Arguments), emission, false)

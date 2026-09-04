@@ -267,6 +267,22 @@ func TestPopOutOfRangeAndEmptyAreRuntimeErrors(t *testing.T) {
 	}
 }
 
+// Issue #126 item 4 (revisao): o indice de pop/swap_remove passa por um slot
+// `any` como qualquer outro (elemento de append, chave de delete) — a
+// fronteira dinamica (emitDynamicBoundaryGuard) precisa reportar o
+// diagnostico da linguagem, "expected int, got string", em vez de deixar o
+// native falhar primeiro com sua propria mensagem interna.
+func TestPopIndexDynamicBoundaryGuardMatchesDeleteKey(t *testing.T) {
+	err := runTypedFunctionProgramError(t, `
+let xs: int[] = [1, 2, 3]
+let dyn: any = "0"
+let removed: int = pop(ref xs, dyn)
+`)
+	if err == nil || !strings.Contains(err.Error(), "expected int, got string") {
+		t.Fatalf("err = %v, want expected int, got string", err)
+	}
+}
+
 func TestTypedDeleteMutatesCallerMap(t *testing.T) {
 	got := runTypedFunctionProgram(t, `
 let mapping: map[string, int] = {"a": 1}
