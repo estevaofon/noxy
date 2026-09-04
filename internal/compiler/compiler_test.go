@@ -203,6 +203,45 @@ end`, "run")
 	}
 }
 
+// Argumento `ref` com alvo NOMEAVEL: o tipo do alvo e conhecido em
+// compilacao (`a` e int), strictCompatibleNested confere, os modos ficam
+// provados e a chamada e OP_CALL_STATIC — a metade positiva da invariante
+// da revisao adversarial da #126.
+func TestCompileRefArgumentWithKnownTargetEmitsStaticCall(t *testing.T) {
+	fn := compiledFunction(t, `func bump(n: ref int) -> void
+    *n = *n + 1
+end
+func run() -> void
+    let a: int = 1
+    bump(ref a)
+end`, "run")
+	code := fn.Chunk.(*chunk.Chunk).Code
+	if !containsOpcode(code, chunk.OP_CALL_STATIC) {
+		t.Fatal("ref argument with known target omitted OP_CALL_STATIC")
+	}
+}
+
+// Metade negativa (issue #126): `ref h.b` com h de tipo any nao tem tipo de
+// alvo conhecido — `ref x` prova o MODO, nunca o TIPO DO ALVO. Sem alvo
+// conferido em compilacao a chamada TEM de cair para OP_CALL, o unico
+// caminho que roda validateParameterModes/validateRefTargets; com
+// OP_CALL_STATIC a escrita entraria num campo de outro tipo em silencio.
+func TestCompileRefArgumentWithUnknownTargetEmitsPlainCall(t *testing.T) {
+	fn := compiledFunction(t, `func bump(n: ref int) -> void
+    *n = *n + 1
+end
+func run(h: any) -> void
+    bump(ref h.b)
+end`, "run")
+	code := fn.Chunk.(*chunk.Chunk).Code
+	if !containsOpcode(code, chunk.OP_CALL) {
+		t.Fatal("ref argument with unknown target omitted OP_CALL")
+	}
+	if containsOpcode(code, chunk.OP_CALL_STATIC) {
+		t.Fatal("ref argument with unknown target emitted OP_CALL_STATIC: runtime ref validation would be skipped")
+	}
+}
+
 // Callee dinâmico (tipo any): fnType não é *ast.FunctionType, isExact fica
 // false, e o compilador tem de cair para OP_CALL genérico — nunca
 // OP_CALL_STATIC, que pularia validateParameterModes em runtime.

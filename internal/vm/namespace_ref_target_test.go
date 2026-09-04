@@ -32,6 +32,9 @@ end
 func read(h: Holder) -> int
     return h.b.n
 end
+func setb(b: ref base.B) -> void
+    *b = base.B(99)
+end
 `
 
 func requireRefTargetError(t *testing.T, err error) {
@@ -126,5 +129,27 @@ test_report(h.tag)
 	}
 	if got := reported.String(); got != "PWNED" {
 		t.Fatalf("expected mutated tag \"PWNED\", got %q", got)
+	}
+}
+
+func TestNamespaceRefArgumentWithUnnameableButCorrectTargetStillMutates(t *testing.T) {
+	// Controle negativo (sem sobre-rejeicao): o alvo `h.b` continua sem tipo
+	// estatico para o programa, mas AGORA o parametro tambem e `ref base.B`
+	// — cair para OP_CALL nao pode virar erro: validateRefTargets aprova o
+	// alvo e a mutacao acontece.
+	root := writeModuleFiles(t, map[string]string{
+		"base.nx": refTargetBaseModule,
+		"mid.nx":  refTargetMidModule,
+	})
+	reported, err := runModuleProgram(t, root, `use mid
+let h: mid.Holder = mid.mk()
+mid.setb(ref h.b)
+test_report(mid.read(h))
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := reported.String(); got != "99" {
+		t.Fatalf("expected mutated field 99, got %q", got)
 	}
 }

@@ -226,8 +226,11 @@ func TestNamespaceNullableMemberNarrows(t *testing.T) {
 	root := t.TempDir()
 	writeModuleFile(t, root, "o.nx", "struct V\n    x: int\nend\nlet opt: V? = null\nfunc get() -> V?\n    return null\nend\n")
 
+	// Os requireErrorLacks sao essenciais aqui: `got o.V` e prefixo de
+	// `got o.V?`, entao sem eles uma regressao no narrowing passaria batida.
 	err := compileSourceAtRoot(t, root, "use o\nif o.opt != null then\n    let s: string = o.opt\nend\n")
 	requireErrorMentions(t, err, "expected string, got o.V")
+	requireErrorLacks(t, err, "o.V?", "may be null")
 
 	err = compileSourceAtRoot(t, root, "use o\nlet s: string = o.opt\n")
 	requireErrorMentions(t, err, "expected string, got o.V?", "may be null")
@@ -235,6 +238,7 @@ func TestNamespaceNullableMemberNarrows(t *testing.T) {
 	// e o retorno `V?` de uma chamada por namespace narrowa igual:
 	err = compileSourceAtRoot(t, root, "use o\nlet v = o.get()\nif v != null then\n    let s: string = v\nend\n")
 	requireErrorMentions(t, err, "expected string, got o.V")
+	requireErrorLacks(t, err, "o.V?", "may be null")
 }
 
 func TestNamespaceMemberOfUnloadableModuleStaysDynamic(t *testing.T) {

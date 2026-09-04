@@ -54,6 +54,23 @@ func requireErrorMentions(t *testing.T, err error, wants ...string) {
 	}
 }
 
+// requireErrorLacks e o par negativo de requireErrorMentions: a mensagem
+// existe mas NAO pode conter certos trechos. Necessario porque a checagem e
+// por Contains e uma mensagem pode ser prefixo de outra — `got o.V` cabe
+// dentro de `got o.V?`, entao so o par positivo nao distingue narrowing de
+// ausencia de narrowing.
+func requireErrorLacks(t *testing.T, err error, unwanted ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected a compile error, got none")
+	}
+	for _, unwant := range unwanted {
+		if strings.Contains(err.Error(), unwant) {
+			t.Fatalf("error %q should not mention %q", err.Error(), unwant)
+		}
+	}
+}
+
 func requireNoError(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
