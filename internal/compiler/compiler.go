@@ -3479,16 +3479,33 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 		// ArrayType.Size, e ArrayType.String o omite, entao sem este ramo
 		// `let r: ref int[] = ref a` com `a: int[5]` (que develop aceitava)
 		// morria com o erro impossivel "expected ref int[], got ref int[]".
+		// A comparacao aqui e invariante: elementos equivalentes (Decl-aware),
+		// so o tamanho e ignorado. Usar areTypesCompatible (a regra de
+		// ATRIBUICAO, que alarga) deixaria `ref (int?)[] = r` e `ref any[] = r`
+		// passarem com `r: ref int[]` — e escrever null/string dentro do
+		// `int[]` do dono.
 		if actualRef, ok := actual.(*ast.RefType); ok {
 			expectedElem, expectedIsArray := expectedRef.ElementType.(*ast.ArrayType)
 			actualElem, actualIsArray := actualRef.ElementType.(*ast.ArrayType)
 			if expectedIsArray && actualIsArray {
-				return c.areTypesCompatible(expectedElem.ElementType, actualElem.ElementType)
+				return c.arraysEquivalentIgnoringSize(expectedElem, actualElem)
 			}
 		}
 		return false
 	}
 	return false
+}
+
+// arraysEquivalentIgnoringSize e typesEquivalent para arrays com UMA excecao: o
+// Size nao conta, em nenhum nivel de aninhamento. Nada mais e afrouxado — o
+// elemento final compara por typesEquivalent (identidade por Decl).
+func (c *Compiler) arraysEquivalentIgnoringSize(a, b *ast.ArrayType) bool {
+	innerA, aIsArray := a.ElementType.(*ast.ArrayType)
+	innerB, bIsArray := b.ElementType.(*ast.ArrayType)
+	if aIsArray && bIsArray {
+		return c.arraysEquivalentIgnoringSize(innerA, innerB)
+	}
+	return c.typesEquivalent(a.ElementType, b.ElementType)
 }
 
 // typesEquivalent compara dois tipos estruturalmente, tratando como iguais

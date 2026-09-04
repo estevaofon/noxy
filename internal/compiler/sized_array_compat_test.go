@@ -133,3 +133,60 @@ let n: int = total(ref a)
 		t.Fatalf("ref para array dimensionado em parametro ref dinamico deve compilar: %v", err)
 	}
 }
+
+func TestRefToArrayStaysInvariantInTheElement(t *testing.T) {
+	// Regressao da primeira onda: o ramo novo de *ast.RefType comparava os
+	// elementos com areTypesCompatible — a regra de ATRIBUICAO, que alarga.
+	// Como `int?` aceita `int` e `any` aceita tudo, `ref (int?)[] = r` e
+	// `ref any[] = r` com `r: ref int[]` passavam, e `s[0] = null` /
+	// `s[0] = "boom"` gravavam null e string dentro do `int[]` do dono
+	// (develop recusava os dois em compilacao). So o TAMANHO e ignorado.
+	t.Run("elemento anulavel", func(t *testing.T) {
+		err := compileProgramSource(t, "let a: int[] = [1, 2, 3]\nlet r: ref int[] = ref a\nlet s: ref (int?)[] = r\n")
+		requireErrorMentions(t, err, "expected ref int?[], got ref int[]")
+	})
+	t.Run("elemento any", func(t *testing.T) {
+		err := compileProgramSource(t, "let a: int[] = [1, 2, 3]\nlet r: ref int[] = ref a\nlet s: ref any[] = r\n")
+		requireErrorMentions(t, err, "expected ref any[], got ref int[]")
+	})
+	t.Run("struct distinto no elemento", func(t *testing.T) {
+		err := compileProgramSource(t, `struct P
+    x: int
+end
+struct Q
+    x: int
+end
+let a: P[] = []
+let r: ref P[] = ref a
+let s: ref Q[] = r
+`)
+		requireErrorMentions(t, err, "expected ref Q[], got ref P[]")
+	})
+}
+
+func TestRefToNestedArrayIgnoresSizeAtEveryLevel(t *testing.T) {
+	// O tamanho e ignorado em todo nivel de aninhamento, nas duas direcoes.
+	cases := map[string]string{
+		"dimensionado para dinamico": "let a: int[2][3] = [[1, 2, 3], [4, 5, 6]]\nlet r: ref int[][] = ref a\n",
+		"dinamico para dimensionado": "let a: int[][] = [[1, 2, 3]]\nlet r: ref int[2][3] = ref a\n",
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			requireNoError(t, compileProgramSource(t, source))
+		})
+	}
+}
+
+func TestRefToArrayOfModuleStructFollowsTheDeclaration(t *testing.T) {
+	// Identidade por Decl atravessa o `ref`: `geometry.Point` (namespace) e
+	// `Point` (select) sao a MESMA declaracao, entao um ref a `Point[]` entra
+	// num slot `ref geometry.Point[]`.
+	root := t.TempDir()
+	writeModuleFile(t, root, "geometry.nx", "struct Point\n    x: int\nend\n")
+	requireNoError(t, compileSourceAtRoot(t, root, `use geometry select Point
+use geometry
+let a: Point[] = []
+let r: ref Point[] = ref a
+let s: ref geometry.Point[] = r
+`))
+}
