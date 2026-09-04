@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"noxy-vm/internal/chunk"
 	"noxy-vm/internal/ext"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/value"
 	"os"
 	"sync"
@@ -146,7 +147,8 @@ func nativeVM(context value.NativeContext) (*VM, error) {
 }
 
 type VMConfig struct {
-	RootPath string
+	RootPath    string
+	ProjectRoot string // raiz do projeto (noxy.mod mais proximo de RootPath); "" = script solto
 }
 
 func New() *VM {
@@ -158,6 +160,11 @@ func NewWithConfig(cfg VMConfig) *VM {
 }
 
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
+	if cfg.ProjectRoot == "" {
+		if root, ok := pkgmanager.FindRoot(cfg.RootPath); ok {
+			cfg.ProjectRoot = root
+		}
+	}
 	shared.initializeState()
 	vm := &VM{
 		shared: shared,

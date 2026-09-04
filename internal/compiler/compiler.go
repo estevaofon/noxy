@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/value"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,7 @@ type Compiler struct {
 	currentLine         int
 	FileName            string
 	moduleRoot          string
+	projectRoot         string       // raiz do projeto (noxy.mod mais proximo de moduleRoot); "" = script solto
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
@@ -180,6 +182,10 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 	if moduleRoot == "" {
 		moduleRoot = "."
 	}
+	projectRoot := ""
+	if root, ok := pkgmanager.FindRoot(moduleRoot); ok {
+		projectRoot = root
+	}
 	c := &Compiler{
 		enclosing:    nil,
 		currentChunk: chunk.New(),
@@ -192,6 +198,7 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 		currentLine:  1,
 		FileName:     fileName,
 		moduleRoot:   moduleRoot,
+		projectRoot:  projectRoot,
 		moduleName:   "main",
 		warnings:     &[]Warning{},
 	}
@@ -2194,7 +2201,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// use pkg select *
 			exports, loadable := c.discoverModuleExports(n.Module)
 			if !loadable && c.enclosing == nil {
-				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'", n.Token.Line, n.Module)
+				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'%s", n.Token.Line, n.Module, c.syncHint(n.Module))
 			}
 			// §8/R8: templates genericos exportados entram no registry
 			// (Module = modulo definidor) em vez de c.globals — importBindingFrom

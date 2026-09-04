@@ -1,7 +1,7 @@
 # AGENTS.md — Guia para agentes de IA no Noxy VM
 
 Máquina virtual de bytecode para a linguagem Noxy, em Go (módulo `noxy-vm`,
-Go 1.25). Versão corrente: `v0.23.5` (`internal/version/version.go`).
+Go 1.25). Versão corrente: `v0.24.0` (`internal/version/version.go`).
 
 **Fonte da verdade da linguagem: `docs/NOXY_LANGUAGE_SPEC.md`.** Regra de
 linguagem vem da spec ou de teste no binário — nunca de um exemplo. Este
@@ -24,7 +24,7 @@ Source → Lexer → Parser → AST → Compiler → Bytecode (Chunk) → VM
 | `internal/stdlib` | Módulos `.nx` embutidos (`//go:embed *.nx`, sem registro) |
 | `cmd/noxy` | CLI, REPL (`runREPL`), `diagOut` (destino único dos diagnósticos da CLI) |
 | `internal/ext`, `sdk/noxyplugin` | Extensões wasm e por processo (`noxy-plugin/1`); o SDK é módulo Go aninhado, testado à parte (`go test ./...` dentro dele) |
-| `internal/pkgmanager`, `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.25.0) | Periferia |
+| `internal/pkgmanager` (`--get`/`--sync`, `noxy.sum` v2, `FindRoot`), `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.25.0) | Periferia |
 
 ## Verificação obrigatória
 
@@ -33,6 +33,7 @@ Da raiz do repositório, após qualquer modificação:
 ```bash
 go build ./... && go vet ./...
 go test ./internal/... -count=1
+go run ./cmd/noxy --sync --locked   # precisa de rede na primeira vez
 go run ./cmd/noxy noxy_examples/run_all_tests_concurrent.nx
 ```
 

@@ -1,0 +1,17 @@
+// Aceitação do package manager: importa o pacote instalado por `noxy --sync`
+// (noxy.mod: github.com/estevaofon/quicksort v0.1.0). Falha se noxy_libs
+// não foi sincronizado.
+use github_com.estevaofon.quicksort.quicksort select *
+use sys select exit
+
+func assert(cond: bool, msg: string)
+    if !cond then
+        eprint(f"assertion failed: {msg}")
+        exit(1)
+    end
+end
+
+let array: int[] = [10, 7, 8, 9, 1, 5, 2, 6, 3, 4]
+quicksort(ref array, 0, 9)
+assert(array == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "quicksort from package")
+print("use_quicksort_pkg: ok")

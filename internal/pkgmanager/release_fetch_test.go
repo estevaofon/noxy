@@ -133,24 +133,3 @@ func TestFetchProcessBinariesErrors(t *testing.T) {
 		t.Fatalf("missing asset names the status: %v", err)
 	}
 }
-
-func TestRecordProcessSums(t *testing.T) {
-	root := t.TempDir()
-	err := recordProcessSums(root, "github_com/acme/guest", []byte(fetchManifest), map[string]string{
-		"guest-linux-amd64":       strings.Repeat("a", 64),
-		"guest-windows-amd64.exe": strings.Repeat("b", 64),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(SumFilePath(root))
-	for _, want := range []string{
-		"github_com/acme/guest noxy_ext.toml sha256:" + hexSum([]byte(fetchManifest)),
-		"github_com/acme/guest bin/guest-linux-amd64 sha256:" + strings.Repeat("a", 64),
-		"github_com/acme/guest bin/guest-windows-amd64.exe sha256:" + strings.Repeat("b", 64),
-	} {
-		if !strings.Contains(string(data), want) {
-			t.Fatalf("noxy.sum missing %q:\n%s", want, data)
-		}
-	}
-}

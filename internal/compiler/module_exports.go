@@ -6,6 +6,7 @@ import (
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/stdlib"
 	"os"
 	"path/filepath"
@@ -88,6 +89,14 @@ func (c *Compiler) discoveryState() *moduleDiscoveryState {
 
 func (c *Compiler) discoverModuleExports(module string) (map[string]struct{}, bool) {
 	return c.discoverModuleExportsWithState(module, c.discoveryState())
+}
+
+// syncHint delega a pkgmanager.SyncHint (spec §6): `use pkg select *` resolve
+// em tempo de COMPILACAO (discoverModuleExports), nunca chega ao
+// resolveModule da VM, entao a dica do runtime nunca dispara pra ele sem
+// este espelho.
+func (c *Compiler) syncHint(moduleName string) string {
+	return pkgmanager.SyncHint(c.projectRoot, moduleName)
 }
 
 func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDiscoveryState) (map[string]struct{}, bool) {
@@ -855,6 +864,12 @@ func (c *Compiler) moduleFileCandidates(pathName string) []string {
 				filepath.Join(searchRoot, suffix, suffix+".nx"),
 				filepath.Join(searchRoot, suffix),
 				filepath.Join(searchRoot, suffix+".nx"),
+			)
+		}
+		if c.projectRoot != "" {
+			candidates = append(candidates,
+				filepath.Join(c.projectRoot, "noxy_libs", suffix, suffix+".nx"),
+				filepath.Join(c.projectRoot, "noxy_libs", suffix),
 			)
 		}
 		candidates = append(candidates,

@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.24.0] - 2026-09-04
+
+Package manager: `noxy --sync` reconstrói `noxy_libs` a partir de `noxy.mod`
+e `noxy.sum`, offline após o sync; `noxy.sum` v2 registra o fechamento
+transitivo inteiro com hash de árvore por pacote.
+
+### Added
+- `--sync` e `--sync --locked`: `noxy --sync` reconstrói `noxy_libs` a
+  partir de `noxy.mod` + `noxy.sum`, sem rede quando o lock já cobre o
+  fechamento; `--sync --locked` recusa qualquer escrita e falha se o lock
+  não descreve exatamente o que o `noxy.mod` pede (uso em CI).
+- Hash de árvore por pacote de fonte (`dirhash.Hash1` do Go, exclui `bin/`
+  e `noxy_libs/`), gravado no `noxy.sum` e verificado a cada `--sync`.
+- MVS (minimal version selection): conflito de versão entre dependências
+  resolve pela maior, como no Go.
+- Pseudo-versão para pacotes sem tag (`vX.Y.(Z+1)-0.<data>-<sha>`, forma
+  do Go), usada quando `--get pkg@<sha ou branch>` é pedido.
+- Carimbo `noxy_libs/.noxy-sync`: registra o que o próprio sync instalou,
+  para a poda remover só isso e nunca tocar um diretório colocado à mão
+  (`math_lib`).
+- Raiz do projeto pelo `noxy.mod` mais próximo (`FindRoot`), usada por
+  `--get`/`--sync` (a partir do cwd) e pela VM (a partir do diretório do
+  script): a VM passa a verificar extensões de scripts em subdiretórios
+  contra o `noxy.sum` da raiz, o que antes era pulado.
+- Dica no erro `module not found`: se o módulo é uma `require` do
+  `noxy.mod`, a mensagem aponta `run 'noxy --sync'`.
+
+### Changed (BREAKING)
+- `noxy.sum` v2: chave por caminho do módulo e versão; linhas v1 aceitas
+  por uma versão e regravadas no primeiro `--sync`.
+- `noxy_libs` é derivado: não commitar; `noxy --sync` reconstrói. Quem
+  tinha `noxy_libs` commitado roda `--sync` uma vez e faz `git rm -r
+  --cached noxy_libs`.
+- `--get` sem versão resolve a tag mais nova (antes `HEAD`) para qualquer
+  pacote, não só extensão por processo; `HEAD` no `noxy.mod` é pinado no
+  próximo `--sync`.
+- Mensagens `run 'noxy --get'` viram `run 'noxy --sync'`.
+- Caminho de módulo só na forma `host/user/repo`; `https://` e `git@` são
+  erro.
+
 ## [0.23.5] - 2026-09-04
 
 Issue #134 — frontend: keywords de tipo contextuais, identificadores Unicode e

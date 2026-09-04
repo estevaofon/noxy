@@ -145,7 +145,7 @@ use time as tm
 // TOFU sob noxy_libs sem NENHUMA entrada de noxy.sum precisa avisar em
 // stderr (achado de revisao — TOFU nao pode ser silencioso): o load segue
 // (spec §15, noxy.sum spec pendente), mas quem roda o script deve saber que
-// a extensao nunca passou por "noxy --get".
+// a extensao nunca passou por "noxy --sync".
 func TestExtensionTOFUWarningWithoutSumEntry(t *testing.T) {
 	root := t.TempDir()
 	writeExtensionPackage(t, root)
@@ -194,7 +194,7 @@ func TestExtensionSumRoundTripViaPkgmanager(t *testing.T) {
 	root := t.TempDir()
 	writeExtensionPackage(t, root)
 	pkgDir := filepath.Join(root, "noxy_libs", "guest")
-	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest", "v1.0.0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(pkgDir, "ext.wasm"), []byte("tampered"), 0o644); err != nil {
@@ -220,7 +220,7 @@ func TestExtensionSumManifestTamperRefusesLoad(t *testing.T) {
 	root := t.TempDir()
 	writeExtensionPackage(t, root)
 	pkgDir := filepath.Join(root, "noxy_libs", "guest")
-	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest", "v1.0.0"); err != nil {
 		t.Fatal(err)
 	}
 	origWasm, err := os.ReadFile(filepath.Join(pkgDir, "ext.wasm"))
