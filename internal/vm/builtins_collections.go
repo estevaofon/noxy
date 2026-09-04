@@ -198,37 +198,39 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		return value.NewNull(), nil
 	})
+	// Issue #126 item 4: pop com indice opcional (Python list.pop([i])) e
+	// swap_remove (Rust Vec::swap_remove, O(1) sem preservar ordem). Posicao
+	// inexistente — inclusive pop em array vazio, que devolvia null sob um
+	// retorno tipado T — e erro de runtime (regra da #121). `delete`
+	// continua so de map, como em Go.
 	popSignature := value.NativeSignature{
-		Arity: 1,
+		Arity:    1,
+		Variadic: true, // 1 ou 2 argumentos: Variadic + len(Params) == 2 (defer.go)
 		Params: []value.ParamInfo{
 			{IsRef: true, TypeName: "ref array"},
+			{IsRef: false, TypeName: "int"},
 		},
 		ReturnType: "any",
 	}
 	vm.DefineContextualNativeWithSignature("pop", popSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
-		machine, contextErr := nativeVM(context)
-		if contextErr != nil {
-			return value.NewNull(), contextErr
+		if len(args) < 1 || len(args) > 2 {
+			return value.NewNull(), fmt.Errorf("pop: expects 1 or 2 arguments, got %d", len(args))
 		}
-		if len(args) != 1 {
-			return value.NewNull(), nil
+		return removeArrayElement(context, "pop", args, false)
+	})
+	swapRemoveSignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+			{IsRef: false, TypeName: "int"},
+		},
+		ReturnType: "any",
+	}
+	vm.DefineContextualNativeWithSignature("swap_remove", swapRemoveSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		if len(args) != 2 {
+			return value.NewNull(), fmt.Errorf("swap_remove: expects exactly 2 arguments, got %d", len(args))
 		}
-		arrVal, err := machine.unicizeThroughRefValue(args[0])
-		if err != nil {
-			return value.NewNull(), nil
-		}
-		if arrVal.Type == value.VAL_OBJ {
-			if arr, ok := arrVal.Obj.(*value.ObjArray); ok {
-				if len(arr.Elements) == 0 {
-					return value.NewNull(), nil
-				}
-				val := arr.Elements[len(arr.Elements)-1]
-				arr.Elements = arr.Elements[:len(arr.Elements)-1]
-				value.Release(val) // RC: o array solta a posse duravel do elemento removido
-				return val, nil
-			}
-		}
-		return value.NewNull(), nil
+		return removeArrayElement(context, "swap_remove", args, true)
 	})
 	vm.DefineContextualNative("slice", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if err := rejectRefArgs("slice", args); err != nil {
@@ -370,4 +372,48 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		return value.NewBytes("")
 	})
+}
+
+// removeArrayElement e o corpo comum de pop (sem indice: o ultimo; com
+// indice: aquela posicao, preservando a ordem, O(n)) e swap_remove (troca com
+// o ultimo, O(1)). Passa pelo mesmo funil de CoW de append/delete
+// (unicizeThroughRefValue). Posicao inexistente e erro com a mesma mensagem
+// da indexacao; argumento invalido e erro tipado, nunca null (#121).
+func removeArrayElement(context value.NativeContext, name string, args []value.Value, swap bool) (value.Value, error) {
+	machine, contextErr := nativeVM(context)
+	if contextErr != nil {
+		return value.NewNull(), contextErr
+	}
+	if len(args) == 2 && args[1].Type != value.VAL_INT {
+		return value.NewNull(), fmt.Errorf("%s: index must be an int, got %s", name, runtimeTypeName(args[1]))
+	}
+	arrVal, err := machine.unicizeThroughRefValue(args[0])
+	if err != nil {
+		return value.NewNull(), err
+	}
+	arr, ok := arrVal.Obj.(*value.ObjArray)
+	if arrVal.Type != value.VAL_OBJ || !ok {
+		return value.NewNull(), fmt.Errorf("%s: expects an array, got %s", name, runtimeTypeName(arrVal))
+	}
+	last := len(arr.Elements) - 1
+	idx := int64(last)
+	if len(args) == 2 {
+		idx = args[1].Int()
+	}
+	if last < 0 && len(args) == 1 {
+		return value.NewNull(), fmt.Errorf("pop from empty array")
+	}
+	if idx < 0 || idx > int64(last) {
+		return value.NewNull(), fmt.Errorf("array index out of bounds")
+	}
+	removed := arr.Elements[idx]
+	if swap {
+		arr.Elements[idx] = arr.Elements[last]
+	} else {
+		copy(arr.Elements[idx:], arr.Elements[idx+1:])
+	}
+	arr.Elements[last] = value.NewNull()
+	arr.Elements = arr.Elements[:last]
+	value.Release(removed) // RC: o array solta a posse duravel do elemento removido; o chamador recebe o valor
+	return removed, nil
 }
