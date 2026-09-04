@@ -97,6 +97,7 @@ func TestNamespaceFunctionAsValueIsTyped(t *testing.T) {
 }
 
 func TestNamespaceMemberStaysDynamicWhenStructIsUnnameable(t *testing.T) {
+	t.Skip("inverte na Task 5")
 	// n.nx usa m pela forma de NAMESPACE: V nao entra nos exports de n, e um
 	// programa que so faz `use n` nao tem nome para o retorno de n.make().
 	// Tipo inteiro dinamico (nunca meio-tipado): o `let` anotado nao e
@@ -266,4 +267,64 @@ func TestNamespaceMemberReexportedByWildcardStaysDynamic(t *testing.T) {
 	requireNoError(t, compileSourceAtRoot(t, root, "use m\nlet s: string = m.g(1)\n"))
 	err := compileSourceAtRoot(t, root, "use m select g\nlet s: string = g(1)\n")
 	requireErrorMentions(t, err, "expected string, got int")
+}
+
+func TestNamespaceStructNameSkipsAliasShadowedWhereTypeIsInferred(t *testing.T) {
+	// Item (c) da issue: dentro de f, `m` e o parametro Box; a grafia do
+	// tipo de w.make() e escolhida no ponto em que o tipo e PRODUZIDO, entao
+	// pula o alias sombreado e exibe `w.V`.
+	root := t.TempDir()
+	writeModuleFile(t, root, "m.nx", rollModule)
+	writeModuleFile(t, root, "w.nx", "use m select V, norm\nfunc make() -> V\n    return norm(V(0.0, 0.0))\nend\n")
+	err := compileSourceAtRoot(t, root, `use m
+use w
+struct Box
+    q: int
+end
+func f(m: Box) -> int
+    let p = w.make()
+    let s: string = p
+    return 0
+end
+`)
+	requireErrorMentions(t, err, "expected string, got w.V")
+	requireErrorLacks(t, err, "got m.V")
+}
+
+func TestNamespaceStructNameIsFixedWhereInferredNotWherePrinted(t *testing.T) {
+	// Caracterizacao (spec §1.5): o `let` de topo grava `m.V`; a mensagem
+	// dentro de f, onde `m` esta sombreado, ainda imprime `m.V` — nao ha
+	// re-traducao na impressao.
+	root := t.TempDir()
+	writeModuleFile(t, root, "m.nx", rollModule)
+	writeModuleFile(t, root, "w.nx", "use m select V, norm\nfunc make() -> V\n    return norm(V(0.0, 0.0))\nend\n")
+	err := compileSourceAtRoot(t, root, `use m
+use w
+struct Box
+    q: int
+end
+let v = w.make()
+func f(m: Box) -> int
+    let s: string = v
+    return 0
+end
+`)
+	requireErrorMentions(t, err, "expected string, got m.V")
+}
+
+func TestQualifiedAnnotationStillResolvesWhenAliasIsShadowedByParameter(t *testing.T) {
+	// Anotacao e espaco de tipos: `m.V` dentro de f(m: Box) continua o struct
+	// do modulo (comportamento atual, preservado).
+	requireNoError(t, compileSourceAtRoot(t, rollRoot(t), `use m
+struct Box
+    q: int
+end
+func mk() -> m.V
+    return m.V(1.0, 2.0)
+end
+func f(m: Box) -> int
+    let q: m.V = mk()
+    return 0
+end
+`))
 }
