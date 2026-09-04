@@ -218,3 +218,42 @@ test_report(a["x"] * 10 + b["x"])
 		}
 	})
 }
+
+func TestNamespaceWriteReachesTheAliasOwnBinding(t *testing.T) {
+	// caracterizacao: a escrita cai na ligacao do modulo DAQUELE alias, mesmo
+	// quando o TIPO do membro resolve pelo modulo que o declarou. `mid.nx` so
+	// alcanca `x` por re-export (`use base select *`), e select liga um
+	// snapshot: `mid.x = 5` muda a copia de `mid`, nao a variavel viva de
+	// `base` (spec §11, "Module state is writable through the namespace").
+	root := writeModuleFiles(t, map[string]string{
+		"base.nx": `let x: int = 1
+
+func read_x() -> int
+    return x
+end
+`,
+		"mid.nx": "use base select *\n",
+	})
+
+	t.Run("escrita pelo re-exportador nao alcanca o declarante", func(t *testing.T) {
+		reported, err := runModuleProgram(t, root, `use mid
+use base
+mid.x = 5
+test_report(mid.x * 100 + base.read_x() * 10 + base.x)
+`)
+		if err != nil || reported.Int() != 511 {
+			t.Fatalf("reported=%v err=%v (want 511: mid.x=5, base.read_x()=1, base.x=1)", reported, err)
+		}
+	})
+
+	t.Run("escrita pelo declarante alcanca o estado vivo", func(t *testing.T) {
+		reported, err := runModuleProgram(t, root, `use mid
+use base
+base.x = 5
+test_report(mid.x * 100 + base.read_x() * 10 + base.x)
+`)
+		if err != nil || reported.Int() != 155 {
+			t.Fatalf("reported=%v err=%v (want 155: mid.x=1, base.read_x()=5, base.x=5)", reported, err)
+		}
+	})
+}
