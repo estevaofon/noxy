@@ -92,5 +92,14 @@ func TestFStringUnclosedBraceIsReportedByTheLexer(t *testing.T) {
 	requireIllegal(t, "f\"{x\"\n", "unclosed brace in f-string")
 	requireIllegal(t, "f\"{x\"\n", "hint:")
 	requireIllegal(t, `f"{x`, "unclosed brace in f-string")
-	requireIllegal(t, `f"{"abc}"`, "unterminated")
+	// The nested literal "abc}" closes fine (its own quote matches at the
+	// end); what never closes is the `{` opened before it, so EOF arrives
+	// with depth 1 and the diagnosis is "unclosed brace", same as CPython
+	// 3.12 ("f-string: expecting '}'") for the equivalent input.
+	requireIllegal(t, `f"{"abc}"`, "unclosed brace in f-string")
+	// Here the nested literal itself never closes either (no matching `"`
+	// before EOF) — still reported as "unclosed brace in f-string": the `{`
+	// is also open, and that's the actionable fix regardless of which quote
+	// is missing.
+	requireIllegal(t, `f"{"abc`, "unclosed brace in f-string")
 }

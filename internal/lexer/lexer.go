@@ -556,12 +556,7 @@ func (l *Lexer) readQuoted(quote byte, kind literalKind) (string, string) {
 	return string(out), ""
 }
 
-// unclosedBraceReason is used both when a raw newline or EOF is hit while an
-// expression's `{` is still open, and when a nested literal inside that
-// expression consumes the rest of the input looking for its own closing
-// quote (which also leaves the outer `{` unterminated) — hence it names both
-// "unclosed brace" and "unterminated" so either phrasing finds it.
-const unclosedBraceReason = "unclosed brace in f-string (unterminated '{' expression)\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"
+const unclosedBraceReason = "unclosed brace in f-string\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"
 
 // readNestedQuoted copies a string literal that appears INSIDE an f-string
 // expression, verbatim (opening quote, body with escapes untouched, closing
