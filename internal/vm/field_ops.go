@@ -73,8 +73,12 @@ func (vm *VM) setPropertyGeneric(c *chunk.Chunk, ip int, name string) error {
 		// Issue #133: membro de modulo pelo namespace (ObjMap sobre o
 		// bindingStore do modulo) e map acessado como propriedade. Chave
 		// inexistente e erro como na leitura; RC: retain-antes-de-release —
-		// ObjMap.Set nao toca contadores. Set e mutexado e avanca a geracao
-		// do store (invalida caches de leitura do modulo).
+		// ObjMap.Swap nao toca contadores. A troca e UMA secao critica que
+		// avanca a geracao do store (invalida caches de leitura do modulo):
+		// com Get+Set separados dois escritores concorrentes leriam o mesmo
+		// valor velho e ambos o liberariam (double free). O Get abaixo so
+		// serve as checagens de existencia e de R1, que ja nao sao atomicas
+		// com a escrita (docs/concurrency.md).
 		old, exists := mapping.Get(name)
 		if !exists {
 			return vm.runtimeError(c, ip, "undefined property '%s' in module/map", name)
@@ -83,7 +87,7 @@ func (vm *VM) setPropertyGeneric(c *chunk.Chunk, ip int, name string) error {
 			return vm.runtimeError(c, ip, "slot '%s' already holds a reference\n  hint: pass it directly, without 'ref'", name)
 		}
 		value.Retain(val)
-		mapping.Set(name, val)
+		old, _ = mapping.Swap(name, val)
 		value.Release(old)
 		vm.push(val)
 		return nil

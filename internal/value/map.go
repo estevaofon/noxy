@@ -38,6 +38,20 @@ func (store *bindingStore) set(key interface{}, item Value) {
 	store.gen.Add(1)
 }
 
+// swap grava item e devolve o valor ANTERIOR sob o MESMO Lock. Existe para
+// o dono do RC: com get+set separados dois escritores concorrentes leem o
+// mesmo valor velho e cada um o libera (double free), porque cada operacao
+// e atomica sozinha mas a sequencia nao e. Como set, o bump da geracao vem
+// DEPOIS da escrita (ver a regra do gen no topo).
+func (store *bindingStore) swap(key interface{}, item Value) (Value, bool) {
+	store.mu.Lock()
+	old, existed := store.values[key]
+	store.values[key] = item
+	store.mu.Unlock()
+	store.gen.Add(1)
+	return old, existed
+}
+
 func (store *bindingStore) defineIfAbsent(key interface{}, item Value) bool {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -102,6 +116,12 @@ func (mapping *ObjMap) Get(key interface{}) (Value, bool) {
 
 func (mapping *ObjMap) Set(key interface{}, item Value) {
 	mapping.ensureStore().set(key, item)
+}
+
+// Swap: troca o valor de key devolvendo o anterior, numa unica secao
+// critica — ver bindingStore.swap.
+func (mapping *ObjMap) Swap(key interface{}, item Value) (Value, bool) {
+	return mapping.ensureStore().swap(key, item)
 }
 
 func (mapping *ObjMap) Delete(key interface{}) bool {
