@@ -1,0 +1,47 @@
+// contextual_keywords_unicode: keywords de tipo (int, map, chan, any...) sao
+// contextuais desde a issue #134 — reservadas so em posicao de tipo, nome
+// livre em posicao de valor — e identificadores aceitam letras Unicode
+// (spec §1.2, §1.3). Roda no runner; sai com 1 se alguma asserção falhar.
+use sys select exit
+
+func assert(condition: bool, message: string) -> void
+    if !condition then
+        print("contextual_keywords_unicode: FAIL - " + message)
+        exit(1)
+    end
+end
+
+struct Tile
+    map: int
+    chan: string
+end
+
+func any(x: int) -> int
+    return x * 2
+end
+
+func bump(v: ref int) -> void
+    *v = *v + 1
+end
+
+let int: int = 5
+let map: map[string, int] = {"a": 1}
+let café: string = "café"
+let área = 3
+
+let t: Tile = Tile(7, "c")
+assert(t.map == 7, "campo map")
+assert(t.chan == "c", "campo chan")
+t.map = 8
+bump(ref t.map)
+assert(t.map == 9, "escrita e ref em campo map")
+assert(f"{t.map}-{int}" == "9-5", "f-string com membro map")
+assert(any(int) == 10, "func any")
+assert(map["a"] == 1, "map como nome de variavel com tipo map[...]")
+assert(café == "café" && área == 3, "identificadores Unicode")
+
+for string in [1, 2] do
+    assert(string > 0, "for com variavel chamada string")
+end
+
+print("contextual_keywords_unicode: OK")

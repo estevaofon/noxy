@@ -45,21 +45,43 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 
 ### 1.2 Keywords
 
-| Category | Keywords |
-|----------|----------|
-| Declarations | `let`, `func`, `struct` |
-| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in`, `defer`, `when`, `case`, `default`, `try` |
-| Types | `int`, `float`, `string`, `bool`, `void`, `bytes`, `any`, `ref`, `func`, `map`, `chan` |
-| Literals | `true`, `false`, `null` |
-| Modules | `use`, `select`, `as` |
-| Specials | `zeros` |
+| Category | Keywords | Reserved where |
+|----------|----------|----------------|
+| Declarations | `let`, `func`, `struct` | everywhere |
+| Control Flow | `if`, `elif`, `then`, `else`, `end`, `while`, `do`, `return`, `break`, `continue`, `for`, `in`, `defer`, `when`, `case`, `default`, `try` | everywhere |
+| Types | `int`, `float`, `string`, `bool`, `void`, `bytes`, `any`, `map`, `chan` | type position only |
+| Type operators | `ref`, `func` | everywhere |
+| Literals | `true`, `false`, `null` | everywhere |
+| Modules | `use`, `select`, `as` | everywhere |
+| Specials | `zeros` | everywhere |
 
-`map` and `chan` are type constructors (`map[K, V]`, `chan T`), `any` is the
-dynamic type (§2.1); all three are reserved everywhere, so they cannot name a
-variable, a parameter or a module (`use src.map` → `'map' is a keyword and
-cannot be used as a name`). `str` is not a keyword.
+The type keywords are **contextual**: they are reserved only where a type is
+expected — a struct name (`struct map` → `'map' is a keyword and cannot be
+used as a name`), a type parameter (`struct Box<map>`), the member of a
+qualified type (`io.map`). Everywhere a *name* is expected they are ordinary
+identifiers, as `int` and `any` are in Go: `let int: int = 5`, `let map = {}`,
+`func any() -> int`, a parameter `map: Tile[][]`, `use src.map as map` with
+`map.tile()` and `let t: map.Tile`, a struct field `map: int` with `s.map`,
+`s.map = v`, `ref s.map` and `{s.map}` in an f-string. `ref` and `func` are
+prefix operators in expressions as well as in types, so they stay reserved
+everywhere. `str` is not a keyword.
 
-### 1.3 Operators
+### 1.3 Identifiers
+
+An identifier starts with a letter or `_` and continues with letters, digits
+or `_`. Letters and digits are Unicode (`unicode.IsLetter`, `unicode.IsDigit`),
+as in Go: `let café = 1`, `func área() -> float`. Identifiers are compared
+byte for byte — no Unicode normalization is applied. A combining mark is
+neither a letter nor a digit, so `é` must be written as the single
+precomposed code point: `e` followed by a combining accent is a syntax
+error, not a different name (the same rule as Go). Numeric literals use
+ASCII digits only.
+
+A character outside the language's alphabet is one diagnostic per character
+(`invalid syntax "“"` for a pasted curly quote), and the column in a
+diagnostic's `[line:column]` counts characters, not bytes.
+
+### 1.4 Operators
 
 | Category | Operators |
 |----------|-----------|
@@ -71,7 +93,7 @@ cannot be used as a name`). `str` is not a keyword.
 | Reference | `ref` |
 | Function Return | `->` |
 
-### 1.4 Delimiters
+### 1.5 Delimiters
 
 | Symbol | Usage |
 |--------|-------|
@@ -1117,6 +1139,9 @@ typed base (`unknown field`), and at runtime through a dynamic one
 (`undefined property 'zzz'` for `let d: any = p` followed by `d.zzz` **or**
 `d.zzz = 1`). No path adds a field to an instance.
 
+A field may have any name, type keywords included: `map: int` is a field
+called `map`, read and written as `s.map` (§1.2).
+
 ### Self-Reference
 
 A struct may contain its own type in two ways, and they mean different things.
@@ -1522,10 +1547,10 @@ print(recebida.valor * 6) // 42 — the whole Caixa<int> traveled through the
                            // channel, not just its field
 ```
 
-> **Note:** `map` is a type keyword (`map[K, V]`), so it cannot be used as the
-> name of a generic function. The standard idiom, used by the `collections`
-> module, is to call the transformation function `map_arr` instead:
-> `func map_arr<A, B>(arr: A[], fn: func(A) -> B) -> B[]`.
+> **Note:** `map` was reserved in every position in earlier versions, which is why
+> the `collections` module's transformation function is called `map_arr`.
+> `map` is a contextual keyword now (§1.2) and `func map<A, B>(...)` parses;
+> `map_arr` keeps its name for compatibility.
 
 > **Cosmetic note:** printing a generic struct instance shows its qualified
 > name, e.g. `<main::Caixa<int> instance>` instead of `<Caixa instance>`.
@@ -2761,7 +2786,7 @@ io.close(f)
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.23.3`). It is a module binding, not a
+string `noxy --version` prints (`v0.23.5`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 

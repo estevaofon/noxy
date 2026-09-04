@@ -113,7 +113,13 @@ const (
 	// Especiais
 	NEWLINE TokenType = "NEWLINE"
 	EOF     TokenType = "EOF"
-	ILLEGAL TokenType = "ILLEGAL"
+	// ILLEGAL e um caractere fora do alfabeto da linguagem, copiado como
+	// literal (uma runa). LEXER_ERROR e uma RAZAO escrita pelo lexer
+	// ("unterminated string", lexer.UnclosedBraceReason) — o parser imprime
+	// o literal como diagnostico. Sao tipos distintos de proposito (issue
+	// #134): a distincao anterior era contar runas do literal.
+	ILLEGAL     TokenType = "ILLEGAL"
+	LEXER_ERROR TokenType = "LEXER_ERROR"
 )
 
 var keywords = map[string]TokenType{

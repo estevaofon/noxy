@@ -98,6 +98,16 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.LBRACKET, p.parseIndexExpression)
 	p.registerInfix(token.DOT, p.parseMemberAccess)
 
+	// Keyword de tipo contextual em posicao de EXPRESSAO e um identificador
+	// (`print(map)`, `int + 1` com `let int = 5`): o literal do token ja e
+	// o nome (issue #134, spec §1.2). O parser de tipo nunca passa por aqui.
+	for _, t := range []token.TokenType{
+		token.TYPE_INT, token.TYPE_FLOAT, token.TYPE_STRING, token.TYPE_BOOL,
+		token.TYPE_BYTES, token.TYPE_VOID, token.TYPE_ANY, token.MAP, token.CHAN,
+	} {
+		p.registerPrefix(t, p.parseIdentifier)
+	}
+
 	return p
 }
 
@@ -109,11 +119,11 @@ func (p *Parser) peekError(t token.TokenType) {
 	if t == token.IDENTIFIER && isTypeKeyword(p.peekToken.Type) {
 		// Keyword de TIPO em posicao de nome (issue #126 item 5): map, chan,
 		// any etc. sao justamente as palavras que alguem tentaria usar como
-		// nome de variavel/modulo/parametro (`let map: int`, `use src.map`,
-		// `func f(any: int)`). Palavras de controle de fluxo (in, do, then,
-		// as...) ficam de fora deste desvio: elas aparecem na posicao de
-		// identificador exatamente quando a construcao foi truncada
-		// (`for in [1] do` sem a variavel do laco), e ali "expected
+		// nome de variavel/modulo/parametro (`struct map`, `struct Box<map>`,
+		// `let x: io.map`, `let ref: int`). Palavras de controle de fluxo (in,
+		// do, then, as...) ficam de fora deste desvio: elas aparecem na
+		// posicao de identificador exatamente quando a construcao foi
+		// truncada (`for in [1] do` sem a variavel do laco), e ali "expected
 		// identifier, found in" — a mensagem generica abaixo — e' o
 		// diagnostico correto, nao "'in' is a keyword and cannot be used as
 		// a name".
@@ -130,7 +140,9 @@ func (p *Parser) peekError(t token.TokenType) {
 // isTypeKeyword reporta se t e' uma das palavras-chave de tipo (grupo
 // "Palavras-chave - Tipos" em internal/token/token.go): map, chan, any, int,
 // float, string, bool, bytes, void, ref. Sao as reservadas que um usuario
-// plausivelmente tentaria usar como nome (issue #126 item 5) — ao contrario
+// plausivelmente tentaria usar como nome (issue #126 item 5); desde a #134
+// as nove contextuais (isContextualTypeKeyword) so chegam aqui em posicao de
+// TIPO — nome de struct, parametro de tipo, tipo qualificado — ao contrario
 // das palavras de controle de fluxo (in, do, then, as, ...), que so aparecem
 // em posicao de identificador quando a construcao foi truncada.
 func isTypeKeyword(t token.TokenType) bool {
@@ -142,6 +154,41 @@ func isTypeKeyword(t token.TokenType) bool {
 	default:
 		return false
 	}
+}
+
+// isContextualTypeKeyword reporta se t e' uma das NOVE keywords de tipo
+// contextuais (issue #134, spec §1.2): reservadas so em posicao de tipo,
+// nome livre em toda posicao de valor — como int/string/any em Go, que sao
+// identificadores pre-declarados. `ref` e `func` ficam de fora: sao
+// operadores de prefixo em expressao alem de tipo, com significado nas duas
+// posicoes. E' um subconjunto de isTypeKeyword.
+func isContextualTypeKeyword(t token.TokenType) bool {
+	switch t {
+	case token.TYPE_INT, token.TYPE_FLOAT, token.TYPE_STRING, token.TYPE_BOOL,
+		token.TYPE_BYTES, token.TYPE_VOID, token.TYPE_ANY, token.MAP, token.CHAN:
+		return true
+	default:
+		return false
+	}
+}
+
+// isNameToken reporta se t pode nomear variavel, funcao, parametro, campo,
+// modulo ou membro: IDENTIFIER ou keyword de tipo contextual.
+func isNameToken(t token.TokenType) bool {
+	return t == token.IDENTIFIER || isContextualTypeKeyword(t)
+}
+
+// expectName e' o expectPeek(IDENTIFIER) das posicoes de VALOR. Falha pelo
+// mesmo peekError(IDENTIFIER): o que sobra ali e' keyword de controle
+// (`let if` → "expected identifier, found if"), pontuacao, ou `ref` (que
+// ainda recebe o erro do #126) — nenhuma mensagem muda.
+func (p *Parser) expectName() bool {
+	if isNameToken(p.peekToken.Type) {
+		p.nextToken()
+		return true
+	}
+	p.peekError(token.IDENTIFIER)
+	return false
 }
 
 // resyncAfterFailedStatement consome a marca resyncToLine: avanca ate o
@@ -378,7 +425,7 @@ func (p *Parser) parseIfStatement() *ast.IfStatement {
 func (p *Parser) parseLetStatement() *ast.LetStmt {
 	stmt := &ast.LetStmt{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 
@@ -493,7 +540,7 @@ func (p *Parser) parseContinueStatement() *ast.ContinueStmt {
 func (p *Parser) parseUseStatement() *ast.UseStmt {
 	stmt := &ast.UseStmt{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 	// Parse dot-separated module path: pkg.sub.mod
@@ -501,7 +548,7 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 
 	for p.peekTokenIs(token.DOT) {
 		p.nextToken() // eat .
-		if !p.expectPeek(token.IDENTIFIER) {
+		if !p.expectName() {
 			return nil
 		}
 		stmt.Module += "." + p.curToken.Literal
@@ -510,7 +557,7 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 	// Check for 'as' Alias
 	if p.peekTokenIs(token.AS) {
 		p.nextToken() // eat as
-		if !p.expectPeek(token.IDENTIFIER) {
+		if !p.expectName() {
 			return nil
 		}
 		stmt.Alias = p.curToken.Literal
@@ -532,7 +579,7 @@ func (p *Parser) parseUseStatement() *ast.UseStmt {
 				}
 				start = false
 
-				if !p.expectPeek(token.IDENTIFIER) {
+				if !p.expectName() {
 					return nil
 				}
 				stmt.Selectors = append(stmt.Selectors, p.curToken.Literal)
@@ -817,6 +864,15 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return t
 	}
 
+	// Issue #134 (design §1.5): keyword de tipo contextual seguida de '.' e'
+	// um alias de modulo qualificando um tipo (`use src.map as map` +
+	// `let t: map.Tile`). Um token de lookahead decide: `map[` e `chan T`
+	// caem no switch abaixo como antes. Parametro de tipo nunca e' keyword
+	// (design §1.4), entao activeTypeParams nao e' consultado aqui.
+	if isContextualTypeKeyword(p.curToken.Type) && p.peekTokenIs(token.DOT) {
+		return p.parseNamedType(p.curToken.Literal)
+	}
+
 	var t ast.NoxyType
 	// Primitive types and Identifier types
 	switch p.curToken.Type {
@@ -855,39 +911,7 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		if p.activeTypeParams[p.curToken.Literal] {
 			return &ast.TypeParamType{Name: p.curToken.Literal}
 		}
-		name := p.curToken.Literal
-		// Support dot notation for types (e.g. io.File)
-		for p.peekTokenIs(token.DOT) {
-			p.nextToken() // eat .
-			if !p.expectPeek(token.IDENTIFIER) {
-				return nil
-			}
-			name += "." + p.curToken.Literal
-		}
-		// Tipo generico em posicao de anotacao: Nome<arg1, arg2>
-		if p.peekTokenIs(token.LT) {
-			p.nextToken() // eat nome; curToken = <
-			args := []ast.NoxyType{}
-			for {
-				p.nextToken() // avanca para o inicio do proximo tipo
-				arg := p.parseType()
-				if arg == nil {
-					return nil
-				}
-				args = append(args, arg)
-				p.splitCompositeGT() // divide >> ou >= pendentes ANTES de checar peek
-				if p.peekTokenIs(token.COMMA) {
-					p.nextToken()
-					continue
-				}
-				break
-			}
-			if !p.expectPeek(token.GT) {
-				return nil
-			}
-			return &ast.GenericType{Name: name, Args: args}
-		}
-		t = &ast.PrimitiveType{Name: name}
+		return p.parseNamedType(p.curToken.Literal)
 	case token.MAP:
 		// map[key, val]
 		if !p.expectPeek(token.LBRACKET) {
@@ -919,6 +943,46 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return nil
 	}
 	return t
+}
+
+// parseNamedType completa um tipo nomeado a partir do primeiro segmento ja'
+// consumido (curToken): segmentos qualificados `.Nome` (io.File) e
+// argumentos genericos `Nome<T, U>`. Ao retornar, curToken esta' no ultimo
+// token do tipo. O segmento apos '.' exige IDENTIFIER — keyword ali e'
+// posicao de tipo e recebe o erro do #126 (`let x: io.map`).
+func (p *Parser) parseNamedType(name string) ast.NoxyType {
+	// Support dot notation for types (e.g. io.File)
+	for p.peekTokenIs(token.DOT) {
+		p.nextToken() // eat .
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
+		name += "." + p.curToken.Literal
+	}
+	// Tipo generico em posicao de anotacao: Nome<arg1, arg2>
+	if p.peekTokenIs(token.LT) {
+		p.nextToken() // eat nome; curToken = <
+		args := []ast.NoxyType{}
+		for {
+			p.nextToken() // avanca para o inicio do proximo tipo
+			arg := p.parseType()
+			if arg == nil {
+				return nil
+			}
+			args = append(args, arg)
+			p.splitCompositeGT() // divide >> ou >= pendentes ANTES de checar peek
+			if p.peekTokenIs(token.COMMA) {
+				p.nextToken()
+				continue
+			}
+			break
+		}
+		if !p.expectPeek(token.GT) {
+			return nil
+		}
+		return &ast.GenericType{Name: name, Args: args}
+	}
+	return &ast.PrimitiveType{Name: name}
 }
 
 // splitCompositeGT divide tokens compostos que contem '>' quando estamos
@@ -1384,7 +1448,7 @@ func (p *Parser) parseTypeParameters() []string {
 func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 	stmt := &ast.FunctionStatement{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 	stmt.Name = p.curToken.Literal
@@ -1441,8 +1505,9 @@ func (p *Parser) parseFunctionStatement() *ast.FunctionStatement {
 func (p *Parser) parseFunctionLiteral() ast.Expression {
 	lit := &ast.FunctionLiteral{Token: p.curToken}
 
-	// Optional Name (e.g. func myName(...) ...)
-	if p.peekTokenIs(token.IDENTIFIER) {
+	// Optional Name (e.g. func myName(...) ...) — keyword de tipo contextual
+	// tambem e' nome aqui (issue #134).
+	if isNameToken(p.peekToken.Type) {
 		p.nextToken()
 		lit.Name = p.curToken.Literal
 	}
@@ -1489,7 +1554,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 		return parameters
 	}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 
@@ -1519,7 +1584,7 @@ func (p *Parser) parseFunctionParameters() []*ast.Parameter {
 
 	for p.peekTokenIs(token.COMMA) {
 		p.nextToken() // eat COMMA
-		if !p.expectPeek(token.IDENTIFIER) {
+		if !p.expectName() {
 			return nil
 		}
 		// ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
@@ -1772,11 +1837,19 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 			continue
 		}
 
-		if p.curToken.Type != token.IDENTIFIER {
-			// Error or break?
-			// If not identifier, maybe illegal.
-			p.nextToken()
-			continue
+		if !isNameToken(p.curToken.Type) {
+			// Issue #134: antes, um token que nao era IDENTIFIER aqui era
+			// pulado em silencio — um campo `map: int` sumia da struct e
+			// o erro so aparecia no construtor ("expects 1 arguments, got
+			// 2"). peekError formata a partir de peekToken; o ofensor aqui
+			// e' curToken.
+			p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: expected identifier, found %s",
+				p.curToken.Line, p.curToken.Column, p.curToken.Type.Display()))
+			// skipUntilEnd consome o corpo ate o `end` da struct: um erro
+			// por campo invalido, nao uma cascata (mesmo padrao de
+			// parseFunctionStatement).
+			p.skipUntilEnd()
+			return nil
 		}
 
 		field := &ast.StructField{Name: p.curToken.Literal}
@@ -1807,7 +1880,7 @@ func (p *Parser) parseStructStatement() *ast.StructStatement {
 func (p *Parser) parseMemberAccess(left ast.Expression) ast.Expression {
 	exp := &ast.MemberAccessExpression{Token: p.curToken, Left: left}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 	exp.Member = p.curToken.Literal
@@ -1820,14 +1893,13 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	switch p.curToken.Type {
 	case token.EOF:
 		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
-	case token.ILLEGAL:
-		if lexer.IsReason(p.curToken.Literal) {
-			// O literal de um ILLEGAL e a razao que o lexer escreveu
-			// ("unterminated string", lexer.UnclosedBraceReason + hint).
-			msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
-		}
-		// Caso contrario o literal e um caractere desconhecido isolado
-		// (ex.: "@") e o msg generico "invalid syntax %q" acima ja serve.
+	case token.LEXER_ERROR:
+		// O literal e a razao que o lexer escreveu ("unterminated string",
+		// lexer.UnclosedBraceReason + hint) e vira o diagnostico. Um
+		// ILLEGAL (caractere desconhecido, ex.: "@") fica com o
+		// "invalid syntax %q" generico acima. A distincao e por TIPO de
+		// token (issue #134), nao mais por comprimento do literal.
+		msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
 	}
 	p.errors = append(p.errors, msg)
 }
@@ -1835,7 +1907,7 @@ func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 func (p *Parser) parseForStatement() *ast.ForStatement {
 	stmt := &ast.ForStatement{Token: p.curToken}
 
-	if !p.expectPeek(token.IDENTIFIER) {
+	if !p.expectName() {
 		return nil
 	}
 

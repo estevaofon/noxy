@@ -40,9 +40,9 @@ func TestQuoteAndBackslashEscapes(t *testing.T) {
 // string de aspas simples sem fechamento são ILLEGAL com motivo legível, não
 // um token STRING com lixo.
 func TestUnterminatedLiteralAfterBackslashAndSingleQuotes(t *testing.T) {
-	requireIllegal(t, `"abc\`, "unterminated")
-	requireIllegal(t, `'abc`, "unterminated")
-	requireIllegal(t, `'abc\`, "unterminated")
+	requireLexerError(t, `"abc\`, "unterminated")
+	requireLexerError(t, `'abc`, "unterminated")
+	requireLexerError(t, `'abc\`, "unterminated")
 }
 
 // Um caractere fora do alfabeto da linguagem vira um token ILLEGAL com o
@@ -89,19 +89,19 @@ func TestFStringQuotesInsideBraces(t *testing.T) {
 }
 
 func TestFStringUnclosedBraceIsReportedByTheLexer(t *testing.T) {
-	requireIllegal(t, "f\"{x\"\n", "unclosed brace in f-string")
-	requireIllegal(t, "f\"{x\"\n", "hint:")
-	requireIllegal(t, `f"{x`, "unclosed brace in f-string")
+	requireLexerError(t, "f\"{x\"\n", "unclosed brace in f-string")
+	requireLexerError(t, "f\"{x\"\n", "hint:")
+	requireLexerError(t, `f"{x`, "unclosed brace in f-string")
 	// The nested literal "abc}" closes fine (its own quote matches at the
 	// end); what never closes is the `{` opened before it, so EOF arrives
 	// with depth 1 and the diagnosis is "unclosed brace", same as CPython
 	// 3.12 ("f-string: expecting '}'") for the equivalent input.
-	requireIllegal(t, `f"{"abc}"`, "unclosed brace in f-string")
+	requireLexerError(t, `f"{"abc}"`, "unclosed brace in f-string")
 	// Here the nested literal itself never closes either (no matching `"`
 	// before EOF) — still reported as "unclosed brace in f-string": the `{`
 	// is also open, and that's the actionable fix regardless of which quote
 	// is missing.
-	requireIllegal(t, `f"{"abc`, "unclosed brace in f-string")
+	requireLexerError(t, `f"{"abc`, "unclosed brace in f-string")
 }
 
 // The parser duplicates this text nowhere anymore (it references
@@ -114,24 +114,20 @@ func TestUnclosedBraceReasonIsThePinnedSpecText(t *testing.T) {
 	}
 }
 
-// Issue #126: IsReason separa a razao escrita pelo lexer (uma frase em
-// ingles, sempre com mais de uma runa) do caractere desconhecido copiado
-// verbatim por newToken. Contar BYTES confundia os dois: `string(l.ch)`
-// converte o byte para runa, entao qualquer byte nao-ASCII (o 0xE2 de uma
-// aspa curva colada, por exemplo) vira uma string de 2 bytes e passava por
-// "razao", fazendo o parser imprimir o caractere cru em vez de
-// `invalid syntax "..."`.
-func TestIsReasonCountsRunesNotBytes(t *testing.T) {
-	if IsReason("â") {
-		t.Fatalf("IsReason(%q) = true, want false: e um unico caractere desconhecido", "â")
+// Issue #134: a razao escrita pelo lexer ("unterminated string",
+// UnclosedBraceReason) e o caractere desconhecido copiado verbatim sao tokens
+// de TIPOS distintos — LEXER_ERROR e ILLEGAL. Antes a distincao era
+// lexer.IsReason, uma contagem de runas do literal (issue #126), que nada
+// impunha: uma razao de uma palavra ou um ILLEGAL com mais de uma runa
+// mudava o diagnostico do parser sem quebrar teste algum.
+func TestLexerErrorAndIllegalAreDistinctTypes(t *testing.T) {
+	if got := firstToken(t, `"abc`); got.Type != token.LEXER_ERROR || got.Literal != "unterminated string" {
+		t.Fatalf("token = %#v, want LEXER_ERROR \"unterminated string\"", got)
 	}
-	if IsReason("@") {
-		t.Fatalf("IsReason(\"@\") = true, want false")
+	if got := firstToken(t, `f"{x`); got.Type != token.LEXER_ERROR || got.Literal != UnclosedBraceReason {
+		t.Fatalf("token = %#v, want LEXER_ERROR with UnclosedBraceReason", got)
 	}
-	if !IsReason(UnclosedBraceReason) {
-		t.Fatalf("IsReason(UnclosedBraceReason) = false, want true")
-	}
-	if !IsReason("unterminated string") {
-		t.Fatalf("IsReason(\"unterminated string\") = false, want true")
+	if got := firstToken(t, "@"); got.Type != token.ILLEGAL || got.Literal != "@" {
+		t.Fatalf("token = %#v, want ILLEGAL \"@\"", got)
 	}
 }

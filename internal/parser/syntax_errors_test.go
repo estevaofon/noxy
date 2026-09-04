@@ -105,17 +105,14 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			want:   []string{`invalid syntax "@"`},
 		},
 		{
-			// Issue #126: aspas curvas coladas de um editor de texto. Cada
-			// byte de U+201C vira um ILLEGAL cujo literal e a conversao
-			// int->rune daquele byte ("\u00e2" para 0xE2), com mais de um
-			// BYTE — lexer.IsReason contava bytes e tratava isso como uma
-			// "razao" escrita pelo lexer, imprimindo o caractere cru sem
-			// aspas nem diagnostico. Agora conta RUNAS e a mensagem generica
-			// volta.
+			// Issue #126/#134: aspas curvas coladas de um editor de texto.
+			// Cada caractere e UM token ILLEGAL com a runa inteira como
+			// literal e vira `invalid syntax "“"` — nunca o byte cru
+			// impresso sem aspas (o sintoma do #126).
 			name:    "pasted curly quotes report invalid syntax, not a bare byte",
 			source:  "let s: string = \u201cabc\u201d\n",
-			want:    []string{"invalid syntax"},
-			notWant: []string{"SyntaxError: \u00e2"},
+			want:    []string{`invalid syntax "“"`, `invalid syntax "”"`},
+			notWant: []string{"SyntaxError: \u00e2", `""`},
 		},
 	}
 	for _, tc := range cases {
@@ -140,22 +137,24 @@ func TestSyntaxErrorMessages(t *testing.T) {
 	}
 }
 
-// Issue #126 item 5: keyword onde se espera um nome (`use src.map as map`,
-// `let map: int = 1`) dizia "expected identifier, found map" e, como o parser
-// nao sincroniza, cada token seguinte virava mais um "invalid syntax". Agora e
-// UM erro que nomeia a keyword, e o parser pula o resto da linha (recuperacao
-// em modo panico com ponto de sincronizacao — Crafting Interpreters §6.3.3).
+// Issue #126 item 5 / #134: keyword em posicao de TIPO onde se espera um
+// nome (`struct map`, `struct Box<map>`, `func f<int>()`) e `ref` em
+// qualquer posicao de nome dizem UM erro que nomeia a keyword, e o parser
+// pula o resto da linha (recuperacao em modo panico com ponto de
+// sincronizacao — Crafting Interpreters §6.3.3). As keywords de tipo em
+// posicao de VALOR (`let map`, `use src.map as map`, `func f(any: int)`)
+// sao nomes desde a #134 e nao chegam aqui.
 func TestKeywordAsNameIsASingleError(t *testing.T) {
 	cases := []struct {
 		name   string
 		source string
 		want   string
 	}{
-		{"use module named map", "use src.map as map\nlet x: int = 1\n", "[1:9] SyntaxError: 'map' is a keyword and cannot be used as a name"},
-		{"use alias named map", "use src.level as map\nlet x: int = 1\n", "[1:18] SyntaxError: 'map' is a keyword and cannot be used as a name"},
-		{"let named map", "let map: int = 1\nlet y: int = 2\n", "[1:5] SyntaxError: 'map' is a keyword and cannot be used as a name"},
-		{"let named chan inside block", "func f()\n    let chan: int = 1\n    let y: int = 2\nend\n", "[2:9] SyntaxError: 'chan' is a keyword and cannot be used as a name"},
-		{"param named any", "func f(any: int)\nend\n", "'any' is a keyword and cannot be used as a name"},
+		{"struct named map", "struct map end\nlet y: int = 2\n", "[1:8] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"struct type parameter named map", "struct Box<map> end\nlet y: int = 2\n", "[1:12] SyntaxError: 'map' is a keyword and cannot be used as a name"},
+		{"func type parameter named int", "func f<int>() end\nlet y: int = 2\n", "[1:8] SyntaxError: 'int' is a keyword and cannot be used as a name"},
+		{"let named ref", "let ref: int = 1\nlet y: int = 2\n", "[1:5] SyntaxError: 'ref' is a keyword and cannot be used as a name"},
+		{"param named ref", "func f(ref: int)\nend\n", "'ref' is a keyword and cannot be used as a name"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -177,9 +176,9 @@ func TestKeywordAsNameIsASingleError(t *testing.T) {
 
 // Revisão da issue #126 item 5: resyncToLine só pode valer para o statement
 // que a ligou. peekError liga a marca quando um expectPeek(IDENTIFIER)
-// aninhado falha por causa de keyword de tipo — mas em `y = obj.map` quem
-// falha é parseMemberAccess (chamado de dentro da expressão do lado direito
-// do `=`), e o AssignStmt que envolve essa expressão ainda volta non-nil; em
+// aninhado falha por causa de keyword de tipo — em `let x: Caixa<io.map> = 5`
+// quem falha é o ramo de tipo qualificado dentro do argumento genérico, e
+// parseLetStatement ainda volta non-nil (com Type incompleto); em
 // `let x: io.map = 5` quem falha é o ramo de tipo qualificado dentro de
 // parseValueType, e parseLetStatement também volta non-nil (com Type
 // incompleto). Em nenhum dos dois casos ParseProgram vê o statement como
@@ -203,8 +202,8 @@ func TestResyncFlagDoesNotLeakAcrossStatements(t *testing.T) {
 		keywordWant string
 	}{
 		{
-			"member access inside assignment RHS",
-			"y = obj.map\n",
+			"qualified type inside generic argument",
+			"let x: Caixa<io.map> = 5\n",
 			"'map' is a keyword and cannot be used as a name",
 		},
 		{
@@ -264,6 +263,22 @@ func TestSyntaxErrorsCarryLineAndColumn(t *testing.T) {
 	joined := strings.Join(p.Errors(), "\n")
 	if !strings.HasPrefix(joined, "[3:") {
 		t.Fatalf("erro deveria apontar a linha 3: %q", joined)
+	}
+}
+
+// Issue #134: coluna em caracteres, e um diagnostico por caractere ilegal.
+func TestIllegalCharacterDiagnosticsCountRunes(t *testing.T) {
+	p := New(lexer.New("let s: string = “abc”\n"))
+	_ = p.ParseProgram()
+	if got := len(p.Errors()); got != 2 {
+		t.Fatalf("want 2 errors (one per pasted quote), got %d: %q", got, p.Errors())
+	}
+
+	p = New(lexer.New("let café = 1 @\n"))
+	_ = p.ParseProgram()
+	joined := strings.Join(p.Errors(), "\n")
+	if !strings.Contains(joined, `[1:14] SyntaxError: invalid syntax "@"`) {
+		t.Fatalf("errors=%q: want the '@' reported at column 14 (characters, not bytes)", p.Errors())
 	}
 }
 

@@ -222,7 +222,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.23.3
+Noxy REPL v0.23.5
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
