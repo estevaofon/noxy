@@ -242,6 +242,17 @@ scores["Bob"] = 50
 **Pass-by-Value Behavior**:
 Maps are passed by **VALUE**: the callee's map is independent at any depth through value entries (copy-on-write; a `map[K, ref T]` value is a shared edge — §2.2 rule 6). Use `ref` when the function must modify the caller's map.
 
+**Writing with a dot**: on a value whose static type is `map[K, V]`,
+`m.key = v` is checked exactly like `m["key"] = v` — the key type must accept
+`string` (`m.a = 2` on a `map[int, int]` is `[line N] type mismatch in map
+key: expected int, got string`) and the value must match `V` (`m.a = "boom"`
+on a `map[string, int]` is `[line N] type mismatch in map value: expected
+int, got string`). The two forms differ in what they do to a key that is not
+there: the index form **inserts** it, while the dot form only addresses an
+**existing** entry, in both directions — reading or writing a missing key is
+the runtime error `undefined property 'b' in module/map`. A dot *read* on a
+map stays dynamically typed: unlike the write, it is not checked against `V`.
+
 **Iteration order is undefined**: a map is backed by a Go map, so `for k in m`,
 `keys(m)` and printing a map may produce a different order on each run and
 across versions. Never depend on it — sort `keys(m)` when the output has to be
@@ -2470,6 +2481,13 @@ global. A global `let` that shadows the namespace name is a different
 binding and is unaffected. As with any shared global, concurrent writers
 must coordinate (docs/concurrency.md): a single write is synchronized, a
 read-modify-write is not.
+
+A write through a namespace reaches the binding of **that alias's module**,
+even when the member's *type* resolves through the module that declared it:
+a member that only reaches `mid` by re-export (`mid.nx` does `use base
+select *`) is `mid`'s own snapshot, so `mid.x = 5` makes `mid.x` read 5 while
+`base.read_x()` still returns 1. Write through the declaring module's own
+namespace (`use base` and `base.x = 5`) to change the live state.
 
 The namespace object is a **view of the module's live state**, not a value
 with copy semantics: binding it to another name (`let s: any = m`) or passing
