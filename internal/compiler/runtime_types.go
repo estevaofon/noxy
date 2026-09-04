@@ -366,31 +366,39 @@ func (c *Compiler) checkDeclaredTypeFrom(t ast.NoxyType, line int, position, imp
 // importHintFor monta o hint de `unknown type 'name'` quando alguma
 // dependencia ja carregada declara um struct chamado name (issue #133,
 // spec §1.7): `add 'use <origem>' or 'use <reexportador> select name' to
-// name this type`. Dois passos, porque origins aponta sempre para o modulo
-// DECLARANTE: (1) a origem vem de moduleDiscovery.origins; (2) os
-// reexportadores sao os modulos descobertos (moduleDiscovery.exported) cujos
-// exports contem a MESMA declaracao. "" sem candidato. Ordem deterministica
-// (sort) porque os dois mapas nao tem ordem.
+// name this type`. Tres passos, porque origins aponta sempre para o modulo
+// DECLARANTE e nomes de struct podem colidir entre modulos DIFERENTES sem
+// serem a MESMA declaracao (dois modulos distintos podem cada um declarar o
+// seu proprio `struct V`): (1) originDecls guarda, por modulo, o *ponteiro*
+// da declaracao chamada name naquele modulo — nao so o nome; (2) a origem
+// escolhida (origin) e deterministica (sort) entre os modulos candidatos;
+// (3) so entao um reexportador qualifica: seu export de name tem de ser o
+// MESMO ponteiro de originDecl, nao qualquer decl com o mesmo nome em outro
+// modulo. "" sem candidato. Ordem deterministica (sort) porque os dois mapas
+// nao tem ordem.
 func (c *Compiler) importHintFor(name string) string {
 	if c.moduleDiscovery == nil {
 		return ""
 	}
-	var origins []string
-	declarations := make(map[*ast.StructStatement]bool)
+	originDecls := make(map[string]*ast.StructStatement)
 	for decl, module := range c.moduleDiscovery.origins {
 		if decl.Name == name {
-			origins = append(origins, module)
-			declarations[decl] = true
+			originDecls[module] = decl
 		}
 	}
-	if len(origins) == 0 {
+	if len(originDecls) == 0 {
 		return ""
+	}
+	var origins []string
+	for module := range originDecls {
+		origins = append(origins, module)
 	}
 	sort.Strings(origins)
 	origin := origins[0]
+	originDecl := originDecls[origin]
 	var reexporters []string
 	for module, exported := range c.moduleDiscovery.exported {
-		if module != origin && declarations[exported[name]] {
+		if module != origin && exported[name] == originDecl {
 			reexporters = append(reexporters, module)
 		}
 	}

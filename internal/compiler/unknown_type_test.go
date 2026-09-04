@@ -249,3 +249,26 @@ func TestUnknownTypeHintNamesTheDeclaringAndReexportingModules(t *testing.T) {
 	err = compileSourceAtRoot(t, root, "let v: Nada = 1\n")
 	requireErrorMentions(t, err, "unknown type 'Nada'", "declare 'struct Nada' or import it with 'use m select Nada'")
 }
+
+func TestUnknownTypeHintReexporterMatchesTheChosenOriginsDeclarationNotJustTheName(t *testing.T) {
+	// Issue #133 (review round 1): dois modulos DIFERENTES podem cada um
+	// declarar o seu proprio `struct V` sem serem a MESMA declaracao. O
+	// reexportador so pode entrar no hint se o export dele apontar para o
+	// MESMO ponteiro da declaracao do modulo escolhido como origem — nao
+	// para qualquer decl de outro modulo que por acaso tenha o mesmo nome.
+	root := t.TempDir()
+	writeModuleFile(t, root, "a.nx", "struct V\n    x: int\nend\nfunc f() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "b.nx", "struct V\n    y: int\nend\nfunc g() -> void\nend\n")
+	writeModuleFile(t, root, "bridge.nx", "use b select *\n")
+	// bridge reexporta a V de b (nao relacionada a de a) — nao pode aparecer
+	// no hint como se reexportasse a V de a, mesmo com "a" < "b" ordenando
+	// "a" como origem escolhida.
+	err := compileSourceAtRoot(t, root, "use a select f\nuse bridge select g\nlet v: V = f()\n")
+	requireErrorMentions(t, err, "unknown type 'V'", "add 'use a' or 'use a select V' to name this type")
+	requireNotMentions(t, err, "use b select V")
+
+	// bridge2 reexporta a MESMA V de a: agora sim entra no hint.
+	writeModuleFile(t, root, "bridge2.nx", "use a select *\nfunc g2() -> void\nend\n")
+	err = compileSourceAtRoot(t, root, "use a select f\nuse bridge2 select g2\nlet v: V = f()\n")
+	requireErrorMentions(t, err, "unknown type 'V'", "add 'use a' or 'use bridge2 select V' to name this type")
+}
