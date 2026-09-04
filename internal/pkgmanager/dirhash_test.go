@@ -47,10 +47,10 @@ func TestTreeHashIsStableAndIgnoresExcludedDirs(t *testing.T) {
 func TestTreeHashGolden(t *testing.T) {
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{"b.nx": "b", "a/a.nx": "a"})
-	// sha256("a")=ca978112..., sha256("b")=3e23e816...; linhas ordenadas:
+	// sha256("a")=ca978112..., sha256("b")=3e23e816...; linhas ordenadas por caminho:
 	// "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb  a/a.nx\n"
 	// "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d  b.nx\n"
-	const want = "ef00c411a2c22895690493e6171ccd40da71d41cd93036e4ef99fea73f864e7a"
+	const want = "cb5f791053dc9fe3eb77b34e5c645116d93ba4d24d660160ce5b075842037809"
 	got, err := TreeHash(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +60,27 @@ func TestTreeHashGolden(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("golden: %s", got)
+	}
+}
+
+func TestTreeHashSortsByPathNotHash(t *testing.T) {
+	dir := t.TempDir()
+	// Choose contents such that hash order and path order differ.
+	// sha256("z")=594e519a..., sha256("a")=ca978112ca...; paths: a.nx < z.nx
+	writeTree(t, dir, map[string]string{"z.nx": "z", "a.nx": "a"})
+	// Hash order would be: 594e519a... z.nx, ca978112... a.nx (alphabetically 5 < c)
+	// Path order is: a.nx, z.nx
+	// TreeHash must use path order (spec §3.3), not hash order.
+	got, err := TreeHash(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expected: path-sorted lines
+	// sha256("a")=ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb
+	// sha256("z")=594e519ae499312b29433b7dd8a97ff068defcba9755b6d5d00e84c524d67b06
+	const wantSorted = "fc25b6ea2c14beb8dbd38b8506926ff0038f4d8d7ec50424f27bd33efa07ce17"
+	if got != wantSorted {
+		t.Fatalf("path-sorted hash: expected %s, got %s", wantSorted, got)
 	}
 }
 

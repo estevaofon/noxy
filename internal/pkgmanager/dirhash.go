@@ -21,7 +21,11 @@ var treeHashExcluded = map[string]bool{".git": true, "bin": true, "noxy_libs": t
 // "<sha256 hex do arquivo>  <caminho com />\n" ordenadas por caminho
 // (spec §3.3). Symlink e erro, como no Go.
 func TreeHash(dir string) (string, error) {
-	var lines []string
+	type fileHash struct {
+		path    string
+		hashHex string
+	}
+	var hashes []fileHash
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -59,16 +63,18 @@ func TreeHash(dir string) (string, error) {
 		if _, copyErr := io.Copy(h, f); copyErr != nil {
 			return copyErr
 		}
-		lines = append(lines, fmt.Sprintf("%x  %s\n", h.Sum(nil), rel))
+		hashes = append(hashes, fileHash{rel, fmt.Sprintf("%x", h.Sum(nil))})
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
-	sort.Strings(lines)
+	sort.Slice(hashes, func(i, j int) bool {
+		return hashes[i].path < hashes[j].path
+	})
 	h := sha256.New()
-	for _, line := range lines {
-		h.Write([]byte(line))
+	for _, fh := range hashes {
+		fmt.Fprintf(h, "%s  %s\n", fh.hashHex, fh.path)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
