@@ -19,10 +19,25 @@ declaração, não a grafia".
   `docs/concurrency.md` continua valendo — leitura-modificação-escrita não é
   atômica. Sai a regra "module variables are read-only outside the module"
   da 0.11.0 (precedente: Python, Go, Nim, Swift permitem escrever num global
-  de outro módulo).
+  de outro módulo). Membro cujo tipo declarado o programa não consegue
+  traduzir (instância de struct genérico do módulo, §1.6) é **recusado** na
+  escrita — `cannot assign to 'g.c': its type is an instance of a generic
+  struct of 'g' and cannot be checked here`, com hint para expor uma função
+  no módulo; escrever sem checagem gravava outro tipo no global e quebrava o
+  módulo por dentro. A leitura continua dinâmica.
+- **O objeto do namespace é uma visão viva, nunca copiada**: `let s: any = m`
+  ou passar `m` a um `func(x: any)` já não destaca o estado — a escrita
+  (`s.count = 3`) cai no módulo e uma função dele lê o valor novo. Antes o
+  CoW clonava o mapa exportado para um store órfão e a escrita sumia em
+  silêncio. Precedente: em Python, Go e Nim um módulo é uma referência. Um
+  map comum em `any` continua com semântica de cópia.
 - **Hint de `unknown type` nomeia o módulo real** (§11): `add 'use base' or
   'use mid select V' to name this type` quando alguma dependência carregada
-  declara o struct.
+  declara o struct. Com mais de um módulo carregado declarando o nome, o
+  hint lista todos (`'V' is declared by modules base and otherdiff; add 'use
+  <module>' or 'use <module> select V' for the one you mean`) em vez de
+  escolher um por ordem alfabética — a escolha arbitrária apontava para a
+  declaração errada metade das vezes.
 
 ### Changed (BREAKING)
 - **Tipo é a declaração, não a grafia** (§3, §11). O compilador passa a
@@ -55,6 +70,19 @@ declaração, não a grafia".
   continua sendo o nome cru mais o layout (dois módulos com `struct V` de
   mesmo layout são indistinguíveis no VM; a mensagem `expected V, got V`
   é defeito de exibição) — bug pré-existente, follow-up registrado na #133.
+- **`m.chave = v` sobre `map[K, V]` é checado como `m["chave"] = v`.** A
+  escrita com ponto num valor de tipo estático map passa pelo mesmo
+  protocolo do caminho indexado: a chave é a string do membro (`K` tem de
+  aceitar `string`), o valor tem de satisfazer `V`, e slot de valor `ref T`
+  só aceita ref. A **leitura** com ponto sobre map continua dinâmica.
+
+  | Antes | Agora |
+  |---|---|
+  | `mm.a = "boom"` em `map[string, int]` → runtime error `only instances have properties` (0.23.3) | `[line N] type mismatch in map value: expected int, got string` em compilação |
+  | `mk.a = 1` em `map[int, int]` → runtime error | `type mismatch in map key: expected int, got string` |
+
+  Migração: use `mm["a"] = v` (a forma documentada, §5) ou corrija o tipo do
+  valor — o erro diz qual é.
 - **Array de tamanho fixo: verificação de compatibilidade volta a passar
   pelo runtime.** O atalho de string removido de `areTypesCompatible`
   aceitava por acidente, em compilação, `let a: int[5] = <valor any[]>`; a

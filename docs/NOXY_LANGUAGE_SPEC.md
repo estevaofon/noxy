@@ -2471,6 +2471,19 @@ binding and is unaffected. As with any shared global, concurrent writers
 must coordinate (docs/concurrency.md): a single write is synchronized, a
 read-modify-write is not.
 
+The namespace object is a **view of the module's live state**, not a value
+with copy semantics: binding it to another name (`let s: any = m`) or passing
+it to a `func(x: any)` never detaches it, so a write through that name is
+still seen inside the module (in Python, Go and Nim a module is likewise a
+reference).
+
+A member whose declared type the program cannot write — an instance of a
+generic struct of the module (§1.6) — is **read** dynamically but cannot be
+**assigned**: `cannot assign to 'g.c': its type is an instance of a generic
+struct of 'g' and cannot be checked here`, with a hint to expose a function in
+the module that updates it. An unchecked write there would store another type
+in the module's own global and break the module from the inside.
+
 ### Struct identity across import forms
 
 A struct imported by namespace (`geometry.Point`) and the same struct imported
