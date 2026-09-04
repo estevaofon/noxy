@@ -864,6 +864,15 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return t
 	}
 
+	// Issue #134 (spec §1.5): keyword de tipo contextual seguida de '.' e'
+	// um alias de modulo qualificando um tipo (`use src.map as map` +
+	// `let t: map.Tile`). Um token de lookahead decide: `map[` e `chan T`
+	// caem no switch abaixo como antes. Parametro de tipo nunca e' keyword
+	// (spec §1.4), entao activeTypeParams nao e' consultado aqui.
+	if isContextualTypeKeyword(p.curToken.Type) && p.peekTokenIs(token.DOT) {
+		return p.parseNamedType(p.curToken.Literal)
+	}
+
 	var t ast.NoxyType
 	// Primitive types and Identifier types
 	switch p.curToken.Type {
@@ -902,39 +911,7 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		if p.activeTypeParams[p.curToken.Literal] {
 			return &ast.TypeParamType{Name: p.curToken.Literal}
 		}
-		name := p.curToken.Literal
-		// Support dot notation for types (e.g. io.File)
-		for p.peekTokenIs(token.DOT) {
-			p.nextToken() // eat .
-			if !p.expectPeek(token.IDENTIFIER) {
-				return nil
-			}
-			name += "." + p.curToken.Literal
-		}
-		// Tipo generico em posicao de anotacao: Nome<arg1, arg2>
-		if p.peekTokenIs(token.LT) {
-			p.nextToken() // eat nome; curToken = <
-			args := []ast.NoxyType{}
-			for {
-				p.nextToken() // avanca para o inicio do proximo tipo
-				arg := p.parseType()
-				if arg == nil {
-					return nil
-				}
-				args = append(args, arg)
-				p.splitCompositeGT() // divide >> ou >= pendentes ANTES de checar peek
-				if p.peekTokenIs(token.COMMA) {
-					p.nextToken()
-					continue
-				}
-				break
-			}
-			if !p.expectPeek(token.GT) {
-				return nil
-			}
-			return &ast.GenericType{Name: name, Args: args}
-		}
-		t = &ast.PrimitiveType{Name: name}
+		return p.parseNamedType(p.curToken.Literal)
 	case token.MAP:
 		// map[key, val]
 		if !p.expectPeek(token.LBRACKET) {
@@ -966,6 +943,46 @@ func (p *Parser) parseAtomicType() ast.NoxyType {
 		return nil
 	}
 	return t
+}
+
+// parseNamedType completa um tipo nomeado a partir do primeiro segmento ja'
+// consumido (curToken): segmentos qualificados `.Nome` (io.File) e
+// argumentos genericos `Nome<T, U>`. Ao retornar, curToken esta' no ultimo
+// token do tipo. O segmento apos '.' exige IDENTIFIER — keyword ali e'
+// posicao de tipo e recebe o erro do #126 (`let x: io.map`).
+func (p *Parser) parseNamedType(name string) ast.NoxyType {
+	// Support dot notation for types (e.g. io.File)
+	for p.peekTokenIs(token.DOT) {
+		p.nextToken() // eat .
+		if !p.expectPeek(token.IDENTIFIER) {
+			return nil
+		}
+		name += "." + p.curToken.Literal
+	}
+	// Tipo generico em posicao de anotacao: Nome<arg1, arg2>
+	if p.peekTokenIs(token.LT) {
+		p.nextToken() // eat nome; curToken = <
+		args := []ast.NoxyType{}
+		for {
+			p.nextToken() // avanca para o inicio do proximo tipo
+			arg := p.parseType()
+			if arg == nil {
+				return nil
+			}
+			args = append(args, arg)
+			p.splitCompositeGT() // divide >> ou >= pendentes ANTES de checar peek
+			if p.peekTokenIs(token.COMMA) {
+				p.nextToken()
+				continue
+			}
+			break
+		}
+		if !p.expectPeek(token.GT) {
+			return nil
+		}
+		return &ast.GenericType{Name: name, Args: args}
+	}
+	return &ast.PrimitiveType{Name: name}
 }
 
 // splitCompositeGT divide tokens compostos que contem '>' quando estamos

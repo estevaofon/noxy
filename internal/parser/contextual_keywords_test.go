@@ -72,6 +72,38 @@ func TestContextualKeywordNodesAreIdentifiers(t *testing.T) {
 	}
 }
 
+// Spec §1.5: com `use src.map as map` legal, `map.Tile` em anotacao e' um
+// tipo qualificado — `map.` e `map[` se distinguem por um token de
+// lookahead. `chan T` e `map[K, V]` continuam construtores de tipo.
+func TestContextualKeywordAliasQualifiesAType(t *testing.T) {
+	p := New(lexer.New("let t: map.Tile = map.tile()\nlet u: map.Box<int> = map.box(1)\nlet m: map[string, int] = {}\nlet c: chan int = make_chan()\n"))
+	program := p.ParseProgram()
+	checkParserErrors(t, p)
+
+	let, ok := program.Statements[0].(*ast.LetStmt)
+	if !ok || let.Type == nil || let.Type.String() != "map.Tile" {
+		t.Fatalf("statement 0 = %#v, want let with type map.Tile", program.Statements[0])
+	}
+	generic, ok := program.Statements[1].(*ast.LetStmt)
+	if !ok || generic.Type == nil {
+		t.Fatalf("statement 1 = %#v, want let with generic type", program.Statements[1])
+	}
+	if gt, isGeneric := generic.Type.(*ast.GenericType); !isGeneric || gt.Name != "map.Box" || len(gt.Args) != 1 {
+		t.Fatalf("statement 1 type = %#v, want GenericType map.Box<int>", generic.Type)
+	}
+}
+
+// `map` seguido de outra coisa que nao '.' nem '[' continua a ser o erro de
+// construtor de tipo, nao um tipo chamado map.
+func TestMapTypeStillRequiresBracket(t *testing.T) {
+	p := New(lexer.New("let v: map string = {}\n"))
+	_ = p.ParseProgram()
+	joined := strings.Join(p.Errors(), "\n")
+	if !strings.Contains(joined, "expected '[', found string") {
+		t.Fatalf("errors=%q, want expected '[', found string", p.Errors())
+	}
+}
+
 // Campo de struct cujo token nao e nome: antes era pulado em silencio (o
 // campo sumia e o erro so aparecia no construtor); agora e erro de sintaxe.
 // `ref` nao e nome em posicao alguma.
