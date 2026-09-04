@@ -63,3 +63,34 @@ func TestUnknownCharacterIsIllegalToken(t *testing.T) {
 		t.Fatalf("tokens ILLEGAL = %q, want [\"@\"]", illegal)
 	}
 }
+
+// Issue #126 item 3 (PEP 701): dentro de `{...}` de uma f-string, uma aspa
+// igual a do delimitador abre um literal aninhado em vez de fechar a
+// f-string. O lexer conta a profundidade de chaves; o parser continua
+// recebendo o literal inteiro e re-lexando cada `{...}`.
+func TestFStringQuotesInsideBraces(t *testing.T) {
+	cases := []struct {
+		name, source, want string
+	}{
+		{"double inside double", `f"n = {fmt("%03d", n)}"`, `n = {fmt("%03d", n)}`},
+		{"single inside single", `f'{fmt('%d', n)}'`, `{fmt('%d', n)}`},
+		{"map literal with space", `f"{ {"a": 1}["a"] }"`, `{ {"a": 1}["a"] }`},
+		{"escaped quote inside nested string stays verbatim", `f"{s + "a\"b"}"`, `{s + "a\"b"}`},
+		{"literal braces still escape at depth zero", `f"{{x}} = {x}"`, `{{x}} = {x}`},
+		{"nested braces close in order", `f"{{{x}}}"`, `{{{x}}}`},
+		{"brace char inside nested string does not count", `f"{"}"}!"`, `{"}"}!`},
+		{"text after the expression", `f"{a}: {b}"`, `{a}: {b}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			requireLiteral(t, tc.source, token.FSTRING, tc.want)
+		})
+	}
+}
+
+func TestFStringUnclosedBraceIsReportedByTheLexer(t *testing.T) {
+	requireIllegal(t, "f\"{x\"\n", "unclosed brace in f-string")
+	requireIllegal(t, "f\"{x\"\n", "hint:")
+	requireIllegal(t, `f"{x`, "unclosed brace in f-string")
+	requireIllegal(t, `f"{"abc}"`, "unterminated")
+}

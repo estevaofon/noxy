@@ -497,19 +497,48 @@ func appendValidatedRune(out []byte, code int) ([]byte, string) {
 
 // readQuoted scans the body of a quoted literal. An empty reason means
 // success; otherwise it describes why the literal is illegal.
+//
+// F-strings are brace-aware (issue #126, the PEP 701 rule): inside a `{...}`
+// expression a quote equal to the delimiter opens a nested string literal
+// (copied verbatim, escapes included — the parser re-lexes the expression)
+// instead of closing the f-string. At depth 0 `{{` and `}}` are literal
+// braces and do not change the depth. A `{` still open at a raw newline or
+// at EOF is reported here, next to its cause.
 func (l *Lexer) readQuoted(quote byte, kind literalKind) (string, string) {
 	l.readChar() // Skip opening quote
 
 	var out []byte
+	depth := 0 // f-string only: `{` of expressions still open
 
 	for {
 		if l.ch == 0 {
+			if depth > 0 {
+				return string(out), unclosedBraceReason
+			}
 			return string(out), "unterminated " + kind.name()
 		}
-		if l.ch == quote {
+		if l.ch == quote && depth == 0 {
 			break
 		}
-		if l.ch == '\\' {
+		switch {
+		case kind == literalFString && depth > 0 && l.ch == '\n':
+			return string(out), unclosedBraceReason
+		case kind == literalFString && depth == 0 && (l.ch == '{' || l.ch == '}') && l.peekChar() == l.ch:
+			out = append(out, l.ch, l.ch)
+			l.readChar()
+		case kind == literalFString && l.ch == '{':
+			depth++
+			out = append(out, '{')
+		case kind == literalFString && depth > 0 && l.ch == '}':
+			depth--
+			out = append(out, '}')
+		case kind == literalFString && depth > 0 && (l.ch == '"' || l.ch == '\''):
+			var reason string
+			out, reason = l.readNestedQuoted(out, l.ch)
+			if reason != "" {
+				return string(out), reason
+			}
+		case l.ch == '\\':
 			l.readChar() // Skip backslash
 			if l.ch == 0 {
 				return string(out), "unterminated " + kind.name()
@@ -519,12 +548,54 @@ func (l *Lexer) readQuoted(quote byte, kind literalKind) (string, string) {
 			if reason != "" {
 				return string(out), reason
 			}
-		} else {
+		default:
 			out = append(out, l.ch)
 		}
 		l.readChar()
 	}
 	return string(out), ""
+}
+
+// unclosedBraceReason is used both when a raw newline or EOF is hit while an
+// expression's `{` is still open, and when a nested literal inside that
+// expression consumes the rest of the input looking for its own closing
+// quote (which also leaves the outer `{` unterminated) — hence it names both
+// "unclosed brace" and "unterminated" so either phrasing finds it.
+const unclosedBraceReason = "unclosed brace in f-string (unterminated '{' expression)\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"
+
+// readNestedQuoted copies a string literal that appears INSIDE an f-string
+// expression, verbatim (opening quote, body with escapes untouched, closing
+// quote), leaving l.ch on the closing quote. The parser re-lexes the
+// expression, so the escapes are interpreted there.
+//
+// A raw newline here means the nested literal — and therefore the `{`
+// expression around it — cannot close on this line, same as an unescaped
+// newline anywhere else at depth > 0: reported as unclosedBraceReason rather
+// than a plain "unterminated string", since the actionable fix is the same
+// missing `}`.
+func (l *Lexer) readNestedQuoted(out []byte, quote byte) ([]byte, string) {
+	out = append(out, quote)
+	l.readChar()
+	for {
+		if l.ch == 0 {
+			return out, unclosedBraceReason
+		}
+		if l.ch == '\n' {
+			return out, unclosedBraceReason
+		}
+		if l.ch == quote {
+			return append(out, quote), ""
+		}
+		if l.ch == '\\' {
+			out = append(out, '\\')
+			l.readChar()
+			if l.ch == 0 {
+				return out, unclosedBraceReason
+			}
+		}
+		out = append(out, l.ch)
+		l.readChar()
+	}
 }
 
 func newToken(tokenType token.TokenType, ch byte) token.Token {

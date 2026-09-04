@@ -172,11 +172,13 @@ func TestParseScientificFloatLiteral(t *testing.T) {
 }
 
 func TestFStringBraceEscapesAndTrailingTokenError(t *testing.T) {
-	// A ultima variante usa f-string de aspas simples porque o mapa literal
-	// `{"a": 1}` contem aspas duplas: o lexer nao e brace-aware, entao aspas
-	// duplas dentro de `{...}` exigem f-string delimitada por aspas simples
-	// (mesma regra do caso `f'{"a"}'` logo antes) — ver §9 da spec.
-	for _, source := range []string{"f\"{{x}}\"\n", "f\"{{{x}}}\"\n", "f'{\"a\"}'\n", "f'{ {\"a\": 1}[\"a\"] }'\n"} {
+	// Issue #126 item 3 (PEP 701): o lexer conta chaves, entao aspas iguais
+	// as do delimitador dentro de `{...}` abrem um literal aninhado — nao ha
+	// mais a regra "use f'...' quando a expressao tem aspas duplas".
+	for _, source := range []string{
+		"f\"{{x}}\"\n", "f\"{{{x}}}\"\n", "f'{\"a\"}'\n", "f'{ {\"a\": 1}[\"a\"] }'\n",
+		"f\"{\"a\"}\"\n", "f\"{ {\"a\": 1}[\"a\"] }\"\n", "f\"n = {fmt(\"%03d\", n)}\"\n", "f'{fmt('%d', n)}'\n",
+	} {
 		p := New(lexer.New(source))
 		p.ParseProgram()
 		if len(p.Errors()) != 0 {

@@ -76,7 +76,7 @@ func TestSyntaxErrorMessages(t *testing.T) {
 		{
 			name:   "f-string with unclosed brace",
 			source: "print(f\"{x\")\n",
-			want:   []string{"SyntaxError: unclosed brace in f-string"},
+			want:   []string{"SyntaxError: unclosed brace in f-string", "hint: every '{' that starts an expression"},
 		},
 		{
 			name:   "f-string with broken inner expression",
@@ -92,6 +92,11 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			name:   "ref of ref type",
 			source: "let q: ref ref int\n",
 			want:   []string{"SyntaxError: 'ref ref' is not a type", "hint: a reference is never taken to a reference"},
+		},
+		{
+			name:   "unterminated string is a SyntaxError with the lexer reason",
+			source: "let s: string = \"abc\n",
+			want:   []string{"SyntaxError: unterminated string"},
 		},
 	}
 	for _, tc := range cases {

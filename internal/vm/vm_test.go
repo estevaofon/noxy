@@ -73,6 +73,14 @@ func TestFStringBraceEscapesRender(t *testing.T) {
 	}
 }
 
+// Issue #126 item 3: aspas duplas dentro de `{}` de uma f"..." (PEP 701).
+func TestFStringDoubleQuotesInsideBracesRunEndToEnd(t *testing.T) {
+	got := captureVMSource(t, "let n: int = 7\ntest_report(f\"n = {fmt(\"%03d\", n)} {\"!\"} {\"}\"}\")\n")
+	if s, _ := got.Obj.(string); s != "n = 007 ! }" {
+		t.Fatalf("got %q, want %q", s, "n = 007 ! }")
+	}
+}
+
 func runVmTests(t *testing.T, tests []vmTestCase) {
 	for _, tt := range tests {
 		testExpectedObject(t, tt.expected, captureVMSource(t, "test_report("+tt.input+")"))

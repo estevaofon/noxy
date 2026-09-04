@@ -1141,18 +1141,24 @@ func (p *Parser) parseFString() ast.Expression {
 		case ch == '{':
 			braceCount := 1
 			j := i + 1
+		scan:
 			for ; j < len(literal); j++ {
-				if literal[j] == '{' {
+				switch literal[j] {
+				case '{':
 					braceCount++
-				} else if literal[j] == '}' {
+				case '}':
 					braceCount--
 					if braceCount == 0 {
-						break
+						break scan
 					}
+				case '"', '\'':
+					// Literal aninhado (PEP 701, issue #126): a expressao pode
+					// conter strings; chaves dentro delas nao contam.
+					j = skipNestedQuoted(literal, j)
 				}
 			}
 			if j >= len(literal) {
-				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: unclosed brace in f-string", line, column))
+				p.errors = append(p.errors, fmt.Sprintf("[%d:%d] SyntaxError: %s", line, column, "unclosed brace in f-string\n  hint: every '{' that starts an expression needs a matching '}'; write '{{' for a literal brace"))
 				return nil
 			}
 			flush()
@@ -1202,6 +1208,22 @@ func (p *Parser) parseFString() ast.Expression {
 		}
 	}
 	return combined
+}
+
+// skipNestedQuoted devolve o indice da aspa que fecha o literal de string
+// aberto em literal[start] (pulando `\x`), ou len(literal)-1 se ele nao
+// fecha — o chamador entao cai em "unclosed brace".
+func skipNestedQuoted(literal string, start int) int {
+	quote := literal[start]
+	for k := start + 1; k < len(literal); k++ {
+		switch literal[k] {
+		case '\\':
+			k++
+		case quote:
+			return k
+		}
+	}
+	return len(literal) - 1
 }
 
 // parseTryExpression: `try expr` com a precedencia de prefixo — `try f(x).ok`
@@ -1795,9 +1817,13 @@ func (p *Parser) parseMemberAccess(left ast.Expression) ast.Expression {
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	msg := fmt.Sprintf("[%d:%d] SyntaxError: invalid syntax %q", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
-	// If literal is empty (e.g. EOF), might be weird.
-	if p.curToken.Type == token.EOF {
+	switch p.curToken.Type {
+	case token.EOF:
 		msg = fmt.Sprintf("[%d:%d] SyntaxError: unexpected EOF", p.curToken.Line, p.curToken.Column)
+	case token.ILLEGAL:
+		// O literal de um ILLEGAL e a razao que o lexer escreveu
+		// ("unterminated string", "unclosed brace in f-string" + hint).
+		msg = fmt.Sprintf("[%d:%d] SyntaxError: %s", p.curToken.Line, p.curToken.Column, p.curToken.Literal)
 	}
 	p.errors = append(p.errors, msg)
 }
