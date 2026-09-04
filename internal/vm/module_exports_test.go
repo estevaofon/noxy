@@ -634,28 +634,18 @@ test_report(to_str(viaSelect) + "|" + to_str(viaNamespace) + "|" + to_str(viaFun
 
 // O struct `Point` declarado no importador NAO e o `Point` de geometry:
 // typesEquivalent so aproxima dois nomes que resolvem para a MESMA
-// *ast.StructStatement, entao `geometry.Point` (declaracao do modulo) continua
-// recusado onde se espera o `Point` local. E o guard contra a versao frouxa da
-// regra (looselySameType, que compara so o nome sem qualificador, aceitaria os
-// dois como iguais).
-//
-// O caminho inverso — `use geometry select dist2` com um `Point` local, sem o
-// namespace — nao e detectavel: a assinatura importada carrega o nome NU
-// `Point`, que o importador resolve para o proprio struct. Qualificar os tipos
-// das assinaturas importadas esta fora do §8c ("c.structs nao passa a indexar
-// nomes qualificados").
+// *ast.StructStatement, entao um `Point` LOCAL continua recusado onde se
+// espera o `Point` de geometry, e vice-versa — nos dois sentidos, porque a
+// assinatura importada por select carrega a DECLARACAO de geometry.Point
+// (Decl), nao o nome cru: `geometry.Point` passado para `dist2` (que quer o
+// Point de geometry) e legitimamente a MESMA declaracao e compila; um
+// `Point` local passado no lugar e uma declaracao DIFERENTE e e recusado. E
+// o guard contra a versao frouxa da regra (looselySameType, que compara so o
+// nome sem qualificador, aceitaria os dois como iguais nos dois sentidos).
 func TestLocalStructIsNotTheModuleStructOfTheSameName(t *testing.T) {
-	// Issue #133: com Decl, a assinatura de dist2 (lida via moduleTopLevelBindings,
-	// que ja roda validator.Compile do modulo) carrega a declaracao real de
-	// geometry.Point desde a Task 2 — o caso ABAIXO (geometry.Point passado a
-	// dist2, que quer o Point de geometry) passa a compilar sem erro, correto.
-	// O "caminho inverso" que o comentario acima documentava como "nao
-	// detectavel" inverte na Task 5 (assinatura importada por select ganha
-	// exibicao qualificada, `expected geometry.Point, got Point`); ate la o
-	// teste fica pulado.
-	t.Skip("inverte na Task 5")
 	root := writeModuleFiles(t, map[string]string{"geometry.nx": geometryModule})
-	_, err := runModuleProgram(t, root, `use geometry
+	// Sentido 1: geometry.Point (a MESMA declaracao que dist2 quer) compila.
+	if _, err := runModuleProgram(t, root, `use geometry
 use geometry select dist2
 struct Point
     x: int
@@ -663,9 +653,24 @@ struct Point
 end
 let fromModule: geometry.Point = geometry.Point(0, 0)
 dist2(fromModule, fromModule)
+`); err != nil {
+		t.Fatalf("geometry.Point passed to geometry's own dist2 must compile: %v", err)
+	}
+	// Sentido 2 (o guard de identidade cross-modulo): um Point LOCAL, com o
+	// MESMO nome mas uma declaracao DIFERENTE, e recusado no lugar do Point
+	// de geometry. So a substring do argumento e conferida — a mensagem
+	// completa ("expected geometry.Point, got Point") depende da exibicao
+	// qualificada que a Task 5 acrescenta.
+	_, err := runModuleProgram(t, root, `use geometry select dist2
+struct Point
+    x: int
+    y: int
+end
+let local: Point = Point(0, 0)
+dist2(local, local)
 `)
-	if err == nil || !strings.Contains(err.Error(), "expected Point, got geometry.Point") {
-		t.Fatalf("error=%v, want nominal mismatch", err)
+	if err == nil || !strings.Contains(err.Error(), "argument 1 to 'dist2'") {
+		t.Fatalf("error=%v, want nominal mismatch on the local Point", err)
 	}
 }
 

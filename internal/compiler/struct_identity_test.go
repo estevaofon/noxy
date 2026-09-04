@@ -146,3 +146,31 @@ func TestTypesEquivalentUsesDeclNotName(t *testing.T) {
 		t.Fatal("primitives still compare by name")
 	}
 }
+
+func TestForwardReferenceThroughGenericArgumentCompiles(t *testing.T) {
+	// Issue #133 (achado de revisao, round 1): um struct LOCAL pode nomear
+	// outro struct declarado MAIS ADIANTE no mesmo programa atraves do
+	// argumento de um generico (`c: Caixa<B>`, com `struct B` so depois de
+	// `struct A`). unknownFieldTypeError so pode confirmar B quando B ja
+	// estiver registrado em c.structs — para um template LOCAL isso so
+	// acontece quando predeclareStructs (ou o case *ast.StructStatement)
+	// chega em B, o que ainda NAO aconteceu quando A e predeclarado. A
+	// checagem eager de ensureStructInstance (generics_structs.go) pula esse
+	// caso (so roda para template IMPORTADO) e deixa o caminho de sempre
+	// cobrir a referencia adiantada.
+	src := `struct Caixa<T>
+    v: T
+end
+struct A
+    c: Caixa<B>
+end
+struct B
+    x: int
+end
+`
+	program := parseForTest(t, src)
+	c := NewWithState(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), "main.nx")
+	if _, _, err := c.Compile(program); err != nil {
+		t.Fatalf("forward reference through generic argument must compile: %v", err)
+	}
+}

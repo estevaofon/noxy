@@ -282,8 +282,20 @@ func (c *Compiler) ensureStructInstance(tpl *StructTemplate, args []ast.NoxyType
 	// designa declaracao") em vez do diagnostico especifico daqui. Confere
 	// AQUI, antes do call site normal usar os campos, para que o erro
 	// continue sendo o "unknown type" com hint, nao um mismatch generico.
-	if err := c.unknownFieldTypeError(instance); err != nil {
-		return "", err
+	//
+	// So para template IMPORTADO (mesma condicao de unknownFieldTypeError
+	// para o hint, runtime_types.go): um template LOCAL pode referenciar um
+	// struct declarado MAIS ADIANTE no mesmo programa (`c: Caixa<B>` com
+	// `struct B` depois) — nesse caso B so entra em c.structs quando
+	// predeclareStructs chega nele (function_types.go), o que ainda nao
+	// aconteceu aqui; conferir agora acusaria "unknown type" numa
+	// referencia adiantada legitima. O caminho de sempre (compiler.go, case
+	// *ast.StructStatement, DEPOIS do registro) continua cobrindo o
+	// template local quando a instancia e finalmente compilada.
+	if tpl.Module != c.moduleName {
+		if err := c.unknownFieldTypeError(instance); err != nil {
+			return "", instantiationChainError(displayInstanceName(base, args), line, err)
+		}
 	}
 	// Re-registra: os campos mudaram (GenericType -> nome qualificado) e o tipo
 	// do construtor derivado deles tem de acompanhar.
