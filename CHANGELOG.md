@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.23.5] - 2026-09-04
 
 Issue #134 — frontend: keywords de tipo contextuais, identificadores Unicode e
 token de erro tipado no lexer.
