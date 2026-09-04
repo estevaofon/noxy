@@ -73,6 +73,11 @@ fora do §1.2.
     pré-existente em que `use m select f` + `f(ref h.b)` podia escrever um
     valor do tipo errado através da referência; `function 'setstr' argument
     1: expected ref string, got ref B` volta a ser levantado.
+  - Mesma regra pelo lado do valor: argumento **por valor** cujo tipo
+    estático o programa não sabe nomear também passa pelo `OP_CALL`
+    validado — `mid.takeint(mid.getref())` volta a levantar `function
+    'takeint' argument 1: expected int, got ref` em vez de seguir em
+    silêncio.
 - **`pop` em posição inexistente é erro de runtime** (§10): `pop(ref xs)`
   em array vazio devolvia `null` sob um retorno tipado `T` — o "null de
   aridade num builtin tipado" que a 0.23.2 deixou pendente. Agora é `pop

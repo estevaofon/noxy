@@ -153,3 +153,62 @@ test_report(mid.read(h))
 		t.Fatalf("expected mutated field 99, got %q", got)
 	}
 }
+
+// Issue #126, mesma revisao adversarial pelo outro lado da chamada: um
+// argumento POR VALOR cujo tipo estatico o programa nao consegue nomear
+// (aqui o retorno `ref base.B` de `mid.getref()`, que programView zera
+// inteiro por ser inominavel apos `use mid`) tambem nao prova o MODO. Antes
+// da correcao, `argType == nil` passava por areStrictTypesCompatible sem
+// reclamar, `modesProven` continuava true, o call site emitia OP_CALL_STATIC
+// e validateParameterModes nunca rodava: a funcao recebia uma referencia
+// onde esperava um int e seguia em silencio.
+
+const byValueUnknownMidModule = `use base
+let origin: base.B = base.B(1)
+func getref() -> ref base.B
+    return ref origin
+end
+func takeint(n: int) -> int
+    return n + 1
+end
+func takestring(s: string) -> string
+    return s
+end
+`
+
+func TestNamespaceByValueArgumentWithUnnameableTypeIsCheckedAtRuntime(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{
+		"base.nx": refTargetBaseModule,
+		"mid.nx":  byValueUnknownMidModule,
+	})
+	_, err := runModuleProgram(t, root, `use mid
+test_report(mid.takeint(mid.getref()))
+`)
+	if err == nil {
+		t.Fatalf("expected runtime error, got none")
+	}
+	const want = "function 'takeint' argument 1: expected int, got ref"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected error mentioning %q, got %v", want, err)
+	}
+}
+
+func TestNamespaceByValueStringArgumentWithUnnameableTypeIsCheckedAtRuntime(t *testing.T) {
+	// Mesmo buraco com parametro `string`: a mensagem de runtime nomeia o
+	// parametro esperado, entao o sabor confirma que a validacao roda para
+	// qualquer tipo, nao so int.
+	root := writeModuleFiles(t, map[string]string{
+		"base.nx": refTargetBaseModule,
+		"mid.nx":  byValueUnknownMidModule,
+	})
+	_, err := runModuleProgram(t, root, `use mid
+test_report(mid.takestring(mid.getref()))
+`)
+	if err == nil {
+		t.Fatalf("expected runtime error, got none")
+	}
+	const want = "function 'takestring' argument 1: expected string, got ref"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected error mentioning %q, got %v", want, err)
+	}
+}

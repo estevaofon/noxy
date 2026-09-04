@@ -2718,6 +2718,18 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 			return nil, nil, err
 		}
 		argTypes = append(argTypes, argType)
+		// Tipo estatico desconhecido (campo de um `any`, retorno que
+		// programViewType zerou por ser inominavel pelo programa) ⇒ o MODO do
+		// argumento tambem NAO foi provado: asRefType(nil) e falso,
+		// areStrictTypesCompatible aceita nil contra qualquer parametro e as
+		// guardas de slot pulam nil, entao ninguem conferiu que o valor nao e
+		// uma referencia. Mesma regra do ramo `ref` acima: cair para OP_CALL
+		// devolve a checagem ao runtime (validateParameterModes, "expected
+		// int, got ref") — sem isso a referencia entra num slot por valor em
+		// silencio.
+		if isExact && argType == nil {
+			modesProven = false
+		}
 		if isExact {
 			if _, stillRef := asRefType(argType); stillRef {
 				if _, expectedIsRef := asRefType(funcType.Params[i]); !expectedIsRef {
