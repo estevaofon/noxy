@@ -192,6 +192,17 @@ func (p *Parser) ParseProgram() *ast.Program {
 }
 
 func (p *Parser) parseStatement() ast.Statement {
+	// resyncToLine so deve valer para O STATEMENT que esta comecando agora.
+	// Sem este reset, uma falha de expectPeek(IDENTIFIER) dentro de um helper
+	// aninhado cuja falha NAO propaga como nil do statement (parseMemberAccess
+	// dentro de uma expressao de atribuicao — `y = obj.map` — ou o ramo de
+	// tipo qualificado em parseValueType — `let x: io.map = 5`) deixaria a
+	// marca ligada; o statement seguinte, mesmo com um erro completamente
+	// diferente e sem keyword nenhuma, entraria por engano no atalho de pular
+	// ate o fim da linha em vez do seu proprio caminho de erro (issue #126
+	// item 5, achado de revisao).
+	p.resyncToLine = false
+
 	// As chamadas para *StmtType (e nao ast.Statement) sao verificadas contra
 	// nil e so entao devolvidas como ast.Statement: retornar diretamente um
 	// ponteiro concreto nil (`return p.parseLetStatement()`) empacota esse

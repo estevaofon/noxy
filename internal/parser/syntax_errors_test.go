@@ -146,6 +146,87 @@ func TestKeywordAsNameIsASingleError(t *testing.T) {
 	}
 }
 
+// Revisão da issue #126 item 5: resyncToLine só pode valer para o statement
+// que a ligou. peekError liga a marca quando um expectPeek(IDENTIFIER)
+// aninhado falha por causa de keyword de tipo — mas em `y = obj.map` quem
+// falha é parseMemberAccess (chamado de dentro da expressão do lado direito
+// do `=`), e o AssignStmt que envolve essa expressão ainda volta non-nil; em
+// `let x: io.map = 5` quem falha é o ramo de tipo qualificado dentro de
+// parseValueType, e parseLetStatement também volta non-nil (com Type
+// incompleto). Em nenhum dos dois casos ParseProgram vê o statement como
+// nil, então resyncAfterFailedStatement nunca roda para ELE — sem o reset no
+// topo de parseStatement, a marca ficava ligada e vazava para o PRÓXIMO
+// statement, fazendo-o (por engano) pular até o fim da linha em vez de
+// seguir seu próprio caminho de erro, comendo o resto do seu diagnóstico.
+func TestResyncFlagDoesNotLeakAcrossStatements(t *testing.T) {
+	const nextStmt = "let : int = 1\n"
+
+	baseline := New(lexer.New(nextStmt))
+	_ = baseline.ParseProgram()
+	baselineErrs := baseline.Errors()
+	if len(baselineErrs) == 0 {
+		t.Fatalf("baseline sem erro: %q deveria falhar sozinho", nextStmt)
+	}
+
+	cases := []struct {
+		name        string
+		leakingStmt string
+		keywordWant string
+	}{
+		{
+			"member access inside assignment RHS",
+			"y = obj.map\n",
+			"'map' is a keyword and cannot be used as a name",
+		},
+		{
+			"qualified type inside let annotation",
+			"let x: io.map = 5\n",
+			"'map' is a keyword and cannot be used as a name",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := New(lexer.New(tc.leakingStmt + nextStmt))
+			_ = p.ParseProgram()
+			errs := p.Errors()
+
+			joined := strings.Join(errs, "\n")
+			if !strings.Contains(joined, tc.keywordWant) {
+				t.Fatalf("errors=%q: falta o erro de keyword %q", errs, tc.keywordWant)
+			}
+
+			// O que sobra depois do(s) erro(s) da primeira linha tem que
+			// bater exatamente com o baseline do segundo statement rodando
+			// sozinho (ignorando o prefixo [linha:coluna], que muda porque
+			// "let : int = 1" está na linha 2 aqui e na linha 1 no
+			// baseline). Se a marca vazou, resyncAfterFailedStatement pula
+			// direto até a NEWLINE e engole os erros em cascata de
+			// "let : int = 1" — a lista final fica mais curta que o
+			// baseline.
+			if len(errs) < len(baselineErrs) {
+				t.Fatalf("errors=%q: tem menos erros que o baseline sozinho %q — resyncToLine vazou e pulou a linha seguinte", errs, baselineErrs)
+			}
+			got := errs[len(errs)-len(baselineErrs):]
+			for i, want := range baselineErrs {
+				if stripPosition(got[i]) != stripPosition(want) {
+					t.Fatalf("erro final [%d] = %q, want %q (deveria ser igual ao statement rodando sozinho, exceto a posição) — resyncToLine vazou", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// stripPosition remove o prefixo "[linha:coluna] " de uma mensagem de erro,
+// para comparar o conteúdo do diagnóstico ignorando a posição (que muda
+// conforme a linha em que o statement aparece).
+func stripPosition(err string) string {
+	_, rest, found := strings.Cut(err, "] ")
+	if !found {
+		return err
+	}
+	return rest
+}
+
 // Cada diagnóstico carrega a posição [linha:coluna] do ponto do erro — é o
 // que o usuário usa para achar a linha; garante que a linha não é sempre 1.
 func TestSyntaxErrorsCarryLineAndColumn(t *testing.T) {
