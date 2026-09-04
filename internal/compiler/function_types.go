@@ -262,7 +262,7 @@ func (c *Compiler) areStrictTypesCompatible(expected, actual ast.NoxyType) bool 
 		a, ok := actual.(*ast.RefType)
 		return ok && c.strictCompatibleNested(e.ElementType, a.ElementType)
 	default:
-		return expected.String() == actual.String() || c.typesEquivalent(expected, actual)
+		return c.typesEquivalent(expected, actual)
 	}
 }
 

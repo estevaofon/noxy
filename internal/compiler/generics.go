@@ -883,7 +883,7 @@ func (c *Compiler) validateImportedTemplateScope(tpl *FuncTemplate, arguments []
 				line, display, name, tpl.Module,
 			)
 		}
-		if importerType == nil || !(definedType.String() == importerType.String() || c.typesEquivalent(definedType, importerType)) {
+		if importerType == nil || !c.typesEquivalent(definedType, importerType) {
 			importerDesc := "desconhecido"
 			if importerType != nil {
 				importerDesc = importerType.String()

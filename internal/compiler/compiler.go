@@ -3438,9 +3438,6 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 	if _, ok := expected.(*ast.FunctionType); ok {
 		return c.areStrictTypesCompatible(expected, actual)
 	}
-	if expected.String() == actual.String() {
-		return true
-	}
 	if c.typesEquivalent(expected, actual) {
 		return true
 	}
@@ -3473,11 +3470,16 @@ func (c *Compiler) typesEquivalent(a, b ast.NoxyType) bool {
 		if !ok {
 			return false
 		}
-		if x.Name == y.Name {
-			return true
+		// Issue #133: Decl e a identidade; Name nunca. Se qualquer lado
+		// designa uma declaracao, decide o ponteiro (o outro lado resolve por
+		// Decl ou, sem ele, pelo nome — structDeclarationOf). So dois nomes
+		// que nao designam struct (primitivos, nomes ainda nao resolvidos)
+		// comparam por Name.
+		da, db := c.structDeclarationOf(x), c.structDeclarationOf(y)
+		if da != nil || db != nil {
+			return da == db
 		}
-		da := c.structDeclaration(x.Name)
-		return da != nil && da == c.structDeclaration(y.Name)
+		return x.Name == y.Name
 	case *ast.ArrayType:
 		y, ok := b.(*ast.ArrayType)
 		return ok && x.Size == y.Size && c.typesEquivalent(x.ElementType, y.ElementType)
@@ -3548,7 +3550,9 @@ func (c *Compiler) structDeclaration(name string) *ast.StructStatement {
 // (unify/bindTypeParam, sem *Compiler): iguais quando as strings coincidem
 // apos remover qualificadores de namespace dos nomes (geometry.Point ~ Point).
 // Mais permissiva que typesEquivalent — unify nunca e mais estrita que a
-// checagem da pass 2, que decide com o compilador completo.
+// checagem da pass 2, que decide com o compilador completo. Decl NAO e
+// consultado aqui de proposito: e a comparacao pura do unificador; a pass 2
+// decide com typesEquivalent.
 func looselySameType(a, b ast.NoxyType) bool {
 	return unqualifiedTypeString(a) == unqualifiedTypeString(b)
 }
