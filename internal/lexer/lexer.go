@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"unicode"
 	"unicode/utf8"
 
 	"noxy-vm/internal/token"
@@ -29,7 +30,12 @@ func (l *Lexer) readChar() {
 	}
 	l.position = l.readPosition
 	l.readPosition += 1
-	l.column++
+	// Coluna em CARACTERES, nao em bytes (issue #134): um byte de
+	// continuacao UTF-8 (10xxxxxx) pertence ao caractere que o byte
+	// anterior comecou e nao abre coluna nova. Linhas ASCII nao mudam.
+	if l.ch&0xC0 != 0x80 {
+		l.column++
+	}
 }
 
 func (l *Lexer) peekChar() byte {
@@ -37,6 +43,23 @@ func (l *Lexer) peekChar() byte {
 		return 0
 	}
 	return l.input[l.readPosition]
+}
+
+// currentRune decodifica o caractere UTF-8 que comeca em l.position. Para
+// ASCII (o caso comum) devolve rune(l.ch) e size 1 sem decodificar. Um byte
+// invalido decodifica como utf8.RuneError com size 1.
+func (l *Lexer) currentRune() (r rune, size int) {
+	if l.ch < utf8.RuneSelf {
+		return rune(l.ch), 1
+	}
+	return utf8.DecodeRuneInString(l.input[l.position:])
+}
+
+// advanceRune consome o caractere inteiro devolvido por currentRune.
+func (l *Lexer) advanceRune(size int) {
+	for i := 0; i < size; i++ {
+		l.readChar()
+	}
 }
 
 func (l *Lexer) NextToken() token.Token {
@@ -221,7 +244,8 @@ func (l *Lexer) NextToken() token.Token {
 		tok.Literal = ""
 		tok.Type = token.EOF
 	default:
-		if isLetter(l.ch) {
+		r, size := l.currentRune()
+		if isIdentStart(r) {
 			tok.Literal = l.readIdentifier()
 			tok.Type = token.LookupIdent(tok.Literal)
 			tok.Line = startLine
@@ -233,7 +257,13 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Column = startColumn
 			return tok
 		} else {
-			tok = newToken(token.ILLEGAL, l.ch)
+			// Caractere fora do alfabeto: UM token ILLEGAL por CARACTERE,
+			// com a runa inteira como literal (issue #134). Retorna cedo,
+			// como os ramos acima: a cauda comum de NextToken faz um
+			// readChar, que avancaria so um byte de um caractere multibyte.
+			tok = token.Token{Type: token.ILLEGAL, Literal: string(r), Line: startLine, Column: startColumn}
+			l.advanceRune(size)
+			return tok
 		}
 	}
 
@@ -260,8 +290,12 @@ func (l *Lexer) skipComment() {
 
 func (l *Lexer) readIdentifier() string {
 	position := l.position
-	for isLetter(l.ch) || isDigit(l.ch) || l.ch == '_' {
-		l.readChar()
+	for {
+		r, size := l.currentRune()
+		if !isIdentPart(r) {
+			break
+		}
+		l.advanceRune(size)
 	}
 	return l.input[position:l.position]
 }
@@ -599,8 +633,16 @@ func newToken(tokenType token.TokenType, ch byte) token.Token {
 	return token.Token{Type: tokenType, Literal: string(ch)}
 }
 
-func isLetter(ch byte) bool {
-	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_'
+// isIdentStart / isIdentPart definem identificador como Go (spec §1.3):
+// comeca com letra ou '_', continua com letra, digito ou '_', com letra e
+// digito por unicode.IsLetter/IsDigit. Numeros NAO passam por aqui —
+// readNumber continua a usar o isDigit ASCII abaixo.
+func isIdentStart(r rune) bool {
+	return r == '_' || unicode.IsLetter(r)
+}
+
+func isIdentPart(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func isDigit(ch byte) bool {

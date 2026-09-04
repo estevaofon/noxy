@@ -105,17 +105,14 @@ func TestSyntaxErrorMessages(t *testing.T) {
 			want:   []string{`invalid syntax "@"`},
 		},
 		{
-			// Issue #126: aspas curvas coladas de um editor de texto. Cada
-			// byte de U+201C vira um ILLEGAL cujo literal e a conversao
-			// int->rune daquele byte ("\u00e2" para 0xE2), com mais de um
-			// BYTE — lexer.IsReason contava bytes e tratava isso como uma
-			// "razao" escrita pelo lexer, imprimindo o caractere cru sem
-			// aspas nem diagnostico. Agora conta RUNAS e a mensagem generica
-			// volta.
+			// Issue #126/#134: aspas curvas coladas de um editor de texto.
+			// Cada caractere e UM token ILLEGAL com a runa inteira como
+			// literal e vira `invalid syntax "“"` — nunca o byte cru
+			// impresso sem aspas (o sintoma do #126).
 			name:    "pasted curly quotes report invalid syntax, not a bare byte",
 			source:  "let s: string = \u201cabc\u201d\n",
-			want:    []string{"invalid syntax"},
-			notWant: []string{"SyntaxError: \u00e2"},
+			want:    []string{`invalid syntax "“"`, `invalid syntax "”"`},
+			notWant: []string{"SyntaxError: \u00e2", `""`},
 		},
 	}
 	for _, tc := range cases {
@@ -264,6 +261,22 @@ func TestSyntaxErrorsCarryLineAndColumn(t *testing.T) {
 	joined := strings.Join(p.Errors(), "\n")
 	if !strings.HasPrefix(joined, "[3:") {
 		t.Fatalf("erro deveria apontar a linha 3: %q", joined)
+	}
+}
+
+// Issue #134: coluna em caracteres, e um diagnostico por caractere ilegal.
+func TestIllegalCharacterDiagnosticsCountRunes(t *testing.T) {
+	p := New(lexer.New("let s: string = “abc”\n"))
+	_ = p.ParseProgram()
+	if got := len(p.Errors()); got != 2 {
+		t.Fatalf("want 2 errors (one per pasted quote), got %d: %q", got, p.Errors())
+	}
+
+	p = New(lexer.New("let café = 1 @\n"))
+	_ = p.ParseProgram()
+	joined := strings.Join(p.Errors(), "\n")
+	if !strings.Contains(joined, `[1:14] SyntaxError: invalid syntax "@"`) {
+		t.Fatalf("errors=%q: want the '@' reported at column 14 (characters, not bytes)", p.Errors())
 	}
 }
 
