@@ -897,6 +897,17 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				return nil, nil, err
 			}
 
+			// Issue #133 (caso 3): dono de tipo estatico map[K, V]. `m.chave =
+			// v` e a MESMA escrita que `m["chave"] = v` (o OP_SET_PROPERTY do
+			// VM tem ramo de mapa desde o #133) e recebe a MESMA checagem do
+			// caminho indexado — sem ela um `map[string, int]` passava a
+			// guardar uma string. A leitura com ponto sobre mapa continua
+			// dinamica (memberType devolve nil para dono map): so a escrita
+			// muda aqui.
+			if mapType, isMap := unwrapRefType(leftType).(*ast.MapType); isMap {
+				return c.compileMapMemberAssignment(n, memberExp, mapType)
+			}
+
 			// RESOLVE FIELD TYPE (antes de compilar o valor: §3 target-typing,
 			// posicao 4, precisa do tipo declarado do campo como alvo para
 			// decidir se n.Value e um template de funcao nu):

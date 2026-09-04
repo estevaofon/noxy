@@ -92,3 +92,20 @@ test_report(p.x)
 		t.Fatalf("got %v, want 2", reported)
 	}
 }
+
+// Issue #133 (revisao adversarial, caso 3): com tipo estatico map[K, V] a
+// escrita com ponto e a mesma de `m["chave"] = v` — checada no compilador e
+// gravada na MESMA entrada em runtime.
+func TestMapDotWriteOnStaticMapTypeWritesTheEntry(t *testing.T) {
+	root := writeModuleFiles(t, map[string]string{})
+	reported, err := runModuleProgram(t, root, `let mm: map[string, int] = {"a": 1}
+mm.a = 2
+test_report(mm["a"])
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reported.Int() != 2 {
+		t.Fatalf("got %v, want 2", reported)
+	}
+}
