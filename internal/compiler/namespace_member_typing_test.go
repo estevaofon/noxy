@@ -1,6 +1,13 @@
 package compiler
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"noxy-vm/internal/ast"
+	"noxy-vm/internal/lexer"
+	"noxy-vm/internal/parser"
+)
 
 // Issue #126 item 2: `m.f(...)` e `m.x` pelo namespace carregam o tipo
 // declarado pelo modulo (o mesmo que `select` registra), traduzido para a
@@ -169,5 +176,90 @@ func TestNamespaceGenericTemplateStillRejected(t *testing.T) {
 
 func TestNamespaceCallInsideFunctionBodyIsTyped(t *testing.T) {
 	err := compileSourceAtRoot(t, rollRoot(t), "use m\nfunc f() -> string\n    let v = m.roll(1)\n    return v\nend\n")
+	requireErrorMentions(t, err, "expected string, got int")
+}
+
+func TestReplNamespaceCallIsTypedOnLaterLine(t *testing.T) {
+	// REPL: cada linha e um compilador novo; `use m` numa linha e
+	// `m.roll(1)` na seguinte tem de ver o tipo — namespaceImports e
+	// namespaceOrder viajam em ModuleState.
+	root := rollRoot(t)
+	globals := make(map[string]ast.NoxyType)
+	structs := make(map[string]*ast.StructStatement)
+	var modules *ModuleState
+	for _, line := range []string{
+		"use m\n",
+		"let v = m.roll(1)\n",
+		"let s: string = v\n",
+		"let p = m.norm(m.V(1.0, 2.0))\n",
+		"let bad: string = p\n",
+	} {
+		program := parser.New(lexer.New(line)).ParseProgram()
+		c := NewWithStateAndRoot(globals, structs, "REPL", root)
+		c.SetModuleState(modules)
+		_, _, err := c.Compile(program)
+		modules = c.ModuleState()
+		switch {
+		case strings.HasPrefix(line, "let s"):
+			requireErrorMentions(t, err, "expected string, got int")
+		case strings.HasPrefix(line, "let bad"):
+			requireErrorMentions(t, err, "expected string, got m.V")
+		default:
+			requireNoError(t, err)
+		}
+	}
+}
+
+func TestNamespaceCallInsideGenericFunctionBodyIsTyped(t *testing.T) {
+	// Corpo de template generico: o tipo do namespace tem de sobreviver a
+	// instanciacao (`wrap<int>`), senao `return m.roll(1)` num `-> string`
+	// passaria batido. A mensagem vem da checagem do corpo instanciado.
+	err := compileSourceAtRoot(t, rollRoot(t), "use m\nfunc wrap<T>(x: T) -> string\n    return m.roll(1)\nend\nlet s: string = wrap(1)\n")
+	requireErrorMentions(t, err, "return type mismatch in 'main::wrap<int>': expected string, got int")
+}
+
+func TestNamespaceNullableMemberNarrows(t *testing.T) {
+	// Interacao com a spec de nullable (§2): um `let` de topo `V?` lido pelo
+	// namespace entra no fluxo de narrowing como qualquer outro valor —
+	// dentro do `if m.opt != null` o tipo e `o.V` (nao-nulo), e fora dele o
+	// erro traz o hint de `may be null`.
+	root := t.TempDir()
+	writeModuleFile(t, root, "o.nx", "struct V\n    x: int\nend\nlet opt: V? = null\nfunc get() -> V?\n    return null\nend\n")
+
+	err := compileSourceAtRoot(t, root, "use o\nif o.opt != null then\n    let s: string = o.opt\nend\n")
+	requireErrorMentions(t, err, "expected string, got o.V")
+
+	err = compileSourceAtRoot(t, root, "use o\nlet s: string = o.opt\n")
+	requireErrorMentions(t, err, "expected string, got o.V?", "may be null")
+
+	// e o retorno `V?` de uma chamada por namespace narrowa igual:
+	err = compileSourceAtRoot(t, root, "use o\nlet v = o.get()\nif v != null then\n    let s: string = v\nend\n")
+	requireErrorMentions(t, err, "expected string, got o.V")
+}
+
+func TestNamespaceMemberOfUnloadableModuleStaysDynamic(t *testing.T) {
+	// `use nope` de um modulo que nao existe ao lado nao e erro de
+	// compilacao (a resolucao real fica para o runtime; cf.
+	// TestFunctionBodyOnlyWildcardDoesNotAffectModuleLoadability, que exige
+	// que uma dependencia ausente nao invalide o modulo). A tipagem por
+	// namespace nao pode introduzir erro NOVO ai: sem exports descobertos,
+	// importedBindingType falha e o membro fica dinamico (tipo nil).
+	root := rollRoot(t)
+	requireNoError(t, compileSourceAtRoot(t, root, "use nope\nfunc f() -> int\n    let v: int = nope.f(1)\n    return v\nend\n"))
+	requireNoError(t, compileSourceAtRoot(t, root, "use nope\nlet v: int = nope.f(1)\n"))
+}
+
+func TestNamespaceMemberReexportedByWildcardStaysDynamic(t *testing.T) {
+	// Caracterizacao da assimetria documentada em namespace_member_types.go:
+	// `g` chega a m so por REEXPORTACAO (`use x select *`), e
+	// moduleTopLevelBindings enxerga apenas as declaracoes do proprio m —
+	// entao `m.g(1)` fica dinamico (nenhum erro) enquanto `use m select g`
+	// resolve a assinatura e acusa. Conservador, nunca tipo errado; fechar a
+	// assimetria e follow-up.
+	root := t.TempDir()
+	writeModuleFile(t, root, "x.nx", "func g(n: int) -> int\n    return n\nend\n")
+	writeModuleFile(t, root, "m.nx", "use x select *\n")
+	requireNoError(t, compileSourceAtRoot(t, root, "use m\nlet s: string = m.g(1)\n"))
+	err := compileSourceAtRoot(t, root, "use m select g\nlet s: string = g(1)\n")
 	requireErrorMentions(t, err, "expected string, got int")
 }

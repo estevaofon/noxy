@@ -19,7 +19,19 @@ import "noxy-vm/internal/ast"
 // de valor (importedBindingType devolve ok=false) e continua recusado em
 // compileCallExpression com o hint de `select`.
 //
-// O bytecode nao muda (OP_GET_PROPERTY no objeto modulo); so o tipo.
+// O acesso ao membro continua emitindo OP_GET_PROPERTY no objeto modulo; o
+// que muda alem do tipo e o SITE DE CHAMADA: com assinatura inteiramente
+// nomeavel a chamada passa pelo caminho isExact e emite OP_CALL_STATIC
+// (modos provados), igual ao que `select` ja fazia. Excecao: um argumento
+// `ref x` cujo tipo do alvo e desconhecido derruba modesProven e volta para
+// OP_CALL, para validateParameterModes/validateRefTargets conferirem o alvo
+// em runtime (compileCallExpression, ramo do parametro `ref`).
+//
+// Assimetria conhecida com `select`: um nome que chega a m so por
+// REEXPORTACAO (`use x select *` dentro de m.nx) continua dinamico pelo
+// namespace — moduleTopLevelBindings enxerga apenas as declaracoes do
+// proprio m —, enquanto `use m select g` o resolve. Conservador (dinamico,
+// nunca tipo errado) e documentado como follow-up.
 func (c *Compiler) namespaceMemberType(access *ast.MemberAccessExpression) ast.NoxyType {
 	base, ok := access.Left.(*ast.Identifier)
 	// A guarda de sombreamento e a mesma de compileCallExpression (o hook do

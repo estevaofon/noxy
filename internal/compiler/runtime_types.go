@@ -34,8 +34,9 @@ func (c *Compiler) emitRuntimeValueType(t ast.NoxyType) error {
 // o resto (primitivos, structs) so passa por aqui. Codigo tipado nao paga
 // nada.
 //
-// Tipo estatico DESCONHECIDO (nil: nativo sem assinatura, membro de
-// namespace `m.f()`, plugin) fica de fora de proposito (revisao do #119,
+// Tipo estatico DESCONHECIDO (nil: nativo sem assinatura, plugin; depois
+// da #126 um membro de namespace `m.f()` so cai aqui quando o programa nao
+// consegue NOMEAR o tipo do modulo) fica de fora de proposito (revisao do #119,
 // decisao B): 134 natives da stdlib nao declaram contrato de retorno, e a
 // guarda em cada `return native(...)` custava +35-55 % por chamada de
 // wrapper, alem de transformar nulls silenciosos de crypto/net em aborts

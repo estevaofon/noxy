@@ -98,15 +98,16 @@ func noxyTypeName(t ast.NoxyType) string {
 }
 
 func callableName(expression ast.Expression) string {
-	switch callee := expression.(type) {
-	case *ast.Identifier:
-		return callee.Value
-	case *ast.MemberAccessExpression:
-		// `m.roll(...)` (issue #126 item 2): "argument 1 to 'm.roll'", nao
-		// "(m.roll)" como MemberAccessExpression.String() imprime.
-		if base, ok := callee.Left.(*ast.Identifier); ok {
-			return base.Value + "." + callee.Member
-		}
+	// Caminho rapido do caso comum.
+	if ident, ok := expression.(*ast.Identifier); ok {
+		return ident.Value
+	}
+	// `m.roll(...)` (issue #126 item 2): "argument 1 to 'm.roll'", nao
+	// "(m.roll)" como MemberAccessExpression.String() imprime — e o mesmo
+	// vale para cadeias mais fundas (`o.inner.cb`), que stableKey ja
+	// canoniza (nullable.go) para os hints.
+	if key, ok := stableKey(expression); ok {
+		return key
 	}
 	return expression.String()
 }
