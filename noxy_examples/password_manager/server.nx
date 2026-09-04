@@ -280,4 +280,4 @@ print("")
 let server: http_server.HttpServer = http_server.new_server(host, port)
 
 print(fmt("Password Manager running at http://%s:%d", host, port))
-http_server.serve(server, router)
+http_server.serve(ref server, router)

@@ -150,8 +150,8 @@ let m: map[string, db.Row] = res.by_name
 }
 
 func TestModuleFieldTypeUsesNamespaceAlias(t *testing.T) {
-	// (`m.f(...)` via namespace e chamada dinamica — sem tipo de retorno
-	// estatico —, por isso o resultado passa por um `let` anotado.)
+	// (o `let` anotado continua valido: desde a #126 item 2 `d.q()` tem tipo
+	// estatico `d.QueryResult`, que bate com a anotacao por igualdade.)
 	err := compileSourceAtRoot(t, dbRoot(t), `use db as d
 let res: d.QueryResult = d.q()
 let s: string = res.rows

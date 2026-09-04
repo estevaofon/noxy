@@ -98,8 +98,15 @@ func noxyTypeName(t ast.NoxyType) string {
 }
 
 func callableName(expression ast.Expression) string {
-	if identifier, ok := expression.(*ast.Identifier); ok {
-		return identifier.Value
+	switch callee := expression.(type) {
+	case *ast.Identifier:
+		return callee.Value
+	case *ast.MemberAccessExpression:
+		// `m.roll(...)` (issue #126 item 2): "argument 1 to 'm.roll'", nao
+		// "(m.roll)" como MemberAccessExpression.String() imprime.
+		if base, ok := callee.Left.(*ast.Identifier); ok {
+			return base.Value + "." + callee.Member
+		}
 	}
 	return expression.String()
 }

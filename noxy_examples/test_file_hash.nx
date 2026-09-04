@@ -9,7 +9,7 @@ let filename: string = "test_icon.bin"
 let content: bytes = hex_decode("89504e470d0a1a0a0000000d49484452") // PNG header via hex
 
 let f_write: io.File = io.open(filename, "w")
-io.write(f_write, content) 
+io.write_bytes(f_write, content)
 io.close(f_write)
 
 // 2. Read as Bytes

@@ -1095,6 +1095,10 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 		// desconhecido, campo inexistente ou tipo que o programa nao consegue
 		// nomear).
 		fieldType := c.memberType(leftType, n.Member)
+		if fieldType == nil && leftType == nil {
+			// `m.x` / `m.f` com m namespace (issue #126 item 2).
+			fieldType = c.namespaceMemberType(n)
+		}
 		if key, ok := stableKey(n); ok {
 			fieldType = c.narrowType(key, fieldType)
 		}

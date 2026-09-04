@@ -15,7 +15,15 @@ sqlite.exec(db, "CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY, no
 sqlite.exec(db, "DELETE FROM produtos")
 
 // Insere com prepared statement
-let stmt: Statement = sqlite.prepare(db, "INSERT INTO produtos (nome, preco) VALUES (?, ?)")
+// sqlite.prepare -> Statement?: null quando o SQL nao compila
+let prepared: Statement? = sqlite.prepare(db, "INSERT INTO produtos (nome, preco) VALUES (?, ?)")
+
+if prepared == null then
+    print("Erro ao preparar statement")
+    return
+end
+
+let stmt: Statement = prepared
 
 sqlite.bind_text(stmt, 1, "Notebook")
 sqlite.bind_float(stmt, 2, 2599.90)
