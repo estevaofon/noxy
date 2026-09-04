@@ -262,13 +262,34 @@ func TestUnknownTypeHintReexporterMatchesTheChosenOriginsDeclarationNotJustTheNa
 	writeModuleFile(t, root, "bridge.nx", "use b select *\n")
 	// bridge reexporta a V de b (nao relacionada a de a) — nao pode aparecer
 	// no hint como se reexportasse a V de a, mesmo com "a" < "b" ordenando
-	// "a" como origem escolhida.
+	// "a" como origem escolhida. Desde a revisao adversarial do #133 (caso 5)
+	// esta forma tem DUAS origens carregadas (a declara V, e b tambem, pela
+	// cadeia de bridge), entao o hint lista as duas em vez de escolher uma:
+	// a garantia que interessa continua sendo que bridge nunca e apresentado
+	// como reexportador da V de a.
 	err := compileSourceAtRoot(t, root, "use a select f\nuse bridge select g\nlet v: V = f()\n")
-	requireErrorMentions(t, err, "unknown type 'V'", "add 'use a' or 'use a select V' to name this type")
+	requireErrorMentions(t, err, "unknown type 'V'", "'V' is declared by modules a and b")
 	requireNotMentions(t, err, "use b select V")
+	requireNotMentions(t, err, "use bridge select V")
 
 	// bridge2 reexporta a MESMA V de a: agora sim entra no hint.
 	writeModuleFile(t, root, "bridge2.nx", "use a select *\nfunc g2() -> void\nend\n")
 	err = compileSourceAtRoot(t, root, "use a select f\nuse bridge2 select g2\nlet v: V = f()\n")
 	requireErrorMentions(t, err, "unknown type 'V'", "add 'use a' or 'use bridge2 select V' to name this type")
+}
+
+func TestUnknownTypeHintNamesEveryDeclaringModuleWhenSeveralDeclareTheName(t *testing.T) {
+	// Issue #133 (revisao adversarial, caso 5): com DOIS modulos carregados
+	// declarando `struct V`, o hint escolhia um por ordem alfabetica e
+	// apontava, metade das vezes, para a declaracao errada — seguir o hint
+	// trocava `unknown type 'V'` por `expected V, got otherdiff.V`. Sem o
+	// contexto que produziu o erro, a resposta honesta e listar os
+	// candidatos e deixar a escolha com quem escreve.
+	root := t.TempDir()
+	writeModuleFile(t, root, "base.nx", "struct V\n    x: int\nend\nfunc f() -> V\n    return V(1)\nend\n")
+	writeModuleFile(t, root, "otherdiff.nx", "struct V\n    s: string\nend\nfunc g() -> V\n    return V(\"hi\")\nend\n")
+	err := compileSourceAtRoot(t, root, "use base select f\nuse otherdiff select g\nlet v: V = f()\n")
+	requireErrorMentions(t, err,
+		"variable 'v': unknown type 'V'",
+		"'V' is declared by modules base and otherdiff; add 'use <module>' or 'use <module> select V' for the one you mean")
 }

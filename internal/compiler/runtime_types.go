@@ -394,6 +394,16 @@ func (c *Compiler) importHintFor(name string) string {
 		origins = append(origins, module)
 	}
 	sort.Strings(origins)
+	if len(origins) > 1 {
+		// Issue #133 (caso 5): mais de um modulo carregado declara este nome, e
+		// sao declaracoes DIFERENTES. Escolher uma por ordem alfabetica
+		// apontava para a errada metade das vezes — seguir o hint so trocava
+		// `unknown type 'V'` por `expected V, got outro.V`. Nada aqui conhece o
+		// contexto que produziu o erro (o tipo do inicializador, por exemplo),
+		// entao a resposta honesta e listar os candidatos e deixar a escolha
+		// com quem escreve.
+		return fmt.Sprintf("'%s' is declared by modules %s; add 'use <module>' or 'use <module> select %s' for the one you mean", name, joinWithAnd(origins), name)
+	}
 	origin := origins[0]
 	originDecl := originDecls[origin]
 	var reexporters []string
@@ -410,6 +420,14 @@ func (c *Compiler) importHintFor(name string) string {
 		options = append(options, fmt.Sprintf("'use %s select %s'", origin, name))
 	}
 	return fmt.Sprintf("add %s to name this type", strings.Join(options, " or "))
+}
+
+// joinWithAnd escreve uma lista em prosa: "a", "a and b", "a, b and c".
+func joinWithAnd(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 // firstUnknownTypeName procura em t (inclusive dentro de array, map, ref,
