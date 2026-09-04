@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.23.3] - 2026-09-04
 
 Issue #126 — achados do [Deadrail](https://github.com/estevaofon/deadrail)
 (shooter em Noxy): sem `math`, sem tipo em `m.f()`, sem remoção por índice,
