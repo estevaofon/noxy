@@ -90,7 +90,9 @@ declaração, não a grafia".
   any[]`). Atribuição entre array de tamanho fixo e dinâmico
   (`let fixed: int[5] = [1, 2, 3, 4, 5]`, `let a: int[15] = xs`) continua
   compilando como antes — o tamanho nunca foi checado estaticamente nesses
-  casos.
+  casos, e o mesmo vale para uma referência ao array
+  (`let r: ref int[] = ref fixed` e a direção inversa): o tamanho segue
+  checado só pela guarda de runtime.
 
 ## [0.23.3] - 2026-09-04
 

@@ -74,3 +74,62 @@ func TestSizedArrayStillChecksTheElementType(t *testing.T) {
 	err := compileProgramSource(t, "let bad: int[5] = [\"a\"]\n")
 	requireErrorMentions(t, err, "expected int[], got string[]")
 }
+
+func TestRefToArrayIgnoresSizeInBothDirections(t *testing.T) {
+	// Regressao da #133 (segunda onda): o ramo de *ast.ArrayType ficou
+	// insensivel ao tamanho, mas *ast.RefType nao tinha ramo nenhum em
+	// areTypesCompatible e caia em typesEquivalent, que compara Size. Como
+	// ArrayType.String omite Size, o erro saia contraditorio:
+	// "expected ref int[], got ref int[]". No develop `ref int[] = ref a`
+	// com `a: int[5]` compilava e imprimia 5.
+	cases := map[string]string{
+		"sized into dynamic": "let a: int[5] = [1, 2, 3, 4, 5]\nlet r: ref int[] = ref a\n",
+		"dynamic into sized": "let b: int[] = [1, 2, 3]\nlet r: ref int[5] = ref b\n",
+	}
+	for name, source := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := compileProgramSource(t, source); err != nil {
+				t.Fatalf("must compile (pre-#133 behavior): %v", err)
+			}
+		})
+	}
+}
+
+func TestRefStaysInvariantOutsideArraySize(t *testing.T) {
+	// Controle: ignorar o TAMANHO do array nao afrouxa `ref` em nada mais.
+	t.Run("primitive alvo", func(t *testing.T) {
+		err := compileProgramSource(t, "let n: int = 1\nlet r: ref int = ref n\nlet s: ref string = r\n")
+		requireErrorMentions(t, err, "expected ref string, got ref int")
+	})
+	t.Run("struct distinto", func(t *testing.T) {
+		err := compileProgramSource(t, `struct P
+    x: int
+end
+struct Q
+    x: int
+end
+let p: P = P(1)
+let r: ref P = ref p
+let s: ref Q = r
+`)
+		requireErrorMentions(t, err, "expected ref Q, got ref P")
+	})
+	t.Run("elemento de array do alvo", func(t *testing.T) {
+		err := compileProgramSource(t, "let a: int[5] = [1, 2, 3, 4, 5]\nlet r: ref int[] = ref a\nlet s: ref string[] = r\n")
+		requireErrorMentions(t, err, "expected ref string[], got ref int[]")
+	})
+}
+
+func TestRefToSizedArrayPassesToDynamicRefParameter(t *testing.T) {
+	// Controle do site de chamada: areStrictTypesCompatible ja aceitava isto
+	// pelo ramo `e.Size == 0` e NAO foi tocado pela #133 (verificado contra um
+	// binario de develop: aceito nos dois).
+	if err := compileProgramSource(t, `func total(xs: ref int[]) -> int
+    return length(*xs)
+end
+let a: int[5] = [1, 2, 3, 4, 5]
+let n: int = total(ref a)
+`); err != nil {
+		t.Fatalf("ref para array dimensionado em parametro ref dinamico deve compilar: %v", err)
+	}
+}

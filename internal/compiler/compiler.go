@@ -3472,6 +3472,22 @@ func (c *Compiler) areTypesCompatible(expected, actual ast.NoxyType) bool {
 		// efeito colateral da identidade por Decl.
 		return ok && c.areTypesCompatible(expectedArray.ElementType, actualArray.ElementType)
 	}
+	if expectedRef, ok := expected.(*ast.RefType); ok {
+		// `ref` e invariante — typesEquivalent acima ja decidiu todo par de
+		// alvos iguais, e um alvo diferente continua incompativel. A UNICA
+		// folga e a mesma do ramo de array logo acima: typesEquivalent compara
+		// ArrayType.Size, e ArrayType.String o omite, entao sem este ramo
+		// `let r: ref int[] = ref a` com `a: int[5]` (que develop aceitava)
+		// morria com o erro impossivel "expected ref int[], got ref int[]".
+		if actualRef, ok := actual.(*ast.RefType); ok {
+			expectedElem, expectedIsArray := expectedRef.ElementType.(*ast.ArrayType)
+			actualElem, actualIsArray := actualRef.ElementType.(*ast.ArrayType)
+			if expectedIsArray && actualIsArray {
+				return c.areTypesCompatible(expectedElem.ElementType, actualElem.ElementType)
+			}
+		}
+		return false
+	}
 	return false
 }
 
