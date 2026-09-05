@@ -1,4 +1,4 @@
-[![noxy 0.23.2](https://img.shields.io/badge/noxy-0.23.2-blue)](CHANGELOG.md)
+[![noxy 0.25.0](https://img.shields.io/badge/noxy-0.25.0-blue)](CHANGELOG.md)
 
 # Noxy
 
