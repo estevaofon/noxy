@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,7 +13,12 @@ import (
 // resto esta testado em pkgmanager. Sobe o binario e roda --sync num
 // projeto sem dependencias (nao precisa de rede) e fora de qualquer projeto.
 func TestSyncFlagFindsRootAndFailsWithoutNoxyMod(t *testing.T) {
+	// Windows so executa caminho absoluto com extensao: sem o ".exe", exec
+	// falha com "executable file not found in %PATH%" (falha vista no CI).
 	bin := filepath.Join(t.TempDir(), "noxy")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
