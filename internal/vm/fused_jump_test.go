@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Frame raiz: stack[0] = script closure; empilhamos a,b e o opcode fundido

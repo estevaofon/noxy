@@ -3,8 +3,8 @@ package compiler
 import (
 	"testing"
 
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
 )
 
 // Regressao da #133: a identidade de struct por Decl removeu de

@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // refReadHint e o hint que acompanha todo erro "esperava T, veio ref T"

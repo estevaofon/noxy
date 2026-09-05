@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/ext/exttest"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ext/exttest"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // TestMain: com NOXY_EXT_HELPER=plugin o binario de teste vira um plugin

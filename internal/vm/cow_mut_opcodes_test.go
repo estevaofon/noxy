@@ -3,8 +3,8 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Os chunks destes testes terminam sem OP_RETURN de propósito: o loop do

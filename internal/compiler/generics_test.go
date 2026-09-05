@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/chunk"
+	"github.com/estevaofon/noxy/internal/chunk"
 )
 
 func TestGenericFunctionDeclarationEmitsNothing(t *testing.T) {

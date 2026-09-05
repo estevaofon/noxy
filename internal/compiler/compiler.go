@@ -2,10 +2,10 @@ package compiler
 
 import (
 	"fmt"
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/pkgmanager"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/pkgmanager"
+	"github.com/estevaofon/noxy/internal/value"
 	"path/filepath"
 	"strings"
 )

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Semântica de valor (spec §2.2/§4.3, CRITICAL): uma escrita aninhada através

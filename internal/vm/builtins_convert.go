@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // conversionInputLimit bounds how much of a rejected value appears in an error

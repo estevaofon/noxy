@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 
 	_ "modernc.org/sqlite"
 )

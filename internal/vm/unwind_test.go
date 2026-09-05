@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func TestDeferredCallsRunLIFOOnExplicitReturn(t *testing.T) {

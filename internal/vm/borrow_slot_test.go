@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Slot no ObjRef (issue #93b): OP_REF_PROPERTY resolve o indice do campo uma

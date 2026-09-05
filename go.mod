@@ -1,4 +1,4 @@
-module noxy-vm
+module github.com/estevaofon/noxy
 
 go 1.25.0
 

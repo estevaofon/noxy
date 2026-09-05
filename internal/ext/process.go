@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Carencias do host (spec §2.7, §4.3). Variaveis para os testes encurtarem.

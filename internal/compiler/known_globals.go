@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // Issue #47 parte 3: um global inexistente e erro de COMPILACAO, nao um

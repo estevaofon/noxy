@@ -1,6 +1,6 @@
 package vm
 
-import "noxy-vm/internal/value"
+import "github.com/estevaofon/noxy/internal/value"
 
 // stringOperands reconhece o par (string, string) para os opcodes de
 // ordenacao OP_GREATER/OP_LESS. Segue o mesmo criterio do branch de strings

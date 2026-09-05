@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func loadNXBVectors(t testing.TB) map[string][]byte {

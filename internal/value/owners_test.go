@@ -56,11 +56,11 @@ func TestReleaseSingleCompareMatchesRange(t *testing.T) {
 	cases := []struct {
 		start, want int32
 	}{
-		{0, 0},                                       // clamp: dec a mais nao desce
-		{-1, -1},                                     // negativo nunca e tocado
-		{math.MinInt32, math.MinInt32},               // borda do overflow de current-1
-		{1, 0},                                       // ultimo dono vai a zero
-		{2, 1},                                       // decremento normal
+		{0, 0},                         // clamp: dec a mais nao desce
+		{-1, -1},                       // negativo nunca e tocado
+		{math.MinInt32, math.MinInt32}, // borda do overflow de current-1
+		{1, 0},                         // ultimo dono vai a zero
+		{2, 1},                         // decremento normal
 		{ownersSaturation - 1, ownersSaturation - 2}, // ainda rastreado
 		{ownersSaturation, ownersSaturation},         // saturado: permanentemente compartilhado
 		{ownersSaturation + 5, ownersSaturation + 5}, // acima da saturacao idem

@@ -5,7 +5,7 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Issue #86: duas routines escrevendo o mesmo ObjInstance derrubavam o

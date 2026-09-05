@@ -3,7 +3,7 @@ package compiler
 import (
 	"strings"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // instanceName monta o nome qualificado de uma instancia monomorfizada:

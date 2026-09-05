@@ -2,12 +2,12 @@ package compiler
 
 import (
 	"fmt"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/estevaofon/noxy/internal/pkgmanager"
+	"github.com/estevaofon/noxy/internal/stdlib"
 	"maps"
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
-	"noxy-vm/internal/pkgmanager"
-	"noxy-vm/internal/stdlib"
 	"os"
 	"path/filepath"
 	"strings"

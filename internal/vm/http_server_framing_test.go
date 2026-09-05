@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func captureServerInt(t *testing.T, body string) int64 {

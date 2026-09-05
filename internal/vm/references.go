@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func referenceMapKey(index value.Value) (interface{}, error) {

@@ -3,8 +3,8 @@ package vm
 import (
 	"fmt"
 
-	"noxy-vm/internal/compiler"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/compiler"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // rejectRefArgs e o gemeo dinamico de rejectRefArgumentsForValueNatives

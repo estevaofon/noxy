@@ -1,8 +1,8 @@
 package compiler
 
 import (
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/value"
 	"testing"
 )
 

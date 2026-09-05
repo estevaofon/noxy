@@ -2,7 +2,7 @@ package vm
 
 import (
 	"fmt"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func runtimeValueMode(v value.Value) string {

@@ -3,7 +3,7 @@
 `noxyplugin` is the Go SDK for writing Noxy process extensions: executables
 that speak `noxy-plugin/1` over their stdin/stdout. It is a nested Go module
 (`github.com/estevaofon/noxy/sdk/noxyplugin`) with no dependency on
-`noxy-vm` — it carries its own NXB codec over Go types, because the wire
+`github.com/estevaofon/noxy` — it carries its own NXB codec over Go types, because the wire
 format is the contract, not a shared package. Protocol design:
 `docs/superpowers/specs/2026-08-29-process-extensions-design.md` in the
 main repository; user-facing docs: `docs/EXTENSIONS.md`.
@@ -109,6 +109,6 @@ go test ./...
 ```
 
 This module's tests (frame codec, golden NXB vectors, a fake host over
-`io.Pipe`) run independently of the root `noxy-vm` module's `go test
+`io.Pipe`) run independently of the root `github.com/estevaofon/noxy` module's `go test
 ./...` — CI runs both (see `.github/workflows/network-deadlines.yml`,
 job `network-semantics`).

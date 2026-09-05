@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
 )
 
 // Issue #58 item 2: um nome de tipo que nao foi declarado em lugar nenhum

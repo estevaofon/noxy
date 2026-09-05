@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func assertReportedInt(t *testing.T, got value.Value, want int64) {

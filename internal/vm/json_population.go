@@ -2,9 +2,9 @@ package vm
 
 import (
 	"encoding/json"
+	"github.com/estevaofon/noxy/internal/value"
 	"math"
 	"math/big"
-	"noxy-vm/internal/value"
 	"sort"
 )
 

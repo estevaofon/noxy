@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/stdlib"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/stdlib"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 type controlledDeadlineConn struct {

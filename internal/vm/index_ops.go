@@ -1,8 +1,8 @@
 package vm
 
 import (
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // setIndexGeneric e o corpo de OP_SET_INDEX: desempilha valor, indice e

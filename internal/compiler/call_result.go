@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // call_result (issue #105 item 2): a fronteira sincrona de erro devolve

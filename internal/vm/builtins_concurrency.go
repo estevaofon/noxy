@@ -5,7 +5,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func (vm *VM) defineConcurrencyBuiltins() {

@@ -3,7 +3,7 @@ package plugin
 import (
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // InterfaceToValue constroi via value.NewArray/NewMapWithData: o contêiner e

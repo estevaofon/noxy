@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 type moduleKey struct {

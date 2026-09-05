@@ -12,17 +12,17 @@ import (
 	"syscall"
 	"time"
 
-	"noxy-vm/internal/plugin"
-	"noxy-vm/internal/value"
-	"noxy-vm/internal/version"
+	"github.com/estevaofon/noxy/internal/plugin"
+	"github.com/estevaofon/noxy/internal/value"
+	"github.com/estevaofon/noxy/internal/version"
 )
 
 // pluginDeprecationWarned: um unico aviso por processo (spec 2026-08-29
 // §10.1). sys_load_plugin, internal/plugin e compiler.PluginNativeNames
-// saem juntos na v0.25.0.
+// saem juntos na v0.26.0.
 var pluginDeprecationWarned atomic.Bool
 
-const pluginDeprecationWarning = "warning: sys_load_plugin is deprecated since v0.23.0 and will be removed in v0.25.0; publish the plugin as a kind = \"process\" extension (docs/EXTENSIONS.md)"
+const pluginDeprecationWarning = "warning: sys_load_plugin is deprecated since v0.23.0 and will be removed in v0.26.0; publish the plugin as a kind = \"process\" extension (docs/EXTENSIONS.md)"
 
 func (vm *VM) defineSystemBuiltins() {
 	vm.DefineNative("sys_signal_notify", func(args []value.Value) value.Value {

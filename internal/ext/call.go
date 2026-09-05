@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // acquire devolve uma instancia pronta e a funcao de release. No modo

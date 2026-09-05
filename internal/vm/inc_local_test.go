@@ -3,8 +3,8 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Frame raiz: LocalBase = 1, slot local 0 = stack[1]. Empilha 5 no slot e

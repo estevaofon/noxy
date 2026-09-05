@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/lexer"
+	"github.com/estevaofon/noxy/internal/lexer"
 )
 
 // Programa cortado em cada ponto onde o parser exige um token específico

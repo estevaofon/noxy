@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // json_loads respeita a semântica de valor nos níveis ANINHADOS (issue #53

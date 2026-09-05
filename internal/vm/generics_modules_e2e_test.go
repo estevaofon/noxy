@@ -6,12 +6,12 @@ package vm
 // os.WriteFile + compiler com RootPath apontando para o TempDir).
 
 import (
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/compiler"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/compiler"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/estevaofon/noxy/internal/value"
 	"os"
 	"path/filepath"
 	"strings"

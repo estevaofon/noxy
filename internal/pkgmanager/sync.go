@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"noxy-vm/internal/ext"
+	"github.com/estevaofon/noxy/internal/ext"
 )
 
 type SyncOptions struct {

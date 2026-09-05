@@ -1,6 +1,6 @@
 package vm
 
-import "noxy-vm/internal/value"
+import "github.com/estevaofon/noxy/internal/value"
 
 func (vm *VM) readShort() uint16 {
 	vm.ip += 2

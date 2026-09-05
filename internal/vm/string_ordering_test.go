@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // A spec (§1.4/§8) lista `>`, `<`, `>=`, `<=` como operadores de comparacao

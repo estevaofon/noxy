@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func spawnCompiledTestTask(t *testing.T, machine *VM, source, functionName string) value.Value {

@@ -10,10 +10,10 @@ import (
 	"runtime"
 	"strings"
 
-	"noxy-vm/internal/ext"
-	"noxy-vm/internal/pkgmanager"
-	"noxy-vm/internal/value"
-	"noxy-vm/internal/version"
+	"github.com/estevaofon/noxy/internal/ext"
+	"github.com/estevaofon/noxy/internal/pkgmanager"
+	"github.com/estevaofon/noxy/internal/value"
+	"github.com/estevaofon/noxy/internal/version"
 )
 
 // extensionLoaderPermits permite aos testes liberar modulos de import extras

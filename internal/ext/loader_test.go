@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/ext/exttest"
+	"github.com/estevaofon/noxy/internal/ext/exttest"
 
 	"github.com/tetratelabs/wazero/api"
 )

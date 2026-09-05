@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // Checagem estatica dos operandos de `+ - * / %` e `< > <= >=` (issue #75):
