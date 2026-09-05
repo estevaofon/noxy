@@ -5,7 +5,7 @@ import (
 	"math"
 	"unicode/utf8"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // maxRangeLength limita o array que range materializa: acima disso o erro e

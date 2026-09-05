@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Testes de semântica aritmética/relacional do executor (spec §8) que o

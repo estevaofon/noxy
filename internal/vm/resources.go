@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 type handleRegistry[T any] struct {

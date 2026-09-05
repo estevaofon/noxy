@@ -3,7 +3,7 @@ package vm
 import (
 	"fmt"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // resultDefs sao as definicoes de struct que o COMPILADOR entrega a

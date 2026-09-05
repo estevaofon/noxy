@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/ext/exttest"
+	"github.com/estevaofon/noxy/internal/ext/exttest"
 )
 
 // sys_exit chama os.Exit direto: o unico jeito de provar que fecha as
@@ -32,8 +32,8 @@ func TestSysExitClosesProcessExtensions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, data := range map[string][]byte{
-		"noxy_ext.toml":            []byte(manifest),
-		"guest.nx":                 []byte("func pid() -> int\n    return guest_pid()\nend\n"),
+		"noxy_ext.toml":             []byte(manifest),
+		"guest.nx":                  []byte("func pid() -> int\n    return guest_pid()\nend\n"),
 		filepath.Join("bin", asset): bin,
 	} {
 		if err := os.WriteFile(filepath.Join(pkg, name), data, 0o755); err != nil {

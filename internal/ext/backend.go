@@ -3,7 +3,7 @@ package ext
 import (
 	"context"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Backend e a fronteira que o VM enxerga de uma extensao carregada, seja

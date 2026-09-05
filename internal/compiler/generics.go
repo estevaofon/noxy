@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
 )
 
 // FuncTemplate guarda a declaracao original (nao compilada) de uma funcao

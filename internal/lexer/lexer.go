@@ -4,7 +4,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"noxy-vm/internal/token"
+	"github.com/estevaofon/noxy/internal/token"
 )
 
 type Lexer struct {

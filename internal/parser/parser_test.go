@@ -1,8 +1,8 @@
 package parser
 
 import (
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
 	"strings"
 	"testing"
 )

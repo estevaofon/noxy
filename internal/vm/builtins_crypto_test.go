@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // requireBuiltinError chama o native esperando erro tipado cuja mensagem

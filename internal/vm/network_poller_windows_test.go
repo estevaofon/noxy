@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func TestWSAPollFDLayout(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Issue #126 item 1: wrappers finos sobre o math do Go. Dominio invalido e

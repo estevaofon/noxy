@@ -1,8 +1,8 @@
 package vm
 
 import (
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Campo de struct por indice (issue #96): OP_GET_FIELD / OP_SET_FIELD /

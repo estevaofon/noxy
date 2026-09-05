@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Issue #118 item 1: a fronteira `any` -> slot tipado e checada em runtime em

@@ -3,7 +3,7 @@ package ext
 import (
 	"fmt"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Corpos dos quadros fora de chamada (HELLO, ERROR, LOG — spec §2.4, §2.6)

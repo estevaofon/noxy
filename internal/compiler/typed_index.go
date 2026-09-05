@@ -3,8 +3,8 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
 )
 
 // Indexacao tipada de array (issue #66, item 1): o compilador sabe quando a

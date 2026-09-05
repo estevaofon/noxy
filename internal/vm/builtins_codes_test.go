@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // codesOf calls the strings_codes native directly and returns the decoded

@@ -3,7 +3,7 @@ package lexer
 import (
 	"testing"
 
-	"noxy-vm/internal/token"
+	"github.com/estevaofon/noxy/internal/token"
 )
 
 func TestQuestionMarkIsAToken(t *testing.T) {

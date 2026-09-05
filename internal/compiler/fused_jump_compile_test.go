@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
 )
 
 func compileFusedSource(t *testing.T, source string) error {

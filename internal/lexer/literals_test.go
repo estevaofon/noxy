@@ -3,7 +3,7 @@ package lexer
 import (
 	"testing"
 
-	"noxy-vm/internal/token"
+	"github.com/estevaofon/noxy/internal/token"
 )
 
 // Literais inteiros binários (spec §2.1: `0b…` ao lado de `0x…`) — o único

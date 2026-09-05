@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func (vm *VM) defineJSONBuiltins() {

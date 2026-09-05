@@ -8,7 +8,7 @@ import (
 	"math"
 	"sort"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Tags NXB v1 — append-only (spec §10): valores existentes nunca mudam.

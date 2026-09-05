@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func TestFloatArithmeticSpecialized(t *testing.T) {

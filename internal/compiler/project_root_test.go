@@ -1,9 +1,9 @@
 package compiler
 
 import (
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
 	"os"
 	"path/filepath"
 	"strings"

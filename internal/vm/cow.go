@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // cloneCount conta clones CoW; visível para testes e diagnóstico.

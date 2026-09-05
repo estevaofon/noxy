@@ -3,7 +3,7 @@ package compiler
 import (
 	"strings"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // memberType devolve o tipo estatico do campo member de um valor do tipo

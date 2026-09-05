@@ -9,8 +9,10 @@ import (
 )
 
 // SumEntry e uma linha do noxy.sum v2 (spec §3.2):
-//   <modulo> <versao> sha256:<hex>            → File == ""  (hash de arvore)
-//   <modulo> <versao> <arquivo> sha256:<hex>  → artefato de extensao
+//
+//	<modulo> <versao> sha256:<hex>            → File == ""  (hash de arvore)
+//	<modulo> <versao> <arquivo> sha256:<hex>  → artefato de extensao
+//
 // Linhas v1 ("<github_com/x/y> <arquivo> sha256:<hex>") entram com Version
 // "" e sao descartadas no proximo Save.
 type SumEntry struct {

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
 )
 
 // Issue #41: `let x = expr` e aceito sem anotacao — o tipo fica para o

@@ -10,7 +10,7 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // instantiateForTarget e o hook central do §3: quando name nomeia um template
@@ -222,6 +222,7 @@ func (c *Compiler) rejectBareGenericTemplateIdentifier(identifier *ast.Identifie
 //   - os dois concretos: mesma recursão estrutural e mesmas folgas de
 //     compatibilidade de unify (any/null não bindam, `func` nu aceita
 //     qualquer chamável).
+//
 // unifyBidirectionalAnnotated e unifyBidirectional com a MESMA ponte de nomes
 // de instancia que unifyAnnotation aplica no caminho principal (I5). Aqui os
 // dois lados podem trazer as duas formas: expected sai de

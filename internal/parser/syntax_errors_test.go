@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/lexer"
+	"github.com/estevaofon/noxy/internal/lexer"
 )
 
 // Diagnósticos de sintaxe com texto próprio (não o genérico "expected X,

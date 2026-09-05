@@ -1,9 +1,9 @@
 package compiler
 
 import (
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // O empréstimo como LUGAR (issue #83).

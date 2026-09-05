@@ -3,8 +3,8 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Guarda o cache de globais contra staleness: a função lê o global duas

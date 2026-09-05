@@ -1,7 +1,7 @@
 package compiler
 
 import (
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 	"os"
 	"path/filepath"
 	"testing"

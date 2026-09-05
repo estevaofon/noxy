@@ -3,7 +3,7 @@ package compiler
 import (
 	"testing"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // Task 14 (spec §5): o REPL cria um *Compiler NOVO a cada linha (correto —

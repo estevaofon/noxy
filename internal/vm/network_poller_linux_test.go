@@ -10,7 +10,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func TestUnixReadHangupMatchesLinuxPOLLRDHUP(t *testing.T) {

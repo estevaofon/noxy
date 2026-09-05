@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/pkgmanager"
+	"github.com/estevaofon/noxy/internal/pkgmanager"
 )
 
 func writeProject(t *testing.T) (root, sub string) {

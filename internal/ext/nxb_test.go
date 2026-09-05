@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func mustRoundTrip(t *testing.T, v value.Value) value.Value {

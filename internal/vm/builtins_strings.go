@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // requireTextArgument rejects a bytes value where text is expected. Value.String()
@@ -426,7 +426,7 @@ func (vm *VM) defineStringBuiltins() {
 			if idx < 0 || idx >= len(s) {
 				return value.NewString(""), nil
 			}
-			return value.NewString(s[idx:idx+1]), nil
+			return value.NewString(s[idx : idx+1]), nil
 		}
 		runes := []rune(s)
 		if idx < 0 || idx >= len(runes) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Issue #126 item 1: modulo `math` da stdlib — wrappers finos sobre o math

@@ -184,13 +184,29 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 
 ## Installation
 
+### With `go install` (recommended)
+
+Requires Go 1.25+. Installs the `noxy` binary into `$(go env GOPATH)/bin`
+(make sure that directory is in your `PATH`):
+
+```bash
+go install github.com/estevaofon/noxy/cmd/noxy@latest
+```
+
+To install a specific release, replace `@latest` with a tag (e.g. `@v0.24.0`).
+
+### From source
+
 ```bash
 # Clone the repository
 git clone https://github.com/estevaofon/noxy.git
-cd noxy-vm
+cd noxy
 
 # Build
 go build -o noxy ./cmd/noxy
+
+# Or install into $(go env GOPATH)/bin
+go install ./cmd/noxy
 
 # Or run directly
 go run ./cmd/noxy/main.go file.nx
@@ -290,7 +306,7 @@ go run cmd/noxy/main.go noxy_examples/run_all_tests_concurrent.nx
 ## Architecture
 
 ```
-noxy-vm/
+noxy/
 ├── cmd/noxy/main.go      # Main CLI
 ├── internal/
 │   ├── lexer/            # Tokenization

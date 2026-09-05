@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/ext/exttest"
-	"noxy-vm/internal/pkgmanager"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ext/exttest"
+	"github.com/estevaofon/noxy/internal/pkgmanager"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 const testExtManifest = `

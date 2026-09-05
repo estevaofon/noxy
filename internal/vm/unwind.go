@@ -1,6 +1,6 @@
 package vm
 
-import "noxy-vm/internal/value"
+import "github.com/estevaofon/noxy/internal/value"
 
 type frameOutcome struct {
 	Result value.Value

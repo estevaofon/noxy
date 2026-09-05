@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Refs cujo contêiner é ele mesmo um ref (`ref r.x`, `ref r[i]` com r: ref

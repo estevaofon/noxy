@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func convertResultField(t *testing.T, machine *VM, native string, arg value.Value, field string) value.Value {

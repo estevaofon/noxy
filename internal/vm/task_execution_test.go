@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func TestPreparedTaskCallReturnsExplicitResult(t *testing.T) {

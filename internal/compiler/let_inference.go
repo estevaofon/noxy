@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 // Inferencia local de tipo em `let` (issue #41, spec §3): `let x = expr` sem

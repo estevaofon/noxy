@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/token"
+	"github.com/estevaofon/noxy/internal/token"
 )
 
 // firstToken lexes source and returns its first token, which for every case

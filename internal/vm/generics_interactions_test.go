@@ -9,7 +9,7 @@ package vm
 import (
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func TestLambdaInsideGenericBody(t *testing.T) {

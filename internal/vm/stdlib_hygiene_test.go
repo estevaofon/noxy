@@ -16,12 +16,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/parser"
-	"noxy-vm/internal/stdlib"
-	"noxy-vm/internal/token"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/estevaofon/noxy/internal/stdlib"
+	"github.com/estevaofon/noxy/internal/token"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 var nativeRegistrationHelpers = map[string]bool{

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // depth(n) recursivo: 10000 niveis exigem ~10001 frames e dezenas de milhares

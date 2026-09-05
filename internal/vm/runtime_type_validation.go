@@ -2,7 +2,7 @@ package vm
 
 import (
 	"fmt"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool {
@@ -93,7 +93,6 @@ func validStructConstructorType(definition *value.ObjStruct) (*value.RuntimeType
 	}
 	return schema, true
 }
-
 
 // runtimeTagAccepted informa, em O(profundidade do tipo), se uma tag de
 // runtime existente satisfaz o esquema esperado. Tag aceita vale como prova

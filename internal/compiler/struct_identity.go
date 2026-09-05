@@ -1,6 +1,6 @@
 package compiler
 
-import "noxy-vm/internal/ast"
+import "github.com/estevaofon/noxy/internal/ast"
 
 // Issue #133: o tipo de um struct e a sua DECLARACAO, nao a grafia. Este
 // arquivo concentra as duas operacoes de identidade:

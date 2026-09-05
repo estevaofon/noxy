@@ -3,9 +3,9 @@ package compiler
 import (
 	"fmt"
 
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/chunk"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // compileTry abaixa `try expr` (spec §7, issue #105 item 2). expr deve ter

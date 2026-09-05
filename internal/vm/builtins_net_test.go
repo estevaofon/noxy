@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func callBuiltinWithinBound(t *testing.T, machine *VM, name string, args ...value.Value) value.Value {

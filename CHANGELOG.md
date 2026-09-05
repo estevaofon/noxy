@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Caminho do módulo Go passa de `noxy-vm` para `github.com/estevaofon/noxy`,
+  o que habilita `go install github.com/estevaofon/noxy/cmd/noxy@latest`
+  (a partir da primeira tag publicada após esta mudança). Imports internos
+  e o `README.md` (seção *Installation*, `cd noxy` após o clone) foram
+  atualizados; nada muda para programas Noxy.
+
 ## [0.24.0] - 2026-09-04
 
 Package manager: `noxy --sync` reconstrói `noxy_libs` a partir de `noxy.mod`

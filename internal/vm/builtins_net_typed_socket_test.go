@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Issue #121: net_accept/net_recv/net_send aceitavam so o map que o runtime

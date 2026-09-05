@@ -3,7 +3,7 @@ package vm
 import (
 	"fmt"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // Invariante do slot `ref T` (spec docs/superpowers/specs/

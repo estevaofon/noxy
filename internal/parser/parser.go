@@ -3,9 +3,9 @@ package parser
 import (
 	"errors"
 	"fmt"
-	"noxy-vm/internal/ast"
-	"noxy-vm/internal/lexer"
-	"noxy-vm/internal/token"
+	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/token"
 	"strconv"
 )
 

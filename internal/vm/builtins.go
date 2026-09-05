@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"os"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func (shared *SharedState) initializeState() {

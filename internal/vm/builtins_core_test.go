@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func assertBuiltinValue(t *testing.T, got, want value.Value) {

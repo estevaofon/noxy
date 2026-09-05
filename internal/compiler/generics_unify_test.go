@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"noxy-vm/internal/ast"
+	"github.com/estevaofon/noxy/internal/ast"
 )
 
 func tInt() ast.NoxyType               { return &ast.PrimitiveType{Name: "int"} }

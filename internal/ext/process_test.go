@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 // fakeConn e o par de pipes que o host enxerga como o processo do plugin.

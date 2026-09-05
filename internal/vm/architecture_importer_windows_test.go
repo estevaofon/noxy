@@ -15,7 +15,7 @@ func TestArchitectureImporterLoadsWindowsModuleExportData(t *testing.T) {
 }
 
 func TestArchitectureImporterReportsUnresolvedModule(t *testing.T) {
-	loaded, err := newArchitectureImporter(t).Import("noxy-vm/internal/architecture_missing_package")
+	loaded, err := newArchitectureImporter(t).Import("github.com/estevaofon/noxy/internal/architecture_missing_package")
 	if err == nil {
 		t.Fatalf("loaded=%v, want module resolution error", loaded)
 	}

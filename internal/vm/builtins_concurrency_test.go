@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 const statefulBuiltinTimeout = 2 * time.Second

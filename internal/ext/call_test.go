@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"noxy-vm/internal/ext/exttest"
-	"noxy-vm/internal/value"
+	"github.com/estevaofon/noxy/internal/ext/exttest"
+	"github.com/estevaofon/noxy/internal/value"
 )
 
 func loadTestModule(t *testing.T, concurrency string) *Module {

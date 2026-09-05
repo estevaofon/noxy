@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"noxy-vm/internal/plugin"
-	"noxy-vm/internal/value"
-	"noxy-vm/internal/version"
+	"github.com/estevaofon/noxy/internal/plugin"
+	"github.com/estevaofon/noxy/internal/value"
+	"github.com/estevaofon/noxy/internal/version"
 )
 
 // pluginDeprecationWarned: um unico aviso por processo (spec 2026-08-29
