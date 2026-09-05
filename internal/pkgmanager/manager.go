@@ -39,7 +39,9 @@ func Get(pkgArg string) error {
 	} else if cfg, err = ParseModFile(modPath); err != nil {
 		return err
 	}
-	f := newFetcher(filepath.Join(root, NoxyLibsDir), os.Stdout)
+	libs := filepath.Join(root, NoxyLibsDir)
+	cleanStaleTemps(libs)
+	f := newFetcher(libs, os.Stdout)
 	defer f.cleanup()
 	fmt.Printf("Getting package %s...\n", pkgArg)
 	resolved, err := f.resolve(module, ref)

@@ -52,9 +52,17 @@ func ParseSumFile(path string) (*SumFile, error) {
 		digest := strings.TrimPrefix(last, "sha256:")
 		switch {
 		case len(f) == 4: // v2 artefato
-			s.entries[sumKey(f[0], f[2])] = SumEntry{f[0], f[1], f[2], digest}
+			ver, err := NormalizeVersion(f[1])
+			if err != nil {
+				return nil, fmt.Errorf("noxy.sum: malformed line %q: %w", line, err)
+			}
+			s.entries[sumKey(f[0], f[2])] = SumEntry{f[0], ver, f[2], digest}
 		case IsSemverTag(f[1]) || IsPseudoVersion(f[1]): // v2 arvore
-			s.entries[sumKey(f[0], "")] = SumEntry{f[0], f[1], "", digest}
+			ver, err := NormalizeVersion(f[1])
+			if err != nil {
+				return nil, fmt.Errorf("noxy.sum: malformed line %q: %w", line, err)
+			}
+			s.entries[sumKey(f[0], "")] = SumEntry{f[0], ver, "", digest}
 		default: // v1: chave local, sem versao
 			module := ModulePath(f[0])
 			s.entries[sumKey(module, f[1])] = SumEntry{module, "", f[1], digest}

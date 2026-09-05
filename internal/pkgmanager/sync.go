@@ -31,7 +31,9 @@ func Sync(root string, opts SyncOptions) error {
 	if _, err := os.Stat(filepath.Join(root, "noxy.mod")); err != nil {
 		return fmt.Errorf("no noxy.mod in %s", root)
 	}
-	f := newFetcher(filepath.Join(root, NoxyLibsDir), opts.Out)
+	libs := filepath.Join(root, NoxyLibsDir)
+	cleanStaleTemps(libs)
+	f := newFetcher(libs, opts.Out)
 	defer f.cleanup()
 	return syncWith(root, opts, f)
 }
@@ -46,7 +48,6 @@ func syncWith(root string, opts SyncOptions, f *fetcher) error {
 		opts.Out = io.Discard
 	}
 	libs := filepath.Join(root, NoxyLibsDir)
-	cleanStaleTemps(libs)
 
 	modPath := filepath.Join(root, "noxy.mod")
 	cfg, err := ParseModFile(modPath)
@@ -122,7 +123,18 @@ func syncWith(root string, opts SyncOptions, f *fetcher) error {
 	if err := writeStamp(libs, stamp); err != nil {
 		return err
 	}
-	if err := saveIfChanged(SumFilePath(root), lock); err != nil {
+	if opts.Locked {
+		// §5.2: pacote ausente do disco mas presente no lock e instalado
+		// normalmente (o install loop acima ja rodou), mas so a ESCRITA do
+		// lock e recusada — se o install trouxe linhas que o noxy.sum em
+		// disco nao tinha (ex.: artefatos de extensao perdidos), --locked
+		// nao pode "consertar" isso escrevendo; erro em vez de salvar.
+		if _, changed, err := lockDiff(SumFilePath(root), lock); err != nil {
+			return err
+		} else if changed {
+			return fmt.Errorf("noxy.sum is out of date with noxy.mod; run 'noxy --sync' without --locked")
+		}
+	} else if err := saveIfChanged(SumFilePath(root), lock); err != nil {
 		return err
 	}
 	if requireChanged(requireBefore, cfg.Require) {
@@ -263,6 +275,15 @@ func lockMatches(closure map[string]string, lock *SumFile) error {
 	return nil
 }
 
+// stampWarn e o destino do aviso de carimbo corrompido (spec §3.4); costura
+// de teste, producao e os.Stderr.
+var stampWarn io.Writer = os.Stderr
+
+// readStamp: carimbo ausente ou corrompido conta como vazio (nada e podado),
+// com aviso em stampWarn no caso corrompido — uma linha que nao tem
+// exatamente dois campos derruba o carimbo inteiro, nao so a linha (spec
+// §3.4): um carimbo parcialmente ilegivel nao pode fingir que sabe o que foi
+// instalado.
 func readStamp(libs string) map[string]string {
 	stamp := map[string]string{}
 	data, err := os.ReadFile(filepath.Join(libs, stampFile))
@@ -270,10 +291,15 @@ func readStamp(libs string) map[string]string {
 		return stamp
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		f := strings.Fields(line)
-		if len(f) == 2 {
-			stamp[f[0]] = f[1]
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			fmt.Fprintf(stampWarn, "warning: %s/%s is corrupted; nothing will be pruned\n", NoxyLibsDir, stampFile)
+			return map[string]string{}
+		}
+		stamp[f[0]] = f[1]
 	}
 	return stamp
 }
@@ -326,27 +352,37 @@ func removeEmptyParents(path, stop string) {
 	}
 }
 
+// lockDiff renderiza lock e diz se o resultado difere do que esta em path —
+// mesma regra de "sem mudanca" do saveIfChanged (arquivo ausente + lock
+// vazio nao conta como diferenca), reaproveitada pela recusa de escrita do
+// --locked (spec §5.2).
+func lockDiff(path string, lock *SumFile) (fresh []byte, changed bool, err error) {
+	fresh, err = lock.render()
+	if err != nil {
+		return nil, false, err
+	}
+	old, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
+		return fresh, !bytes.Equal(old, fresh), nil
+	case os.IsNotExist(readErr):
+		return fresh, len(lock.entries) != 0, nil
+	default:
+		return nil, false, readErr
+	}
+}
+
 // saveIfChanged nao reescreve um lock cujo conteudo nao mudou (spec §5.1):
 // compara render() com o arquivo em disco, sem arquivo temporario. Um
 // projeto sem dependencias e sem noxy.sum previo nao ganha um noxy.sum vazio
 // so por ter rodado --sync.
 func saveIfChanged(path string, lock *SumFile) error {
-	fresh, err := lock.render()
+	fresh, changed, err := lockDiff(path, lock)
 	if err != nil {
 		return err
 	}
-	old, readErr := os.ReadFile(path)
-	switch {
-	case readErr == nil:
-		if bytes.Equal(old, fresh) {
-			return nil
-		}
-	case os.IsNotExist(readErr):
-		if len(lock.entries) == 0 {
-			return nil
-		}
-	default:
-		return readErr
+	if !changed {
+		return nil
 	}
 	return os.WriteFile(path, fresh, 0o644)
 }

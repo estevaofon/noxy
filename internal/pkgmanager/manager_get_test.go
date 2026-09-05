@@ -210,3 +210,65 @@ func TestGetSameVersionWithMovedTagFails(t *testing.T) {
 		t.Fatalf("moved tag must be refused by --get too (spec §5.4): %v", err)
 	}
 }
+
+// TestGetTaglessRepoInstallsPseudoVersion cobre o bug em que resolve()
+// clonava para um temporario noxy_libs/.get-*, e syncWith (chamado por
+// Get com o MESMO fetcher) apagava esse temporario com cleanStaleTemps
+// antes de instalar — f.dir devolvia um caminho ja removido e o pacote
+// virava folha em silencio (achado de revisao). cleanStaleTemps agora roda
+// so no inicio de Get/Sync, antes do fetcher existir.
+func TestGetTaglessRepoInstallsPseudoVersion(t *testing.T) {
+	a := newLocalRepo(t, map[string]string{"a.nx": "a"}, "")
+	stubRepos(t, map[string]string{"github.com/t/a": a})
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := Get("github.com/t/a"); err != nil {
+		t.Fatalf("--get: %v", err)
+	}
+	mod, _ := os.ReadFile(filepath.Join(project, "noxy.mod"))
+	if !strings.Contains(string(mod), "require github.com/t/a v0.0.0-") {
+		t.Fatalf("noxy.mod must record the pseudo-version:\n%s", mod)
+	}
+	pkg := filepath.Join(project, "noxy_libs", "github_com", "t", "a")
+	if data, err := os.ReadFile(filepath.Join(pkg, "a.nx")); err != nil || string(data) != "a" {
+		t.Fatalf("package must be installed on disk: %q %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(pkg, ".git")); !os.IsNotExist(err) {
+		t.Fatal(".git must be removed")
+	}
+	sum, _ := os.ReadFile(filepath.Join(project, "noxy.sum"))
+	if !strings.Contains(string(sum), "github.com/t/a v0.0.0-") {
+		t.Fatalf("noxy.sum must have a tree line:\n%s", sum)
+	}
+}
+
+// TestGetBranchRefInstallsPseudoVersion e o mesmo bug que
+// TestGetTaglessRepoInstallsPseudoVersion, mas pelo caminho de branch/sha de
+// resolve (nao o de HEAD sem tag): --get pkg@master tambem clona em resolve
+// antes de syncWith rodar.
+func TestGetBranchRefInstallsPseudoVersion(t *testing.T) {
+	a := newLocalRepo(t, map[string]string{"a.nx": "a"}, "v0.1.0")
+	writeTree(t, a, map[string]string{"a.nx": "a2"})
+	gitIn(t, a, "add", ".")
+	gitIn(t, a, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "second")
+	stubRepos(t, map[string]string{"github.com/t/a": a})
+	project := t.TempDir()
+	t.Chdir(project)
+
+	err := Get("github.com/t/a@master")
+	if err != nil {
+		// repositorios novos podem chamar o branch de "main"
+		err = Get("github.com/t/a@main")
+	}
+	if err != nil {
+		t.Fatalf("--get: %v", err)
+	}
+	mod, _ := os.ReadFile(filepath.Join(project, "noxy.mod"))
+	if !strings.Contains(string(mod), "require github.com/t/a v0.1.1-0.") {
+		t.Fatalf("noxy.mod must record the pseudo-version above the base tag:\n%s", mod)
+	}
+	pkg := filepath.Join(project, "noxy_libs", "github_com", "t", "a")
+	if data, err := os.ReadFile(filepath.Join(pkg, "a.nx")); err != nil || string(data) != "a2" {
+		t.Fatalf("installed a.nx must be the later branch content: %q %v", data, err)
+	}
+}

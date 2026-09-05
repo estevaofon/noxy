@@ -79,7 +79,7 @@ func TestSumFileReadsV1LinesAsUnversioned(t *testing.T) {
 	if v, ok := s.Version("github.com/estevaofon/noxy_dynamodb"); !ok || v != "" {
 		t.Fatalf("v1 version is unknown (empty): %q %v", v, ok)
 	}
-	// Um Save regrava só o que foi re-registrado: linhas v1 são descartadas.
+	// Um Save regrava so o que foi re-registrado: linhas v1 sao descartadas.
 	s.DropModule("github.com/estevaofon/noxy_dynamodb")
 	s.SetTree("github.com/estevaofon/noxy_dynamodb", "v0.3.0", "ee")
 	if err := s.Save(path); err != nil {
@@ -93,6 +93,27 @@ func TestSumFileReadsV1LinesAsUnversioned(t *testing.T) {
 	_ = os.WriteFile(bad, []byte("only two\n"), 0o644)
 	if _, err := ParseSumFile(bad); err == nil {
 		t.Fatal("malformed line must fail")
+	}
+}
+
+// TestSumFileNormalizesV2TreeLineVersion cobre a normalizacao com
+// NormalizeVersion na leitura de uma linha v2 de arvore (spec §3.2): um
+// noxy.sum escrito a mao sem o "v" ainda tem que ler a versao normalizada,
+// senao "one version per module" no render() pode falhar comparando
+// "1.0.0" (do arquivo) com "v1.0.0" (de um SetTree em memoria) mesmo sendo
+// a mesma versao.
+func TestSumFileNormalizesV2TreeLineVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "noxy.sum")
+	if err := os.WriteFile(path, []byte("github.com/t/a 1.0.0 sha256:aaaa\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := ParseSumFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, d, ok := s.TreeHash("github.com/t/a")
+	if !ok || v != "v1.0.0" || d != "aaaa" {
+		t.Fatalf("TreeHash must read back the normalized version: %q %q %v", v, d, ok)
 	}
 }
 

@@ -183,7 +183,8 @@ func computeClosure(in closureInput) (map[string]string, error) {
 			}
 		}
 		if !progressed {
-			for m, v := range chosen {
+			for _, m := range sortedKeys(chosen) {
+				v := chosen[m]
 				if direct[m] && in.Root.Require[m] != v {
 					fmt.Fprintf(in.Out, "%s: noxy.mod requires %s, but %s requires %s; using %s\n",
 						m, in.Root.Require[m], required[m][v], v, v)

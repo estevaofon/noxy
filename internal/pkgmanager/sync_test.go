@@ -232,6 +232,56 @@ returns = "void"
 	}
 }
 
+// TestSyncLockedRefusesToWriteRecoveredArtifactLines cobre a recusa de
+// escrita do --locked (spec §5.2): um noxy.sum que so tem a linha de arvore
+// de um modulo de extensao wasm (linhas de artefato perdidas, ou de um
+// noxy.sum escrito a mao) com o pacote AUSENTE do disco. --locked instala o
+// pacote normalmente (o hash de arvore bate com o lock, entao lockMatches
+// deixa passar), mas o install recupera as linhas de artefato que faltavam
+// no lock em memoria — a escrita dessa versao "consertada" tem que ser
+// recusada, nao silenciosamente salva.
+func TestSyncLockedRefusesToWriteRecoveredArtifactLines(t *testing.T) {
+	manifest := `name = "guest"
+abi = 1
+wasm = "ext.wasm"
+
+[[export]]
+name = "guest_noop"
+params = []
+returns = "void"
+`
+	wasm := []byte("wasm bytes")
+	w := newLocalRepo(t, map[string]string{"noxy_ext.toml": manifest, "ext.wasm": string(wasm)}, "v0.1.0")
+	stubRepos(t, map[string]string{"github.com/t/w": w})
+	p := newSyncProject(t, "module p\n\nrequire github.com/t/w v0.1.0\n")
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	full := p.sum(t)
+	var treeLine string
+	for _, line := range strings.Split(strings.TrimRight(full, "\n"), "\n") {
+		if !strings.Contains(line, "noxy_ext.toml") && !strings.Contains(line, "ext.wasm") {
+			treeLine = line
+		}
+	}
+	if treeLine == "" {
+		t.Fatalf("no tree line found in:\n%s", full)
+	}
+	onlyTree := treeLine + "\n"
+	if err := os.WriteFile(filepath.Join(p.root, "noxy.sum"), []byte(onlyTree), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(p.libs); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.sync(t, true); err == nil || !strings.Contains(err.Error(), "noxy.sum is out of date with noxy.mod; run 'noxy --sync' without --locked") {
+		t.Fatalf("--locked must refuse to write the recovered artifact lines: %v", err)
+	}
+	if got := p.sum(t); got != onlyTree {
+		t.Fatalf("noxy.sum must stay unchanged on disk:\n%s", got)
+	}
+}
+
 func TestSyncInstallsProcessExtensionAndReinstallsWhenBinaryMissing(t *testing.T) {
 	platform := runtime.GOOS + "-" + runtime.GOARCH
 	asset := "guest-" + platform
@@ -319,5 +369,40 @@ returns = "void"
 	err = q.sync(t, false)
 	if err == nil || !strings.Contains(err.Error(), "process extensions are installed from a tagged release") {
 		t.Fatalf("pseudo-version process extension must be refused: %v", err)
+	}
+}
+
+// TestReadStampCorruptedLineWarnsAndPrunesNothing cobre a regra do §3.4: uma
+// linha do carimbo sem exatamente dois campos derruba o carimbo INTEIRO
+// (nao so a linha), com aviso em stampWarn — o proximo sync trata o carimbo
+// como vazio (nada e podado, mesmo que o noxy.mod tenha perdido o require).
+func TestReadStampCorruptedLineWarnsAndPrunesNothing(t *testing.T) {
+	a := newLocalRepo(t, map[string]string{"a.nx": "a"}, "v1.0.0")
+	stubRepos(t, map[string]string{"github.com/t/a": a})
+	p := newSyncProject(t, "module p\n\nrequire github.com/t/a v1.0.0\n")
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	stampPath := filepath.Join(p.libs, stampFile)
+	if err := os.WriteFile(stampPath, []byte("github.com/t/a v1.0.0 extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Remove o require: sem o carimbo intacto, o pacote nao pode ser podado.
+	if err := os.WriteFile(filepath.Join(p.root, "noxy.mod"), []byte("module p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	prev := stampWarn
+	stampWarn = &stderr
+	t.Cleanup(func() { stampWarn = prev })
+
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "warning: noxy_libs/.noxy-sync is corrupted; nothing will be pruned") {
+		t.Fatalf("expected corruption warning, got:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(p.libs, "github_com", "t", "a")); err != nil {
+		t.Fatalf("package must not be pruned when the stamp is corrupted: %v", err)
 	}
 }

@@ -26,7 +26,7 @@ func TestCompareVersionsOrdersTagsAndPseudoVersions(t *testing.T) {
 		"v0.1.0",
 		"v0.1.1-0.20260301000000-cccccccccccc", // pseudo acima da base v0.1.0
 		"v0.1.1-0.20260302000000-dddddddddddd",
-		"v0.1.1",                               // release acima da sua pré-release
+		"v0.1.1",                               // release acima da sua pre-release
 		"v1.0.0",
 	}
 	for i := 0; i+1 < len(order); i++ {
