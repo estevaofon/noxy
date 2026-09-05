@@ -43,3 +43,4 @@ build_layer.sh
 
 # superpowers SDD scratch (ledger, briefs, review packages)
 .superpowers/
+noxy
