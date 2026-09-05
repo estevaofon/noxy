@@ -91,27 +91,12 @@ func (c *Compiler) discoverModuleExports(module string) (map[string]struct{}, bo
 	return c.discoverModuleExportsWithState(module, c.discoveryState())
 }
 
-// syncHint espelha vm.syncHint (internal/vm/modules.go, spec §6): so no
-// caminho de erro, le <projectRoot>/noxy.mod e, se o modulo pedido e (ou
-// esta sob) uma dependencia declarada, aponta o comando. `use pkg select *`
-// resolve em tempo de COMPILACAO (discoverModuleExports), nunca chega ao
+// syncHint delega a pkgmanager.SyncHint (spec §6): `use pkg select *` resolve
+// em tempo de COMPILACAO (discoverModuleExports), nunca chega ao
 // resolveModule da VM, entao a dica do runtime nunca dispara pra ele sem
 // este espelho.
 func (c *Compiler) syncHint(moduleName string) string {
-	if c.projectRoot == "" {
-		return ""
-	}
-	cfg, err := pkgmanager.ParseModFile(filepath.Join(c.projectRoot, "noxy.mod"))
-	if err != nil {
-		return ""
-	}
-	for _, module := range cfg.Requires() {
-		local := strings.ReplaceAll(pkgmanager.LocalPath(module), "/", ".")
-		if moduleName == local || strings.HasPrefix(moduleName, local+".") {
-			return " (required by noxy.mod) — run 'noxy --sync'"
-		}
-	}
-	return ""
+	return pkgmanager.SyncHint(c.projectRoot, moduleName)
 }
 
 func (c *Compiler) discoverModuleExportsWithState(module string, state *moduleDiscoveryState) (map[string]struct{}, bool) {
