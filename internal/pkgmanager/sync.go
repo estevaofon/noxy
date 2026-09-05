@@ -29,14 +29,18 @@ func Sync(root string, opts SyncOptions) error {
 		opts.Out = io.Discard
 	}
 	if _, err := os.Stat(filepath.Join(root, "noxy.mod")); err != nil {
-		return fmt.Errorf("no noxy.mod in %s or any parent", root)
+		return fmt.Errorf("no noxy.mod in %s", root)
 	}
 	f := newFetcher(filepath.Join(root, NoxyLibsDir), opts.Out)
 	defer f.cleanup()
 	return syncWith(root, opts, f)
 }
 
-// syncWith reutiliza um *fetcher ja existente — Get reutiliza o fetcher.
+// syncWith reutiliza um *fetcher ja existente — Get reutiliza o fetcher. O
+// chamador e o dono de f: syncWith nunca chama f.cleanup(), quem chamou e
+// que deve dar defer nisso; f.out deve ser o mesmo io.Writer de opts.Out,
+// senao a saida dos dois se separa (relatos de clone caindo num, "cached"/
+// "installed" caindo no outro).
 func syncWith(root string, opts SyncOptions, f *fetcher) error {
 	if opts.Out == nil {
 		opts.Out = io.Discard
@@ -224,7 +228,10 @@ func install(libs string, lock *SumFile, stamp map[string]string, f *fetcher, m,
 func platformAssetPresent(libs string, lock *SumFile, m string) bool {
 	dir := filepath.Join(libs, filepath.FromSlash(LocalPath(m)))
 	manifest, _, err := readManifest(dir)
-	if err != nil || manifest == nil || manifest.Kind != ext.KindProcess {
+	if err != nil {
+		return false // manifesto ilegivel: reinstalar e a resposta segura
+	}
+	if manifest == nil || manifest.Kind != ext.KindProcess {
 		return true
 	}
 	asset, ok := manifest.BinaryFor(runtime.GOOS, runtime.GOARCH)
@@ -271,16 +278,41 @@ func readStamp(libs string) map[string]string {
 	return stamp
 }
 
+// writeStamp so toca o disco quando o carimbo mudou (espelha saveIfChanged):
+// um projeto sem dependencias nao ganha nem noxy_libs/ nem .noxy-sync so por
+// ter rodado --sync.
 func writeStamp(libs string, stamp map[string]string) error {
+	fresh := renderStamp(stamp)
+	path := filepath.Join(libs, stampFile)
+	old, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if bytes.Equal(old, fresh) {
+			return nil
+		}
+	case os.IsNotExist(err):
+		if len(fresh) == 0 {
+			return nil
+		}
+	default:
+		return err
+	}
 	if err := os.MkdirAll(libs, 0o755); err != nil {
 		return err
+	}
+	return os.WriteFile(path, fresh, 0o644)
+}
+
+func renderStamp(stamp map[string]string) []byte {
+	if len(stamp) == 0 {
+		return nil
 	}
 	lines := make([]string, 0, len(stamp))
 	for m, v := range stamp {
 		lines = append(lines, m+" "+v)
 	}
 	sort.Strings(lines)
-	return os.WriteFile(filepath.Join(libs, stampFile), []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	return []byte(strings.Join(lines, "\n") + "\n")
 }
 
 func removeEmptyParents(path, stop string) {
@@ -295,14 +327,26 @@ func removeEmptyParents(path, stop string) {
 }
 
 // saveIfChanged nao reescreve um lock cujo conteudo nao mudou (spec §5.1):
-// compara render() com o arquivo em disco, sem arquivo temporario.
+// compara render() com o arquivo em disco, sem arquivo temporario. Um
+// projeto sem dependencias e sem noxy.sum previo nao ganha um noxy.sum vazio
+// so por ter rodado --sync.
 func saveIfChanged(path string, lock *SumFile) error {
 	fresh, err := lock.render()
 	if err != nil {
 		return err
 	}
-	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, fresh) {
-		return nil
+	old, readErr := os.ReadFile(path)
+	switch {
+	case readErr == nil:
+		if bytes.Equal(old, fresh) {
+			return nil
+		}
+	case os.IsNotExist(readErr):
+		if len(lock.entries) == 0 {
+			return nil
+		}
+	default:
+		return readErr
 	}
 	return os.WriteFile(path, fresh, 0o644)
 }

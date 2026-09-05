@@ -2,8 +2,11 @@ package pkgmanager
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -133,7 +136,7 @@ func TestSyncLockedRefusesOutOfDateLock(t *testing.T) {
 	if err := p.sync(t, false); err != nil {
 		t.Fatal(err)
 	}
-	// linha v1 no lugar da árvore → desatualizado
+	// linha v1 no lugar da arvore → desatualizado
 	_ = os.WriteFile(filepath.Join(p.root, "noxy.sum"), []byte("github_com/t/a noxy_ext.toml sha256:00\n"), 0o644)
 	if err := p.sync(t, true); err == nil || !strings.Contains(err.Error(), "out of date") {
 		t.Fatalf("v1 line under --locked: %v", err)
@@ -185,5 +188,136 @@ func TestSyncWithoutNoxyModFails(t *testing.T) {
 	err := Sync(t.TempDir(), SyncOptions{Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "no noxy.mod") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestSyncInstallsWasmExtensionAndRecordsArtifacts(t *testing.T) {
+	manifest := `name = "guest"
+abi = 1
+wasm = "ext.wasm"
+
+[[export]]
+name = "guest_noop"
+params = []
+returns = "void"
+`
+	wasm := []byte("wasm bytes")
+	w := newLocalRepo(t, map[string]string{"noxy_ext.toml": manifest, "ext.wasm": string(wasm)}, "v0.1.0")
+	stubRepos(t, map[string]string{"github.com/t/w": w})
+	p := newSyncProject(t, "module p\n\nrequire github.com/t/w v0.1.0\n")
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	sum := p.sum(t)
+	for _, want := range []string{
+		"github.com/t/w v0.1.0 sha256:",
+		"github.com/t/w v0.1.0 noxy_ext.toml sha256:" + hexSum([]byte(manifest)),
+		"github.com/t/w v0.1.0 ext.wasm sha256:" + hexSum(wasm),
+	} {
+		if !strings.Contains(sum, want) {
+			t.Fatalf("noxy.sum missing %q:\n%s", want, sum)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(p.libs, "github_com", "t", "w", "ext.wasm")); err != nil || string(data) != string(wasm) {
+		t.Fatalf("ext.wasm on disk: %q %v", data, err)
+	}
+
+	// Segundo sync: manifesto wasm nao pede binario de plataforma, so o
+	// hash de arvore precisa bater — cached.
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.out.String(), "cached") {
+		t.Fatalf("second sync must be cached:\n%s", p.out.String())
+	}
+}
+
+func TestSyncInstallsProcessExtensionAndReinstallsWhenBinaryMissing(t *testing.T) {
+	platform := runtime.GOOS + "-" + runtime.GOARCH
+	asset := "guest-" + platform
+	if runtime.GOOS == "windows" {
+		asset += ".exe"
+	}
+	manifest := fmt.Sprintf(`name = "guest"
+abi = 1
+kind = "process"
+
+[binaries]
+%s = %q
+plan9-mips = "guest-plan9-mips"
+
+[[export]]
+name = "guest_noop"
+params = []
+returns = "void"
+`, platform, asset)
+	repo := newLocalRepo(t, map[string]string{"noxy_ext.toml": manifest}, "v0.1.0")
+	stubRepos(t, map[string]string{"github.com/t/proc": repo})
+
+	mine, other := []byte("my platform bits"), []byte("plan9 bits")
+	srv := serveRelease(t, map[string][]byte{
+		asset:              mine,
+		"guest-plan9-mips": other,
+		"checksums.txt":    []byte(hexSum(mine) + "  " + asset + "\n" + hexSum(other) + "  guest-plan9-mips\n"),
+	})
+	prevRel := releaseBaseURL
+	releaseBaseURL = func(string, string) (string, error) { return srv.URL + "/rel/", nil }
+	t.Cleanup(func() { releaseBaseURL = prevRel })
+
+	p := newSyncProject(t, "module p\n\nrequire github.com/t/proc v0.1.0\n")
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(p.libs, "github_com", "t", "proc", "bin", asset)
+	if data, err := os.ReadFile(binPath); err != nil || string(data) != string(mine) {
+		t.Fatalf("asset on disk: %q %v", data, err)
+	}
+	sum := p.sum(t)
+	for _, want := range []string{
+		"github.com/t/proc v0.1.0 bin/" + asset + " sha256:" + hexSum(mine),
+		"github.com/t/proc v0.1.0 bin/guest-plan9-mips sha256:" + hexSum(other),
+	} {
+		if !strings.Contains(sum, want) {
+			t.Fatalf("noxy.sum missing %q:\n%s", want, sum)
+		}
+	}
+	if !strings.Contains(p.out.String(), "installed (bin/"+asset+")") {
+		t.Fatalf("output:\n%s", p.out.String())
+	}
+
+	// Apagar o binario desta plataforma: nao pode ficar "cached" para
+	// sempre (platformAssetPresent), tem que baixar de novo.
+	if err := os.Remove(binPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(p.out.String(), "cached") {
+		t.Fatalf("missing platform asset must not read as cached:\n%s", p.out.String())
+	}
+	if data, err := os.ReadFile(binPath); err != nil || string(data) != string(mine) {
+		t.Fatalf("asset must be re-downloaded: %q %v", data, err)
+	}
+	sum = p.sum(t)
+	if !strings.Contains(sum, "github.com/t/proc v0.1.0 bin/guest-plan9-mips sha256:"+hexSum(other)) {
+		t.Fatalf("other-platform line must survive:\n%s", sum)
+	}
+
+	// Extensao por processo pedida numa pseudo-versao e recusada: assets
+	// dependem de uma release, e pseudo-versao nao tem uma.
+	scratch := newFetcher(t.TempDir(), io.Discard)
+	v, err := scratch.resolve("github.com/t/proc", "master")
+	if err != nil {
+		v, err = scratch.resolve("github.com/t/proc", "main") // repositorios novos podem chamar o branch de "main"
+	}
+	scratch.cleanup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := newSyncProject(t, "module q\n\nrequire github.com/t/proc "+v+"\n")
+	err = q.sync(t, false)
+	if err == nil || !strings.Contains(err.Error(), "process extensions are installed from a tagged release") {
+		t.Fatalf("pseudo-version process extension must be refused: %v", err)
 	}
 }
