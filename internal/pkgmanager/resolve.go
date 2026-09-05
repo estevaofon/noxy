@@ -157,14 +157,6 @@ func computeClosure(in closureInput) (map[string]string, error) {
 			}
 			visited[fetchKey(m, v)] = true
 			progressed = true
-			// Indireto cuja versao escolhida e exatamente o piso do lock: o
-			// fecho de m ja esta refletido no lock por um --sync anterior,
-			// nao ha nada novo a aprender relendo seu noxy.mod (spec §4.2).
-			if !direct[m] {
-				if lv, _, ok := in.Lock.TreeHash(m); ok && lv == v {
-					continue
-				}
-			}
 			cfg, err := readDepMod(in, m, v)
 			if err != nil {
 				return nil, err

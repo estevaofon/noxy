@@ -112,21 +112,51 @@ func TestClosureRootHeadIsPinnedIntoNoxyMod(t *testing.T) {
 
 func TestClosureReadsInstalledDepModWithoutNetwork(t *testing.T) {
 	libs := filepath.Join(t.TempDir(), "noxy_libs")
-	dep := filepath.Join(libs, "github_com", "t", "b")
-	writeTree(t, dep, map[string]string{"b.nx": "b", "noxy.mod": "module b\n\nrequire github.com/t/a v1.0.0\n"})
-	digest, _ := TreeHash(dep)
+	depB := filepath.Join(libs, "github_com", "t", "b")
+	writeTree(t, depB, map[string]string{"b.nx": "b", "noxy.mod": "module b\n\nrequire github.com/t/a v1.0.0\n"})
+	digestB, _ := TreeHash(depB)
+	depA := filepath.Join(libs, "github_com", "t", "a")
+	writeTree(t, depA, map[string]string{"a.nx": "a"})
+	digestA, _ := TreeHash(depA)
 	lock := &SumFile{}
-	lock.SetTree("github.com/t/b", "v1.0.0", digest)
-	lock.SetTree("github.com/t/a", "v1.0.0", "whatever")
+	lock.SetTree("github.com/t/b", "v1.0.0", digestB)
+	lock.SetTree("github.com/t/a", "v1.0.0", digestA)
 	prevURL := gitURLFor
 	gitURLFor = func(string) string { t.Fatal("cached package must be read from disk"); return "" }
 	t.Cleanup(func() { gitURLFor = prevURL })
 	root := NewModuleConfig()
 	root.Require["github.com/t/b"] = "v1.0.0"
 	f := newFetcher(libs, &bytes.Buffer{})
-	closure, err := computeClosure(closureInput{Root: root, Lock: lock, Stamp: map[string]string{"github.com/t/b": "v1.0.0"}, Libs: libs, Fetch: f, Out: &bytes.Buffer{}})
+	stamp := map[string]string{"github.com/t/b": "v1.0.0", "github.com/t/a": "v1.0.0"}
+	closure, err := computeClosure(closureInput{Root: root, Lock: lock, Stamp: stamp, Libs: libs, Fetch: f, Out: &bytes.Buffer{}})
 	if err != nil || closure["github.com/t/a"] != "v1.0.0" {
 		t.Fatalf("%v %v", closure, err)
+	}
+}
+
+func TestClosureReadsIndirectDepModFromCloneWhenNotInstalled(t *testing.T) {
+	// x → a → b, nenhum instalado; o lock tem entradas para os tres, mas
+	// sem "b" nao instalado nem clonado a partir do noxy.mod de "a", "b"
+	// cairia do lock e nao seria instalado (regressao: uso em runtime falha).
+	b := newLocalRepo(t, map[string]string{"b.nx": "b"}, "v1.0.0")
+	a := newLocalRepo(t, map[string]string{"a.nx": "a", "noxy.mod": "module a\n\nrequire github.com/t/b v1.0.0\n"}, "v1.0.0")
+	x := newLocalRepo(t, map[string]string{"x.nx": "x", "noxy.mod": "module x\n\nrequire github.com/t/a v1.0.0\n"}, "v1.0.0")
+	stubRepos(t, map[string]string{"github.com/t/a": a, "github.com/t/b": b, "github.com/t/x": x})
+
+	lock := &SumFile{}
+	lock.SetTree("github.com/t/x", "v1.0.0", "whatever-x")
+	lock.SetTree("github.com/t/a", "v1.0.0", "whatever-a")
+	lock.SetTree("github.com/t/b", "v1.0.0", "whatever-b")
+	root := NewModuleConfig()
+	root.Require["github.com/t/x"] = "v1.0.0"
+	f := newFetcher(filepath.Join(t.TempDir(), "noxy_libs"), &bytes.Buffer{})
+	defer f.cleanup()
+	closure, err := computeClosure(closureInput{Root: root, Lock: lock, Stamp: map[string]string{}, Libs: f.libs, Fetch: f, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closure["github.com/t/a"] != "v1.0.0" || closure["github.com/t/b"] != "v1.0.0" {
+		t.Fatalf("indirect deps must be discovered via clone, not dropped from the closure: %v", closure)
 	}
 }
 
