@@ -89,9 +89,9 @@ returns = "void"
 	}
 	sum, _ := os.ReadFile(filepath.Join(project, "noxy.sum"))
 	for _, want := range []string{
-		"github_com/acme/guest noxy_ext.toml sha256:" + hexSum([]byte(manifest)),
-		"github_com/acme/guest bin/" + asset + " sha256:" + hexSum(mine),
-		"github_com/acme/guest bin/guest-plan9-mips sha256:" + hexSum(other),
+		"github.com/acme/guest v0.1.0 noxy_ext.toml sha256:" + hexSum([]byte(manifest)),
+		"github.com/acme/guest v0.1.0 bin/" + asset + " sha256:" + hexSum(mine),
+		"github.com/acme/guest v0.1.0 bin/guest-plan9-mips sha256:" + hexSum(other),
 	} {
 		if !strings.Contains(string(sum), want) {
 			t.Fatalf("noxy.sum missing %q:\n%s", want, sum)

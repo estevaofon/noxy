@@ -180,7 +180,7 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestDat
 	if err != nil {
 		return err
 	}
-	pkg := filepath.ToSlash(rel)
+	pkg := pkgmanager.ModulePath(filepath.ToSlash(rel))
 	wantManifest, hasManifest := sums.Lookup(pkg, "noxy_ext.toml")
 	wantArtifact, hasArtifact := sums.Lookup(pkg, artifactName)
 	if !hasManifest && !hasArtifact {

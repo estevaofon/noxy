@@ -194,7 +194,7 @@ func TestExtensionSumRoundTripViaPkgmanager(t *testing.T) {
 	root := t.TempDir()
 	writeExtensionPackage(t, root)
 	pkgDir := filepath.Join(root, "noxy_libs", "guest")
-	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest", "v1.0.0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(pkgDir, "ext.wasm"), []byte("tampered"), 0o644); err != nil {
@@ -220,7 +220,7 @@ func TestExtensionSumManifestTamperRefusesLoad(t *testing.T) {
 	root := t.TempDir()
 	writeExtensionPackage(t, root)
 	pkgDir := filepath.Join(root, "noxy_libs", "guest")
-	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest"); err != nil {
+	if err := pkgmanager.RecordExtensionSums(root, pkgDir, "guest", "v1.0.0"); err != nil {
 		t.Fatal(err)
 	}
 	origWasm, err := os.ReadFile(filepath.Join(pkgDir, "ext.wasm"))

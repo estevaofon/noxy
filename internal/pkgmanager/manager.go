@@ -28,13 +28,6 @@ func splitPackageArg(pkgArg string) (repoURL, version string) {
 	return parts[0], "HEAD"
 }
 
-// localPackagePath: github.com/user/repo → github_com/user/repo.
-func localPackagePath(repoURL string) string {
-	parts := strings.Split(repoURL, "/")
-	parts[0] = strings.ReplaceAll(parts[0], ".", "_")
-	return strings.Join(parts, "/")
-}
-
 // readManifest devolve (nil, nil, nil) quando o pacote nao e uma extensao;
 // um manifesto presente mas invalido falha o --get — binarios dependem
 // dele, e um typo nao pode virar "pacote sem extensao" em silencio.
@@ -69,7 +62,7 @@ func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error 
 	}
 	visited[cacheKey] = true
 
-	localPath := localPackagePath(repoURL)
+	localPath := LocalPath(repoURL)
 	targetDir := filepath.Join(NoxyLibsDir, filepath.FromSlash(localPath))
 	if isRoot {
 		fmt.Printf("Getting package %s...\n", pkgArg)
@@ -137,11 +130,15 @@ func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error 
 	}
 
 	if manifest != nil {
+		sumVersion := resolved
+		if sumVersion == HeadVersion { // provisório até a Task 9
+			sumVersion = "v0.0.0"
+		}
 		var sumErr error
 		if manifest.Kind == ext.KindProcess {
-			sumErr = recordProcessSums(".", localPath, manifestData, binarySums)
+			sumErr = recordProcessSums(".", repoURL, sumVersion, manifestData, binarySums)
 		} else {
-			sumErr = RecordExtensionSums(".", targetDir, localPath)
+			sumErr = RecordExtensionSums(".", targetDir, repoURL, sumVersion)
 		}
 		if sumErr != nil {
 			fmt.Printf("Warning: failed to record noxy.sum entries: %s\n", sumErr)
@@ -224,19 +221,11 @@ func updateModFile(pkg, pkgVersion string) error {
 	return config.Save(modPath)
 }
 
-// RecordExtensionSums grava no noxy.sum (sob root) os hashes do manifesto e
-// do wasm de uma extensao recem-baixada em targetDir, sob a chave localPath
-// (caminho relativo a noxy_libs, com "/"). Exportada para o teste de
-// integracao do VM exercitar o mesmo escritor usado por "--get" e provar que
-// caminho e chave batem com o leitor (vm.verifyExtensionSum).
-//
-// O manifesto e parseado com ext.ParseManifest (internal/ext importa so
-// internal/value — nao ha ciclo real com pkgmanager; um comentario anterior
-// alegava ciclo por engano, revisao final corrigiu). Manifesto ausente pula
-// o registro; um invalido ja falhou em readManifest.
-func RecordExtensionSums(root, targetDir, localPath string) error {
-	manifestPath := filepath.Join(targetDir, "noxy_ext.toml")
-	manifestData, err := os.ReadFile(manifestPath)
+// RecordExtensionSums grava manifesto + .wasm de uma extensao wasm em
+// targetDir sob a chave (module, version). Exportada para o teste de
+// integracao da VM exercitar o mesmo escritor do --sync.
+func RecordExtensionSums(root, targetDir, module, version string) error {
+	manifestData, err := os.ReadFile(filepath.Join(targetDir, "noxy_ext.toml"))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -247,18 +236,16 @@ func RecordExtensionSums(root, targetDir, localPath string) error {
 	if err != nil {
 		return nil
 	}
-	wasmName := manifest.Wasm
 	sums, err := ParseSumFile(SumFilePath(root))
 	if err != nil {
 		return err
 	}
-	pkg := strings.ReplaceAll(localPath, "\\", "/")
-	sums.Set(pkg, "noxy_ext.toml", sha256Hex(manifestData))
-	wasmData, err := os.ReadFile(filepath.Join(targetDir, wasmName))
+	sums.SetArtifact(module, version, "noxy_ext.toml", sha256Hex(manifestData))
+	wasmData, err := os.ReadFile(filepath.Join(targetDir, manifest.Wasm))
 	if err != nil {
 		return err
 	}
-	sums.Set(pkg, wasmName, sha256Hex(wasmData))
+	sums.SetArtifact(module, version, manifest.Wasm, sha256Hex(wasmData))
 	return sums.Save(SumFilePath(root))
 }
 
@@ -269,15 +256,14 @@ func sha256Hex(data []byte) string {
 
 // recordProcessSums grava manifesto + bin/<asset> de TODAS as plataformas
 // publicadas (spec §8.1, passo 6).
-func recordProcessSums(root, localPath string, manifestData []byte, binaries map[string]string) error {
+func recordProcessSums(root, module, version string, manifestData []byte, binaries map[string]string) error {
 	sums, err := ParseSumFile(SumFilePath(root))
 	if err != nil {
 		return err
 	}
-	pkg := strings.ReplaceAll(localPath, "\\", "/")
-	sums.Set(pkg, "noxy_ext.toml", sha256Hex(manifestData))
+	sums.SetArtifact(module, version, "noxy_ext.toml", sha256Hex(manifestData))
 	for asset, digest := range binaries {
-		sums.Set(pkg, "bin/"+asset, digest)
+		sums.SetArtifact(module, version, "bin/"+asset, digest)
 	}
 	return sums.Save(SumFilePath(root))
 }
