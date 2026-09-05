@@ -9,8 +9,8 @@ import (
 )
 
 // SumEntry e uma linha do noxy.sum v2 (spec §3.2):
-//   <módulo> <versão> sha256:<hex>            → File == ""  (hash de árvore)
-//   <módulo> <versão> <arquivo> sha256:<hex>  → artefato de extensão
+//   <modulo> <versao> sha256:<hex>            → File == ""  (hash de arvore)
+//   <modulo> <versao> <arquivo> sha256:<hex>  → artefato de extensao
 // Linhas v1 ("<github_com/x/y> <arquivo> sha256:<hex>") entram com Version
 // "" e sao descartadas no proximo Save.
 type SumEntry struct {
@@ -18,7 +18,7 @@ type SumEntry struct {
 }
 
 type SumFile struct {
-	entries map[string]SumEntry // chave: módulo + "\x00" + arquivo
+	entries map[string]SumEntry // chave: modulo + "\x00" + arquivo
 }
 
 func sumKey(module, file string) string { return module + "\x00" + file }
@@ -53,9 +53,9 @@ func ParseSumFile(path string) (*SumFile, error) {
 		switch {
 		case len(f) == 4: // v2 artefato
 			s.entries[sumKey(f[0], f[2])] = SumEntry{f[0], f[1], f[2], digest}
-		case IsSemverTag(f[1]) || IsPseudoVersion(f[1]): // v2 árvore
+		case IsSemverTag(f[1]) || IsPseudoVersion(f[1]): // v2 arvore
 			s.entries[sumKey(f[0], "")] = SumEntry{f[0], f[1], "", digest}
-		default: // v1: chave local, sem versão
+		default: // v1: chave local, sem versao
 			module := ModulePath(f[0])
 			s.entries[sumKey(module, f[1])] = SumEntry{module, "", f[1], digest}
 		}

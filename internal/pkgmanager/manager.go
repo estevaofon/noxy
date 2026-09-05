@@ -131,7 +131,7 @@ func downloadPackage(pkgArg string, isRoot bool, visited map[string]bool) error 
 
 	if manifest != nil {
 		sumVersion := resolved
-		if sumVersion == HeadVersion { // provisório até a Task 9
+		if sumVersion == HeadVersion { // provisorio ate a Task 9
 			sumVersion = "v0.0.0"
 		}
 		var sumErr error
