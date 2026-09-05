@@ -2201,7 +2201,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 			// use pkg select *
 			exports, loadable := c.discoverModuleExports(n.Module)
 			if !loadable && c.enclosing == nil {
-				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'", n.Token.Line, n.Module)
+				return nil, nil, fmt.Errorf("[line %d] failed to resolve wildcard module '%s'%s", n.Token.Line, n.Module, c.syncHint(n.Module))
 			}
 			// §8/R8: templates genericos exportados entram no registry
 			// (Module = modulo definidor) em vez de c.globals — importBindingFrom

@@ -1,11 +1,7 @@
 // Aceitação do package manager: importa o pacote instalado por `noxy --sync`
 // (noxy.mod: github.com/estevaofon/quicksort v0.1.0). Falha se noxy_libs
-// não foi sincronizado. `select quicksort` (não `select *`): a resolução de
-// `select *` acontece em tempo de compilação (discoverModuleExports) e não
-// passa pela dica "run 'noxy --sync'" do runtime (vm.resolveModule); um
-// select nomeado ou `use ... as` chega ao OP_IMPORT em runtime e recebe a
-// dica quando o pacote falta.
-use github_com.estevaofon.quicksort.quicksort select quicksort
+// não foi sincronizado.
+use github_com.estevaofon.quicksort.quicksort select *
 use sys select exit
 
 func assert(cond: bool, msg: string)
