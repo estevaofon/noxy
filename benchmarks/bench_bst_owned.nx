@@ -5,10 +5,10 @@
 // `ref TreeNode` nos filhos e nao passa por esse caminho.
 struct TreeNode
     valor: int
-    esquerda: TreeNode
-    direita: TreeNode
+    esquerda: TreeNode?     // posse; null onde a arvore termina (spec §2.4, §3)
+    direita: TreeNode?
 end
-func insert(node: ref TreeNode, v: int) -> void
+func insert(node: ref (TreeNode?), v: int) -> void
     if *node == null then
         *node = TreeNode(v, null, null)
         return
@@ -19,14 +19,20 @@ func insert(node: ref TreeNode, v: int) -> void
         insert(ref node.direita, v)
     end
 end
-func count(node: ref TreeNode) -> int
+func count(node: ref (TreeNode?)) -> int
     if *node == null then
         return 0
     end
-    return 1 + count(ref node.esquerda) + count(ref node.direita)
+    // O narrowing de `*node` nao sobrevive a uma chamada cuja raiz e `ref`
+    // (spec §3, "Self-Reference"): um emprestimo por chamada, testado de novo.
+    let e: int = count(ref node.esquerda)
+    if *node == null then
+        return 0
+    end
+    return 1 + e + count(ref node.direita)
 end
 func main() -> void
-    let raiz: TreeNode = null
+    let raiz: TreeNode? = null
     let seed: int = 12345
     let i: int = 0
     while i < 20000 do

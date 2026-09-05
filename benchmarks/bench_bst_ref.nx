@@ -2,8 +2,8 @@
 // promovida a heap, e o acesso nao caminha o caminho do emprestimo (issue #93).
 struct TreeNode
     valor: int
-    esquerda: ref TreeNode
-    direita: ref TreeNode
+    esquerda: ref TreeNode?     // compartilhado; null onde a arvore termina (spec §2.3 R8)
+    direita: ref TreeNode?
 end
 func insert(node: ref TreeNode, v: int) -> void
     if v < node.valor then
@@ -22,11 +22,12 @@ func insert(node: ref TreeNode, v: int) -> void
         end
     end
 end
-func count(node: ref TreeNode) -> int
+func count(node: ref TreeNode?) -> int
     if node == null then
         return 0
     end
-    return 1 + count(node.esquerda) + count(node.direita)
+    let n: ref TreeNode = node   // spec §2.4: o narrowing nao sobrevive a chamada; vincula uma vez
+    return 1 + count(n.esquerda) + count(n.direita)
 end
 func main() -> void
     let raiz: TreeNode = TreeNode(500000, null, null)
