@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"noxy-vm/internal/ast"
 	"noxy-vm/internal/chunk"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/value"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,7 @@ type Compiler struct {
 	currentLine         int
 	FileName            string
 	moduleRoot          string
+	projectRoot         string       // raiz do projeto (noxy.mod mais proximo de moduleRoot); "" = script solto
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
@@ -180,6 +182,10 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 	if moduleRoot == "" {
 		moduleRoot = "."
 	}
+	projectRoot := ""
+	if root, ok := pkgmanager.FindRoot(moduleRoot); ok {
+		projectRoot = root
+	}
 	c := &Compiler{
 		enclosing:    nil,
 		currentChunk: chunk.New(),
@@ -192,6 +198,7 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 		currentLine:  1,
 		FileName:     fileName,
 		moduleRoot:   moduleRoot,
+		projectRoot:  projectRoot,
 		moduleName:   "main",
 		warnings:     &[]Warning{},
 	}

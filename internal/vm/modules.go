@@ -7,6 +7,7 @@ import (
 	"noxy-vm/internal/compiler"
 	"noxy-vm/internal/lexer"
 	"noxy-vm/internal/parser"
+	"noxy-vm/internal/pkgmanager"
 	"noxy-vm/internal/stdlib"
 	"noxy-vm/internal/value"
 	"os"
@@ -57,6 +58,12 @@ func (vm *VM) resolveModule(name string) (resolvedModule, error) {
 				)
 			}
 		}
+		if project := vm.Config.ProjectRoot; project != "" {
+			candidates = append(candidates,
+				filepath.Join(project, "noxy_libs", suffix, suffix+".nx"),
+				filepath.Join(project, "noxy_libs", suffix),
+			)
+		}
 		candidates = append(candidates,
 			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix, suffix+".nx"),
 			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix),
@@ -100,9 +107,28 @@ func (vm *VM) resolveModule(name string) (resolvedModule, error) {
 
 	content, readErr := stdlib.FS.ReadFile(pathName + ".nx")
 	if readErr != nil {
-		return resolvedModule{}, fmt.Errorf("module not found: %s", canonicalName)
+		return resolvedModule{}, fmt.Errorf("module not found: %s%s", canonicalName, vm.syncHint(canonicalName))
 	}
 	return resolvedModule{Key: key, Name: canonicalName, Kind: resolvedEmbeddedModule, Content: string(content)}, nil
+}
+
+// syncHint: so no caminho de erro, le <ProjectRoot>/noxy.mod e, se o modulo
+// pedido e (ou esta sob) uma dependencia declarada, aponta o comando (spec §6).
+func (vm *VM) syncHint(moduleName string) string {
+	if vm.Config.ProjectRoot == "" {
+		return ""
+	}
+	cfg, err := pkgmanager.ParseModFile(filepath.Join(vm.Config.ProjectRoot, "noxy.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, module := range cfg.Requires() {
+		local := strings.ReplaceAll(pkgmanager.LocalPath(module), "/", ".")
+		if moduleName == local || strings.HasPrefix(moduleName, local+".") {
+			return " (required by noxy.mod) — run 'noxy --sync'"
+		}
+	}
+	return ""
 }
 
 func (vm *VM) loadModule(name string) (value.Value, error) {

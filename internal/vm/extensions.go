@@ -119,7 +119,7 @@ func (vm *VM) loadProcessBackend(dir string, manifest *ext.Manifest, manifestDat
 	binBytes, err := os.ReadFile(binPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("extension %q: binary bin/%s not found — run 'noxy --get' to download it", manifest.Name, asset)
+			return nil, fmt.Errorf("extension %q: binary bin/%s not found — run 'noxy --sync' to download it", manifest.Name, asset)
 		}
 		return nil, fmt.Errorf("extension %q: %w", manifest.Name, err)
 	}
@@ -159,9 +159,12 @@ func signatureTypeName(declared string) string {
 // novo nome no noxy.sum simplesmente nao encontra entrada e cai no ramo de
 // TOFU-allow (achado de revisao).
 func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestData []byte, artifactName string, artifact []byte) error {
-	rootAbs, err := filepath.Abs(vm.Config.RootPath)
-	if err != nil {
-		return err
+	rootAbs := vm.Config.ProjectRoot
+	if rootAbs == "" {
+		var err error
+		if rootAbs, err = filepath.Abs(vm.Config.RootPath); err != nil {
+			return err
+		}
 	}
 	libs := filepath.Join(rootAbs, "noxy_libs")
 	dirAbs, err := filepath.Abs(dir)
@@ -186,9 +189,9 @@ func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestDat
 	if !hasManifest && !hasArtifact {
 		// TOFU do M1 (spec §15, noxy.sum spec pendente): sem NENHUMA entrada,
 		// o load segue, mas nao em silencio — quem roda o script deve saber
-		// que esta extensao nunca foi registrada por "noxy --get" (achado de
+		// que esta extensao nunca foi registrada por "noxy --sync" (achado de
 		// revisao).
-		fmt.Fprintf(os.Stderr, "warning: extension '%s' loaded from noxy_libs without a noxy.sum entry — run 'noxy --get' to record it\n", manifest.Name)
+		fmt.Fprintf(os.Stderr, "warning: extension '%s' loaded from noxy_libs without a noxy.sum entry — run 'noxy --sync' to record it\n", manifest.Name)
 	}
 	if hasManifest {
 		manifestSum := sha256.Sum256(manifestData)

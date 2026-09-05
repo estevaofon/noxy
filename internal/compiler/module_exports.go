@@ -857,6 +857,12 @@ func (c *Compiler) moduleFileCandidates(pathName string) []string {
 				filepath.Join(searchRoot, suffix+".nx"),
 			)
 		}
+		if c.projectRoot != "" {
+			candidates = append(candidates,
+				filepath.Join(c.projectRoot, "noxy_libs", suffix, suffix+".nx"),
+				filepath.Join(c.projectRoot, "noxy_libs", suffix),
+			)
+		}
 		candidates = append(candidates,
 			filepath.Join(root, "noxy_libs", suffix, suffix+".nx"),
 			filepath.Join(root, "noxy_libs", suffix),

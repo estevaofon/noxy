@@ -145,7 +145,7 @@ use time as tm
 // TOFU sob noxy_libs sem NENHUMA entrada de noxy.sum precisa avisar em
 // stderr (achado de revisao — TOFU nao pode ser silencioso): o load segue
 // (spec §15, noxy.sum spec pendente), mas quem roda o script deve saber que
-// a extensao nunca passou por "noxy --get".
+// a extensao nunca passou por "noxy --sync".
 func TestExtensionTOFUWarningWithoutSumEntry(t *testing.T) {
 	root := t.TempDir()
 	writeExtensionPackage(t, root)

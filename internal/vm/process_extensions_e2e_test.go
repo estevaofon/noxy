@@ -126,8 +126,8 @@ func TestProcessExtensionMissingBinaryErrorsAtUse(t *testing.T) {
 	}
 	machine := NewWithConfig(VMConfig{RootPath: root})
 	err := machine.Interpret(compileVMSourceAtRoot(t, root, "use guest as g\n"))
-	if err == nil || !strings.Contains(err.Error(), "run 'noxy --get'") {
-		t.Fatalf("missing binary must fail at use with a --get hint, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "run 'noxy --sync'") {
+		t.Fatalf("missing binary must fail at use with a --sync hint, got %v", err)
 	}
 }
 
