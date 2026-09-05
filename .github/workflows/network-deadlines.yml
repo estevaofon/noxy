@@ -47,6 +47,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
+      # noxy_libs is derived (spec 2026-09-04): install the locked dependencies
+      # first. Needs network for github.com/estevaofon/quicksort@v0.1.0 and the
+      # noxy_dynamodb release assets; --locked fails if noxy.sum drifted.
+      - run: go run ./cmd/noxy --sync --locked
       # run_all_tests_concurrent.nx runs every noxy_examples/*.nx (minus the
       # interactive/server demos in its exclusion list) through argv[0] — the
       # interpreter `go run` just built — with 8 workers, and exits 1 if any

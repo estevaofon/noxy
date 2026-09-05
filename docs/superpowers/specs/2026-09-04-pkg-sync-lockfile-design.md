@@ -1,7 +1,7 @@
 # `noxy --sync`: lockfile completo e `noxy_libs` derivado
 
 **Data:** 2026-09-04 · **Branch:** `feat/pkg-sync-lockfile`, a partir de `develop` (pós #137, v0.23.5)
-**Status:** aprovado em conversa; revisada por revisor independente (achados 1–5 bloqueantes e 6–12 menores incorporados) · **Issue:** a abrir · **Relação:** spec de extensões por processo (`2026-08-29-process-extensions-design.md`, §8 e §15: "versioned `noxy.sum` keys" e "`noxy.sum` format spec" eram pendências declaradas); spec wasm (`2026-08-23`, §15 idem).
+**Status:** implementado na v0.24.0 · **Issue:** a abrir · **Relação:** spec de extensões por processo (`2026-08-29-process-extensions-design.md`, §8 e §15: "versioned `noxy.sum` keys" e "`noxy.sum` format spec" eram pendências declaradas); spec wasm (`2026-08-23`, §15 idem).
 
 Um projeto clonado com `noxy.mod` e `noxy.sum` deve ficar pronto para rodar com **um comando**, `noxy --sync`, sem rede em tempo de execução e com o mesmo conteúdo em qualquer máquina. Hoje `--get` faz metade disso: clona, escreve `noxy.mod` e grava hash só de artefatos de extensão. Faltam quatro coisas, e cada uma tem precedente em Go, uv ou Cargo: hash para pacotes de fonte, registro do fechamento transitivo, versão sempre pinada e um comando que reconstrua `noxy_libs` a partir dos dois arquivos.
 

@@ -31,8 +31,10 @@ vault.key
 .arc/
 .agents/
 .worktrees/
-noxy_libs/github_com/estevaofon/noxy_terminal/
-noxy_libs/github_com/estevaofon/noxy_dynamodb/
+# noxy_libs é derivado: `noxy --sync` reconstrói a partir de noxy.mod + noxy.sum.
+# math_lib é fixture colocada à mão (noxy_examples/test_libs.nx) até existir `replace`.
+noxy_libs/*
+!noxy_libs/math_lib/
 
 # gerado por noxy_examples/test_alias_conflict.nx (o rm do exemplo falha no Windows)
 log_alias.txt

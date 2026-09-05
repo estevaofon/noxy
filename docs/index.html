@@ -55,7 +55,7 @@
             <div class="hero-content">
                 <a href="https://github.com/estevaofon/noxy/blob/main/CHANGELOG.md" class="version-badge"
                     target="_blank">
-                    <span class="version-badge-tag">v0.23.5</span>
+                    <span class="version-badge-tag">v0.24.0</span>
                     Latest release &middot; changelog
                     <i class="fas fa-arrow-right"></i>
                 </a>
@@ -193,7 +193,8 @@ print(f"Product: {product.name}")</code></pre>
                     <h3>Modules &amp; Packages</h3>
                     <p><code>use m</code>, <code>use m as alias</code>, <code>use m select f, T</code>. Module state
                         is read-only from outside, struct identity is nominal across modules, and a Git-based
-                        package manager installs dependencies with <code>noxy --get</code>.</p>
+                        package manager installs dependencies with <code>noxy --get</code> and reproduces the
+                        lock offline with <code>noxy --sync</code>.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">
@@ -382,7 +383,7 @@ use sys
 
 print(time.now())            // unix timestamp
 print(length(sys.argv()))    // command-line args
-print(sys.version)           // v0.23.5
+print(sys.version)           // v0.24.0
 
 let user: map[string, any] = {"name": "Ana", "age": 30}
 print(json_dumps(user))      // {"age":30,"name":"Ana"}</code></pre>
@@ -851,7 +852,10 @@ go run ./cmd/noxy program.nx</code></pre>
 ./noxy --get github.com/user/repo@v1.0.0
 
 # Then import it by module path
-# use github_com.user.repo.module as m</code></pre>
+# use github_com.user.repo.module as m
+
+# On a clone: rebuild noxy_libs/ from noxy.mod + noxy.sum, offline after
+./noxy --sync</code></pre>
                 </div>
             </div>
         </div>
