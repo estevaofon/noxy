@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.25.0] - 2026-09-05
 
 ### Changed
 - Caminho do módulo Go passa de `noxy-vm` para `github.com/estevaofon/noxy`,
