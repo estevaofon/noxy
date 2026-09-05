@@ -248,7 +248,7 @@ it); list exactly those asset names in `[binaries]`.
 ### `sys_load_plugin` (deprecated)
 
 The line-delimited JSON plugin builtin is deprecated since v0.23.0 and
-will be removed in v0.25.0 together with `internal/plugin` and the
+will be removed in v0.26.0 together with `internal/plugin` and the
 compiler's `PluginNativeNames` special case; it prints a warning on first
 use. Migrate by publishing the plugin as a `kind = "process"` extension.
 

@@ -707,10 +707,10 @@ anywhere.
 
 - **v0.23.0 (this delivery):** the builtin keeps working. Its first call in a
   process prints once to stderr: `warning: sys_load_plugin is deprecated
-  since v0.23.0 and will be removed in v0.25.0; publish the plugin as a kind
+  since v0.23.0 and will be removed in v0.26.0; publish the plugin as a kind
   = "process" extension (docs/EXTENSIONS.md)`. `docs/` mark it deprecated;
   the CHANGELOG states the window.
-- **v0.25.0:** remove `sys_load_plugin`, `internal/plugin`,
+- **v0.26.0** (janela estendida na v0.25.0, que só renomeou o módulo Go): remove `sys_load_plugin`, `internal/plugin`,
   `compiler.PluginNativeNames` and its three call sites, and the JSON
   protocol from `docs/`.
 
@@ -852,7 +852,7 @@ One release, v0.23.0, in the order of issue #80's checkboxes:
 6. `noxy_terminal` migrated and released (checkbox 5).
 7. `noxy_dynamodb` migrated and released (checkbox 6).
 8. Deprecation warning for `sys_load_plugin`, CHANGELOG entry with the
-   removal window (checkbox 8, first half; second half at v0.25.0).
+   removal window (checkbox 8, first half; second half at v0.26.0).
 
 Steps 2–4 are one PR to `develop`; 5–8 follow as small PRs.
 

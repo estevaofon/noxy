@@ -9,6 +9,11 @@
   e o `README.md` (seção *Installation*, `cd noxy` após o clone) foram
   atualizados; nada muda para programas Noxy.
 
+### Deprecated
+- `sys_load_plugin`: a remoção (com `internal/plugin` e
+  `compiler.PluginNativeNames`) passa da v0.25.0 para a **v0.26.0**; o aviso
+  no stderr, `docs/EXTENSIONS.md` e a spec §10.1 refletem a nova janela.
+
 ## [0.24.0] - 2026-09-04
 
 Package manager: `noxy --sync` reconstrói `noxy_libs` a partir de `noxy.mod`

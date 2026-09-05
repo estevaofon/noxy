@@ -24,7 +24,7 @@ Source → Lexer → Parser → AST → Compiler → Bytecode (Chunk) → VM
 | `internal/stdlib` | Módulos `.nx` embutidos (`//go:embed *.nx`, sem registro) |
 | `cmd/noxy` | CLI, REPL (`runREPL`), `diagOut` (destino único dos diagnósticos da CLI) |
 | `internal/ext`, `sdk/noxyplugin` | Extensões wasm e por processo (`noxy-plugin/1`); o SDK é módulo Go aninhado, testado à parte (`go test ./...` dentro dele) |
-| `internal/pkgmanager` (`--get`/`--sync`, `noxy.sum` v2, `FindRoot`), `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.25.0) | Periferia |
+| `internal/pkgmanager` (`--get`/`--sync`, `noxy.sum` v2, `FindRoot`), `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.26.0) | Periferia |
 
 ## Verificação obrigatória
 
