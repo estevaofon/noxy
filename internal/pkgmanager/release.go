@@ -33,6 +33,7 @@ var (
 		return tag, nil
 	}
 	httpClient = &http.Client{Timeout: 60 * time.Second}
+	listTags   = gitLsRemoteTags
 )
 
 func toGitURL(repoURL string) string {
