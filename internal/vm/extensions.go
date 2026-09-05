@@ -149,8 +149,15 @@ func signatureTypeName(declared string) string {
 // verifyExtensionSum confere o hash do artefato que o backend vai executar
 // (`.wasm` ou `bin/<asset>`) contra o noxy.sum do projeto (M1
 // trust-on-first-use: spec §15, noxy.sum spec pendente). So se aplica a
-// pacotes sob <RootPath>/noxy_libs — layouts de desenvolvimento fora dali
-// nao tem entrada e a checagem e ignorada.
+// pacotes sob <raiz>/noxy_libs, onde <raiz> e a primeira, em ordem, entre
+// ProjectRoot e RootPath cujo noxy_libs contem dir — resolveModule
+// (modules.go) resolve pacotes de AMBAS as raizes (ProjectRoot/noxy_libs
+// quando o script roda de um subdiretorio com noxy.mod ancestral, e
+// RootPath/noxy_libs quando o proprio script tem um noxy_libs ao lado), e a
+// verificacao tem que cobrir as duas ou fica silenciosamente pulada para
+// quem usa a segunda (achado de revisao). So cai no "fora de noxy_libs"
+// (layout de desenvolvimento, sem verificacao) se dir nao estiver sob
+// nenhuma das duas.
 //
 // O manifesto decide QUAL artefato verificar (manifest.Wasm ou o asset de
 // [binaries]), entao ele proprio precisa ser verificado primeiro — senao
@@ -159,25 +166,37 @@ func signatureTypeName(declared string) string {
 // novo nome no noxy.sum simplesmente nao encontra entrada e cai no ramo de
 // TOFU-allow (achado de revisao).
 func (vm *VM) verifyExtensionSum(dir string, manifest *ext.Manifest, manifestData []byte, artifactName string, artifact []byte) error {
-	rootAbs := vm.Config.ProjectRoot
-	if rootAbs == "" {
-		var err error
-		if rootAbs, err = filepath.Abs(vm.Config.RootPath); err != nil {
-			return err
-		}
-	}
-	libs := filepath.Join(rootAbs, "noxy_libs")
 	dirAbs, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
-	rel, err := filepath.Rel(libs, dirAbs)
-	// "rel == ".."" cobre o proprio noxy_libs; HasPrefix com o separador
-	// junto evita o falso positivo de um irmao como "noxy_libs-outro" que
-	// comeca com ".." apos Rel mas nao esta de fato fora da arvore (achado
-	// de revisao).
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil // fora de noxy_libs (layout de desenvolvimento): sem verificacao
+	rootPathAbs, err := filepath.Abs(vm.Config.RootPath)
+	if err != nil {
+		return err
+	}
+	candidates := make([]string, 0, 2)
+	if vm.Config.ProjectRoot != "" {
+		candidates = append(candidates, vm.Config.ProjectRoot)
+	}
+	candidates = append(candidates, rootPathAbs)
+
+	var rootAbs, rel string
+	found := false
+	for _, cand := range candidates {
+		libs := filepath.Join(cand, "noxy_libs")
+		r, err := filepath.Rel(libs, dirAbs)
+		// "r == ".."" cobre o proprio noxy_libs; HasPrefix com o separador
+		// junto evita o falso positivo de um irmao como "noxy_libs-outro" que
+		// comeca com ".." apos Rel mas nao esta de fato fora da arvore (achado
+		// de revisao).
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			continue
+		}
+		rootAbs, rel, found = cand, r, true
+		break
+	}
+	if !found {
+		return nil // fora de noxy_libs de toda raiz candidata (layout de desenvolvimento): sem verificacao
 	}
 	sums, err := pkgmanager.ParseSumFile(pkgmanager.SumFilePath(rootAbs))
 	if err != nil {

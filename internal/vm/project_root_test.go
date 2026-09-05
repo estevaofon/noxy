@@ -55,6 +55,34 @@ func TestModuleNotFoundHintsSyncWhenRequiredByNoxyMod(t *testing.T) {
 	}
 }
 
+// TestExtensionSumVerifiedForNoxyLibsBesideScriptUnderAncestorNoxyMod cobre o
+// segundo layout que resolveModule aceita (modules.go): script sob um
+// noxy.mod ancestral (ProjectRoot = root), mas o pacote de extensao mora no
+// noxy_libs do PROPRIO diretorio do script (sub/noxy_libs), nao no da raiz.
+// Antes da correcao, verifyExtensionSum so olhava ProjectRoot/noxy_libs; o
+// "rel" desse pacote comecava com ".." e a checagem era pulada em silencio.
+func TestExtensionSumVerifiedForNoxyLibsBesideScriptUnderAncestorNoxyMod(t *testing.T) {
+	root, sub := writeProject(t)
+	writeExtensionPackage(t, sub)
+	pkgDir := filepath.Join(sub, "noxy_libs", "guest")
+	if err := pkgmanager.RecordExtensionSums(sub, pkgDir, "guest", "v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "ext.wasm"), []byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extensionLoaderPermits = []string{"wasi_snapshot_preview1"}
+	t.Cleanup(func() { extensionLoaderPermits = nil })
+	machine := NewWithConfig(VMConfig{RootPath: sub})
+	if machine.Config.ProjectRoot != root {
+		t.Fatalf("ProjectRoot = %q, want %q", machine.Config.ProjectRoot, root)
+	}
+	err := machine.Interpret(compileVMSourceAtRoot(t, sub, "use guest as g\n"))
+	if err == nil || !strings.Contains(err.Error(), "mismatch") {
+		t.Fatalf("a package under RootPath/noxy_libs must be verified even with an ancestor noxy.mod, got %v", err)
+	}
+}
+
 func TestExtensionSumIsVerifiedForScriptInSubdirectory(t *testing.T) {
 	root, sub := writeProject(t)
 	// pacote de extensao em <root>/noxy_libs/guest, noxy.sum na raiz, script em sub/
