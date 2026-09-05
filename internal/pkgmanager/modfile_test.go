@@ -80,24 +80,49 @@ func TestModFileSaveIsSortedAndNormalized(t *testing.T) {
 }
 
 func TestModFileRejectsBadRequire(t *testing.T) {
-	for _, line := range []string{
+	badPathLines := []string{
 		"require https://github.com/x/y v1.0.0",
 		"require git@github.com:x/y v1.0.0",
 		"require github.com/x v1.0.0",
-		"require github.com/x/y abc123",
-	} {
+	}
+	for _, line := range badPathLines {
 		path := filepath.Join(t.TempDir(), "noxy.mod")
 		if err := os.WriteFile(path, []byte("module p\n"+line+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := ParseModFile(path); err == nil || !strings.Contains(err.Error(), "noxy.mod:2:") {
-			t.Fatalf("%q must fail with a line number, got %v", line, err)
+		if _, err := ParseModFile(path); err == nil || !strings.Contains(err.Error(), "noxy.mod:2:") || !strings.Contains(err.Error(), "module path must be host/user/repo") {
+			t.Fatalf("%q must fail with line number and path error, got %v", line, err)
 		}
+	}
+	// Bad version
+	badVersionPath := filepath.Join(t.TempDir(), "noxy.mod")
+	if err := os.WriteFile(badVersionPath, []byte("module p\nrequire github.com/x/y abc123\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseModFile(badVersionPath); err == nil || !strings.Contains(err.Error(), "noxy.mod:2:") || !strings.Contains(err.Error(), "invalid version") {
+		t.Fatalf("bad version must fail with line number and version error, got %v", err)
 	}
 	if err := ValidateModulePath("github.com/x/y"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ValidateModulePath("github_com/x/y"); err == nil {
 		t.Fatal("local path is not a module path")
+	}
+}
+
+func TestModFileSaveRejectsInvalidVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "noxy.mod")
+	c := NewModuleConfig()
+	c.Module = "proj"
+	c.Require["github.com/x/y"] = "abc123"
+	if err := c.Save(path); err == nil || !strings.Contains(err.Error(), "github.com/x/y") {
+		t.Fatalf("Save must reject invalid version, got %v", err)
+	}
+	_, err := os.Stat(path)
+	if err == nil {
+		t.Fatal("file should not have been created")
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("unexpected error type: %v", err)
 	}
 }

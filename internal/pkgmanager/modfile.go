@@ -96,9 +96,10 @@ func (c *ModuleConfig) Save(path string) error {
 		version := c.Require[m]
 		if version != HeadVersion {
 			normalized, err := NormalizeVersion(version)
-			if err == nil {
-				version = normalized
+			if err != nil {
+				return fmt.Errorf("noxy.mod: require %s: %w", m, err)
 			}
+			version = normalized
 		}
 		fmt.Fprintf(&sb, "require %s %s\n", m, version)
 	}
