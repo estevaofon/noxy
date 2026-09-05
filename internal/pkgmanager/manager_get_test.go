@@ -71,11 +71,11 @@ returns = "void"
 		t.Fatal(err)
 	}
 	t.Chdir(project)
-	prevGit, prevRel, prevTag := gitURLFor, releaseBaseURL, resolveNewestTag
+	prevGit, prevRel, prevTag := gitURLFor, releaseBaseURL, listTags
 	gitURLFor = func(string) string { return repo }
 	releaseBaseURL = func(string, string) (string, error) { return srv.URL + "/rel/", nil }
-	resolveNewestTag = func(string) (string, error) { return "v0.1.0", nil }
-	t.Cleanup(func() { gitURLFor, releaseBaseURL, resolveNewestTag = prevGit, prevRel, prevTag })
+	listTags = func(string) (string, error) { return "x\trefs/tags/v0.1.0\n", nil }
+	t.Cleanup(func() { gitURLFor, releaseBaseURL, listTags = prevGit, prevRel, prevTag })
 
 	if err := Get("github.com/acme/guest"); err != nil {
 		t.Fatalf("--get: %v", err)
@@ -153,5 +153,60 @@ func TestGetFailsWithoutPlatformAsset(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, "noxy_libs", "github_com", "acme", "guest")); !os.IsNotExist(err) {
 		t.Fatal("a failed --get installs nothing")
+	}
+}
+
+func TestGetUpgradesPinnedPackageAndKeepsLockHashes(t *testing.T) {
+	a := newLocalRepo(t, map[string]string{"a.nx": "a"}, "v1.0.0")
+	writeTree(t, a, map[string]string{"a.nx": "a2"})
+	gitIn(t, a, "add", ".")
+	gitIn(t, a, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "v1.1.0")
+	gitIn(t, a, "tag", "v1.1.0")
+	stubRepos(t, map[string]string{"github.com/t/a": a})
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := Get("github.com/t/a@v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	sum1, _ := os.ReadFile(filepath.Join(project, "noxy.sum"))
+	// --get de novo na mesma versao: lock inalterado (hash existente vale).
+	if err := Get("github.com/t/a@v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if sum2, _ := os.ReadFile(filepath.Join(project, "noxy.sum")); string(sum2) != string(sum1) {
+		t.Fatalf("same version must not rewrite the lock:\n%s\n%s", sum1, sum2)
+	}
+	// --get sem versao sobe para a tag mais nova.
+	if err := Get("github.com/t/a"); err != nil {
+		t.Fatal(err)
+	}
+	mod, _ := os.ReadFile(filepath.Join(project, "noxy.mod"))
+	if !strings.Contains(string(mod), "require github.com/t/a v1.1.0") {
+		t.Fatalf("noxy.mod:\n%s", mod)
+	}
+	if data, _ := os.ReadFile(filepath.Join(project, "noxy_libs", "github_com", "t", "a", "a.nx")); string(data) != "a2" {
+		t.Fatal("upgrade must install the new version")
+	}
+	if err := Get("https://github.com/t/a"); err == nil || !strings.Contains(err.Error(), "module path must be host/user/repo") {
+		t.Fatalf("scheme is rejected: %v", err)
+	}
+}
+
+func TestGetSameVersionWithMovedTagFails(t *testing.T) {
+	a := newLocalRepo(t, map[string]string{"a.nx": "a"}, "v1.0.0")
+	stubRepos(t, map[string]string{"github.com/t/a": a})
+	project := t.TempDir()
+	t.Chdir(project)
+	if err := Get("github.com/t/a@v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	// "move" a tag: novo commit, tag reapontada
+	writeTree(t, a, map[string]string{"a.nx": "moved"})
+	gitIn(t, a, "add", ".")
+	gitIn(t, a, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "moved")
+	gitIn(t, a, "tag", "-f", "v1.0.0")
+	_ = os.RemoveAll(filepath.Join(project, "noxy_libs", "github_com", "t", "a"))
+	if err := Get("github.com/t/a@v1.0.0"); err == nil || !strings.Contains(err.Error(), "tree hash mismatch") {
+		t.Fatalf("moved tag must be refused by --get too (spec §5.4): %v", err)
 	}
 }

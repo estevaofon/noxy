@@ -19,21 +19,10 @@ import (
 
 // Costuras trocadas pelos testes (servidor httptest, repositorio local).
 var (
-	gitURLFor        = toGitURL
-	releaseBaseURL   = ReleaseBaseURL
-	resolveNewestTag = func(gitURL string) (string, error) {
-		out, err := gitLsRemoteTags(gitURL)
-		if err != nil {
-			return "", err
-		}
-		tag, ok := newestSemverTag(out)
-		if !ok {
-			return "", fmt.Errorf("no semver tag found — process extensions are installed from a tagged release")
-		}
-		return tag, nil
-	}
-	httpClient = &http.Client{Timeout: 60 * time.Second}
-	listTags   = gitLsRemoteTags
+	gitURLFor      = toGitURL
+	releaseBaseURL = ReleaseBaseURL
+	httpClient     = &http.Client{Timeout: 60 * time.Second}
+	listTags       = gitLsRemoteTags
 )
 
 func toGitURL(repoURL string) string {

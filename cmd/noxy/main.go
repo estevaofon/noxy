@@ -55,7 +55,9 @@ func main() {
 		})
 	}
 
-	getPkg := flag.String("get", "", "Download and install a package (e.g. github.com/user/repo@version)")
+	getPkg := flag.String("get", "", "Add or upgrade a package (e.g. github.com/user/repo@v1.0.0) and sync noxy_libs")
+	doSync := flag.Bool("sync", false, "Install every dependency of noxy.mod into noxy_libs, verified against noxy.sum")
+	locked := flag.Bool("locked", false, "With --sync: fail instead of changing noxy.sum or noxy.mod (CI)")
 	cpuProfile := flag.String("cpuprofile", "", "Write CPU profile to file")
 	memProfile := flag.String("memprofile", "", "Write memory profile to file")
 	flag.Parse()
@@ -73,6 +75,24 @@ func main() {
 	if *getPkg != "" {
 		if err := pkgmanager.Get(*getPkg); err != nil {
 			fmt.Fprintf(diagOut, "Error getting package: %s\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *locked && !*doSync {
+		fmt.Fprintln(diagOut, "Error: --locked requires --sync")
+		os.Exit(2)
+	}
+	if *doSync {
+		cwd, _ := os.Getwd()
+		root, ok := pkgmanager.FindRoot(cwd)
+		if !ok {
+			fmt.Fprintf(diagOut, "Error: no noxy.mod in %s or any parent\n", cwd)
+			os.Exit(1)
+		}
+		if err := pkgmanager.Sync(root, pkgmanager.SyncOptions{Locked: *locked, Out: os.Stdout}); err != nil {
+			fmt.Fprintf(diagOut, "Error syncing packages: %s\n", err)
 			os.Exit(1)
 		}
 		return
