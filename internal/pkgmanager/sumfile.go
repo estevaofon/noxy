@@ -133,9 +133,9 @@ func (s *SumFile) Artifacts(module string) map[string]string {
 	return out
 }
 
-// Save grava so linhas v2, ordenadas; linhas v1 (Version == "") caem —
-// quem as re-registra e o --sync (spec §3.2, migracao).
-func (s *SumFile) Save(path string) error {
+// render monta o corpo v2 ordenado (spec §3.2, migracao): linhas v1
+// (Version == "") caem — quem as re-registra e o --sync.
+func (s *SumFile) render() ([]byte, error) {
 	versions := map[string]string{}
 	lines := make([]string, 0, len(s.entries))
 	for _, e := range s.entries {
@@ -143,7 +143,7 @@ func (s *SumFile) Save(path string) error {
 			continue
 		}
 		if prev, ok := versions[e.Module]; ok && prev != e.Version {
-			return fmt.Errorf("noxy.sum: two versions of %s (%s and %s)", e.Module, prev, e.Version)
+			return nil, fmt.Errorf("noxy.sum: two versions of %s (%s and %s)", e.Module, prev, e.Version)
 		}
 		versions[e.Module] = e.Version
 		if e.File == "" {
@@ -153,7 +153,16 @@ func (s *SumFile) Save(path string) error {
 		}
 	}
 	sort.Strings(lines)
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	return []byte(strings.Join(lines, "\n") + "\n"), nil
+}
+
+// Save grava so linhas v2, ordenadas.
+func (s *SumFile) Save(path string) error {
+	data, err := s.render()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 // SumFilePath e o UNICO resolvedor do caminho do noxy.sum: escrita
