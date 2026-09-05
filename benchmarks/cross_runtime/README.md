@@ -15,8 +15,20 @@ diferentes do VM, mais um piso de processo.
                         -NoxyBaseline C:\local\noxy_antigo.exe -BaselineLabel v060
 ```
 
+Em Linux/macOS, o mesmo protocolo em bash (mesma saída, mesmas colunas):
+
+```bash
+./run_cross_runtime.sh --noxy /caminho/local/noxy
+
+# comparando duas versões do próprio Noxy na mesma janela intercalada
+./run_cross_runtime.sh --noxy /local/noxy_novo \
+                       --noxy-baseline /local/noxy_antigo --baseline-label v060
+```
+
 Saída em `results/cross_runtime.md`. `lua` e `go` são opcionais — se não
-estiverem no `PATH`, viram `-` na tabela em vez de erro.
+estiverem no `PATH`, viram `-` na tabela em vez de erro. Os dois runners
+gravam números com ponto decimal fixo (`LC_NUMERIC=C` no bash), independente
+do locale da máquina.
 
 `-NoxyBaseline` adiciona uma segunda versão do Noxy como coluna extra,
 intercalada junto com os outros runtimes. É a **única forma válida de comparar

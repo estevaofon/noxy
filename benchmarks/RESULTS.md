@@ -1495,6 +1495,17 @@ powershell -File benchmarks/cross_runtime/run_cross_runtime.ps1 -Noxy <exe> `
            -NoxyBaseline <exe-antigo> -BaselineLabel v060
 ```
 
+Em Linux/macOS, os mesmos três runners em bash (mesmo protocolo, mesma
+saída; `compare_examples` continua só em PowerShell):
+
+```bash
+benchmarks/run_benchmarks.sh --binary <bin> --label <label>
+benchmarks/interleaved_compare.sh --baseline <bin> --candidate <bin> \
+           --baseline-label v060 --candidate-label v0141 --runs 9
+benchmarks/cross_runtime/run_cross_runtime.sh --noxy <bin> \
+           --noxy-baseline <bin-antigo> --baseline-label v060
+```
+
 Os binários têm de estar em **disco local**: este repo vive em OneDrive e medir
 de lá infla os tempos em ~2x (filtro de sync + antivírus no read). Benches que
 não rodam nos dois binários são pulados e listados no relatório, não medidos.

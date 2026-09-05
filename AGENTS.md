@@ -58,7 +58,8 @@ lugar errado foi tocado; não afrouxe o teste:
 
 Benchmarks em `benchmarks/`: `pwsh -NoProfile -File interleaved_compare.ps1`
 (dois binários intercalados — a única comparação que vale), máquina ociosa,
-delta só na mesma sessão; `compare_examples.ps1` captura a saída dos exemplos
+delta só na mesma sessão; em Linux/macOS os mesmos runners existem em bash
+(`interleaved_compare.sh`, `run_benchmarks.sh`, `cross_runtime/run_cross_runtime.sh`); `compare_examples.ps1` captura a saída dos exemplos
 antes/depois ao mexer no runtime. CI (`.github/workflows/network-deadlines.yml`):
 testes Go em ubuntu+windows, `-race` em `internal/vm`, o runner, cross-build
 com `CGO_ENABLED=0`.
