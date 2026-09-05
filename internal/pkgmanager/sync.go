@@ -313,7 +313,7 @@ func writeStamp(libs string, stamp map[string]string) error {
 	old, err := os.ReadFile(path)
 	switch {
 	case err == nil:
-		if bytes.Equal(old, fresh) {
+		if sameLines(old, fresh) {
 			return nil
 		}
 	case os.IsNotExist(err):
@@ -364,7 +364,7 @@ func lockDiff(path string, lock *SumFile) (fresh []byte, changed bool, err error
 	old, readErr := os.ReadFile(path)
 	switch {
 	case readErr == nil:
-		return fresh, !bytes.Equal(old, fresh), nil
+		return fresh, !sameLines(old, fresh), nil
 	case os.IsNotExist(readErr):
 		return fresh, len(lock.entries) != 0, nil
 	default:
@@ -385,6 +385,15 @@ func saveIfChanged(path string, lock *SumFile) error {
 		return nil
 	}
 	return os.WriteFile(path, fresh, 0o644)
+}
+
+// sameLines compara conteudo ignorando CRLF: no Windows, core.autocrlf=true
+// faz o checkout de noxy.sum com CRLF e uma comparacao byte a byte fazia
+// --locked recusar um lock identico (falha vista no CI). O parser ja tolera
+// CRLF linha a linha; a decisao "mudou?" precisa da mesma tolerancia.
+func sameLines(a, b []byte) bool {
+	crlf, lf := []byte("\r\n"), []byte("\n")
+	return bytes.Equal(bytes.ReplaceAll(a, crlf, lf), bytes.ReplaceAll(b, crlf, lf))
 }
 
 func plural(n int) string {

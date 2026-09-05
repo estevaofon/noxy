@@ -406,3 +406,30 @@ func TestReadStampCorruptedLineWarnsAndPrunesNothing(t *testing.T) {
 		t.Fatalf("package must not be pruned when the stamp is corrupted: %v", err)
 	}
 }
+
+// No Windows do CI, core.autocrlf=true faz o checkout de noxy.sum com CRLF.
+// O parser tolera; a comparacao "lock mudou?" nao podia ser byte a byte, ou
+// --locked recusava um lock semanticamente identico (falha vista no CI).
+func TestSyncLockedAcceptsCRLFLockAndDoesNotRewriteIt(t *testing.T) {
+	a := newLocalRepo(t, map[string]string{"a.nx": "a"}, "v1.0.0")
+	stubRepos(t, map[string]string{"github.com/t/a": a})
+	p := newSyncProject(t, "module p\n\nrequire github.com/t/a v1.0.0\n")
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(p.root, "noxy.sum")
+	lf, _ := os.ReadFile(lockPath)
+	crlf := strings.ReplaceAll(string(lf), "\n", "\r\n")
+	if err := os.WriteFile(lockPath, []byte(crlf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.sync(t, true); err != nil {
+		t.Fatalf("--locked must accept a CRLF lock with identical content: %v", err)
+	}
+	if err := p.sync(t, false); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(lockPath); string(after) != crlf {
+		t.Fatalf("an unchanged lock must not be rewritten, even with CRLF:\n%q", after)
+	}
+}

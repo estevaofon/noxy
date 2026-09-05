@@ -1,2 +1,7 @@
 *.nx linguist-language=Python
 *.nx linguist-detectable=false
+
+# Lock e manifesto do package manager: sempre LF, para o --sync --locked
+# comparar o mesmo conteudo em qualquer SO (core.autocrlf no Windows).
+noxy.sum text eol=lf
+noxy.mod text eol=lf
