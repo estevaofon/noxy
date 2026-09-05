@@ -22,3 +22,4 @@ while i < n do
 end
 let t1: int = time_now_ms()
 print("bytes=" + to_str(n) + " hash31=" + to_str(h) + " ms=" + to_str(t1 - t0))
+print(f"CHECKSUM:{h}")
