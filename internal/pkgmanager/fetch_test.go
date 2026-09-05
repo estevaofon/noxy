@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// newLocalRepo cria um repositório com um commit "v0.1.0" (taggeado se tag)
+// newLocalRepo cria um repositorio com um commit "v0.1.0" (taggeado se tag)
 // e devolve o caminho; commits extras via gitIn.
 func newLocalRepo(t *testing.T, files map[string]string, tag string) string {
 	t.Helper()
@@ -85,7 +85,7 @@ func TestFetcherPseudoVersionUsesBaseTag(t *testing.T) {
 	defer f.cleanup()
 	v, err := f.resolve("github.com/acme/p", "master")
 	if err != nil {
-		// repositórios novos podem chamar o branch de "main"
+		// repositorios novos podem chamar o branch de "main"
 		v, err = f.resolve("github.com/acme/p", "main")
 	}
 	if err != nil || !strings.HasPrefix(v, "v0.1.1-0.") {
@@ -97,6 +97,52 @@ func TestFetcherPseudoVersionUsesBaseTag(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "p.nx")); string(data) != "y" {
 		t.Fatal("pseudo-version clone must be at the branch commit")
+	}
+}
+
+// TestFetcherDirCheckoutsPseudoVersionBySha exercita dir num fetcher que NAO
+// resolveu a versao (caso do lock: a pseudo-versao vem do noxy.mod, nao do
+// cache de resolve), obrigando dir a extrair o sha da propria pseudo-versao
+// e clonar/checkout por ele.
+func TestFetcherDirCheckoutsPseudoVersionBySha(t *testing.T) {
+	repo := newLocalRepo(t, map[string]string{"p.nx": "x"}, "v0.1.0")
+	writeTree(t, repo, map[string]string{"p.nx": "y"})
+	gitIn(t, repo, "add", ".")
+	gitIn(t, repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "second")
+	stubGit(t, repo, "abc\trefs/tags/v0.1.0\n")
+	libs := filepath.Join(t.TempDir(), "noxy_libs")
+	out := &bytes.Buffer{}
+
+	f := newFetcher(libs, out)
+	v, err := f.resolve("github.com/acme/p", "master")
+	if err != nil {
+		// repositorios novos podem chamar o branch de "main"
+		v, err = f.resolve("github.com/acme/p", "main")
+	}
+	if err != nil || !strings.HasPrefix(v, "v0.1.1-0.") {
+		t.Fatalf("branch after v0.1.0 → v0.1.1-0.<ts>-<sha>: %q %v", v, err)
+	}
+	f.cleanup()
+
+	rev, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSHA := strings.TrimSpace(string(rev))[:12]
+	if got := pseudoSHA(v); got != wantSHA {
+		t.Fatalf("pseudoSHA(%q) = %q, want %q", v, got, wantSHA)
+	}
+
+	g := newFetcher(libs, out)
+	dir, err := g.dir("github.com/acme/p", v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "p.nx")); string(data) != "y" {
+		t.Fatal("dir must checkout the commit named by the pseudo-version's sha")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); !os.IsNotExist(err) {
+		t.Fatal(".git must be gone from the clone")
 	}
 }
 
@@ -129,10 +175,62 @@ func TestFetcherPromoteAndCleanup(t *testing.T) {
 			t.Fatalf("cleanup left %s", e.Name())
 		}
 	}
-	// Temporário de um sync morto some no início do próximo.
+	// Temporario de um sync morto some no inicio do proximo.
 	_ = os.MkdirAll(filepath.Join(libs, ".get-zombie-123"), 0o755)
 	cleanStaleTemps(libs)
 	if _, err := os.Stat(filepath.Join(libs, ".get-zombie-123")); !os.IsNotExist(err) {
 		t.Fatal("cleanStaleTemps must remove .get-*")
+	}
+}
+
+// TestFetcherResolveDoesNotDuplicateCloneForSameVersion cobre spec §4.3:
+// resolver o mesmo commit por dois refs diferentes (branch e sha cheio)
+// produz a mesma pseudo-versao — o segundo resolve nao pode deixar um
+// segundo clone para tras.
+func TestFetcherResolveDoesNotDuplicateCloneForSameVersion(t *testing.T) {
+	repo := newLocalRepo(t, map[string]string{"p.nx": "x"}, "v0.1.0")
+	writeTree(t, repo, map[string]string{"p.nx": "y"})
+	gitIn(t, repo, "add", ".")
+	gitIn(t, repo, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "second")
+	stubGit(t, repo, "abc\trefs/tags/v0.1.0\n")
+	rev, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.TrimSpace(string(rev))
+
+	libs := filepath.Join(t.TempDir(), "noxy_libs")
+	f := newFetcher(libs, &bytes.Buffer{})
+	defer f.cleanup()
+	v1, err := f.resolve("github.com/acme/p", "master")
+	if err != nil {
+		// repositorios novos podem chamar o branch de "main"
+		v1, err = f.resolve("github.com/acme/p", "main")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	v2, err := f.resolve("github.com/acme/p", sha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v1 != v2 {
+		t.Fatalf("same commit resolved by branch (%q) and sha (%q) must yield the same pseudo-version", v1, v2)
+	}
+	if len(f.clones) != 1 {
+		t.Fatalf("must reuse the single clone for the same module@version, got %d", len(f.clones))
+	}
+	entries, err := os.ReadDir(libs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".get-") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("resolving the same version twice must not leave more than one .get-* directory, got %d", count)
 	}
 }

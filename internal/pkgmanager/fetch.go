@@ -17,8 +17,8 @@ import (
 type fetcher struct {
 	libs   string
 	out    io.Writer
-	clones map[string]string // módulo@versão → diretório temporário (sem .git)
-	refs   map[string]string // módulo@ref pedido → versão resolvida
+	clones map[string]string // modulo@versao → diretorio temporario (sem .git)
+	refs   map[string]string // modulo@ref pedido → versao resolvida
 }
 
 func newFetcher(libs string, out io.Writer) *fetcher {
@@ -76,7 +76,15 @@ func (f *fetcher) resolve(module, ref string) (string, error) {
 	if err := os.RemoveAll(filepath.Join(tmp, ".git")); err != nil {
 		fmt.Fprintf(f.out, "Warning: failed to remove .git directory: %s\n", err)
 	}
-	f.clones[fetchKey(module, version)] = tmp
+	// Outro ref (branch/sha) ja pode ter resolvido para essa mesma
+	// pseudo-versao nesta chamada de sync: mantem o clone existente em vez
+	// de sobrescrever a entrada e vazar este diretorio (spec §4.3, nunca
+	// clonado duas vezes na mesma versao).
+	if _, ok := f.clones[fetchKey(module, version)]; ok {
+		os.RemoveAll(tmp)
+	} else {
+		f.clones[fetchKey(module, version)] = tmp
+	}
 	f.refs[fetchKey(module, ref)] = version
 	return version, nil
 }
