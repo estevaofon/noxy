@@ -2078,31 +2078,31 @@ Any value a channel can carry — including a generic struct instance such as
 `Caixa<int>` (§6) — travels through `chan_send`/`chan_recv` and is received
 by `when`/`case` exactly like any other value.
 
-### Limites de chamada
+### Call limits
 
-A profundidade de chamada é limitada apenas pela memória: cada VM começa com
-64 frames e 4096 slots de operandos e **cresce sob demanda** até os tetos de
-**100 000 frames** e **1 048 576 slots** (§13). Uma recursão de 50 000 níveis
-roda; uma recursão infinita para com erro de runtime, nunca com um panic:
-
-```text
-Runtime error: [programa.nx:line 2] stack overflow: call depth exceeds 100000 frames
-```
-
-Uma única expressão que empilhe temporários demais (um literal gigantesco)
-esbarra no outro teto:
+Call depth is bounded only by memory: each VM starts with 64 frames and
+4096 operand slots and **grows on demand** up to the caps of
+**100 000 frames** and **1 048 576 slots** (§13). A 50 000-level recursion
+runs; an infinite recursion stops with a runtime error, never with a panic:
 
 ```text
-Runtime error: [programa.nx:line 7] stack overflow: operand stack exceeds 1048576 slots
+Runtime error: [program.nx:line 2] stack overflow: call depth exceeds 100000 frames
 ```
 
-Os dois são erros de runtime comuns: dentro de `call_result` viram um
-`Failure` capturável, como qualquer outro erro.
+A single expression that pushes too many temporaries (a gigantic literal)
+hits the other cap:
 
-O stack Noxy capturado em erros de runtime (`Failure.stack`) mostra no máximo
-96 frames — os 64 mais internos e os 32 mais externos, com uma linha
-`... N frames omitted ...` no meio — para não reter uma string gigante em
-`call_result`/`task_await` numa recursão profunda.
+```text
+Runtime error: [program.nx:line 7] stack overflow: operand stack exceeds 1048576 slots
+```
+
+Both are ordinary runtime errors: inside `call_result` they become a
+catchable `Failure`, like any other error.
+
+The Noxy stack captured in runtime errors (`Failure.stack`) shows at most
+96 frames — the 64 innermost and the 32 outermost, with a
+`... N frames omitted ...` line in the middle — so that a deep recursion does
+not retain a huge string in `call_result`/`task_await`.
 
 ---
 
@@ -2292,33 +2292,33 @@ them apart, read stdin as a file: `io.read_line(io.stdin())` returns
 - `to_float(val)`
 - `to_bytes(val)`
 
-### Conversões numéricas
+### Numeric conversions
 
-A regra geral levantar-vs-`_result` está em *Errors: raise for bugs, results
+The general raise-vs-`_result` rule is in *Errors: raise for bugs, results
 for data*.
 
 ```noxy
-to_int(5.9)      // 5, truncamento em direção a zero
+to_int(5.9)      // 5, truncation toward zero
 to_int("5")      // 5
-to_int("5.5")    // erro: uma string decimal não é um inteiro
-to_int("abc")    // erro
-to_int(true)     // erro: bool não é número em Noxy
+to_int("5.5")    // error: a decimal string is not an integer
+to_int("abc")    // error
+to_int(true)     // error: bool is not a number in Noxy
 ```
 
 ```noxy
 use convert select *
 
-let porta = to_int_result(getenv("PORT").value)   // Result<int>
-if porta.ok then
-    print("porta " + to_str(porta.value))
+let port = to_int_result(getenv("PORT").value)   // Result<int>
+if port.ok then
+    print("port " + to_str(port.value))
 else
-    print("PORT inválida: " + porta.failure.message)
+    print("invalid PORT: " + port.failure.message)
 end
 ```
 
-Validar antes de converter não é uma alternativa correta: `is_digit` aceita
-`"9999999999999999999"`, que estoura `int64`, e não há como checar o intervalo
-sem converter. Não existe `is_float`.
+Validating before converting is not a correct alternative: `is_digit` accepts
+`"9999999999999999999"`, which overflows `int64`, and there is no way to check
+the range without converting. There is no `is_float`.
 
 The core builtins have static return types where the result never varies —
 `length`, `to_str`, `to_int`, `to_float`, `to_bytes`, `type`, `input`, `fmt`,
@@ -2767,7 +2767,7 @@ non-seekable stream shared with `input()`; `read`/`read_lines`/`read_line`/
 ```noxy
 use io
 
-// K&R 8.4: get lê n bytes a partir da posição pos (b"" em erro)
+// K&R 8.4: get reads n bytes starting at position pos (b"" on error)
 func get(f: io.File, pos: int, n: int) -> bytes
     if io.seek(f, pos, io.SEEK_SET).ok then
         return io.read_n(f, n).data
@@ -2871,74 +2871,74 @@ String literals also accept `\u{...}` and `\uXXXX` escapes for writing a
 character by its code point; `from_char_code(code)` is the runtime
 equivalent for a code point computed at runtime.
 
-### Indexação de strings
+### String indexing
 
-Uma `string` é indexada por **caractere** (code point Unicode), não por byte.
-`length`, `substring`, `char_at`, `index_of`, `slice` e `reverse` usam todos a
-mesma unidade, então compõem entre si:
+A `string` is indexed by **character** (Unicode code point), not by byte.
+`length`, `substring`, `char_at`, `index_of`, `slice` and `reverse` all use
+the same unit, so they compose with each other:
 
 ```noxy
 use strings select *
 
-let nome: string = substring(linha, 0, index_of(linha, ":"))
+let name: string = substring(line, 0, index_of(line, ":"))
 ```
 
-`length("café")` é `4`, não `5`.
+`length("café")` is `4`, not `5`.
 
-Um code point não é sempre um caractere percebido pelo usuário: `é` pode ser um
-code point ou dois, e um emoji com modificador é vários. Só um modelo de
-grapheme cluster seria exato, e ele não oferece índice inteiro em tempo
-constante. Noxy adota a aproximação por code point, como Python.
+A code point is not always a user-perceived character: `é` may be one code
+point or two, and an emoji with a modifier is several. Only a grapheme
+cluster model would be exact, and it does not offer constant-time integer
+indexing. Noxy adopts the code point approximation, like Python.
 
-`bytes` é o oposto: indexado por **octeto**, através de `length`, `slice` e
-acesso por elemento. As funções de `strings` recusam um `bytes` e apontam
-`to_str`, que é a ponte explícita entre os dois tipos.
+`bytes` is the opposite: indexed by **octet**, through `length`, `slice` and
+element access. The `strings` functions refuse a `bytes` and point to
+`to_str`, which is the explicit bridge between the two types.
 
-### Invariante UTF-8
+### UTF-8 invariant
 
-Toda `string` Noxy contém UTF-8 válido. A validação acontece uma única vez, na
-fronteira onde bytes viram texto, e não em cada operação — dentro do
-invariante, toda operação por caractere é correta por construção.
+Every Noxy `string` contains valid UTF-8. Validation happens exactly once, at
+the boundary where bytes become text, and not on every operation — within the
+invariant, every per-character operation is correct by construction.
 
 ```noxy
 use strings select *
 
-let dados: bytes = io.read_bytes(arquivo).data
-if is_valid_utf8(dados) then
-    let texto: string = to_str(dados)
+let data: bytes = io.read_bytes(file).data
+if is_valid_utf8(data) then
+    let text: string = to_str(data)
 else
-    print("conteúdo não é UTF-8")
+    print("content is not UTF-8")
 end
 ```
 
-`to_str` levanta erro de runtime sobre bytes inválidos, indicando o offset:
+`to_str` raises a runtime error on invalid bytes, reporting the offset:
 
 ```text
 to_str: bytes are not valid UTF-8 at byte offset 5
 ```
 
-Funções que já possuem struct de resultado — `io.read`, `io.read_lines`,
-`sqlite.query`, `sys.exec_output`, `sys.getenv` — reportam pelos campos `ok` e
-de erro que já têm, em vez de levantar. Levantar fica reservado às conversões
-puras.
+Functions that already have a result struct — `io.read`, `io.read_lines`,
+`sqlite.query`, `sys.exec_output`, `sys.getenv` — report through the `ok` and
+error fields they already have, instead of raising. Raising is reserved for
+pure conversions.
 
-Para lidar com bytes arbitrários deliberadamente, mantenha o valor como
-`bytes`: `io.read_bytes` e `net.recv` já devolvem `bytes` e não validam nada.
+To handle arbitrary bytes deliberately, keep the value as `bytes`:
+`io.read_bytes` and `net.recv` already return `bytes` and validate nothing.
 
-`is_valid_utf8` aceita apenas `bytes`. Passar uma `string` — mesmo através de
-`use strings select *`, o caminho que qualquer código real usa — levanta erro
-de runtime nomeando o tipo recebido, porque o invariante já respondeu: se o
-valor já é `string`, perguntar de novo é a pergunta errada.
+`is_valid_utf8` accepts only `bytes`. Passing a `string` — even through
+`use strings select *`, the path any real code uses — raises a runtime error
+naming the received type, because the invariant has already answered: if the
+value is already a `string`, asking again is the wrong question.
 
-O invariante vale em toda fronteira descrita neste documento, com uma exceção:
-o script de entrada passado na linha de comando é lido por um caminho separado
-do carregamento de módulos e ainda não é validado (registrado como trabalho
-futuro no CHANGELOG).
+The invariant holds at every boundary described in this document, with one
+exception: the entry script passed on the command line is read by a path
+separate from module loading and is not yet validated (recorded as future
+work in the CHANGELOG).
 
-Noxy não aplica normalização Unicode (NFC/NFD). Comparação é byte-exata, como
-em Python — tanto a igualdade quanto a ordenação (`<`, `>`, `<=`, `>=`), que
-ordena strings lexicograficamente por byte; dentro do invariante UTF-8 isso
-é idêntico à ordem por code point.
+Noxy applies no Unicode normalization (NFC/NFD). Comparison is byte-exact, as
+in Python — both equality and ordering (`<`, `>`, `<=`, `>=`), which orders
+strings lexicographically by byte; within the UTF-8 invariant this is
+identical to code point order.
 
 ### Network sockets
 
@@ -3081,7 +3081,7 @@ frames** and **1 048 576 operand slots** — so recursion depth is bounded by
 memory, not by a small fixed array, and a task or `spawn` still starts cheap.
 Reaching a cap is an ordinary runtime error (`stack overflow: call depth
 exceeds 100000 frames` / `stack overflow: operand stack exceeds 1048576
-slots`), never a Go panic; see §7, *Limites de chamada*.
+slots`), never a Go panic; see §7, *Call limits*.
 
 ---
 *Version: 0.13.0*

@@ -115,10 +115,11 @@ print(first(["b", "a"]))      // first<string> — no runtime dispatch
 
 ## What this buys you
 
-- **Concurrency without data races by construction** — data handed to a
-  routine by argument or channel is an independent value. Only `ref`
-  (including a closure that captures one) and globals need coordination, and
-  all of that is visible in the code.
+- **Race-free by construction for what you pass** — data handed to a
+  routine by argument or channel is an independent value, so it cannot race.
+  What is shared is written in the code: globals, `ref` (as argument, field,
+  or captured by a closure) still need coordination, and a concurrent read
+  and write through one of them is undefined.
   ([docs/concurrency.md](docs/concurrency.md))
 - **Refactoring you can trust** — a function's signature tells you exactly
   what it can mutate and how it can fail.
