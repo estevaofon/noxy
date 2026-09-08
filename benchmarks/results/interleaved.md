@@ -1,22 +1,20 @@
-| bench | base_a52c7e1_ms | head_4026c43_ms | delta |
+| bench | develop_ms | ctor_cache_ms | delta |
 |---|---|---|---|
-| bench_borrow_path.nx | 564.7 | 507.7 | -10.1% |
-| bench_bst_owned.nx | 780.9 | 565.8 | -27.5% |
-| bench_bst_ref.nx | 216.7 | 217.9 | 0.6% |
-| bench_bubblesort.nx | 740 | 744.5 | 0.6% |
-| bench_call_light.nx | 32.3 | 28.8 | -10.8% |
-| bench_call_readonly.nx | 572.5 | 546.5 | -4.5% |
-| bench_call_ref.nx | 1109.4 | 1091.6 | -1.6% |
-| bench_conway.nx | 1264.3 | 1283.4 | 1.5% |
-| bench_generic_vs_hand.nx | 431.6 | 432.9 | 0.3% |
-| bench_map_churn.nx | 212.3 | 207 | -2.5% |
-| bench_path_update.nx | 162 | 163.1 | 0.7% |
-| bench_share_mutate.nx | 115.4 | 107.4 | -6.9% |
-| bench_spawn_sum.nx | 400.7 | 394.4 | -1.6% |
-| bench_struct_records.nx | 127.4 | 126 | -1.1% |
-| bench_typed_call_map.nx | 28.2 | 27 | -4.3% |
-| bench_value_call_mutate.nx | 28.4 | 27 | -4.9% |
-
-Pulados (sem equivalencia entre os dois binarios):
-
-- bench_hash31_bytes.nx — sem CHECKSUM no base_a52c7e1
+| bench_borrow_path.nx | 499.4 | 507 | 1.5% |
+| bench_bst_owned.nx | 529.1 | 520 | -1.7% |
+| bench_bst_ref.nx | 214.2 | 208.7 | -2.6% |
+| bench_bubblesort.nx | 673 | 678.3 | 0.8% |
+| bench_call_light.nx | 26.2 | 24.5 | -6.5% |
+| bench_call_readonly.nx | 468.1 | 493.8 | 5.5% |
+| bench_call_ref.nx | 1010 | 1028.2 | 1.8% |
+| bench_conway.nx | 1171.6 | 1171.4 | -0% |
+| bench_dyn_write.nx | 112.3 | 124 | 10.4% |
+| bench_generic_vs_hand.nx | 412.1 | 411.3 | -0.2% |
+| bench_hash31_bytes.nx | 657.8 | 665 | 1.1% |
+| bench_map_churn.nx | 179.5 | 181.5 | 1.1% |
+| bench_path_update.nx | 144.5 | 142 | -1.7% |
+| bench_share_mutate.nx | 93.8 | 93.3 | -0.5% |
+| bench_spawn_sum.nx | 222.6 | 224.1 | 0.7% |
+| bench_struct_records.nx | 107.9 | 51.7 | -52.1% |
+| bench_typed_call_map.nx | 25.1 | 24.5 | -2.4% |
+| bench_value_call_mutate.nx | 23 | 23.4 | 1.7% |
