@@ -195,7 +195,10 @@ is poisoned like a wasm trap. A crash poisons the extension (`extension 'x'
 is poisoned by an earlier trap`) unless `restart = true`. At exit the VM
 closes the plugin's stdin (EOF) and kills it after 2 s if it lingers;
 Linux adds `PDEATHSIG`, Windows a job object, so a hard-killed `noxy`
-leaves no orphan. Stdout is the protocol channel; stderr passes through;
+leaves no orphan (best effort: sandboxes such as AWS Lambda refuse the
+`PDEATHSIG` `prctl` with EPERM, and the VM then starts the plugin without
+it; the EOF rule remains the guard there). Stdout is the protocol channel;
+stderr passes through;
 `noxyplugin.Logf` lands on stderr as `[ext <name>] <message>`.
 
 ### Errors

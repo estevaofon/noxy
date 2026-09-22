@@ -10,7 +10,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func applyDeathGuard(*exec.Cmd) {}
+// No Windows a guarda e o job object, anexado depois do Start
+// (attachJobObject); no Start nao ha guarda, logo nada a repetir sem ela.
+func applyDeathGuard(*exec.Cmd) bool { return false }
 
 // attachJobObject poe o filho num job object com KILL_ON_JOB_CLOSE: o
 // handle do job morre com o host e o kernel mata o filho (spec §4.5). Best

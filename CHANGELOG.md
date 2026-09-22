@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.25.1] - 2026-09-21
+
+### Fixed
+- **Extensão por processo no AWS Lambda** (`internal/ext/process_spawn*.go`):
+  o sandbox da Lambda recusa o `prctl(PR_SET_PDEATHSIG)` com `EPERM`, e o Go
+  devolve o errno como erro do próprio `fork/exec`, então toda extensão por
+  processo (por exemplo `noxy_dynamodb`) falhava no cold start com
+  `extension 'x' trapped: start: fork/exec ...: operation not permitted`.
+  A guarda de morte agora é best effort: em `EPERM`, e só quando a guarda
+  foi aplicada (Linux), `execSpawner` inicia o binário de novo sem
+  `Pdeathsig`; a regra de EOF (spec §4.5) continua sendo a guarda
+  principal. Fora de sandboxes nada muda (`TestOrphanGuestDiesWithHost`
+  segue verde). Testes: `TestDeathGuardRefused` e, em Linux sem root,
+  `TestExecSpawnerRetriesWithoutRefusedDeathGuard` (guarda injetada que o
+  kernel recusa; o retry sobe o plugin). `docs/EXTENSIONS.md` e a spec de
+  design §4.5 registram a guarda como best effort.
+
 ## [0.25.0] - 2026-09-05
 
 ### Changed

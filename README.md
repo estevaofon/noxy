@@ -1,4 +1,4 @@
-[![noxy 0.25.0](https://img.shields.io/badge/noxy-0.25.0-blue)](CHANGELOG.md)
+[![noxy 0.25.1](https://img.shields.io/badge/noxy-0.25.1-blue)](CHANGELOG.md)
 
 # Noxy
 
@@ -194,7 +194,7 @@ Requires Go 1.25+. Installs the `noxy` binary into `$(go env GOPATH)/bin`
 go install github.com/estevaofon/noxy/cmd/noxy@latest
 ```
 
-To install a specific release, replace `@latest` with a tag (e.g. `@v0.25.0`).
+To install a specific release, replace `@latest` with a tag (e.g. `@v0.25.1`).
 
 ### From source
 
@@ -239,7 +239,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.25.0
+Noxy REPL v0.25.1
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
