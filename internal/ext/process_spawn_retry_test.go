@@ -7,20 +7,23 @@ import (
 	"testing"
 )
 
-// deathGuardRefused: so EPERM do Start, e so onde a plataforma aplica a
-// guarda de morte, justifica repetir o Start sem ela (AWS Lambda recusa o
-// prctl de pdeathsig). Erros do binario em si nunca disparam a repeticao.
+// deathGuardRefused: so EPERM do Start, e so quando a guarda de morte foi
+// aplicada, justifica repetir o Start sem ela (AWS Lambda recusa o prctl
+// de pdeathsig). Erros do binario em si nunca disparam a repeticao.
 func TestDeathGuardRefused(t *testing.T) {
 	eperm := &os.PathError{Op: "fork/exec", Path: "/var/task/plugin", Err: syscall.EPERM}
-	if got := deathGuardRefused(eperm); got != hasDeathGuard {
-		t.Fatalf("EPERM: got %v, want hasDeathGuard=%v", got, hasDeathGuard)
+	if !deathGuardRefused(true, eperm) {
+		t.Fatal("EPERM with the guard applied must retry")
+	}
+	if deathGuardRefused(false, eperm) {
+		t.Fatal("EPERM without a guard is the binary's own error: no retry")
 	}
 	for name, err := range map[string]error{
 		"ENOENT": &os.PathError{Op: "fork/exec", Path: "/x", Err: syscall.ENOENT},
 		"EACCES": &os.PathError{Op: "fork/exec", Path: "/x", Err: syscall.EACCES},
 		"nil":    nil,
 	} {
-		if deathGuardRefused(err) {
+		if deathGuardRefused(true, err) {
 			t.Fatalf("%s must not trigger the retry", name)
 		}
 	}

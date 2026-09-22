@@ -381,7 +381,10 @@ that moment receive a trap; the process is exiting anyway.
 Belt and braces for the paths no hook can cover (host killed by a signal,
 `kill -9`, a crash in Go's runtime):
 
-- Linux: `SysProcAttr.Pdeathsig = SIGKILL`.
+- Linux: `SysProcAttr.Pdeathsig = SIGKILL`, best effort: a sandbox that
+  refuses the `prctl` (AWS Lambda answers EPERM, which Go reports as the
+  fork/exec error) gets a second `Start` without it, silently; the EOF rule
+  is the guard there.
 - Windows: the child is assigned to a job object created with
   `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`golang.org/x/sys/windows`); the job
   handle dies with the host.

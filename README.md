@@ -194,7 +194,7 @@ Requires Go 1.25+. Installs the `noxy` binary into `$(go env GOPATH)/bin`
 go install github.com/estevaofon/noxy/cmd/noxy@latest
 ```
 
-To install a specific release, replace `@latest` with a tag (e.g. `@v0.25.0`).
+To install a specific release, replace `@latest` with a tag (e.g. `@v0.25.1`).
 
 ### From source
 

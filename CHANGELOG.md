@@ -12,7 +12,10 @@
   a aplica (`hasDeathGuard`, Linux), `execSpawner` inicia o binário de novo
   sem `Pdeathsig`; a regra de EOF (spec §4.5) continua sendo a guarda
   principal. Fora de sandboxes nada muda (`TestOrphanGuestDiesWithHost`
-  segue verde). Teste: `TestDeathGuardRefused`.
+  segue verde). Testes: `TestDeathGuardRefused` e, em Linux sem root,
+  `TestExecSpawnerRetriesWithoutRefusedDeathGuard` (guarda injetada que o
+  kernel recusa; o retry sobe o plugin). `docs/EXTENSIONS.md` e a spec de
+  design §4.5 registram a guarda como best effort.
 
 ## [0.25.0] - 2026-09-05
 
