@@ -10,6 +10,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// hasDeathGuard: sem guarda no Start, logo nada a repetir sem ela.
+const hasDeathGuard = false
+
 func applyDeathGuard(*exec.Cmd) {}
 
 // attachJobObject poe o filho num job object com KILL_ON_JOB_CLOSE: o

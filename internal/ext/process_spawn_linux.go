@@ -8,6 +8,10 @@ import (
 	"syscall"
 )
 
+// hasDeathGuard: esta plataforma tenta pdeathsig; se o sandbox recusar
+// (EPERM, ex.: AWS Lambda), execSpawner repete sem a guarda.
+const hasDeathGuard = true
+
 // Pdeathsig: se o host morrer sem passar por Close, o kernel mata o filho
 // (spec §4.5). A regra de EOF continua sendo a guarda principal.
 func applyDeathGuard(cmd *exec.Cmd) {
