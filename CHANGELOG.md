@@ -8,9 +8,9 @@
   devolve o errno como erro do próprio `fork/exec`, então toda extensão por
   processo (por exemplo `noxy_dynamodb`) falhava no cold start com
   `extension 'x' trapped: start: fork/exec ...: operation not permitted`.
-  A guarda de morte agora é best effort: em `EPERM`, e só onde a plataforma
-  a aplica (`hasDeathGuard`, Linux), `execSpawner` inicia o binário de novo
-  sem `Pdeathsig`; a regra de EOF (spec §4.5) continua sendo a guarda
+  A guarda de morte agora é best effort: em `EPERM`, e só quando a guarda
+  foi aplicada (Linux), `execSpawner` inicia o binário de novo sem
+  `Pdeathsig`; a regra de EOF (spec §4.5) continua sendo a guarda
   principal. Fora de sandboxes nada muda (`TestOrphanGuestDiesWithHost`
   segue verde). Testes: `TestDeathGuardRefused` e, em Linux sem root,
   `TestExecSpawnerRetriesWithoutRefusedDeathGuard` (guarda injetada que o
