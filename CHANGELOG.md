@@ -143,7 +143,9 @@ achado 1 é o módulo `process`, desenhado em
 - **Resolução de módulos unificada** em `internal/modsrc.Source`
   (`DiskSource`): compilador e VM resolvem `use` pela mesma interface e
   pela mesma lista de candidatos (antes, duas cópias com `os.*` próprio).
-  Sem mudança de comportamento para scripts.
+  Sem mudança de comportamento para scripts, exceto que `NOXY_PATH` passa a
+  ser lido quando a VM é criada: um `sys.setenv("NOXY_PATH", …)` num
+  programa em execução não afeta mais os `use` seguintes.
 - `noxy build` é subcomando: um arquivo chamado literalmente `build` (sem
   `.nx`) precisa de `noxy ./build`.
 

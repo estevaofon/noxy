@@ -31,7 +31,13 @@ protect code either (bytecode disassembles with `--disassembly`).
 The project root is the directory of the nearest `noxy.mod` above the entry
 file, or the entry's directory when there is none. Every module must live
 under it: a module found through `NOXY_PATH` outside the root is a build
-error.
+error. The build resolves `use` exactly like `noxy entry.nx`, and then checks
+that the executable will find each module the same way: a built executable
+only searches `noxy_libs/` (of the project and of the entry's directory) and
+paths relative to the entry. A module that `noxy entry.nx` only finds through
+the current directory or `NOXY_PATH` — even inside the project — is a build
+error (`module <name> resolves through the current directory or NOXY_PATH`);
+move it under `noxy_libs/` or next to the entry.
 
 ## Assets
 
@@ -43,7 +49,10 @@ include web
 
 or on the command line, `--include web --include docs/help.txt` (repeatable).
 Paths are relative to the project root, use `/`, and cannot escape it. Both
-sources are merged. A directory is embedded recursively.
+sources are merged. A directory is embedded recursively. An include that is
+a symlink is followed and embedded under its own name; inside a directory,
+symlinks to files are embedded (their content), symlinks to directories are
+not followed. An include that yields no files is a build error.
 
 ## `--list`
 
@@ -60,18 +69,23 @@ of failing the executable on the user's machine.
 ## How the executable runs
 
 1. On start it reads its own trailer. Without one it is a plain `noxy`.
-2. The payload is extracted **once** into the user cache, keyed by the
-   payload's sha256: `~/.cache/noxy/apps/<hash>/` on Linux,
+2. The payload is extracted **once** into the user cache, in a directory
+   named after the first 16 hex characters of the payload's sha256:
+   `~/.cache/noxy/apps/<hash>/` on Linux,
    `%LocalAppData%\noxy\apps\<hash>\` on Windows,
    `~/Library/Caches/noxy/apps/<hash>/` on macOS. The hash is verified at
    extraction; later starts only check the completion marker
    `.noxy-app-ok`. Extraction is atomic (temporary directory + rename), so
-   two instances starting at once agree on one directory.
+   two instances starting at once agree on one directory. A directory
+   without the marker is a leftover of an interrupted extraction and is
+   replaced.
 3. The program runs with `argv = [<the executable>, <cache>/<entry>, args...]`
    and the **current directory unchanged** — so `dirname(argv[1]) + "/web"`
    finds the embedded `web/`, and `noxy-editor .` still opens the folder
    you are in. Module resolution is sealed to the extracted tree:
-   `NOXY_PATH` and the current directory are ignored.
+   `NOXY_PATH` and the current directory are ignored, and the app never
+   looks above its own directory (a `noxy.mod` or `noxy_libs/` above the
+   cache is not its project).
 4. Extension binaries run from the extracted `noxy_libs/.../bin/`, verified
    against the extracted `noxy.sum` like in a synced project.
 
@@ -81,7 +95,7 @@ Deleting the `apps` directory is always safe.
 | Variable | Effect |
 |---|---|
 | `NOXY_INTERPRETER=1` | The executable ignores its payload and behaves as the plain `noxy` (REPL, `--sync`, `noxy file.nx`, even `noxy build`). **Inherited** by child processes. |
-| `NOXY_APP_CACHE=<dir>` | Use `<dir>` instead of `<user cache>/noxy/apps`. |
+| `NOXY_APP_CACHE=<dir>` | Use `<dir>` instead of `<user cache>/noxy/apps`. Point it at a directory only you can write: the app directory name is predictable, and another local user who can write there could plant one with the marker and have your executable run their code. |
 | `NOXY_PATH` | Ignored by a built executable. |
 
 ## Running other Noxy files from a built program
