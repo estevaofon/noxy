@@ -165,12 +165,14 @@ func NewWithConfig(cfg VMConfig) *VM {
 }
 
 func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
-	if cfg.ProjectRoot == "" {
-		if root, ok := pkgmanager.FindRoot(cfg.RootPath); ok {
-			cfg.ProjectRoot = root
-		}
-	}
+	// Quem passa a propria Source (modo aplicacao) tambem decide
+	// ProjectRoot: "" fica "" (o app nunca sobe acima do seu diretorio).
 	if cfg.Source == nil {
+		if cfg.ProjectRoot == "" {
+			if root, ok := pkgmanager.FindRoot(cfg.RootPath); ok {
+				cfg.ProjectRoot = root
+			}
+		}
 		cfg.Source = modsrc.NewDisk(cfg.RootPath, cfg.ProjectRoot)
 	}
 	shared.initializeState()

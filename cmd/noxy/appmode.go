@@ -10,7 +10,6 @@ import (
 
 	"github.com/estevaofon/noxy/internal/bundle"
 	"github.com/estevaofon/noxy/internal/modsrc"
-	"github.com/estevaofon/noxy/internal/pkgmanager"
 	"github.com/estevaofon/noxy/internal/vm"
 )
 
@@ -61,7 +60,13 @@ func appModeExitCode() (int, bool) {
 	// cwd fica o do usuario.
 	os.Args = append([]string{os.Args[0], entry}, os.Args[1:]...)
 	rootPath := filepath.Dir(entry)
-	projectRoot, _ := pkgmanager.FindRoot(rootPath)
+	// Nunca sobe acima de <appdir> (FindRoot acharia um noxy.mod alheio
+	// acima do cache, cujo noxy_libs sombrearia o app): o projeto e <appdir>
+	// quando o build embutiu um noxy.mod, senao nao ha projeto (spec §5.3).
+	projectRoot := ""
+	if info, err := os.Stat(filepath.Join(appDir, "noxy.mod")); err == nil && !info.IsDir() {
+		projectRoot = appDir
+	}
 	cfg := vm.VMConfig{RootPath: rootPath, ProjectRoot: projectRoot, Source: modsrc.NewSealed(rootPath, projectRoot)}
 	return runWithVMConfig(entry, content, cfg, false), true
 }

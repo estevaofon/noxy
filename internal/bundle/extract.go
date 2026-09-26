@@ -32,7 +32,8 @@ func CacheBase() (string, error) {
 // Extract garante <base>/<CacheKey> extraido e devolve o diretorio e o
 // manifesto. Com o marcador presente nao le o payload nem confere hash
 // (decisao da spec §5.2). Sem marcador: hash, zip para um temporario ao
-// lado, marcador, rename — outra instancia que vencer a corrida e aceita.
+// lado, marcador, rename — outra instancia que vencer a corrida e aceita;
+// um <appdir> sem marcador e velho e e substituido (spec §5.2).
 func Extract(p *Payload, base string) (string, *Manifest, error) {
 	appDir := filepath.Join(base, p.CacheKey())
 	if m, err := readExtracted(appDir); err == nil {
@@ -94,11 +95,21 @@ func Extract(p *Payload, base string) (string, *Manifest, error) {
 		return "", nil, fmt.Errorf("cannot extract app payload to %s: %w", appDir, err)
 	}
 	if err := os.Rename(tmp, appDir); err != nil {
-		os.RemoveAll(tmp)
-		if m, readErr := readExtracted(appDir); readErr == nil {
-			return appDir, m, nil
+		// <appdir> so nasce do rename de um temporario que ja tem o marcador:
+		// sem marcador e resto de algo interrompido (ou plantado), nunca uma
+		// extracao em andamento. Remove e tenta o rename uma vez mais.
+		if _, statErr := os.Stat(filepath.Join(appDir, MarkerName)); os.IsNotExist(statErr) {
+			if os.RemoveAll(appDir) == nil {
+				err = os.Rename(tmp, appDir)
+			}
 		}
-		return "", nil, fmt.Errorf("cannot extract app payload to %s: %w", appDir, err)
+		if err != nil {
+			os.RemoveAll(tmp)
+			if m, readErr := readExtracted(appDir); readErr == nil {
+				return appDir, m, nil
+			}
+			return "", nil, fmt.Errorf("cannot extract app payload to %s: %w", appDir, err)
+		}
 	}
 	m, err = readExtracted(appDir)
 	if err != nil {

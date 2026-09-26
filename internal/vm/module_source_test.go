@@ -106,3 +106,23 @@ func TestCompileModuleReportsErrorsWithoutRunning(t *testing.T) {
 		t.Fatal("CompileModule must not execute the module body")
 	}
 }
+
+// Quem passa a propria Source (modo aplicacao) tambem decide ProjectRoot: a
+// VM nao sobe atras de um noxy.mod alheio (spec noxy build §5.3).
+func TestVMWithOwnSourceDoesNotClimbForAProjectRoot(t *testing.T) {
+	outer := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outer, "noxy.mod"), []byte("module foreign\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(outer, "cache", "app")
+	if err := os.MkdirAll(app, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	machine := NewWithConfig(VMConfig{RootPath: app, Source: modsrc.NewSealed(app, "")})
+	if machine.Config.ProjectRoot != "" {
+		t.Fatalf("ProjectRoot climbed to %q", machine.Config.ProjectRoot)
+	}
+	if open := NewWithConfig(VMConfig{RootPath: app}); open.Config.ProjectRoot == "" {
+		t.Fatal("without its own Source the VM still finds the project root")
+	}
+}

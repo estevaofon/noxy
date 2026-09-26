@@ -202,3 +202,36 @@ func TestExtractRejectsAnEntryNamedLikeTheMarker(t *testing.T) {
 		t.Fatalf("nothing may remain after a rejected payload, got %v", entries)
 	}
 }
+
+func TestExtractReplacesAStaleAppDirWithoutMarker(t *testing.T) {
+	app, _ := packedApp(t)
+	base := t.TempDir()
+	dir, _, err := Extract(openApp(t, app), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, MarkerName)); err != nil {
+		t.Fatal(err)
+	}
+	junk := filepath.Join(dir, "junk.txt")
+	if err := os.WriteFile(junk, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	again, m, err := Extract(openApp(t, app), base)
+	if err != nil {
+		t.Fatalf("a stale app dir without marker must be replaced: %v", err)
+	}
+	if again != dir || m.Entry != "main.nx" {
+		t.Fatalf("dir %s manifest %+v", again, m)
+	}
+	if _, err := os.Stat(filepath.Join(dir, MarkerName)); err != nil {
+		t.Fatalf("marker must be back: %v", err)
+	}
+	if _, err := os.Stat(junk); !os.IsNotExist(err) {
+		t.Fatalf("the stale content must be gone: %v", err)
+	}
+	entries, _ := os.ReadDir(base)
+	if len(entries) != 1 {
+		t.Fatalf("base must hold exactly the app dir, got %d entries", len(entries))
+	}
+}
