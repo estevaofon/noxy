@@ -98,6 +98,14 @@ func argv() -> string[]
     return sys_argv()
 end
 
+// Caminho do executavel que roda este programa: o noxy, ou o proprio app
+// gerado por `noxy build`. Para rodar outro arquivo Noxy com o mesmo
+// interpretador: NOXY_INTERPRETER=1 <executable()> arquivo.nx, com a
+// variavel no ambiente do FILHO (ela e herdada). "" se o sistema nao souber.
+func executable() -> string
+    return sys_executable()
+end
+
 func sleep(ms: int) -> void
     sys_sleep(ms)
 end

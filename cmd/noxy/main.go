@@ -42,6 +42,21 @@ func main() {
 		}
 	}()
 
+	// Modo aplicacao (spec 2026-09-26 §5.1): antes de qualquer flag — todos
+	// os args pertencem ao programa embutido.
+	if code, handled := appModeExitCode(); handled {
+		if code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "build" {
+		if code := runBuild(os.Args[2:]); code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
+
 	// Parse flags
 	showDisassembly := flag.Bool("disassembly", false, "Show bytecode disassembly")
 	showVersion := flag.Bool("version", false, "Show version information")
@@ -49,7 +64,7 @@ func main() {
 
 	// Custom Usage to show double dashes
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: noxy [options] [file]\n\nOptions:\n")
+		fmt.Fprintf(os.Stderr, "Usage: noxy [options] [file]\n       noxy build <entry.nx> [-o <output>] [--include <path>]... [--list]\n\nOptions:\n")
 		flag.VisitAll(func(f *flag.Flag) {
 			fmt.Fprintf(os.Stderr, "  --%s\n\t%s\n", f.Name, f.Usage)
 		})
@@ -406,12 +421,18 @@ func runREPL(src lineSource, prompt, contPrompt string, showDisasm bool) error {
 	return nil
 }
 
-// runWithConfig devolve o codigo de saida (0 sucesso, 1 erro) em vez de
-// chamar os.Exit diretamente — quem chama (runFile) precisa da chance de
-// rodar seus proprios defers (parar/gravar profile) antes do processo
-// terminar. Mensagens e codigos de saida observaveis pela CLI continuam
-// identicos.
+// runWithConfig e o caminho da CLI comum: VM com a Source do disco.
 func runWithConfig(filename string, input string, rootPath string, showDisasm bool) int {
+	return runWithVMConfig(filename, input, vm.VMConfig{RootPath: rootPath}, showDisasm)
+}
+
+// runWithVMConfig devolve o codigo de saida (0 sucesso, 1 erro) em vez de
+// chamar os.Exit diretamente — quem chama (runFile, modo aplicacao) precisa
+// da chance de rodar seus proprios defers (parar/gravar profile) antes do
+// processo terminar. Mensagens e codigos de saida observaveis pela CLI
+// continuam identicos. O compilador do entry usa a MESMA Source da VM
+// (selada em modo aplicacao).
+func runWithVMConfig(filename string, input string, cfg vm.VMConfig, showDisasm bool) int {
 	l := lexer.New(input)
 	p := parser.New(l)
 	program := p.ParseProgram()
@@ -425,7 +446,7 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 
 	// A VM nasce antes do compilador: seus nativos sao os globais que o
 	// check de global inexistente (issue #47 parte 3) garante existir.
-	machine := vm.NewWithConfig(vm.VMConfig{RootPath: rootPath})
+	machine := vm.NewWithConfig(cfg)
 	// Extensoes por processo precisam de EOF/kill na saida (spec §4.5); o
 	// defer cobre sucesso, erro de runtime e o desenrolar de um panic.
 	defer machine.CloseExtensions()
@@ -434,7 +455,8 @@ func runWithConfig(filename string, input string, rootPath string, showDisasm bo
 	// tratador sairiam sem rodar estes defers.
 	defer machine.CloseProcesses()
 	defer installExitSignalHandler(machine)()
-	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, rootPath)
+	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), filename, cfg.RootPath)
+	c.SetModuleSource(machine.Config.Source)
 	c.SetKnownGlobals(append(machine.GlobalNames(), compiler.PluginNativeNames(program)...))
 	chunk, _, err := c.Compile(program)
 	// Avisos do compilador sao diagnostico: diagOut, nunca stdout (issue

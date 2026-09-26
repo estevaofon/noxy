@@ -408,6 +408,17 @@ func (vm *VM) defineSystemBuiltins() {
 		return value.NewString(dir)
 	})
 
+	// sys_executable: o binario que roda este programa — o noxy, ou o
+	// proprio app gerado por `noxy build` (spec 2026-09-26 §3.4). Cru, sem
+	// EvalSymlinks; "" em falha, como sys_getcwd.
+	vm.DefineNative("sys_executable", func(args []value.Value) value.Value {
+		exe, err := os.Executable()
+		if err != nil {
+			return value.NewString("")
+		}
+		return value.NewString(exe)
+	})
+
 	vm.DefineNative("sys_argv", func(args []value.Value) value.Value {
 		// Convert os.Args to string[]
 		vals := make([]value.Value, len(os.Args))

@@ -2845,6 +2845,14 @@ string `noxy --version` prints (`v0.26.0`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 
+`sys.executable() -> string` is the path of the binary running the program:
+the `noxy` interpreter, or the executable produced by `noxy build`
+(`docs/BUILD.md`). To run another Noxy file with the same interpreter, spawn
+`<executable> file.nx` with `NOXY_INTERPRETER=1` in the **child's**
+environment — the variable is inherited, and it makes a built executable
+ignore its embedded program and behave as plain `noxy`. `""` when the OS
+cannot tell.
+
 `sys.exec_output(command, ...)` runs the command through the platform shell:
 `sh -c` on Unix and **`cmd /C` on Windows**. The command string is therefore
 already inside a `cmd` invocation — do not nest another `cmd /c ...`. The

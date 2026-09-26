@@ -1,9 +1,12 @@
 package pkgmanager
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -14,6 +17,10 @@ type ModuleConfig struct {
 	Module      string
 	NoxyVersion string
 	Require     map[string]string // modulo → versao normalizada ou HEAD
+	// Include: diretiva `include <caminho>` (spec 2026-09-26 §3.2) — assets
+	// que `noxy build` embute, relativos ao diretorio do noxy.mod, com "/".
+	// --sync e --get nao a usam, mas Save a preserva.
+	Include []string
 }
 
 func NewModuleConfig() *ModuleConfig {
@@ -29,6 +36,26 @@ func ValidateModulePath(path string) error {
 		return fmt.Errorf("module path must be host/user/repo, got %q", path)
 	}
 	return nil
+}
+
+// ValidateIncludePath aceita so caminho relativo com "/" que fique sob a
+// raiz do projeto, e devolve-o limpo ("./web/" → "web").
+func ValidateIncludePath(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", errors.New("include path is empty")
+	}
+	if strings.Contains(p, "\\") {
+		return "", fmt.Errorf("include \"%s\": use forward slashes", p)
+	}
+	if strings.HasPrefix(p, "/") || (len(p) >= 2 && p[1] == ':') {
+		return "", fmt.Errorf("include \"%s\" is outside the project root", p)
+	}
+	clean := path.Clean(p)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("include \"%s\" is outside the project root", p)
+	}
+	return clean, nil
 }
 
 func ParseModFile(path string) (*ModuleConfig, error) {
@@ -68,6 +95,17 @@ func ParseModFile(path string) (*ModuleConfig, error) {
 				version = normalized
 			}
 			config.Require[parts[1]] = version
+		case "include":
+			if len(parts) < 2 {
+				return nil, fmt.Errorf("noxy.mod:%d: include <path>", i+1)
+			}
+			clean, err := ValidateIncludePath(parts[1])
+			if err != nil {
+				return nil, fmt.Errorf("noxy.mod:%d: %w", i+1, err)
+			}
+			if !slices.Contains(config.Include, clean) {
+				config.Include = append(config.Include, clean)
+			}
 		}
 	}
 	return config, nil
@@ -102,6 +140,16 @@ func (c *ModuleConfig) Save(path string) error {
 			version = normalized
 		}
 		fmt.Fprintf(&sb, "require %s %s\n", m, version)
+	}
+	if len(c.Include) > 0 {
+		includes := append([]string(nil), c.Include...)
+		sort.Strings(includes)
+		if s := sb.String(); !strings.HasSuffix(s, "\n\n") {
+			sb.WriteString("\n")
+		}
+		for _, include := range includes {
+			fmt.Fprintf(&sb, "include %s\n", include)
+		}
 	}
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
 }
