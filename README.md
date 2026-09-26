@@ -1,4 +1,4 @@
-[![noxy 0.25.1](https://img.shields.io/badge/noxy-0.25.1-blue)](CHANGELOG.md)
+[![noxy 0.26.0](https://img.shields.io/badge/noxy-0.26.0-blue)](CHANGELOG.md)
 
 # Noxy
 
@@ -128,7 +128,8 @@ print(first(["b", "a"]))      // first<string> — no runtime dispatch
 Noxy compiles to bytecode and runs on a stack-based VM written in Go. The
 core is deliberately small — structs, arrays, maps, closures, generics,
 routines and channels, `defer` — and the standard library covers the usual
-scripting ground (io, net, http, sqlite, json, strings, math, crypto, time) plus a
+scripting ground (io, net, http, sqlite, json, strings, math, crypto, time,
+process) plus a
 [package manager](docs/PACKAGE_MANAGER.md). Performance today sits around
 CPython for call-heavy code and is
 [measured against every release](benchmarks/RESULTS.md) — without changing
@@ -180,7 +181,7 @@ Fixing beats staying compatible, until 1.0 says otherwise.
 - ✅ Generics with zero runtime cost (monomorphization: `func first<T>(arr: T[]) -> T`, `struct Stack<T>`, always inferred from usage)
 - ✅ Concurrency (noxy routines) [docs/concurrency.md](docs/concurrency.md)
 - ✅ Garbage collection
-- ✅ Built-in modules (io, net, http, sqlite)
+- ✅ Built-in modules (io, net, http, sqlite, process)
 - ✅ Package manager (see [docs/PACKAGE_MANAGER.md](docs/PACKAGE_MANAGER.md))
 
 ## Installation
@@ -194,7 +195,7 @@ Requires Go 1.25+. Installs the `noxy` binary into `$(go env GOPATH)/bin`
 go install github.com/estevaofon/noxy/cmd/noxy@latest
 ```
 
-To install a specific release, replace `@latest` with a tag (e.g. `@v0.25.1`).
+To install a specific release, replace `@latest` with a tag (e.g. `@v0.26.0`).
 
 ### From source
 
@@ -239,7 +240,7 @@ exits with code `1`.
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.
 
 ```noxy
-Noxy REPL v0.25.1
+Noxy REPL v0.26.0
 Type 'exit' to quit.
 >>> let x: int = 10
 >>> x + 5
@@ -341,7 +342,7 @@ flowchart TB
     subgraph RUNTIME["🚀 RUNTIME"]
         direction TB
         F["🖥️ <b>VIRTUAL MACHINE</b><br/><i>Stack-Based Execution</i><br/><code>Interpret Bytecode</code>"]
-        G["📚 <b>STDLIB</b><br/><i>Native Modules</i><br/><code>io, net, http, sqlite...</code>"]
+        G["📚 <b>STDLIB</b><br/><i>Native Modules</i><br/><code>io, net, http, sqlite, process...</code>"]
     end
 
     subgraph OUTPUT["✨ RESULT"]
@@ -443,7 +444,11 @@ print(peek(ints))  // 20
 | `to_bytes(val)` | Converts string/int/array to bytes |
 | `zeros(n)` | Array of n zeros |
 | `range(stop)`, `range(start, stop, step)` | Integer sequence as `int[]` (Python semantics, no import) |
-| `time_now()` | Current timestamp in ms |
+| `sort(ref arr)` | Sorts `int[]`, `float[]` or `string[]` in place |
+| `sort_by(ref arr, key)` | Stable in-place sort by a key function returning int, float or string |
+
+Timestamps come from the `time` module: `time.now()` is Unix time in
+**seconds**, `time.now_ms()` in milliseconds.
 
 ## VM Opcodes
 

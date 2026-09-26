@@ -1,0 +1,61 @@
+// process_supervise.nx — um programa rodando outro: saída aos pedaços
+// enquanto ele roda, estado sem bloquear, parada da árvore inteira.
+// Módulo `process` (spec §12). O handle é o dono: close, ou a saída do
+// Noxy, encerra o que ainda estiver rodando.
+use process
+use sys
+use strings
+
+func assert(cond: bool, msg: string) -> void
+    if !cond then
+        print("FALHOU: " + msg)
+        sys.exit(1)
+    end
+end
+
+let windows: bool = sys.os() == "windows"
+
+// 1. Saída incremental: o programa escreve, dorme um segundo, escreve de novo.
+let cmd: string = "echo primeira; sleep 1; echo segunda"
+if windows then
+    cmd = "echo primeira&ping -n 2 127.0.0.1 >nul&echo segunda"
+end
+let p: process.Process = process.start(cmd)
+assert(p.ok, "start: " + p.error)
+let saida: bytes = b""
+let leituras: int = 0
+while process.poll(p).running do
+    let pedaco: bytes = process.read(p)
+    if length(pedaco) > 0 then
+        leituras = leituras + 1
+    end
+    saida = saida + pedaco
+    sys.sleep(50)
+end
+saida = saida + process.read(p)
+// read nunca parte uma sequência UTF-8: para um programa que escreve
+// UTF-8, to_str de cada pedaço já seria válido.
+let texto: string = to_str(saida)
+iprint(texto)
+assert(strings.contains(texto, "primeira") && strings.contains(texto, "segunda"), "saída completa")
+assert(leituras >= 1, "houve leitura enquanto rodava")
+let fim: process.ProcessStatus = process.poll(p)
+assert(!fim.running && fim.exit_code == 0, "exit code 0")
+process.close(p)
+
+// 2. Parar um processo que não termina sozinho.
+let longo: process.Process = process.start("sleep 30")
+if windows then
+    longo = process.start("ping -n 31 127.0.0.1 >nul")
+end
+assert(process.poll(longo).running, "longo está rodando")
+assert(process.terminate(longo), "terminate sinalizou")
+let parado: process.ProcessStatus = process.wait_for(longo, 5000)
+assert(!parado.running, "parou dentro do prazo")
+process.close(longo)
+
+// 3. Depois de close o handle não existe mais: usar é erro de runtime
+// (misuse); fechar de novo não é.
+process.close(longo)
+
+print("process_supervise: ok")

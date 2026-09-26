@@ -1,0 +1,75 @@
+// sort(ref xs) e sort_by(ref xs, key): ordenação no lugar, pelo mesmo
+// copy-on-write de append. sort ordena int[], float[] e string[]; sort_by
+// ordena qualquer T[] pela chave (int, float ou string) que a função
+// devolve, de forma estável (chaves iguais mantêm a ordem original).
+use sys select exit
+
+func assert(cond: bool, msg: string) -> void
+    if !cond then
+        print("FALHOU: " + msg)
+        exit(1)
+    end
+end
+
+let numeros: int[] = [5, -2, 9, 0, 3]
+sort(ref numeros)
+print(numeros)
+assert(to_str(numeros) == "[-2, 0, 3, 5, 9]", "sort de int[]")
+
+let nomes: string[] = ["pera", "abacate", "uva", "Banana"]
+sort(ref nomes)
+print(nomes)
+assert(nomes[0] == "Banana" && nomes[3] == "uva", "sort de string[] (ordem de code points)")
+
+// A cópia tirada antes não vê a ordenação: valor, não identidade.
+let antes: int[] = [3, 1, 2]
+let depois: int[] = antes
+sort(ref depois)
+assert(to_str(antes) == "[3, 1, 2]" && to_str(depois) == "[1, 2, 3]", "copy-on-write")
+
+struct Entrada
+    nome: string
+    tamanho: int
+end
+
+let arvore: Entrada[] = [Entrada("src", 3), Entrada("docs", 3), Entrada("README.md", 1), Entrada("go.mod", 2)]
+
+func por_nome(e: Entrada) -> string
+    return e.nome
+end
+sort_by(ref arvore, por_nome)
+let ordem: string = ""
+for e in arvore do
+    ordem = ordem + e.nome + " "
+end
+print(ordem)
+assert(ordem == "README.md docs go.mod src ", "sort_by por nome")
+
+// Estável: "src" e "docs" têm o mesmo tamanho e ficam na ordem em que
+// estavam (docs antes de src, herdada da ordenação por nome).
+let por_tamanho = func(e: Entrada) -> int
+    return e.tamanho
+end
+sort_by(ref arvore, por_tamanho)
+ordem = ""
+for e in arvore do
+    ordem = ordem + e.nome + " "
+end
+print(ordem)
+assert(ordem == "README.md go.mod docs src ", "sort_by estável por tamanho")
+
+// Decrescente: negue a chave numérica.
+let maior_primeiro = func(e: Entrada) -> int
+    return 0 - e.tamanho
+end
+sort_by(ref arvore, maior_primeiro)
+assert(arvore[0].tamanho == 3 && arvore[3].nome == "README.md", "sort_by decrescente")
+
+// keys(m) não tem ordem definida: ordene antes de imprimir.
+let m: map[string, int] = {"b": 2, "a": 1, "c": 3}
+let chaves: string[] = keys(m)
+sort(ref chaves)
+print(chaves)
+assert(to_str(chaves) == "[a, b, c]", "keys ordenadas")
+
+print("sort_builtins: ok")

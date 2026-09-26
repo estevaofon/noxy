@@ -114,6 +114,11 @@ type Compiler struct {
 	// de modulo quando o programa declarou mais de um alias para o mesmo
 	// modulo. Copiado por compilador como namespaceImports.
 	namespaceOrder []string
+	// wildcardImports mapeia cada nome que entrou por `use m select *` ao
+	// modulo m — so para o hint de builtin sombreado
+	// (shadowed_builtin_hint.go). Copiado por compilador como
+	// namespaceImports.
+	wildcardImports map[string]string
 	// sessionLets e a memoria de sessao do REPL (nil fora dele): nomes de
 	// `let` global de linhas ANTERIORES. O predeclare so CHECA contra ele;
 	// quem registra e o loop do REPL apos a linha compilar com sucesso —
@@ -220,6 +225,13 @@ func NewChild(parent *Compiler) *Compiler {
 		childNamespaceImports[name] = module
 	}
 	childNamespaceOrder := append([]string(nil), parent.namespaceOrder...)
+	var childWildcardImports map[string]string
+	if len(parent.wildcardImports) > 0 {
+		childWildcardImports = make(map[string]string, len(parent.wildcardImports))
+		for name, module := range parent.wildcardImports {
+			childWildcardImports[name] = module
+		}
+	}
 	if parent.warnings == nil {
 		parent.warnings = &[]Warning{}
 	}
@@ -245,6 +257,7 @@ func NewChild(parent *Compiler) *Compiler {
 		pass1:            parent.pass1,
 		namespaceImports: childNamespaceImports,
 		namespaceOrder:   childNamespaceOrder,
+		wildcardImports:  childWildcardImports,
 	}
 	c.currentChunk.FileName = parent.FileName
 	return c
@@ -2215,6 +2228,7 @@ func (c *Compiler) Compile(node ast.Node) (*chunk.Chunk, ast.NoxyType, error) {
 				if err := c.importBindingFrom(n.Module, bindings, name); err != nil {
 					return nil, nil, err
 				}
+				c.noteWildcardImport(n.Module, name)
 			}
 			c.importModuleStructs(n.Module, nil)
 			c.emitByte(byte(chunk.OP_IMPORT_FROM_ALL))
@@ -2518,7 +2532,12 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 
 			chanType, ok := chType.(*ast.ChanType)
 			if !ok {
-				if chType.String() == "any" {
+				// Tipo nil e o "desconhecido" do checador (membro de um
+				// namespace que nao resolve, campo que o programa nao
+				// consegue nomear): aceito como dinamico, igual a `any` —
+				// antes era nil pointer dereference no String() (achado 6
+				// do Noxy-Editor). O runtime confere o canal.
+				if chType == nil || chType.String() == "any" {
 					retType = &ast.PrimitiveType{Name: "any"}
 				} else {
 					return nil, nil, fmt.Errorf("[line %d] argument to chan_recv must be a channel, got %s", c.currentLine, chType.String())
@@ -2620,8 +2639,9 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 	funcType, isExact := fnType.(*ast.FunctionType)
 	if isExact && len(call.Arguments) != len(funcType.Params) {
 		return nil, nil, fmt.Errorf(
-			"[line %d] function '%s' expects %d arguments, got %d",
+			"[line %d] function '%s' expects %d arguments, got %d%s",
 			c.currentLine, callableName(call.Function), len(funcType.Params), len(call.Arguments),
+			c.shadowedBuiltinHint(call.Function),
 		)
 	}
 
@@ -2746,11 +2766,12 @@ func (c *Compiler) compileCallExpression(call *ast.CallExpression, emission call
 		}
 		if isExact && !c.areStrictTypesCompatible(funcType.Params[i], argType) {
 			return nil, nil, fmt.Errorf(
-				"[line %d] argument %d to '%s': expected %s, got %s%s%s",
+				"[line %d] argument %d to '%s': expected %s, got %s%s%s%s",
 				c.currentLine, i+1, callableName(call.Function),
 				funcType.Params[i].String(), noxyTypeName(argType),
 				c.nullMismatchHint(funcType.Params[i], argType, arg),
 				c.derefReadHint(funcType.Params[i], argType, arg),
+				c.shadowedBuiltinHint(call.Function),
 			)
 		}
 		if isExact {

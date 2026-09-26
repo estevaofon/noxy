@@ -9,7 +9,28 @@ struct SysResult
     error: string
 end
 
+// Saida bruta de exec_output_bytes: `output` e bytes, sem exigencia de
+// UTF-8 (saida do console do Windows em cp850, saida binaria). `error`
+// existe pela simetria com SysResult e fica vazio.
+struct SysBytesResult
+    exit_code: int,
+    output: bytes,
+    ok: bool,
+    error: string
+end
+
 struct EnvResult
+    value: string,
+    ok: bool,
+    error: string
+end
+
+// Diretorio resolvido por temp_dir/home_dir/cache_dir/config_dir: `value` e
+// o caminho, `ok=false` com `error` quando a variavel base da plataforma
+// nao existe. Mesma forma de EnvResult (e nao errors.Result<string>): um
+// `use errors` aqui reexportaria Result/Ok/Err para todo `use sys select *`,
+// colidindo com o Result que o programa declara — test_generics_result.nx.
+struct PathResult
     value: string,
     ok: bool,
     error: string
@@ -19,8 +40,17 @@ func exec(cmd: string) -> SysResult
     return sys_exec(cmd, SysResult)
 end
 
+// Saida (stdout+stderr) intacta, como string: precisa ser UTF-8 valido
+// (senao ok=false com o erro em `error`). Espacos e quebras nas pontas sao
+// preservados; use strings.trim quando quiser apara-los.
 func exec_output(cmd: string) -> SysResult
     return sys_exec_output(cmd, SysResult)
+end
+
+// A mesma execucao, saida como bytes: para saida que nao e UTF-8 (console
+// do Windows, binarios) ou que precisa ser decodificada pelo programa.
+func exec_output_bytes(cmd: string) -> SysBytesResult
+    return sys_exec_output_bytes(cmd, SysBytesResult)
 end
 
 func getenv(key: string) -> EnvResult
@@ -37,6 +67,31 @@ end
 
 func getcwd() -> string
     return sys_getcwd()
+end
+
+// Diretorio temporario da plataforma (TEMP/TMP no Windows, TMPDIR ou /tmp
+// nos demais), sem barra final. Nunca falha.
+func temp_dir() -> string
+    return sys_temp_dir()
+end
+
+// Diretorio pessoal: USERPROFILE no Windows, HOME nos demais. ok=false
+// quando a variavel base nao existe.
+func home_dir() -> PathResult
+    return sys_user_dir("home", PathResult)
+end
+
+// Raiz de cache do usuario: LOCALAPPDATA no Windows, XDG_CACHE_HOME ou
+// ~/.cache no Linux, ~/Library/Caches no macOS. O programa cria o proprio
+// subdiretorio dentro dela.
+func cache_dir() -> PathResult
+    return sys_user_dir("cache", PathResult)
+end
+
+// Raiz de configuracao do usuario: APPDATA no Windows, XDG_CONFIG_HOME ou
+// ~/.config no Linux, ~/Library/Application Support no macOS.
+func config_dir() -> PathResult
+    return sys_user_dir("config", PathResult)
 end
 
 func argv() -> string[]

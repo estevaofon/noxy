@@ -68,6 +68,7 @@ func TestBuiltinSourceLayout(t *testing.T) {
 		"builtins_math.go":        {"defineMathBuiltins"},
 		"builtins_io.go":          {"defineIOBuiltins"},
 		"builtins_sys.go":         {"defineSystemBuiltins"},
+		"builtins_process.go":     {"defineProcessBuiltins"},
 		"builtins_crypto.go":      {"defineCryptoBuiltins"},
 		"builtins_net.go":         {"defineNetworkBuiltins"},
 		"builtins_sqlite.go":      {"defineSQLiteBuiltins"},
@@ -1066,6 +1067,7 @@ func TestResourceRegistriesAndModuleCacheHaveSharedOwners(t *testing.T) {
 		"Sockets":    "*handleRegistry[*SocketResource]",
 		"Databases":  "*handleRegistry[*DatabaseResource]",
 		"Statements": "*handleRegistry[*StatementResource]",
+		"Processes":  "*handleRegistry[*ProcessResource]",
 	}
 	for name, want := range wantRegistries {
 		if got := shared[name]; got != want {

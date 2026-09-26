@@ -1,0 +1,60 @@
+// stdlib/process.nx — processo filho supervisionado (spec de design
+// docs/superpowers/specs/2026-09-26-process-module-design.md): sobe pelo
+// shell da plataforma, saida lida aos pedacos sem bloquear, parada pela
+// arvore inteira. O handle e o dono: close (ou a saida do Noxy) encerra o
+// que ainda roda. Daemon desacoplado e sys.exec("... &").
+
+struct Process
+    handle: int,     // chave no registry; -1 quando ok=false
+    pid: int,        // do lider (o shell); -1 quando ok=false
+    ok: bool,        // subiu
+    error: string    // por que nao subiu ("" em sucesso)
+end
+
+struct ProcessStatus
+    running: bool,
+    exit_code: int   // -1 enquanto roda ou morto por sinal (Unix); 1 se o job foi terminado (Windows)
+end
+
+// Sobe `cmd` pelo shell (sh -c / cmd /S /C), stdout+stderr capturados
+// num unico fluxo, stdin no dispositivo nulo.
+func start(cmd: string) -> Process
+    return process_start(cmd, Process)
+end
+
+// O que chegou desde a ultima leitura (b"" se nada). Nunca bloqueia; um
+// pedaco nunca parte uma sequencia UTF-8 antes do fim do fluxo.
+func read(p: Process) -> bytes
+    return process_read(p)
+end
+
+// Estado do lider, sem bloquear.
+func poll(p: Process) -> ProcessStatus
+    return process_poll(p, ProcessStatus)
+end
+
+// Bloqueia ate o lider sair; devolve o exit code.
+func wait(p: Process) -> int
+    return process_wait(p)
+end
+
+// Espera ate timeout_ms; running=true se o prazo venceu.
+func wait_for(p: Process, timeout_ms: int) -> ProcessStatus
+    return process_wait_for(p, timeout_ms, ProcessStatus)
+end
+
+// Pede parada a arvore: SIGTERM ao grupo (Unix); termina o job (Windows).
+// false se nada foi sinalizado (ja saiu).
+func terminate(p: Process) -> bool
+    return process_terminate(p)
+end
+
+// Forca: SIGKILL ao grupo (Unix); termina o job (Windows).
+func kill(p: Process) -> bool
+    return process_kill(p)
+end
+
+// Mata o que ainda roda e libera o handle. Idempotente.
+func close(p: Process) -> void
+    process_close(p)
+end

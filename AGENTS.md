@@ -1,7 +1,7 @@
 # AGENTS.md — Guia para agentes de IA no Noxy VM
 
 Máquina virtual de bytecode para a linguagem Noxy, em Go (módulo `github.com/estevaofon/noxy`,
-Go 1.25). Versão corrente: `v0.25.1` (`internal/version/version.go`).
+Go 1.25). Versão corrente: `v0.26.0` (`internal/version/version.go`).
 
 **Fonte da verdade da linguagem: `docs/NOXY_LANGUAGE_SPEC.md`.** Regra de
 linguagem vem da spec ou de teste no binário — nunca de um exemplo. Este
@@ -24,7 +24,7 @@ Source → Lexer → Parser → AST → Compiler → Bytecode (Chunk) → VM
 | `internal/stdlib` | Módulos `.nx` embutidos (`//go:embed *.nx`, sem registro) |
 | `cmd/noxy` | CLI, REPL (`runREPL`), `diagOut` (destino único dos diagnósticos da CLI) |
 | `internal/ext`, `sdk/noxyplugin` | Extensões wasm e por processo (`noxy-plugin/1`); o SDK é módulo Go aninhado, testado à parte (`go test ./...` dentro dele) |
-| `internal/pkgmanager` (`--get`/`--sync`, `noxy.sum` v2, `FindRoot`), `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.26.0) | Periferia |
+| `internal/pkgmanager` (`--get`/`--sync`, `noxy.sum` v2, `FindRoot`), `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.27.0) | Periferia |
 
 ## Verificação obrigatória
 
@@ -118,9 +118,11 @@ cresce a pilha. `vm.frames` realoca ao dobrar: nunca guarde `*CallFrame`
 através de chamada Noxy reentrante — reobtenha por índice
 (`&vm.frames[vm.frameCount-1]`).
 
-**Recursos** (arquivos, sockets, bancos, statements) vivem nos registries de
-`SharedState` (`resources.go`), referenciados por handle inteiro; remova do
-registry ao fechar.
+**Recursos** (arquivos, sockets, bancos, statements, processos filhos) vivem
+nos registries de `SharedState` (`resources.go`; `builtins_process.go` para
+`Processes`), referenciados por handle inteiro; remova do registry ao fechar.
+Processo filho (`process.start`) morre com o Noxy: `CloseProcesses` em
+`sys_exit` e nos `defer` da CLI/REPL, ao lado de `CloseExtensions`.
 
 **Overflow de `int` não é checado** — dá a volta (spec §8). Não adicione.
 
@@ -180,4 +182,4 @@ hashes de todos em `noxy.sum`. Ver `docs/EXTENSIONS.md` e
 
 ---
 
-**Versão**: 1.3 (Noxy VM 0.25.1) — atualizado em 2026-09-21
+**Versão**: 1.4 (Noxy VM 0.26.0) — atualizado em 2026-09-26

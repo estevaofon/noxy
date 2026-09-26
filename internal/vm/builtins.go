@@ -16,6 +16,7 @@ func (shared *SharedState) initializeState() {
 		shared.Sockets = newSequencedHandleRegistry[*SocketResource](2, 2)
 		shared.Databases = newHandleRegistry[*DatabaseResource]()
 		shared.Statements = newHandleRegistry[*StatementResource]()
+		shared.Processes = newHandleRegistry[*ProcessResource]()
 	})
 }
 
@@ -43,6 +44,7 @@ func (vm *VM) defineBuiltins() {
 	vm.defineMathBuiltins()
 	vm.defineCryptoBuiltins()
 	vm.defineSystemBuiltins()
+	vm.defineProcessBuiltins()
 	vm.defineCollectionBuiltins()
 	vm.defineNetworkBuiltins()
 	vm.defineSQLiteBuiltins()

@@ -45,7 +45,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 
 	name := ident.Value
 	switch name {
-	case "append", "pop", "delete", "json_loads", "range", "call_result", "swap_remove":
+	case "append", "pop", "delete", "json_loads", "range", "call_result", "swap_remove", "sort", "sort_by":
 	default:
 		return false, nil, nil
 	}
@@ -79,7 +79,7 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 			)
 		}
 	default:
-		if wantArity := map[string]int{"append": 2, "delete": 2, "json_loads": 2, "swap_remove": 2}[name]; len(call.Arguments) != wantArity {
+		if wantArity := map[string]int{"append": 2, "delete": 2, "json_loads": 2, "swap_remove": 2, "sort": 1, "sort_by": 2}[name]; len(call.Arguments) != wantArity {
 			return true, nil, fmt.Errorf(
 				"[line %d] %s expects %d arguments, got %d",
 				c.currentLine, name, wantArity, len(call.Arguments),
@@ -173,6 +173,51 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 		}
 		c.emitCall(len(call.Arguments), emission, false)
 		return true, array.ElementType, nil
+	case "sort":
+		// Achado 3 do Noxy-Editor: sort(ref xs) ordena int[], float[] ou
+		// string[] no lugar. Mesmo contrato de ref do append; o tipo do
+		// elemento e conferido aqui (nao ha ordem natural para struct,
+		// array, map ou any — para esses, sort_by com uma chave).
+		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'sort'", "ref T[]")
+		if err != nil {
+			return true, nil, err
+		}
+		array, ok := container.(*ast.ArrayType)
+		if !ok {
+			return true, nil, fmt.Errorf("[line %d] sort expects an array, got %s", c.currentLine, noxyTypeName(container))
+		}
+		if !isOrderablePrimitive(array.ElementType) {
+			return true, nil, fmt.Errorf(
+				"[line %d] sort expects ref int[], ref float[] or ref string[], got ref %s\n  hint: use sort_by(ref xs, key) with a key function returning int, float or string",
+				c.currentLine, noxyTypeName(array),
+			)
+		}
+		c.emitCall(1, emission, false)
+		return true, builtinType("void"), nil
+	case "sort_by":
+		// sort_by(ref xs, key): key e func(T) -> int|float|string, exata ou
+		// `func` bare (validada em runtime: aridade pela fronteira, tipo da
+		// chave pelo proprio sort_by). Estavel: chaves iguais mantem a ordem.
+		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'sort_by'", "ref T[]")
+		if err != nil {
+			return true, nil, err
+		}
+		array, ok := container.(*ast.ArrayType)
+		if !ok {
+			return true, nil, fmt.Errorf("[line %d] sort_by expects an array, got %s", c.currentLine, noxyTypeName(container))
+		}
+		key, err := c.compileBuiltinValueArgument(call.Arguments[1])
+		if err != nil {
+			return true, nil, err
+		}
+		if key != nil && !isAny(key) && !isBareFunctionType(key) && !c.isSortKeyFunction(key, array.ElementType) {
+			return true, nil, fmt.Errorf(
+				"[line %d] argument 2 to 'sort_by': expected func(%s) -> int, float or string, got %s",
+				c.currentLine, noxyTypeName(array.ElementType), noxyTypeName(key),
+			)
+		}
+		c.emitCall(2, emission, false)
+		return true, builtinType("void"), nil
 	case "delete":
 		container, err := c.compileBuiltinRefArgument(call.Arguments[0], "argument 1 to 'delete'", "ref map")
 		if err != nil {
@@ -249,4 +294,29 @@ func (c *Compiler) compileBuiltinCall(call *ast.CallExpression, emission callEmi
 	default:
 		return false, nil, nil
 	}
+}
+
+// isOrderablePrimitive: os tipos com ordem natural em Noxy — os que `<`
+// aceita (int, float, string). Sao os unicos que sort ordena e os unicos
+// que a chave de sort_by pode devolver.
+func isOrderablePrimitive(t ast.NoxyType) bool {
+	primitive, ok := t.(*ast.PrimitiveType)
+	if !ok {
+		return false
+	}
+	switch primitive.Name {
+	case "int", "float", "string":
+		return true
+	}
+	return false
+}
+
+// isSortKeyFunction: o tipo exato de um argumento `key` de sort_by sobre um
+// T[] — um parametro que aceita T e um retorno com ordem natural.
+func (c *Compiler) isSortKeyFunction(key ast.NoxyType, element ast.NoxyType) bool {
+	function, ok := key.(*ast.FunctionType)
+	if !ok || len(function.Params) != 1 {
+		return false
+	}
+	return c.areStrictTypesCompatible(function.Params[0], element) && isOrderablePrimitive(function.Return)
 }

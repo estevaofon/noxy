@@ -1,5 +1,142 @@
 # Changelog
 
+## [0.26.0] - 2026-09-26
+
+Achados do Noxy-Editor (um editor completo escrito em Noxy;
+`docs/ACHADOS.md` daquele projeto): o que a linguagem não deu conta ao
+construir um programa real. Os itens abaixo respondem aos doze achados; o
+achado 1 é o módulo `process`, desenhado em
+`docs/superpowers/specs/2026-09-26-process-module-design.md` (plano em
+`docs/superpowers/plans/2026-09-26-process-module.md`).
+
+### Added
+- **Módulo `process`** (achado 1; spec §12): processo filho supervisionado.
+  `process.start(cmd) -> Process` sobe o comando pelo shell da plataforma
+  (o mesmo `shellCommand` de `sys.exec`) com stdout+stderr num único pipe e
+  stdin no dispositivo nulo; `read(p) -> bytes` devolve o que chegou sem
+  bloquear e nunca parte uma sequência UTF-8 antes do fim do fluxo (até 3
+  bytes ficam retidos para a próxima leitura); `poll(p)`, `wait(p) -> int`
+  e `wait_for(p, ms)` observam o **líder** (não o pipe, que um neto pode
+  manter aberto); `terminate(p)` e `kill(p)` alcançam a **árvore**
+  (`Setpgid` + `SIGTERM`/`SIGKILL` ao grupo em Unix; job object com
+  `KILL_ON_JOB_CLOSE` no Windows, onde os dois terminam o job) enquanto o
+  líder roda ou o pipe continua aberto — um `server &` é parado depois que
+  o shell saiu; `close(p)` mata o que ainda roda, libera o handle e fecha o
+  lado de leitura do pipe (um escritor que saiu do grupo não segura a
+  goroutine de drain). Todo processo ainda registrado morre com o Noxy:
+  `SharedState.CloseProcesses()` em `sys_exit`, por `defer` na CLI e no
+  REPL, ao lado de `CloseExtensions`, **e por Ctrl+C/SIGTERM** — a CLI em
+  modo script instala um tratador (`cmd/noxy/signals.go`) que mata os
+  processos, fecha as extensões e sai com 128+sinal, a menos que o
+  programa tenha assumido os sinais com `sys.signal_notify`; sem ele o Go
+  saía sem rodar os `defer` e, como o filho está no próprio grupo, nem o
+  Ctrl+C do terminal o alcançava. Morte dura é best effort (`Pdeathsig` no
+  líder em Linux, job no Windows), como as extensões. A carência de 100 ms
+  para drenar a saída após o fim do líder é paga uma vez por processo
+  (`poll` nunca bloqueia). Handle fechado em
+  `read`/`poll`/`wait`/`wait_for`/`terminate`/`kill` é erro de runtime
+  (`process: handle N is not an open process`). Registry
+  `Processes` no `SharedState`; nativos `process_*` em
+  `builtins_process.go`; árvore por plataforma em `process_tree_*.go`.
+  Exemplo: `noxy_examples/process_supervise.nx`. Fora de escopo: stdin do
+  filho, stdout/stderr separados, `argv` sem shell, sinal arbitrário.
+- **`sort(ref xs)` e `sort_by(ref xs, key)`** (builtins centrais, sem `use`;
+  spec §10, achado 3). `sort` ordena `int[]`, `float[]` ou `string[]` no
+  lugar; outro tipo de elemento é erro de compilação apontando para
+  `sort_by`. `sort_by` ordena qualquer `T[]` pela chave (`int`, `float` ou
+  `string`) que `key: func(T) -> K` devolve, de forma **estável**; tipo
+  exato de `key` conferido na compilação, `func` bare em runtime. As chaves
+  são calculadas antes de ordenar (uma chamada por elemento pela fronteira
+  de `call_result`, nunca uma por comparação): erro na função de chave deixa
+  o array intacto. Mesmo CoW de `append`; `sort` é nativo puro (não encerra
+  narrowing), `sort_by` não. Exemplo: `noxy_examples/sort_builtins.nx`;
+  fixture `noxy_examples/type_errors/sort_without_ref.nx`.
+- **`sys.exec_output_bytes(cmd) -> SysBytesResult`** (achado 12): a saída
+  como `bytes`, sem exigência de UTF-8 — `tasklist`/`taskkill` escrevem na
+  codepage do console (cp850 num Windows em português) e `exec_output`
+  devolvia `ok=false` sem como ler os bytes. Mesmo `exit_code`/`ok`.
+- **`sys.temp_dir() -> string`, `sys.home_dir()`, `sys.cache_dir()`,
+  `sys.config_dir() -> PathResult`** (achado 11): os diretórios que o Go
+  resolve por plataforma (`os.TempDir`, `os.UserHomeDir`, `os.UserCacheDir`,
+  `os.UserConfigDir`) em vez de cada programa remontar a tabela
+  `HOME`/`USERPROFILE`, `XDG_*`/`LOCALAPPDATA`/`APPDATA`, `TMPDIR`/`TEMP`.
+  `PathResult{value, ok, error}` tem a forma de `EnvResult`, e não
+  `errors.Result<string>`: um `use errors` em `sys.nx` reexportaria
+  `Result`/`Ok`/`Err` para todo `use sys select *` e colidiria com o
+  `Result` que o programa declara (`test_generics_result.nx`).
+- **Hint de builtin sombreado por `select *`** (achado 4): `use strings
+  select *` liga `strings.contains` ao nome `contains` e o builtin
+  `contains(arr, v)` some; `contains(KEYWORDS, word)` virava um erro de tipo
+  sem explicação. Os erros de aridade e de tipo de argumento de uma chamada a
+  um nome que entrou por `use m select *` e coincide com um builtin ganham
+  `hint: 'contains' here is strings.contains (imported by 'use strings select
+  *'), which shadows the builtin 'contains'; import strings by name ...`. É
+  hint no erro, não aviso no `use`: quem importa `strings` inteiro e nunca
+  chama `contains` com array não tem nada a corrigir. Hoje só
+  `strings.contains` e `http_client.delete` colidem com um nativo global.
+- Spec §12: subseção **Time (`time`)** (antes o módulo não estava
+  documentado) — `time.now()` em segundos, `time.now_ms()` em milissegundos,
+  tabela da API.
+
+### Changed (BREAKING)
+- **`sys.exec_output` devolve a saída intacta** (achado 9). Antes aplicava
+  `TrimSpace`, o que corrompia saída posicional: a primeira linha de
+  `git status --porcelain` (` M a.nx`) perdia o espaço da coluna e o caminho
+  perdia a primeira letra. A spec nunca documentou o trim.
+
+  | Antes | Agora |
+  |---|---|
+  | `exec_output("echo hi").output` → `"hi"` | `"hi\n"` |
+  | `exec_output("git status --porcelain").output` → `"M a.nx"` (coluna perdida) | `" M a.nx\n"` |
+
+  Migração: `strings.trim(r.output)` onde o valor aparado era o desejado
+  (`r.output == "x"` vira `trim(r.output) == "x"`); parsers linha a linha
+  que já ignoravam linhas vazias não mudam. `sys.exec` (sem captura) não é
+  afetado.
+- **`http_server.serve` escreve `Server listening on ...` e `Failed to bind
+  to ...` em stderr** (`eprint`), não em stdout (achado 5; regra de saída do
+  AGENTS.md: stdout é do programa). Quem capturava a linha em stdout passa a
+  lê-la em stderr (`2>&1`).
+
+### Changed
+- **`sys.exec` e `sys.exec_output` no Windows rodam `cmd /S /C "<linha>"`**
+  com a linha de comando montada pela VM (`SysProcAttr.CmdLine`), não por
+  `exec.Command("cmd", "/C", linha)` (achado 10). O Go escapava cada `"` da
+  linha como `\"` e o `cmd` as repassava ao programa: `echo "a b"` imprimia
+  `\"a b\"` e `git -C "D:\pasta com espaço" status` chegava ao git em
+  quatro pedaços — nenhum caminho com espaço passava. Com `/S` o `cmd` remove
+  só a primeira e a última aspa da linha e entrega o resto como o autor
+  escreveu. Unix não muda (`sh -c`). Helper por plataforma em
+  `internal/vm/shell_command_{windows,other}.go`; teste só no Windows
+  (`TestSysExecOutputDeliversQuotesToCmdOnWindows`, roda no CI).
+- README: a tabela de builtins não lista mais `time_now()` "in ms" — o
+  nativo devolve **segundos** e não é builtin central (sem tipo estático;
+  achados 2 e 8). A forma tipada é `use time` + `time.now()` (segundos) e
+  `time.now_ms()` (milissegundos); a tabela ganha `sort`/`sort_by`.
+- `docs/EXTENSIONS.md`: o parêntese "runs that never call it need no binary
+  at run time" estava errado (achado 7) — o binário da plataforma é lido e
+  tem o hash verificado no `use` (spec de design §4.1); só o **start** do
+  processo é adiado para a primeira chamada. Decisão mantida: a verificação
+  de integridade acontece antes de o programa rodar qualquer coisa.
+
+### Deprecated
+- `sys_load_plugin`: a remoção (com `internal/plugin` e
+  `compiler.PluginNativeNames`) passa da v0.26.0 para a **v0.27.0** — esta
+  versão entrega os achados do Noxy-Editor, e a remoção fica para uma
+  versão só dela; o aviso no stderr, `docs/EXTENSIONS.md`, AGENTS.md e a
+  spec de design §10.1 refletem a nova janela.
+
+### Fixed
+- **Panic do compilador com `chan_recv(m.x)` de um módulo que não carrega**
+  (achado 6): com `use src.server as server` apontando para um módulo
+  inexistente, `chan_recv(server.inbox)` num corpo de função derrubava o
+  compilador com `invalid memory address or nil pointer dereference`
+  (`compileCallExpression`) em vez do `module not found` de runtime — o
+  membro de namespace que não resolve tem tipo nil e `chan_recv` chamava
+  `String()` nele. `chan_recv` passa a tratar o tipo desconhecido como
+  dinâmico (resultado `any`), como `chan_send` já fazia; o import que falhou
+  continua sendo reportado pelo runtime.
+
 ## [0.25.1] - 2026-09-21
 
 ### Fixed
