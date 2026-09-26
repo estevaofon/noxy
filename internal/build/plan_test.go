@@ -303,3 +303,36 @@ func TestListPrintsModulesExtensionsAndIncludes(t *testing.T) {
 		t.Fatalf("HumanSize: %s %s %s", HumanSize(1536), HumanSize(23826816), HumanSize(12))
 	}
 }
+
+func TestPlanFollowsSymlinkedIncludes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	root := writeProject(t, map[string]string{
+		"main.nx":    "print(1)\n",
+		"real/b.txt": "b\n",
+	})
+	if err := os.Symlink("real", filepath.Join(root, "web")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("b.txt", filepath.Join(root, "real", "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planOf(t, root, "main.nx", "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := paths(plan.IncludedFiles()); got != "web/b.txt web/link.txt" {
+		t.Fatalf("included %q (files %q)", got, paths(plan.Files))
+	}
+}
+
+func TestPlanRejectsAnEmptyInclude(t *testing.T) {
+	root := writeProject(t, map[string]string{"main.nx": "print(1)\n"})
+	if err := os.MkdirAll(filepath.Join(root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := planOf(t, root, "main.nx", "empty"); err == nil || !strings.Contains(err.Error(), "include empty contains no files") {
+		t.Fatalf("got %v", err)
+	}
+}

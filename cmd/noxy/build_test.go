@@ -272,3 +272,70 @@ func TestBuildAppRunsThroughASymlink(t *testing.T) {
 		t.Fatalf("through a symlink: %v\n%s", err, out)
 	}
 }
+
+func TestBuildRejectsModuleOnlyReachableThroughTheCwd(t *testing.T) {
+	bin := buildNoxy(t)
+	project := t.TempDir()
+	files := map[string]string{
+		"noxy.mod":   "module app\n",
+		"util.nx":    "let greeting: string = \"hi\"\n",
+		"src/app.nx": "use util\nprint(util.greeting)\n",
+	}
+	for rel, content := range files {
+		path := filepath.Join(project, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := run(t, project, appEnv(), bin, "src/app.nx"); err != nil || strings.TrimSpace(out) != "hi" {
+		t.Fatalf("the interpreter finds util through the cwd: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin, "build", "src/app.nx")
+	cmd.Dir = project
+	cmd.Env = appEnv()
+	stdout, stderr := new(strings.Builder), new(strings.Builder)
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Fatalf("build must exit 1: %v\nstdout %q\nstderr %q", err, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "module util resolves through the current directory or NOXY_PATH") || stdout.String() != "" {
+		t.Fatalf("stdout %q stderr %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestBuildAppIgnoresAForeignNoxyModAboveTheCache(t *testing.T) {
+	bin := buildNoxy(t)
+	write := func(root string, files map[string]string) {
+		for rel, content := range files {
+			path := filepath.Join(root, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	project := t.TempDir()
+	write(project, map[string]string{
+		"main.nx":                    "use helper\nprint(helper.message())\n",
+		"noxy_libs/helper/helper.nx": "func message() -> string\n    return \"own helper\"\nend\n",
+	})
+	app := filepath.Join(t.TempDir(), "app"+exeSuffix())
+	if out, err := run(t, project, appEnv(), bin, "build", "main.nx", "-o", app); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	outer := t.TempDir()
+	write(outer, map[string]string{
+		"noxy.mod":                   "module foreign\n",
+		"noxy_libs/helper/helper.nx": "func message() -> string\n    return \"SHADOWED\"\nend\n",
+	})
+	out, err := run(t, t.TempDir(), appEnv("NOXY_APP_CACHE="+filepath.Join(outer, "cache")), app)
+	if err != nil || strings.TrimSpace(out) != "own helper" {
+		t.Fatalf("a noxy.mod above the cache must not shadow the app: %v\n%s", err, out)
+	}
+}

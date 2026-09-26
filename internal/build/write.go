@@ -3,7 +3,6 @@ package build
 import (
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,7 +76,7 @@ func writeAll(path string, parts ...[]byte) error {
 		return err
 	}
 	for _, part := range parts {
-		if _, err := io.Copy(f, strings.NewReader(string(part))); err != nil {
+		if _, err := f.Write(part); err != nil {
 			f.Close()
 			return err
 		}

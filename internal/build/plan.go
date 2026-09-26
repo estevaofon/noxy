@@ -70,11 +70,12 @@ type Plan struct {
 var errSysLoadPlugin = errors.New("sys_load_plugin is not supported in built executables (removed in v0.27.0)")
 
 type walker struct {
-	plan  *Plan
-	src   modsrc.Source
-	vm    *vm.VM
-	seen  map[string]bool
-	files map[string]File
+	plan   *Plan
+	src    modsrc.Source
+	sealed modsrc.Source // a resolucao do app (sem cwd, sem NOXY_PATH)
+	vm     *vm.VM
+	seen   map[string]bool
+	files  map[string]File
 }
 
 // MakePlan resolve a raiz, compila o entry, caminha e compila os modulos,
@@ -111,7 +112,7 @@ func MakePlan(opts Options) (*Plan, error) {
 
 	machine := vm.NewWithConfig(vm.VMConfig{RootPath: entryDir, ProjectRoot: projectRoot})
 	defer machine.CloseExtensions()
-	w := &walker{plan: p, src: machine.Config.Source, vm: machine, seen: map[string]bool{}, files: map[string]File{}}
+	w := &walker{plan: p, src: machine.Config.Source, sealed: modsrc.NewSealed(entryDir, projectRoot), vm: machine, seen: map[string]bool{}, files: map[string]File{}}
 
 	content, err := os.ReadFile(entryAbs)
 	if err != nil {
@@ -234,14 +235,19 @@ func (w *walker) visitModule(name, from string, line int) error {
 		}
 		return err
 	}
+	var rel string
+	if m.Kind != modsrc.KindEmbedded {
+		if rel, err = relUnder(w.plan.Root, m.Path); err != nil {
+			return fmt.Errorf("module %s resolves to %s, outside the project root %s", name, m.Path, w.plan.Root)
+		}
+	}
+	if err := w.checkSealed(name, m, rel); err != nil {
+		return err
+	}
 	switch m.Kind {
 	case modsrc.KindEmbedded:
 		return nil
 	case modsrc.KindFile:
-		rel, err := relUnder(w.plan.Root, m.Path)
-		if err != nil {
-			return fmt.Errorf("module %s resolves to %s, outside the project root %s", name, m.Path, w.plan.Root)
-		}
 		w.plan.Modules = append(w.plan.Modules, Module{Name: name, Path: rel})
 		if err := w.addFile(rel, m.Path, false); err != nil {
 			return err
@@ -265,10 +271,6 @@ func (w *walker) visitModule(name, from string, line int) error {
 		}
 		return w.visitUses(program, rel)
 	case modsrc.KindDirectory:
-		rel, err := relUnder(w.plan.Root, m.Path)
-		if err != nil {
-			return fmt.Errorf("module %s resolves to %s, outside the project root %s", name, m.Path, w.plan.Root)
-		}
 		w.plan.Modules = append(w.plan.Modules, Module{Name: name, Path: rel, Dir: true})
 		entries, err := w.src.ReadDir(m.Path)
 		if err != nil {
@@ -295,6 +297,28 @@ func (w *walker) visitModule(name, from string, line int) error {
 		return nil
 	}
 	return nil
+}
+
+// checkSealed: o app resolve com a DiskSource selada (mesmo Root e
+// ProjectRoot, relativos ao diretorio extraido); um modulo que so o cwd ou o
+// NOXY_PATH acham passaria no build e faltaria no app (spec §6.2). Mesmo
+// Kind e mesmo caminho (ou o mesmo caminho no payload, para um NOXY_PATH que
+// aponta para dentro da raiz por outro caminho) sao exigidos.
+func (w *walker) checkSealed(name string, m modsrc.Module, rel string) error {
+	sealed, err := w.sealed.Resolve(name)
+	if err == nil && sealed.Kind == m.Kind {
+		if m.Kind == modsrc.KindEmbedded || filepath.Clean(sealed.Path) == filepath.Clean(m.Path) {
+			return nil
+		}
+		if sealedRel, err := relUnder(w.plan.Root, sealed.Path); err == nil && sealedRel == rel {
+			return nil
+		}
+	}
+	where := m.Path
+	if m.Kind == modsrc.KindEmbedded {
+		where = "embedded stdlib"
+	}
+	return fmt.Errorf("module %s resolves through the current directory or NOXY_PATH (%s); a built executable only searches the project — move it under noxy_libs/ or next to the entry", name, where)
 }
 
 // visitExtension: noxy_ext.toml ao lado do modulo → manifesto + artefato da
@@ -361,7 +385,10 @@ func (w *walker) addFile(rel, abs string, executable bool) error {
 }
 
 // addIncludes: uniao de `include` do noxy.mod e --include, sem duplicata,
-// validados; diretorio entra recursivamente (arquivos regulares).
+// validados; diretorio entra recursivamente. Um include que e symlink e
+// seguido (o caminho no payload continua o lexical, <include>/<rel>); dentro
+// dele, symlink para arquivo entra (lido pelo link), symlink para diretorio
+// nao e seguido (spec §6.5). Include sem nenhum arquivo e erro.
 func (w *walker) addIncludes(modIncludes, flagIncludes []string) error {
 	seen := map[string]bool{}
 	for _, raw := range append(append([]string{}, modIncludes...), flagIncludes...) {
@@ -385,21 +412,38 @@ func (w *walker) addIncludes(modIncludes, flagIncludes []string) error {
 			}
 			continue
 		}
-		err = filepath.WalkDir(abs, func(p string, d fs.DirEntry, err error) error {
+		walkRoot, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return fmt.Errorf("include %s: %w", clean, err)
+		}
+		count := 0
+		err = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || !d.Type().IsRegular() {
+			if d.IsDir() {
 				return nil
 			}
-			rel, err := filepath.Rel(w.plan.Root, p)
+			if !d.Type().IsRegular() {
+				if d.Type()&fs.ModeSymlink == 0 {
+					return nil
+				}
+				if target, err := os.Stat(p); err != nil || !target.Mode().IsRegular() {
+					return nil
+				}
+			}
+			rel, err := filepath.Rel(walkRoot, p)
 			if err != nil {
 				return err
 			}
-			return w.addFile(filepath.ToSlash(rel), p, false)
+			count++
+			return w.addFile(clean+"/"+filepath.ToSlash(rel), p, false)
 		})
 		if err != nil {
 			return err
+		}
+		if count == 0 {
+			return fmt.Errorf("include %s contains no files", clean)
 		}
 	}
 	sort.Strings(w.plan.Includes)
