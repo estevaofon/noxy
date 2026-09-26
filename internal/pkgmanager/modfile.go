@@ -46,14 +46,14 @@ func ValidateIncludePath(p string) (string, error) {
 		return "", errors.New("include path is empty")
 	}
 	if strings.Contains(p, "\\") {
-		return "", fmt.Errorf("include %q: use forward slashes", p)
+		return "", fmt.Errorf("include \"%s\": use forward slashes", p)
 	}
 	if strings.HasPrefix(p, "/") || (len(p) >= 2 && p[1] == ':') {
-		return "", fmt.Errorf("include %q is outside the project root", p)
+		return "", fmt.Errorf("include \"%s\" is outside the project root", p)
 	}
 	clean := path.Clean(p)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("include %q is outside the project root", p)
+		return "", fmt.Errorf("include \"%s\" is outside the project root", p)
 	}
 	return clean, nil
 }
@@ -144,7 +144,9 @@ func (c *ModuleConfig) Save(path string) error {
 	if len(c.Include) > 0 {
 		includes := append([]string(nil), c.Include...)
 		sort.Strings(includes)
-		sb.WriteString("\n")
+		if s := sb.String(); !strings.HasSuffix(s, "\n\n") {
+			sb.WriteString("\n")
+		}
 		for _, include := range includes {
 			fmt.Fprintf(&sb, "include %s\n", include)
 		}

@@ -170,6 +170,15 @@ func TestModFileIncludeRejectsEscapesAndAbsolutePaths(t *testing.T) {
 	if clean, err := ValidateIncludePath("./web/vendor/"); err != nil || clean != "web/vendor" {
 		t.Fatalf("clean: %q %v", clean, err)
 	}
+	// Exact-text assertions for error messages (literal path, not re-escaped)
+	_, err := ValidateIncludePath("a\\b")
+	if err == nil || err.Error() != "include \"a\\b\": use forward slashes" {
+		t.Fatalf("backslash error: got %q, want %q", err.Error(), "include \"a\\b\": use forward slashes")
+	}
+	_, err = ValidateIncludePath("../x")
+	if err == nil || err.Error() != "include \"../x\" is outside the project root" {
+		t.Fatalf("escape error: got %q, want %q", err.Error(), "include \"../x\" is outside the project root")
+	}
 }
 
 func TestModFileWithoutIncludeSavesNoIncludeLine(t *testing.T) {
@@ -182,5 +191,20 @@ func TestModFileWithoutIncludeSavesNoIncludeLine(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "include") {
 		t.Fatalf("no include expected:\n%s", data)
+	}
+}
+
+func TestModFileSaveWithIncludesButNoRequires(t *testing.T) {
+	cfg := NewModuleConfig()
+	cfg.Module = "app"
+	cfg.Include = []string{"assets"}
+	path := filepath.Join(t.TempDir(), "noxy.mod")
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	want := "module app\n\ninclude assets\n"
+	if string(data) != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", string(data), want)
 	}
 }
