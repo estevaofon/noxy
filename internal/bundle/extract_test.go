@@ -4,6 +4,7 @@ package bundle
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -159,5 +160,45 @@ func TestCacheBaseHonoursOverride(t *testing.T) {
 	base, err = CacheBase()
 	if err != nil || !strings.HasSuffix(filepath.ToSlash(base), "noxy/apps") {
 		t.Fatalf("default base %q %v", base, err)
+	}
+}
+
+func TestExtractRejectsUnsupportedFormatWithoutTouchingTheCache(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	m, _ := json.Marshal(map[string]interface{}{"format": 2, "kind": "source", "entry": "main.nx"})
+	w, _ := zw.Create(ManifestName)
+	w.Write(m)
+	w, _ = zw.Create("main.nx")
+	w.Write([]byte("print(1)\n"))
+	zw.Close()
+	app := writeApp(t, []byte("RUNTIME"), buf.Bytes())
+	base := t.TempDir()
+	_, _, err := Extract(openApp(t, app), base)
+	if err == nil || !strings.Contains(err.Error(), "unsupported app payload format 2") {
+		t.Fatalf("got %v", err)
+	}
+	if entries, _ := os.ReadDir(base); len(entries) != 0 {
+		t.Fatalf("unsupported format must leave nothing behind, got %v entries", len(entries))
+	}
+}
+
+func TestExtractRejectsAnEntryNamedLikeTheMarker(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create(MarkerName)
+	w.Write([]byte("x"))
+	m, _ := sampleManifest().Encode()
+	w, _ = zw.Create(ManifestName)
+	w.Write(m)
+	zw.Close()
+	app := writeApp(t, []byte("RUNTIME"), buf.Bytes())
+	base := t.TempDir()
+	_, _, err := Extract(openApp(t, app), base)
+	if err == nil || !strings.Contains(err.Error(), "app payload has an invalid path: "+MarkerName) {
+		t.Fatalf("got %v", err)
+	}
+	if entries, _ := os.ReadDir(base); len(entries) != 0 {
+		t.Fatalf("nothing may remain after a rejected payload, got %v", entries)
 	}
 }
