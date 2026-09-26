@@ -36,4 +36,5 @@ print("valor poped "+to_str(pop_stack(ref stack)))
 
 push(ref stack_str, "hello")
 push(ref stack_str, "world")
+push(ref stack_str, "Everyone!")
 print("Imprime pilha -> " + to_str(print_stack(stack_str)))

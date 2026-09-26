@@ -64,6 +64,7 @@ type SharedState struct {
 	Sockets      *handleRegistry[*SocketResource]
 	Databases    *handleRegistry[*DatabaseResource]
 	Statements   *handleRegistry[*StatementResource]
+	Processes    *handleRegistry[*ProcessResource]
 	stateOnce    sync.Once
 	builtinsOnce sync.Once
 

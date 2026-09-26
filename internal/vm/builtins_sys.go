@@ -19,10 +19,10 @@ import (
 
 // pluginDeprecationWarned: um unico aviso por processo (spec 2026-08-29
 // §10.1). sys_load_plugin, internal/plugin e compiler.PluginNativeNames
-// saem juntos na v0.26.0.
+// saem juntos na v0.27.0 (janela estendida na v0.25.0 e na v0.26.0).
 var pluginDeprecationWarned atomic.Bool
 
-const pluginDeprecationWarning = "warning: sys_load_plugin is deprecated since v0.23.0 and will be removed in v0.26.0; publish the plugin as a kind = \"process\" extension (docs/EXTENSIONS.md)"
+const pluginDeprecationWarning = "warning: sys_load_plugin is deprecated since v0.23.0 and will be removed in v0.27.0; publish the plugin as a kind = \"process\" extension (docs/EXTENSIONS.md)"
 
 func (vm *VM) defineSystemBuiltins() {
 	vm.DefineNative("sys_signal_notify", func(args []value.Value) value.Value {
@@ -100,13 +100,7 @@ func (vm *VM) defineSystemBuiltins() {
 			return value.NewNull()
 		}
 
-		var cmd *exec.Cmd
-		if os.PathSeparator == '\\' {
-			cmd = exec.Command("cmd", "/C", cmdStr)
-		} else {
-			cmd = exec.Command("sh", "-c", cmdStr)
-		}
-
+		cmd := shellCommand(cmdStr)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
@@ -144,33 +138,9 @@ func (vm *VM) defineSystemBuiltins() {
 			return value.NewNull()
 		}
 
-		var cmd *exec.Cmd
-		if os.PathSeparator == '\\' {
-			cmd = exec.Command("cmd", "/C", cmdStr)
-		} else {
-			cmd = exec.Command("sh", "-c", cmdStr)
-		}
-
-		outBytes, err := cmd.CombinedOutput()
+		outBytes, exitCode, okVal := runShellCapture(cmdStr)
 		outputStr := string(outBytes)
-
-		// ok is true only when the process both started and exited with code
-		// 0. A non-zero exit (an *exec.ExitError) and a failure to start both
-		// report ok=false; exit_code distinguishes them.
-		okVal := true
-		exitCode := 0
 		errMsg := ""
-
-		if err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			} else {
-				exitCode = 1
-			}
-			okVal = false
-		} else {
-			okVal = true
-		}
 
 		// The process's output is an external byte source labelled as
 		// text: it must be valid UTF-8 before it is handed back as a Noxy
@@ -185,9 +155,12 @@ func (vm *VM) defineSystemBuiltins() {
 			errMsg = verifyErr.Error()
 		}
 
+		// A saida volta INTACTA (sem TrimSpace): saida posicional como a de
+		// `git status --porcelain` (" M a.nx") depende do espaco inicial e
+		// quem quiser aparar usa strings.trim (achado 9 do Noxy-Editor).
 		outputField := ""
 		if errMsg == "" {
-			outputField = strings.TrimSpace(outputStr)
+			outputField = outputStr
 		}
 
 		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
@@ -196,6 +169,84 @@ func (vm *VM) defineSystemBuiltins() {
 		inst.MustSet("ok", value.NewBool(okVal))
 		inst.MustSet("error", value.NewString(errMsg))
 
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	// sys_exec_output_bytes e o caminho bruto de sys.exec_output (achado 12
+	// do Noxy-Editor): a saida volta como `bytes`, sem a exigencia de UTF-8
+	// — o que `tasklist`/`taskkill` escrevem na codepage do console do
+	// Windows (cp850 num Windows em portugues) so e legivel por aqui. Mesmo
+	// contrato de exit_code/ok; `error` existe pela simetria com SysResult
+	// e fica vazio (nenhum caminho o preenche hoje).
+	vm.DefineNative("sys_exec_output_bytes", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		cmdStr := args[0].String()
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		outBytes, exitCode, okVal := runShellCapture(cmdStr)
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		inst.MustSet("exit_code", value.NewInt(int64(exitCode)))
+		inst.MustSet("output", value.NewBytes(string(outBytes)))
+		inst.MustSet("ok", value.NewBool(okVal))
+		inst.MustSet("error", value.NewString(""))
+
+		return value.Value{Type: value.VAL_OBJ, Obj: inst}
+	})
+
+	// sys_temp_dir e sys_user_dir (achado 11 do Noxy-Editor): os diretorios
+	// que o Go ja resolve por plataforma — TEMP/TMP ou /tmp; USERPROFILE ou
+	// HOME; LOCALAPPDATA ou XDG_CACHE_HOME/~/.cache; APPDATA ou
+	// XDG_CONFIG_HOME/~/.config — em vez de cada programa remontar a tabela
+	// a partir das variaveis de ambiente. os.TempDir nunca falha; os outros
+	// falham sem a variavel base: PathResult{value, ok, error}, a forma de
+	// EnvResult (nao errors.Result — ver o comentario em sys.nx).
+	vm.DefineNative("sys_temp_dir", func(args []value.Value) value.Value {
+		return value.NewString(os.TempDir())
+	})
+	vm.DefineNative("sys_user_dir", func(args []value.Value) value.Value {
+		if len(args) < 2 {
+			return value.NewNull()
+		}
+		kind := args[0].String()
+		structDef, ok := args[1].Obj.(*value.ObjStruct)
+		if !ok {
+			return value.NewNull()
+		}
+
+		var dir string
+		var err error
+		switch kind {
+		case "home":
+			dir, err = os.UserHomeDir()
+		case "cache":
+			dir, err = os.UserCacheDir()
+		case "config":
+			dir, err = os.UserConfigDir()
+		default:
+			err = fmt.Errorf("sys_user_dir: unknown directory kind %q", kind)
+		}
+		// O caminho vem do ambiente: e uma fonte externa de bytes rotulada
+		// como texto, mesma regra de sys.getenv.
+		if err == nil {
+			err = requireValidUTF8("sys."+kind+"_dir", dir)
+		}
+
+		inst := value.NewInstance(structDef).Obj.(*value.ObjInstance)
+		if err != nil {
+			inst.MustSet("value", value.NewString(""))
+			inst.MustSet("ok", value.NewBool(false))
+			inst.MustSet("error", value.NewString(err.Error()))
+		} else {
+			inst.MustSet("value", value.NewString(dir))
+			inst.MustSet("ok", value.NewBool(true))
+			inst.MustSet("error", value.NewString(""))
+		}
 		return value.Value{Type: value.VAL_OBJ, Obj: inst}
 	})
 
@@ -380,10 +431,36 @@ func (vm *VM) defineSystemBuiltins() {
 		if len(args) > 0 {
 			code = int(args[0].Int())
 		}
-		// os.Exit nao roda defers: fecha os plugins por processo aqui, senao
-		// eles ficariam orfaos ate perceberem o EOF (spec §4.5).
+		// os.Exit nao roda defers: mata os processos filhos registrados
+		// (spec do modulo process §4.3) e fecha os plugins por processo aqui,
+		// senao eles ficariam orfaos ate perceberem o EOF (spec §4.5).
+		vm.shared.CloseProcesses()
 		vm.shared.CloseExtensions()
 		os.Exit(code)
 		return value.NewNull()
 	})
+}
+
+// runShellCapture roda a linha no shell da plataforma (shellCommand) e
+// captura stdout+stderr. ok e true so quando o processo subiu E saiu com 0;
+// saida nao-zero (*exec.ExitError) e falha ao iniciar dao ok=false, e
+// exit_code distingue as duas (1 quando nem chegou a iniciar).
+func runShellCapture(command string) (output []byte, exitCode int, ok bool) {
+	outBytes, err := shellCommand(command).CombinedOutput()
+	if err == nil {
+		return outBytes, 0, true
+	}
+	if exitErr, isExit := err.(*exec.ExitError); isExit {
+		return outBytes, exitErr.ExitCode(), false
+	}
+	return outBytes, 1, false
+}
+
+// SignalSubscribed diz se o programa assumiu SIGINT/SIGTERM com
+// sys.signal_notify (e ainda nao chamou signal_stop): a CLI nao instala o
+// proprio tratador de saida por cima de um programa que e dono dos sinais.
+func (vm *VM) SignalSubscribed() bool {
+	vm.shared.SignalSubMu.Lock()
+	defer vm.shared.SignalSubMu.Unlock()
+	return vm.shared.ActiveSignalChan != nil
 }

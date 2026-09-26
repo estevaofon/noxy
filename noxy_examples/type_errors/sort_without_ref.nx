@@ -1,0 +1,4 @@
+// sort exige `ref` no argumento 1 (spec §2.3 R5) — erro de compilação:
+// argument 1 to 'sort': expected ref T[], got int[]
+let xs: int[] = [3, 1, 2]
+sort(xs)

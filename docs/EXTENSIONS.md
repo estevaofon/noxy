@@ -186,8 +186,13 @@ handles are process-wide — the mode an extension holding connections wants.
 
 ### Lifecycle
 
-The process starts on the **first call** to any export, not at `use`
-(`--smoke`-style runs that never call it need no binary at run time).
+The process starts on the **first call** to any export, not at `use`. The
+binary itself is required at `use`: the VM reads `bin/<asset>` and verifies
+its hash against `noxy.sum` when the module loads (§4.1 of the design spec),
+so a package present without its platform binary fails at compile time with
+`binary bin/<asset> not found — run 'noxy --sync'`. Only the process start is
+deferred; there is no way for a program to degrade gracefully when the
+binary is missing — treat the binary as a prerequisite, like the package.
 Every call runs under a deadline; on expiry the host sends CANCEL and
 returns `extension 'x' timed out: <export> exceeded <N> ms` — the process
 survives if it cancels within 1 s, otherwise it is killed and the extension
@@ -251,7 +256,7 @@ it); list exactly those asset names in `[binaries]`.
 ### `sys_load_plugin` (deprecated)
 
 The line-delimited JSON plugin builtin is deprecated since v0.23.0 and
-will be removed in v0.26.0 together with `internal/plugin` and the
+will be removed in v0.27.0 together with `internal/plugin` and the
 compiler's `PluginNativeNames` special case; it prints a warning on first
 use. Migrate by publishing the plugin as a `kind = "process"` extension.
 

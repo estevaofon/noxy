@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -276,5 +277,152 @@ func TestSysGetenvPreservesUnsetMeaning(t *testing.T) {
 	}
 	if report != "false|" {
 		t.Fatalf("sys.getenv on an unset variable reported %q, want %q (pre-existing ok=false meaning unchanged, error empty)", report, "false|")
+	}
+}
+
+// Achado 9 do Noxy-Editor: sys.exec_output aparava espacos e quebras nas
+// pontas da saida (strings.TrimSpace), corrompendo saida posicional — a
+// primeira linha de `git status --porcelain` (" M a.nx") perdia o espaco e
+// o caminho perdia a primeira letra. A saida volta intacta; quem quiser
+// aparar usa strings.trim.
+func TestSysExecOutputKeepsSurroundingWhitespace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "porcelain.txt")
+	content := "  dois espacos\n fim  \n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use sys\n" +
+		"let r: sys.SysResult = sys.exec_output(" + strconv.Quote(sysCatCommand(path)) + ")\n" +
+		"test_report(to_str(r.ok) + \"|\" + r.output + \"|\" + r.error)"
+	captured := captureVMSource(t, source)
+	report, ok := captured.Obj.(string)
+	if !ok {
+		t.Fatalf("test_report value = %#v, want string", captured)
+	}
+	want := "true|" + content + "|"
+	if report != want {
+		t.Fatalf("sys.exec_output reported %q, want the output untrimmed %q", report, want)
+	}
+}
+
+// Achado 12 do Noxy-Editor: sys.exec_output recusa saida que nao e UTF-8
+// (codepage do console do Windows) e nao havia como ler os bytes.
+// sys.exec_output_bytes devolve a saida bruta com o mesmo exit_code/ok.
+func TestSysExecOutputBytesReturnsRawOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "raw.bin")
+	content := "cp850: caf\xe9\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use sys\n" +
+		"let r: sys.SysBytesResult = sys.exec_output_bytes(" + strconv.Quote(sysCatCommand(path)) + ")\n" +
+		"test_report([to_str(r.ok), to_str(r.exit_code), hex_encode(r.output), r.error, type(r.output)])"
+	cells := semArray(t, captureVMSource(t, source))
+	want := []string{"true", "0", fmt.Sprintf("%x", content), "", "bytes"}
+	if len(cells) != len(want) {
+		t.Fatalf("cells=%d, want %d", len(cells), len(want))
+	}
+	for i, cell := range cells {
+		if s, ok := cell.Obj.(string); !ok || s != want[i] {
+			t.Fatalf("cell %d: got %s, want %q", i, cell.String(), want[i])
+		}
+	}
+}
+
+func TestSysExecOutputBytesReportsNonZeroExit(t *testing.T) {
+	// `exit 3` e valido tanto no sh quanto no cmd.
+	source := "use sys\n" +
+		"let r: sys.SysBytesResult = sys.exec_output_bytes(\"exit 3\")\n" +
+		"test_report([to_str(r.ok), to_str(r.exit_code)])"
+	cells := semArray(t, captureVMSource(t, source))
+	if len(cells) != 2 || cells[0].Obj.(string) != "false" || cells[1].Obj.(string) != "3" {
+		t.Fatalf("got %v, want [false 3]", cells)
+	}
+}
+
+// Achado 11 do Noxy-Editor: nao havia como saber os diretorios do usuario
+// nem o temporario sem remontar a tabela de variaveis de ambiente por
+// plataforma. sys.temp_dir/home_dir/cache_dir/config_dir expoem os
+// resolvedores do Go.
+func TestSysUserDirectoriesFollowTheGoResolvers(t *testing.T) {
+	source := `use sys
+let home: sys.PathResult = sys.home_dir()
+let cache: sys.PathResult = sys.cache_dir()
+let config: sys.PathResult = sys.config_dir()
+test_report([sys.temp_dir(), to_str(home.ok), home.value, to_str(cache.ok), cache.value, to_str(config.ok), config.value])`
+	cells := semArray(t, captureVMSource(t, source))
+	if len(cells) != 7 {
+		t.Fatalf("cells=%d, want 7: %v", len(cells), cells)
+	}
+	expect := func(i int, want string) {
+		t.Helper()
+		if s, ok := cells[i].Obj.(string); !ok || s != want {
+			t.Fatalf("cell %d: got %s, want %q", i, cells[i].String(), want)
+		}
+	}
+	expect(0, os.TempDir())
+	resolvers := []struct {
+		name    string
+		resolve func() (string, error)
+		okCell  int
+		dirCell int
+	}{
+		{"home", os.UserHomeDir, 1, 2},
+		{"cache", os.UserCacheDir, 3, 4},
+		{"config", os.UserConfigDir, 5, 6},
+	}
+	for _, r := range resolvers {
+		dir, err := r.resolve()
+		if err != nil {
+			expect(r.okCell, "false")
+			expect(r.dirCell, "")
+			continue
+		}
+		expect(r.okCell, "true")
+		expect(r.dirCell, dir)
+	}
+}
+
+func TestSysUserDirReportsMissingBaseVariable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", "")
+	} else {
+		t.Setenv("HOME", "")
+	}
+	source := `use sys
+let home: sys.PathResult = sys.home_dir()
+test_report([to_str(home.ok), home.error])`
+	cells := semArray(t, captureVMSource(t, source))
+	if len(cells) != 2 || cells[0].Obj.(string) != "false" || cells[1].Obj.(string) == "" {
+		t.Fatalf("got %v, want ok=false with a message", cells)
+	}
+}
+
+// Achado 10 do Noxy-Editor: no Windows, exec.Command("cmd", "/C", linha)
+// escapava cada aspa da linha como \" e o cmd as repassava ao programa.
+// Com `cmd /S /C "<linha>"` montado por nos, `echo "a b"` imprime `"a b"` e
+// um caminho com espaco entre aspas chega inteiro ao programa.
+func TestSysExecOutputDeliversQuotesToCmdOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("cmd /S /C quoting is Windows-only")
+	}
+	dir := filepath.Join(t.TempDir(), "pasta com espaco")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "f.txt")
+	if err := os.WriteFile(path, []byte("conteudo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source := "use sys\n" +
+		"let echo: sys.SysResult = sys.exec_output(\"echo \\\"a b\\\"\")\n" +
+		"let typed: sys.SysResult = sys.exec_output(" + strconv.Quote("type \""+path+"\"") + ")\n" +
+		"test_report([echo.output, to_str(typed.ok), typed.output])"
+	cells := semArray(t, captureVMSource(t, source))
+	want := []string{"\"a b\"\r\n", "true", "conteudo"}
+	for i := range want {
+		if s, ok := cells[i].Obj.(string); !ok || s != want[i] {
+			t.Fatalf("cell %d: got %q, want %q", i, cells[i].String(), want[i])
+		}
 	}
 }

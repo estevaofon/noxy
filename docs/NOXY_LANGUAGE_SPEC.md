@@ -2326,8 +2326,9 @@ The core builtins have static return types where the result never varies —
 `keys(map[K, V]) -> K[]`, `slice` (same type as its first argument) — so a
 value of theirs is checked like any other expression (`let s: string =
 length(xs)` is a compile error) and can initialize an inferred `let` (§3).
-They — together with `print` and `range` — are pure natives that never run
-Noxy code, so a call to one of them never ends a narrowing (§2.4).
+They — together with `print`, `range` and `sort` — are pure natives that
+never run Noxy code, so a call to one of them never ends a narrowing (§2.4);
+`sort_by` calls its key function and does.
 `call_result` is typed by its callee (`errors.Result<R>`, §7). The others
 (`json_parse`, `task_await`, `make_chan`, ...) are dynamic-boundary builtins:
 their result is `any` or untyped and needs an annotation. A function the
@@ -2348,6 +2349,39 @@ included.
   what a game loop wants when order does not matter. Same range rule.
   Both go through the same copy-on-write path as `append`: a copy taken
   before the call does not see the removal. `delete` remains map-only.
+- `sort(ref arr)`: sorts an `int[]`, `float[]` or `string[]` in place,
+  ascending (strings by code point). Any other element type is a **compile
+  error** (`sort expects ref int[], ref float[] or ref string[]`) that points
+  at `sort_by`. Same copy-on-write path as `append`: a copy taken before the
+  call keeps the old order.
+- `sort_by(ref arr, key)`: sorts any `T[]` in place by the value
+  `key(element)` returns, which must be `int`, `float` or `string` — one
+  type for the whole array (mixed keys are a runtime error). **Stable**:
+  equal keys keep their relative order. `key` is `func(T) -> int|float|string`;
+  an exact function type is checked at compile time (`argument 2 to
+  'sort_by': expected func(T) -> int, float or string, got ...`), a bare
+  `func` at runtime. All keys are computed **before** the sort (one call per
+  element, never one per comparison), so a runtime error inside `key` leaves
+  the array untouched. Descending order: negate a numeric key.
+
+```noxy
+let names: string[] = keys(m)
+sort(ref names)                      // keys(m) has no defined order (§2)
+
+struct Entry
+    name: string
+    size: int
+end
+let entries: Entry[] = [Entry("b", 2), Entry("a", 2), Entry("c", 1)]
+func by_name(e: Entry) -> string
+    return e.name
+end
+sort_by(ref entries, by_name)        // a, b, c
+let by_size = func(e: Entry) -> int
+    return e.size
+end
+sort_by(ref entries, by_size)        // c, a, b — a before b: stable
+```
 - `keys(map)`: Returns array of keys.
 - `has_key(map, key)`: Returns bool.
 - `delete(ref map, key)`
@@ -2660,7 +2694,8 @@ Noxy comes with a comprehensive standard library. Available modules include:
 | `strings` | String manipulation (upper, lower, replace, split) |
 | `math` | Floating-point math: roots, powers, rounding, trigonometry, `min`/`max`/`clamp`, `PI`/`E` |
 | `time` | Time and Date functions |
-| `sys` | System interactions (argv, exit, env) |
+| `sys` | System interactions (argv, exit, env, shell commands, user directories) |
+| `process` | Child processes: start, read output without blocking, poll/wait, terminate/kill the whole tree |
 | `net` | Network sockets (TCP/UDP) |
 | `http` | HTTP Client and Server |
 | `json` | JSON parsing and stringification |
@@ -2783,10 +2818,30 @@ io.write_bytes(f, rec)                                   // sobrescreve no lugar
 io.close(f)
 ```
 
+### Time (`time`)
+
+`time.now() -> int` is the Unix timestamp in **seconds**; `time.now_ms() ->
+int` is milliseconds — the one to use for measuring durations or grouping
+events. Both are typed, so `let t = time.now()` infers `int`. The raw natives
+behind them (`time_now()`, `time_now_ms()`) are not part of the language
+surface: like every `<module>_name` native they carry no static type, and a
+`let` initialized from one needs an annotation.
+
+| Function | Description |
+|----------|-------------|
+| `now() -> int`, `now_ms() -> int` | Unix time in seconds / milliseconds |
+| `now_datetime() -> DateTime` | Local calendar time (`year`, `month`, `day`, `hour`, `minute`, `second`, `weekday` 0=Sunday, `yearday`, `timestamp`) |
+| `sleep(ms)` | Pauses the calling routine |
+| `from_timestamp(ts) -> DateTime`, `to_timestamp(dt) -> int`, `make_datetime(y, m, d, h, mi, s) -> DateTime` | Conversions |
+| `format(dt)`, `format_date(dt)`, `format_time(dt)`, `format_custom(dt, fmt)` | `"YYYY-MM-DD HH:MM:SS"`, date only, time only, `%Y %m %d %H %M %S` |
+| `parse(s) -> DateTime?`, `parse_date(s) -> DateTime?` | `null` when the string does not match (§7) |
+| `add_seconds(ts, n)`, `add_days(ts, n)`, `diff(a, b) -> int`, `diff_duration(a, b) -> Duration`, `before(a, b)`, `after(a, b)` | Timestamp arithmetic and comparison |
+| `is_leap_year(y)`, `days_in_month(y, m)`, `weekday_name(d)`, `month_name(m)` | Calendar helpers |
+
 ### System (`sys`)
 
 `sys.version` is the version of the Noxy running the program — the same
-string `noxy --version` prints (`v0.25.1`). It is a module binding, not a
+string `noxy --version` prints (`v0.26.0`). It is a module binding, not a
 call: `use sys` then `print(sys.version)`, or `use sys select version`, which
 brings it in typed as `string`.
 
@@ -2796,6 +2851,119 @@ already inside a `cmd` invocation — do not nest another `cmd /c ...`. The
 captured output (stdout and stderr combined) is handed back as a Noxy `string`,
 so it must be valid UTF-8: binary or non-UTF-8 output yields `ok=false` with
 the UTF-8 error in `error`, even when the process exited with code 0.
+
+The output comes back **as is** — leading and trailing spaces and newlines
+included, so positional output such as `git status --porcelain` (`" M a.nx"`)
+keeps its first column; `strings.trim` it when a trimmed value is wanted. On
+Windows the line is run as `cmd /S /C "<command>"`, so double quotes inside
+the command reach the program unchanged: `echo "a b"` prints `"a b"` and
+`git -C "D:\pasta com espaço" status` receives one path.
+
+`sys.exec_output_bytes(command) -> SysBytesResult` is the raw variant: the
+same `exit_code`/`ok`, `output` as `bytes` with no UTF-8 requirement — for
+console output in a non-UTF-8 code page (`tasklist` on a Portuguese Windows
+writes cp850) or binary output. `sys.exec(command)` streams the output to the
+program's own stdout/stderr instead of capturing it.
+
+`sys.temp_dir() -> string` (never fails), `sys.home_dir()`, `sys.cache_dir()`
+and `sys.config_dir() -> PathResult` (`value`, `ok`, `error` — the shape of
+`EnvResult`) are the platform directories as Go resolves them: `TEMP`/`TMP`
+or `/tmp`; `USERPROFILE` or `HOME`; `LOCALAPPDATA`, `XDG_CACHE_HOME`/`~/.cache`
+or `~/Library/Caches`; `APPDATA`, `XDG_CONFIG_HOME`/`~/.config` or
+`~/Library/Application Support`. A missing base variable is `ok=false` with
+the reason in `error`. A program creates its own subdirectory inside the
+cache and config roots.
+
+```noxy
+use sys
+
+let cache: sys.PathResult = sys.cache_dir()
+if cache.ok then
+    io.mkdir(cache.value + "/my-app")
+end
+let r: sys.SysResult = sys.exec_output("git status --porcelain")
+if r.ok && r.output != "" then
+    print("dirty: " + r.output)      // first line still starts with its column
+end
+```
+
+### Processes (`process`)
+
+`sys.exec` and `sys.exec_output` block until the command ends. `process`
+is for a program that has to keep running while another one runs — an
+editor executing the open file, a test runner, a supervisor — and that
+has to be able to stop it.
+
+| Function | Description |
+|----------|-------------|
+| `start(cmd: string) -> Process` | Runs `cmd` through the platform shell (`sh -c`, `cmd /S /C`), stdout and stderr captured into **one** stream, stdin the null device. `ok=false` with `error` when it could not start |
+| `read(p) -> bytes` | Everything that arrived since the last read, `b""` if nothing. **Never blocks** |
+| `poll(p) -> ProcessStatus` | `running` and `exit_code`, never blocks |
+| `wait(p) -> int` | Blocks until the leader exits; the exit code |
+| `wait_for(p, timeout_ms) -> ProcessStatus` | Blocks until the exit or the deadline; `running=true` means the deadline passed |
+| `terminate(p) -> bool` | Asks the whole tree to stop: `SIGTERM` to the process group (Unix); terminates the job (Windows). `false` when there is nothing left to signal: the leader has exited **and** the output stream has ended |
+| `kill(p) -> bool` | Forces: `SIGKILL` to the group (Unix); terminates the job (Windows) |
+| `close(p)` | Kills whatever is still running and releases the handle. Idempotent |
+
+`Process` is `{handle: int, pid: int, ok: bool, error: string}`;
+`ProcessStatus` is `{running: bool, exit_code: int}` — `exit_code` is −1
+while running or when the leader was killed by a signal (Unix), 1 when the
+job was terminated (Windows).
+
+The output is raw `bytes` (like `io.read_bytes`): a program may write in
+any encoding. Before the stream ends, a chunk **never ends in the middle
+of a UTF-8 sequence** — up to three bytes of an incomplete sequence are
+held for the next read — so for a UTF-8 producer `to_str(process.read(p))`
+is always valid. Once `poll`, `wait` or `wait_for` report the exit,
+everything the leader wrote before exiting is readable — exactly when the
+stream has reached its end, and after a one-time grace of 100 ms when a
+grandchild still holds the pipe (the first status call after the exit
+pays it; later calls never block).
+
+The end of the output stream and the end of the leader are different
+events: a grandchild that inherited the pipe (`sh -c 'server &'`) keeps
+it open after the shell exits. `poll`/`wait` look at the leader;
+`terminate`/`kill` still reach the group while the pipe is open, so a
+`server &` can be stopped gracefully after its shell is gone. The handle
+is the owner of the tree: `close` kills what is still running, and when
+the Noxy process exits — normally, by `sys.exit`, by a runtime error, or
+by Ctrl+C/`SIGTERM` (the CLI installs a handler that kills the registered
+processes, closes the extensions and exits with 128+signal, unless the
+program took the signals over with `sys.signal_notify`) — every process
+still registered is killed too. The children run in their own process
+group, so the terminal's Ctrl+C does not reach them directly; it reaches
+`noxy`, which kills them. A hard death of `noxy` (SIGKILL, a Go crash) is
+best effort: Linux kills the leader (`PDEATHSIG`), Windows closes the job;
+grandchildren on Unix may survive. A daemon meant to outlive the program
+is `sys.exec("... &")`, not `process.start`.
+
+`read`, `poll`, `wait`, `wait_for`, `terminate` and `kill` on a closed
+handle (or on a `Process` with `ok=false`) are a **runtime error**
+(`process: handle N is not an open process`); `wait_for` with a negative
+timeout is one too. `close` on a closed handle does nothing.
+
+```noxy
+use process
+use sys
+
+let p: process.Process = process.start("go run main.go")
+let out: bytes = b""
+while process.poll(p).running do
+    out = out + process.read(p)      // whatever arrived, without blocking
+    sys.sleep(50)
+end
+out = out + process.read(p)          // the rest, after the exit
+print(to_str(out))
+
+let server: process.Process = process.start("python3 -m http.server 8000")
+sys.sleep(2000)
+process.terminate(server)            // SIGTERM to the whole group
+let status: process.ProcessStatus = process.wait_for(server, 5000)
+if status.running then
+    process.kill(server)
+end
+process.close(server)
+```
 
 ### JSON
 

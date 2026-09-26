@@ -319,13 +319,15 @@ end
 
 func serve(server: ref HttpServer, handler: func) -> void
     if !bind_server(server) then
-        print("Failed to bind to " + server.host + ":" + to_str(server.port))
+        eprint("Failed to bind to " + server.host + ":" + to_str(server.port))
         return
     end
 
     let limits: HttpLimits = server_limits(server)
 
-    print("Server listening on " + server.host + ":" + to_str(server.port))
+    // Diagnostico, nao saida do programa: vai para stderr (regra de saida do
+    // AGENTS.md; achado 5 do Noxy-Editor, cujo stdout e o do editor).
+    eprint("Server listening on " + server.host + ":" + to_str(server.port))
 
     // Accept Loop. Deliberately does not re-check server.running: struct
     // fields are not synchronized between threads the way globals and maps

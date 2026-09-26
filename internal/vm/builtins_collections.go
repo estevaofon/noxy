@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"sort"
 	"unicode/utf8"
 
 	"github.com/estevaofon/noxy/internal/value"
@@ -232,6 +233,99 @@ func (vm *VM) defineCollectionBuiltins() {
 		}
 		return removeArrayElement(context, "swap_remove", args, true)
 	})
+	// Achado 3 do Noxy-Editor: ordenacao no lugar, pelo mesmo CoW de append
+	// (unicizeThroughRefValue). sort so reordena os elementos — nenhum dono
+	// muda, entao nao ha retain/release aqui.
+	sortSignature := value.NativeSignature{
+		Arity: 1,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+		},
+		ReturnType: "void",
+	}
+	vm.DefineContextualNativeWithSignature("sort", sortSignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
+		}
+		if len(args) != 1 {
+			return value.NewNull(), fmt.Errorf("sort: expects exactly 1 argument, got %d", len(args))
+		}
+		arr, err := machine.arrayForInPlaceSort("sort", args[0])
+		if err != nil {
+			return value.NewNull(), err
+		}
+		kind, err := orderableKind(arr.Elements, "sort: elements must all be int, float or string")
+		if err != nil {
+			return value.NewNull(), err
+		}
+		sort.SliceStable(arr.Elements, func(i, j int) bool {
+			return orderableLess(arr.Elements[i], arr.Elements[j], kind)
+		})
+		return value.NewNull(), nil
+	})
+	// sort_by(ref xs, key): a chave de cada elemento e obtida ANTES de
+	// ordenar (n chamadas pela fronteira de call_result, nunca uma por
+	// comparacao), entao um erro na funcao de chave sai como runtime error
+	// comum e o array nao fica meio ordenado. Estavel por indice.
+	sortBySignature := value.NativeSignature{
+		Arity: 2,
+		Params: []value.ParamInfo{
+			{IsRef: true, TypeName: "ref array"},
+			{IsRef: false, TypeName: "func"},
+		},
+		ReturnType: "void",
+	}
+	vm.DefineContextualNativeWithSignature("sort_by", sortBySignature, func(context value.NativeContext, args []value.Value) (value.Value, error) {
+		machine, contextErr := nativeVM(context)
+		if contextErr != nil {
+			return value.NewNull(), contextErr
+		}
+		if len(args) != 2 {
+			return value.NewNull(), fmt.Errorf("sort_by: expects exactly 2 arguments, got %d", len(args))
+		}
+		arr, err := machine.arrayForInPlaceSort("sort_by", args[0])
+		if err != nil {
+			return value.NewNull(), err
+		}
+		key := args[1]
+		elements := arr.Elements
+		count := len(elements)
+		keys := make([]value.Value, count)
+		for i := 0; i < count; i++ {
+			prepared, err := machine.prepareBoundaryCall(key, []value.Value{elements[i]})
+			if err != nil {
+				return value.NewNull(), fmt.Errorf("sort_by: key function: %w", err)
+			}
+			result, err := machine.invokeBoundaryCall(prepared)
+			if err != nil {
+				return value.NewNull(), err
+			}
+			keys[i] = result
+		}
+		kind, err := orderableKind(keys, "sort_by: key function must return int, float or string")
+		if err != nil {
+			return value.NewNull(), err
+		}
+		// A funcao de chave pode ter alcancado o array por um ref
+		// capturado: um append la dentro deixaria `elements` defasado.
+		if len(arr.Elements) != count {
+			return value.NewNull(), fmt.Errorf("sort_by: the key function modified the array being sorted")
+		}
+		order := make([]int, count)
+		for i := range order {
+			order[i] = i
+		}
+		sort.SliceStable(order, func(a, b int) bool {
+			return orderableLess(keys[order[a]], keys[order[b]], kind)
+		})
+		sorted := make([]value.Value, count)
+		for position, index := range order {
+			sorted[position] = elements[index]
+		}
+		arr.Elements = sorted
+		return value.NewNull(), nil
+	})
 	vm.DefineContextualNative("slice", func(_ value.NativeContext, args []value.Value) (value.Value, error) {
 		if err := rejectRefArgs("slice", args); err != nil {
 			return value.NewNull(), err
@@ -416,4 +510,60 @@ func removeArrayElement(context value.NativeContext, name string, args []value.V
 	arr.Elements = arr.Elements[:last]
 	value.Release(removed) // RC: o array solta a posse duravel do elemento removido; o chamador recebe o valor
 	return removed, nil
+}
+
+// arrayForInPlaceSort resolve o `ref xs` de sort/sort_by ate o array com
+// posse exclusiva (CoW), como append faz.
+func (vm *VM) arrayForInPlaceSort(name string, refArg value.Value) (*value.ObjArray, error) {
+	arrVal, err := vm.unicizeThroughRefValue(refArg)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	arr, ok := arrVal.Obj.(*value.ObjArray)
+	if arrVal.Type != value.VAL_OBJ || !ok {
+		return nil, fmt.Errorf("%s: expected an array, got %s", name, runtimeTypeName(arrVal))
+	}
+	return arr, nil
+}
+
+// orderableKind confere que todos os valores tem o MESMO tipo com ordem
+// natural (int, float ou string) e devolve qual; "" para a lista vazia.
+// int e float nao se misturam: a mesma regra de `<`.
+func orderableKind(values []value.Value, what string) (string, error) {
+	kind := ""
+	for index, v := range values {
+		current := ""
+		switch v.Type {
+		case value.VAL_INT:
+			current = "int"
+		case value.VAL_FLOAT:
+			current = "float"
+		case value.VAL_OBJ:
+			if _, isString := v.Obj.(string); isString {
+				current = "string"
+			}
+		}
+		if current == "" {
+			return "", fmt.Errorf("%s, got %s at index %d", what, runtimeTypeName(v), index)
+		}
+		if kind == "" {
+			kind = current
+		} else if kind != current {
+			return "", fmt.Errorf("%s of one type, got %s and %s", what, kind, current)
+		}
+	}
+	return kind, nil
+}
+
+func orderableLess(a, b value.Value, kind string) bool {
+	switch kind {
+	case "int":
+		return a.Int() < b.Int()
+	case "float":
+		return a.Float() < b.Float()
+	default:
+		left, _ := a.Obj.(string)
+		right, _ := b.Obj.(string)
+		return left < right
+	}
 }
