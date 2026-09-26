@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/estevaofon/noxy/internal/ast"
 	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/estevaofon/noxy/internal/modsrc"
 	"github.com/estevaofon/noxy/internal/pkgmanager"
 	"github.com/estevaofon/noxy/internal/value"
 	"path/filepath"
@@ -62,17 +63,21 @@ type scopedStructBinding struct {
 }
 
 type Compiler struct {
-	enclosing           *Compiler
-	currentChunk        *chunk.Chunk
-	locals              []Local
-	globals             map[string]ast.NoxyType
-	upvalues            []Upvalue
-	scopeDepth          int
-	loops               []*Loop
-	currentLine         int
-	FileName            string
-	moduleRoot          string
-	projectRoot         string       // raiz do projeto (noxy.mod mais proximo de moduleRoot); "" = script solto
+	enclosing    *Compiler
+	currentChunk *chunk.Chunk
+	locals       []Local
+	globals      map[string]ast.NoxyType
+	upvalues     []Upvalue
+	scopeDepth   int
+	loops        []*Loop
+	currentLine  int
+	FileName     string
+	moduleRoot   string
+	projectRoot  string // raiz do projeto (noxy.mod mais proximo de moduleRoot); "" = script solto
+	// moduleSource: a UNICA origem de modulos (spec 2026-09-26 §7) —
+	// descoberta de exports/tipos passa por ela, nunca por os.*. Herdada por
+	// NewChild, newPass1Compiler e pelo validador de modulo.
+	moduleSource        modsrc.Source
 	funcReturnType      ast.NoxyType // Expected return type for current function context
 	currentFunctionName string
 	structs             map[string]*ast.StructStatement
@@ -204,6 +209,7 @@ func NewWithStateAndRoot(globals map[string]ast.NoxyType, structs map[string]*as
 		FileName:     fileName,
 		moduleRoot:   moduleRoot,
 		projectRoot:  projectRoot,
+		moduleSource: modsrc.NewDisk(moduleRoot, projectRoot),
 		moduleName:   "main",
 		warnings:     &[]Warning{},
 	}
@@ -249,6 +255,7 @@ func NewChild(parent *Compiler) *Compiler {
 		currentLine:      parent.currentLine,
 		FileName:         parent.FileName,
 		moduleRoot:       parent.moduleRoot,
+		moduleSource:     parent.moduleSource,
 		programBindings:  parent.programBindings,
 		moduleDiscovery:  parent.discoveryState(),
 		generics:         parent.generics,
@@ -265,6 +272,16 @@ func NewChild(parent *Compiler) *Compiler {
 
 func (c *Compiler) GetGlobals() map[string]ast.NoxyType {
 	return c.globals
+}
+
+// SetModuleSource troca a origem de modulos deste compilador (a VM passa a
+// sua; o `noxy build` e o modo aplicacao passam a deles). nil restaura o
+// disco relativo a moduleRoot.
+func (c *Compiler) SetModuleSource(src modsrc.Source) {
+	if src == nil {
+		src = modsrc.NewDisk(c.moduleRoot, c.projectRoot)
+	}
+	c.moduleSource = src
 }
 
 // SetSessionLets arma a checagem de redeclaracao entre linhas de uma sessao
