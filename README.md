@@ -235,6 +235,20 @@ VM/CLI reports — parser, compiler and runtime errors, hints, "Error reading
 file" — goes to **stderr**. A failing run (including a missing script file)
 exits with code `1`.
 
+## Standalone executables
+
+`noxy build` packs a program, its modules, its `noxy_libs` packages, this
+platform's plugin binaries and the assets listed by `include` in `noxy.mod`
+(or `--include`) into one executable that runs without `noxy` installed:
+
+```bash
+noxy build editor.nx -o dist/noxy-editor
+dist/noxy-editor some-folder
+```
+
+Linux and Windows; macOS experimental. Details, cache layout and the
+`NOXY_INTERPRETER` escape hatch: [docs/BUILD.md](docs/BUILD.md).
+
 ## Interactive REPL
 
 Noxy includes a powerful REPL (Read-Eval-Print Loop) for interactive coding. Just run `noxy` without arguments.

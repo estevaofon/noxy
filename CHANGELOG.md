@@ -77,6 +77,28 @@ achado 1 é o módulo `process`, desenhado em
 - Spec §12: subseção **Time (`time`)** (antes o módulo não estava
   documentado) — `time.now()` em segundos, `time.now_ms()` em milissegundos,
   tabela da API.
+- **`noxy build`** (spec `docs/superpowers/specs/2026-09-26-noxy-build-design.md`,
+  `docs/BUILD.md`): `noxy build entry.nx [-o saída] [--include p]... [--list]`
+  gera um executável autocontido — o próprio `noxy` + payload zip (entry,
+  módulos alcançáveis por `use`, packages de `noxy_libs`, `noxy_ext.toml` e
+  o binário **desta** plataforma de cada extensão, `noxy.mod`/`noxy.sum`,
+  assets) + trailer `NOXYAPP1`. Cada módulo é **compilado no build** (sem
+  executar): erro de tipo sai como `src/x.nx: [line N] ...` no build, não
+  no executável. No primeiro start o app extrai o payload para
+  `<cache do usuário>/noxy/apps/<sha256>` (hash conferido só na extração;
+  depois vale o marcador `.noxy-app-ok`), roda com
+  `argv = [exe, <appdir>/entry, args...]`, cwd inalterado e resolução de
+  módulos selada (`NOXY_PATH` e cwd ignorados). `--list` imprime módulos,
+  extensões com plataforma e includes sem gerar nada. `NOXY_INTERPRETER=1`
+  faz o app virar o `noxy` comum (herdada pelos filhos — é como o F5 do
+  editor roda arquivos); `NOXY_APP_CACHE` troca o cache. Linux e Windows;
+  macOS experimental (o build avisa). O fonte embutido é legível com
+  `unzip`. Pacotes `internal/bundle` (formato), `internal/build` (plano e
+  escrita).
+- **`include <caminho>` no `noxy.mod`**: assets que `noxy build` embute,
+  relativos ao diretório do `noxy.mod`; `--get` preserva a linha.
+- **`sys.executable() -> string`**: caminho do binário que roda o programa
+  (o `noxy` ou o app gerado por `noxy build`); `""` em falha.
 
 ### Changed (BREAKING)
 - **`sys.exec_output` devolve a saída intacta** (achado 9). Antes aplicava
@@ -118,6 +140,12 @@ achado 1 é o módulo `process`, desenhado em
   tem o hash verificado no `use` (spec de design §4.1); só o **start** do
   processo é adiado para a primeira chamada. Decisão mantida: a verificação
   de integridade acontece antes de o programa rodar qualquer coisa.
+- **Resolução de módulos unificada** em `internal/modsrc.Source`
+  (`DiskSource`): compilador e VM resolvem `use` pela mesma interface e
+  pela mesma lista de candidatos (antes, duas cópias com `os.*` próprio).
+  Sem mudança de comportamento para scripts.
+- `noxy build` é subcomando: um arquivo chamado literalmente `build` (sem
+  `.nx`) precisa de `noxy ./build`.
 
 ### Deprecated
 - `sys_load_plugin`: a remoção (com `internal/plugin` e
