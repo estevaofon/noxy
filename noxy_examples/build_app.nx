@@ -1,0 +1,45 @@
+// noxy_examples/build_app.nx — exemplo do `noxy build` (docs/BUILD.md): um
+// package de noxy_libs (math_lib), um asset achado por dirname(argv[1]) e os
+// argumentos da linha de comando. Roda igual como script e como executavel:
+//     noxy noxy_examples/build_app.nx um dois
+//     noxy build noxy_examples/build_app.nx --include noxy_examples/build_app_assets -o dist/build_app
+//     dist/build_app um dois
+use sys
+use io
+use math_lib
+use strings select substring, trim
+
+// dirname: o diretorio de p, com "/" ou "\" como separador; "." sem separador.
+func dirname(p: string) -> string
+    let i: int = length(p) - 1
+    while i >= 0 do
+        let ch: string = substring(p, i, i + 1)
+        if ch == "/" || ch == "\\" then
+            return substring(p, 0, i)
+        end
+        i = i - 1
+    end
+    return "."
+end
+
+let args: string[] = sys.argv()
+let here: string = dirname(args[1])
+let f: io.File = io.open(here + "/build_app_assets/greeting.txt", "r")
+let r: io.IOResult = io.read(f)
+io.close(f)
+if !r.ok then
+    eprint("asset missing: " + r.error)
+    sys.exit(1)
+end
+print(trim(r.data))
+print("10 + 20 = " + to_str(math_lib.add(10, 20)))
+let rest: string = ""
+let i: int = 2
+while i < length(args) do
+    if rest != "" then
+        rest = rest + " "
+    end
+    rest = rest + args[i]
+    i = i + 1
+end
+print("args: " + rest)
