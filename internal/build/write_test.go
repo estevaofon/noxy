@@ -59,8 +59,10 @@ func TestWriteCreatesOutputDirectoryAndIsDeterministic(t *testing.T) {
 	if err != nil || p == nil {
 		t.Fatalf("open: %v %v", p, err)
 	}
-	defer p.Close()
 	dir, m, err := bundle.Extract(p, t.TempDir())
+	// Fecha antes do segundo Write: no Windows o rename por cima de um
+	// arquivo aberto falha com "Access is denied".
+	p.Close()
 	if err != nil || m.Entry != "main.nx" || m.Includes[0] != "web" {
 		t.Fatalf("extract: %v %+v", err, m)
 	}
