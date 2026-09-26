@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/estevaofon/noxy/internal/modsrc"
 	"github.com/estevaofon/noxy/internal/stdlib"
 	"github.com/estevaofon/noxy/internal/value"
 )
@@ -1364,10 +1365,12 @@ func TestNetTimeoutWrapper(t *testing.T) {
 		t.Fatal(err)
 	}
 	module, err := machine.loadResolvedModule(resolvedModule{
-		Key:     moduleKey{Root: "embedded", Name: "net"},
-		Name:    "net",
-		Kind:    resolvedEmbeddedModule,
-		Content: string(content),
+		Key: moduleKey{Root: "embedded", Name: "net"},
+		Module: modsrc.Module{
+			Name:    "net",
+			Kind:    modsrc.KindEmbedded,
+			Content: string(content),
+		},
 	})
 	if err != nil {
 		t.Fatalf("load embedded net module: %v", err)

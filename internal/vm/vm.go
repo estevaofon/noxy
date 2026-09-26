@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/estevaofon/noxy/internal/chunk"
 	"github.com/estevaofon/noxy/internal/ext"
+	"github.com/estevaofon/noxy/internal/modsrc"
 	"github.com/estevaofon/noxy/internal/pkgmanager"
 	"github.com/estevaofon/noxy/internal/value"
 	"os"
@@ -150,6 +151,9 @@ func nativeVM(context value.NativeContext) (*VM, error) {
 type VMConfig struct {
 	RootPath    string
 	ProjectRoot string // raiz do projeto (noxy.mod mais proximo de RootPath); "" = script solto
+	// Source e a origem de modulos (spec 2026-09-26 §7). nil = disco a
+	// partir de RootPath/ProjectRoot; o modo aplicacao passa uma selada.
+	Source modsrc.Source
 }
 
 func New() *VM {
@@ -165,6 +169,9 @@ func NewWithShared(shared *SharedState, cfg VMConfig) *VM {
 		if root, ok := pkgmanager.FindRoot(cfg.RootPath); ok {
 			cfg.ProjectRoot = root
 		}
+	}
+	if cfg.Source == nil {
+		cfg.Source = modsrc.NewDisk(cfg.RootPath, cfg.ProjectRoot)
 	}
 	shared.initializeState()
 	vm := &VM{

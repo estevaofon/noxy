@@ -36,7 +36,7 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 		return nil
 	}
 
-	manifestData, err := os.ReadFile(filepath.Join(dir, "noxy_ext.toml"))
+	manifestData, err := vm.Config.Source.ReadFile(filepath.Join(dir, "noxy_ext.toml"))
 	if err != nil {
 		return fmt.Errorf("extension manifest: %w", err)
 	}
@@ -93,7 +93,7 @@ func (vm *VM) ensureExtensionLoaded(dir string) error {
 // loadWasmBackend e o caminho do M1: le o .wasm, verifica o hash, carrega
 // no wazero.
 func (vm *VM) loadWasmBackend(dir string, manifest *ext.Manifest, manifestData []byte) (ext.Backend, error) {
-	wasmBytes, err := os.ReadFile(filepath.Join(dir, manifest.Wasm))
+	wasmBytes, err := vm.Config.Source.ReadFile(filepath.Join(dir, manifest.Wasm))
 	if err != nil {
 		return nil, fmt.Errorf("extension %q: %w", manifest.Name, err)
 	}
