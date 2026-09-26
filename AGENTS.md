@@ -22,7 +22,8 @@ Source → Lexer → Parser → AST → Compiler → Bytecode (Chunk) → VM
 | `internal/value` | `Value` (32 B), objetos, RC/CoW (`cow.go`), natives |
 | `internal/vm` | `run()` em `executor.go`; pilhas em `stack.go`/`calls.go`/`unwind.go`; `builtins_*.go`; `modules.go`; `cow.go`; `resources.go`; `extensions.go` |
 | `internal/stdlib` | Módulos `.nx` embutidos (`//go:embed *.nx`, sem registro) |
-| `cmd/noxy` | CLI, REPL (`runREPL`), `diagOut` (destino único dos diagnósticos da CLI) |
+| `internal/modsrc, internal/bundle, internal/build` | Origem única de módulos (Source/DiskSource, usada por compiler e vm); formato do executável autocontido (trailer NOXYAPP1, zip, extração); pipeline do noxy build |
+| `cmd/noxy` | CLI, REPL (`runREPL`), `diagOut` (destino único dos diagnósticos da CLI), `noxy build` (`build.go`) e modo aplicação (`appmode.go`) |
 | `internal/ext`, `sdk/noxyplugin` | Extensões wasm e por processo (`noxy-plugin/1`); o SDK é módulo Go aninhado, testado à parte (`go test ./...` dentro dele) |
 | `internal/pkgmanager` (`--get`/`--sync`, `noxy.sum` v2, `FindRoot`), `internal/lineedit`, `internal/console`, `internal/version`, `internal/plugin` (deprecado, sai na v0.27.0) | Periferia |
 
@@ -123,6 +124,13 @@ nos registries de `SharedState` (`resources.go`; `builtins_process.go` para
 `Processes`), referenciados por handle inteiro; remova do registry ao fechar.
 Processo filho (`process.start`) morre com o Noxy: `CloseProcesses` em
 `sys_exit` e nos `defer` da CLI/REPL, ao lado de `CloseExtensions`.
+
+**Módulos.** `use` resolve **só** por `modsrc.Source` (`internal/modsrc`):
+compilador (`SetModuleSource`) e VM (`VMConfig.Source`) recebem a mesma
+instância; nunca `os.Stat`/`os.ReadFile` para achar módulo. Em modo
+aplicação a Source é selada (`NewSealed`: sem `NOXY_PATH`, sem cwd).
+`noxy build` compila cada módulo com `vm.CompileModule` (nada executa); o
+formato do executável é `internal/bundle`, documentado em `docs/BUILD.md`.
 
 **Overflow de `int` não é checado** — dá a volta (spec §8). Não adicione.
 

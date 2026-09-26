@@ -1,7 +1,7 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
-build/
+/build/
 dist/
 wheels/
 *.egg-info
@@ -43,4 +43,4 @@ build_layer.sh
 
 # superpowers SDD scratch (ledger, briefs, review packages)
 .superpowers/
-noxy
+/noxy

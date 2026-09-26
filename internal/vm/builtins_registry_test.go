@@ -43,7 +43,7 @@ func TestBuiltinRegistrySnapshot(t *testing.T) {
 		"strings_replace_first", "strings_reverse", "strings_split",
 		"strings_starts_with", "strings_substring", "strings_to_lower",
 		"strings_to_upper", "strings_trim", "swap_remove", "sys_argv", "sys_exec",
-		"sys_exec_output", "sys_exec_output_bytes", "sys_exit", "sys_getcwd", "sys_getenv",
+		"sys_exec_output", "sys_exec_output_bytes", "sys_executable", "sys_exit", "sys_getcwd", "sys_getenv",
 		"sys_load_plugin", "sys_os", "sys_setenv", "sys_signal_notify", "sys_signal_stop", "sys_sleep",
 		"sys_temp_dir", "sys_user_dir", "sys_version", "task_await",
 		"time_add_days", "time_add_seconds", "time_after", "time_before",

@@ -4,112 +4,35 @@ import (
 	"errors"
 	"fmt"
 	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/estevaofon/noxy/internal/chunk"
 	"github.com/estevaofon/noxy/internal/compiler"
 	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/modsrc"
 	"github.com/estevaofon/noxy/internal/parser"
 	"github.com/estevaofon/noxy/internal/pkgmanager"
-	"github.com/estevaofon/noxy/internal/stdlib"
 	"github.com/estevaofon/noxy/internal/value"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-type resolvedModuleKind uint8
-
-const (
-	resolvedEmbeddedModule resolvedModuleKind = iota
-	resolvedFileModule
-	resolvedDirectoryModule
-)
-
 type resolvedModule struct {
-	Key     moduleKey
-	Name    string
-	Kind    resolvedModuleKind
-	Path    string
-	Content string
+	Key    moduleKey
+	Module modsrc.Module
 }
 
+// resolveModule: Source.Resolve + chave do cache; "module not found" ganha
+// a dica de --sync como sempre.
 func (vm *VM) resolveModule(name string) (resolvedModule, error) {
-	root, err := filepath.Abs(vm.Config.RootPath)
-	if err != nil {
-		return resolvedModule{}, fmt.Errorf("resolve module root: %w", err)
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return resolvedModule{}, fmt.Errorf("resolve module root: %w", err)
-		}
-		root = filepath.Clean(root)
-	}
 	canonicalName := strings.TrimSpace(name)
-	key := moduleKey{Root: root + "\x00" + os.Getenv("NOXY_PATH"), Name: canonicalName}
-	pathName := strings.ReplaceAll(canonicalName, ".", string(filepath.Separator))
-
-	checkLocations := func(suffix string) (string, bool, bool) {
-		candidates := make([]string, 0, 16)
-		if noxyPath := os.Getenv("NOXY_PATH"); noxyPath != "" {
-			for _, searchRoot := range filepath.SplitList(noxyPath) {
-				candidates = append(candidates,
-					filepath.Join(searchRoot, suffix, suffix+".nx"),
-					filepath.Join(searchRoot, suffix),
-					filepath.Join(searchRoot, suffix+".nx"),
-				)
-			}
+	m, err := vm.Config.Source.Resolve(canonicalName)
+	if err != nil {
+		if errors.Is(err, modsrc.ErrNotFound) {
+			return resolvedModule{}, fmt.Errorf("module not found: %s%s", canonicalName, pkgmanager.SyncHint(vm.Config.ProjectRoot, canonicalName))
 		}
-		if project := vm.Config.ProjectRoot; project != "" {
-			candidates = append(candidates,
-				filepath.Join(project, "noxy_libs", suffix, suffix+".nx"),
-				filepath.Join(project, "noxy_libs", suffix),
-			)
-		}
-		candidates = append(candidates,
-			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix, suffix+".nx"),
-			filepath.Join(vm.Config.RootPath, "noxy_libs", suffix),
-			filepath.Join(vm.Config.RootPath, "stdlib", suffix),
-			filepath.Join(vm.Config.RootPath, suffix),
-			filepath.Join("noxy_libs", suffix, suffix+".nx"),
-			filepath.Join("noxy_libs", suffix),
-			filepath.Join("stdlib", suffix),
-			suffix,
-		)
-		for _, candidate := range candidates {
-			info, statErr := os.Stat(candidate)
-			if statErr == nil {
-				absolute, absErr := filepath.Abs(candidate)
-				if absErr != nil {
-					return "", false, false
-				}
-				return filepath.Clean(absolute), info.IsDir(), true
-			}
-		}
-		return "", false, false
+		return resolvedModule{}, err
 	}
-
-	path, isDir, found := checkLocations(pathName + ".nx")
-	if !found || isDir {
-		path, isDir, found = checkLocations(pathName)
-	}
-	if found {
-		if isDir {
-			baseName := filepath.Base(path)
-			for _, candidate := range []string{baseName + ".nx", "main.nx"} {
-				entryPath := filepath.Join(path, candidate)
-				if info, statErr := os.Stat(entryPath); statErr == nil && !info.IsDir() {
-					return resolvedModule{Key: key, Name: canonicalName, Kind: resolvedFileModule, Path: entryPath}, nil
-				}
-			}
-			return resolvedModule{Key: key, Name: canonicalName, Kind: resolvedDirectoryModule, Path: path}, nil
-		}
-		return resolvedModule{Key: key, Name: canonicalName, Kind: resolvedFileModule, Path: path}, nil
-	}
-
-	content, readErr := stdlib.FS.ReadFile(pathName + ".nx")
-	if readErr != nil {
-		return resolvedModule{}, fmt.Errorf("module not found: %s%s", canonicalName, pkgmanager.SyncHint(vm.Config.ProjectRoot, canonicalName))
-	}
-	return resolvedModule{Key: key, Name: canonicalName, Kind: resolvedEmbeddedModule, Content: string(content)}, nil
+	return resolvedModule{Key: moduleKey{Root: vm.Config.Source.Key(), Name: canonicalName}, Module: m}, nil
 }
 
 func (vm *VM) loadModule(name string) (value.Value, error) {
@@ -132,44 +55,60 @@ func (vm *VM) loadModule(name string) (value.Value, error) {
 }
 
 func (vm *VM) loadResolvedModule(source resolvedModule) (value.Value, error) {
-	switch source.Kind {
-	case resolvedDirectoryModule:
+	switch source.Module.Kind {
+	case modsrc.KindDirectory:
 		return vm.loadResolvedDirectory(source)
-	case resolvedEmbeddedModule:
-		return vm.compileAndRunModule(source, source.Content)
-	case resolvedFileModule:
-		// Deteccao de extensao: se o pacote do modulo tem noxy_ext.toml ao
-		// lado, carrega o WASM e registra os exports como natives ANTES de
-		// compilar o wrapper .nx (que referencia esses natives).
-		manifestPath := filepath.Join(filepath.Dir(source.Path), "noxy_ext.toml")
-		if _, statErr := os.Stat(manifestPath); statErr == nil {
-			if err := vm.ensureExtensionLoaded(filepath.Dir(source.Path)); err != nil {
-				return value.NewNull(), fmt.Errorf("failed to load extension for module %s: %w", source.Name, err)
-			}
-		}
-		content, err := os.ReadFile(source.Path)
+	case modsrc.KindEmbedded:
+		code, err := vm.compileModule(source.Module, source.Module.Content)
 		if err != nil {
 			return value.NewNull(), err
 		}
-		text := string(content)
-		if err := requireValidUTF8("module "+source.Path, text); err != nil {
+		return vm.runModule(source, code)
+	case modsrc.KindFile:
+		content, err := vm.prepareFileModule(source.Module)
+		if err != nil {
 			return value.NewNull(), err
 		}
-		return vm.compileAndRunModule(source, text)
+		code, err := vm.compileModule(source.Module, content)
+		if err != nil {
+			return value.NewNull(), err
+		}
+		return vm.runModule(source, code)
 	default:
-		return value.NewNull(), fmt.Errorf("unknown resolved module kind for %s", source.Name)
+		return value.NewNull(), fmt.Errorf("unknown resolved module kind for %s", source.Module.Name)
 	}
 }
 
+// prepareFileModule: se o pacote do modulo tem noxy_ext.toml ao lado,
+// carrega a extensao e registra os exports como natives ANTES de compilar o
+// wrapper .nx (que referencia esses natives); depois le e valida o fonte.
+func (vm *VM) prepareFileModule(m modsrc.Module) (string, error) {
+	dir := filepath.Dir(m.Path)
+	if _, err := vm.Config.Source.ReadFile(filepath.Join(dir, "noxy_ext.toml")); err == nil {
+		if err := vm.ensureExtensionLoaded(dir); err != nil {
+			return "", fmt.Errorf("failed to load extension for module %s: %w", m.Name, err)
+		}
+	}
+	content, err := vm.Config.Source.ReadFile(m.Path)
+	if err != nil {
+		return "", err
+	}
+	text := string(content)
+	if err := requireValidUTF8("module "+m.Path, text); err != nil {
+		return "", err
+	}
+	return text, nil
+}
+
 func (vm *VM) loadResolvedDirectory(source resolvedModule) (value.Value, error) {
-	files, err := os.ReadDir(source.Path)
+	entries, err := vm.Config.Source.ReadDir(source.Module.Path)
 	if err != nil {
 		return value.NewNull(), err
 	}
 	moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
-	for _, file := range files {
-		if file.IsDir() {
-			submoduleName := source.Name + "." + file.Name()
+	for _, entry := range entries {
+		if entry.IsDir {
+			submoduleName := source.Module.Name + "." + entry.Name
 			submodule, loadErr := vm.loadModule(submoduleName)
 			if loadErr != nil {
 				var cycleErr *moduleCycleError
@@ -178,14 +117,14 @@ func (vm *VM) loadResolvedDirectory(source resolvedModule) (value.Value, error) 
 				}
 				continue
 			}
-			moduleEnvironment.SetLocal(file.Name(), submodule)
+			moduleEnvironment.SetLocal(entry.Name, submodule)
 			continue
 		}
-		if !strings.HasSuffix(file.Name(), ".nx") {
+		if !strings.HasSuffix(entry.Name, ".nx") {
 			continue
 		}
-		baseName := strings.TrimSuffix(file.Name(), ".nx")
-		submoduleName := source.Name + "." + baseName
+		baseName := strings.TrimSuffix(entry.Name, ".nx")
+		submoduleName := source.Module.Name + "." + baseName
 		submodule, loadErr := vm.loadModule(submoduleName)
 		if loadErr != nil {
 			return value.NewNull(), fmt.Errorf("failed to load submodule %s: %w", submoduleName, loadErr)
@@ -195,21 +134,25 @@ func (vm *VM) loadResolvedDirectory(source resolvedModule) (value.Value, error) 
 	return moduleEnvironment.ExportMap(), nil
 }
 
-func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.Value, error) {
+// compileModule e a metade "compilar" da carga de um modulo: parse,
+// compilador com os nativos ja registrados (inclusive os da extensao
+// carregada em prepareFileModule) e a mesma Source da VM.
+func (vm *VM) compileModule(m modsrc.Module, content string) (*chunk.Chunk, error) {
 	l := lexer.New(content)
 	p := parser.New(l)
 	program := p.ParseProgram()
 	if len(p.Errors()) > 0 {
-		if source.Kind == resolvedEmbeddedModule {
-			return value.NewNull(), fmt.Errorf("parse error in embedded module %s: %v", source.Name, p.Errors())
+		if m.Kind == modsrc.KindEmbedded {
+			return nil, fmt.Errorf("parse error in embedded module %s: %v", m.Name, p.Errors())
 		}
-		return value.NewNull(), fmt.Errorf("parse error in module %s: %v", source.Name, p.Errors())
+		return nil, fmt.Errorf("parse error in module %s: %v", m.Name, p.Errors())
 	}
-	compilerPath := source.Path
-	if source.Kind == resolvedEmbeddedModule {
-		compilerPath = source.Name
+	compilerPath := m.Path
+	if m.Kind == modsrc.KindEmbedded {
+		compilerPath = m.Name
 	}
 	c := compiler.NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), compilerPath, vm.Config.RootPath)
+	c.SetModuleSource(vm.Config.Source)
 	// Issue #47 parte 3: o modulo enxerga os nativos ja registrados na raiz
 	// (inclusive os da extensao carregada logo acima) e os que o proprio
 	// modulo registra via sys_load_plugin.
@@ -220,11 +163,14 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 	for _, warning := range c.Warnings() {
 		fmt.Fprintln(os.Stderr, warning)
 	}
-	if err != nil {
-		return value.NewNull(), err
-	}
+	return code, err
+}
+
+// runModule executa o chunk do modulo num ambiente proprio e devolve o
+// ExportMap — a metade "executar", inalterada.
+func (vm *VM) runModule(source resolvedModule, code *chunk.Chunk) (value.Value, error) {
 	moduleEnvironment := value.NewGlobalEnvironment(vm.shared.Root)
-	modFn := &value.ObjFunction{Name: source.Name, Arity: 0, Chunk: code, Environment: moduleEnvironment}
+	modFn := &value.ObjFunction{Name: source.Module.Name, Arity: 0, Chunk: code, Environment: moduleEnvironment}
 	modClosure := &value.ObjClosure{Function: modFn, Upvalues: []*value.ObjUpvalue{}, Environment: moduleEnvironment}
 	callerFrameCount := vm.frameCount
 	vm.push(value.Value{Type: value.VAL_FUNCTION, Obj: modClosure})
@@ -239,4 +185,19 @@ func (vm *VM) compileAndRunModule(source resolvedModule, content string) (value.
 		vm.pop()
 	}
 	return moduleEnvironment.ExportMap(), nil
+}
+
+// CompileModule e a checagem de compilacao do `noxy build` (spec §6.3):
+// carrega a extensao ao lado do modulo (sem subir processo), compila com os
+// nativos conhecidos e descarta o chunk. Nada executa.
+func (vm *VM) CompileModule(m modsrc.Module) error {
+	content := m.Content
+	if m.Kind == modsrc.KindFile {
+		var err error
+		if content, err = vm.prepareFileModule(m); err != nil {
+			return err
+		}
+	}
+	_, err := vm.compileModule(m, content)
+	return err
 }

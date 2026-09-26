@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"github.com/estevaofon/noxy/internal/ast"
 	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/estevaofon/noxy/internal/modsrc"
 	"github.com/estevaofon/noxy/internal/parser"
 	"github.com/estevaofon/noxy/internal/pkgmanager"
-	"github.com/estevaofon/noxy/internal/stdlib"
 	"maps"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -797,99 +795,46 @@ func (c *Compiler) loadModuleDeclarations(module string, state *moduleDiscoveryS
 }
 
 // resolveModuleDeclarations e o corpo nao-memoizado de loadModuleDeclarations:
-// procura o arquivo/diretorio/embed do modulo e delega o parse+validacao.
+// resolve pelo moduleSource e delega o parse+validacao.
 func (c *Compiler) resolveModuleDeclarations(module string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
-	pathName := strings.ReplaceAll(module, ".", string(filepath.Separator))
-	for _, candidate := range c.moduleFileCandidates(pathName) {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			continue
-		}
-		if info.IsDir() {
-			base := filepath.Base(candidate)
-			for _, entry := range []string{base + ".nx", "main.nx"} {
-				entryPath := filepath.Join(candidate, entry)
-				if entryInfo, entryErr := os.Stat(entryPath); entryErr == nil && !entryInfo.IsDir() {
-					return c.parseModuleDeclarationsFile(entryPath, state)
-				}
-			}
-			entries, readErr := os.ReadDir(candidate)
-			if readErr != nil {
-				return nil, nil, false
-			}
-			names := make([]string, 0, len(entries))
-			for _, entry := range entries {
-				if entry.IsDir() {
-					_, _, loadable := c.loadModuleDeclarations(module+"."+entry.Name(), state)
-					if loadable {
-						names = append(names, entry.Name())
-					}
-				} else if strings.HasSuffix(entry.Name(), ".nx") {
-					name := strings.TrimSuffix(entry.Name(), ".nx")
-					_, _, loadable := c.loadModuleDeclarations(module+"."+name, state)
-					if !loadable {
-						return nil, nil, false
-					}
-					names = append(names, name)
-				}
-			}
-			return nil, names, true
-		}
-		return c.parseModuleDeclarationsFile(candidate, state)
-	}
-
-	embedPath := strings.ReplaceAll(module, ".", "/") + ".nx"
-	content, err := stdlib.FS.ReadFile(embedPath)
+	m, err := c.moduleSource.Resolve(module)
 	if err != nil {
 		return nil, nil, false
 	}
-	return c.parseModuleDeclarations(content, module, state)
-}
-
-func (c *Compiler) moduleFileCandidates(pathName string) []string {
-	root := c.moduleRoot
-	if root == "" {
-		root = "."
-	}
-
-	var searchRoots []string
-	if noxyPath := os.Getenv("NOXY_PATH"); noxyPath != "" {
-		searchRoots = append(searchRoots, filepath.SplitList(noxyPath)...)
-	}
-
-	var candidates []string
-	addSuffix := func(suffix string) {
-		for _, searchRoot := range searchRoots {
-			candidates = append(candidates,
-				filepath.Join(searchRoot, suffix, suffix+".nx"),
-				filepath.Join(searchRoot, suffix),
-				filepath.Join(searchRoot, suffix+".nx"),
-			)
+	switch m.Kind {
+	case modsrc.KindEmbedded:
+		return c.parseModuleDeclarations([]byte(m.Content), module, state)
+	case modsrc.KindFile:
+		return c.parseModuleDeclarationsFile(m.Path, state)
+	case modsrc.KindDirectory:
+		entries, err := c.moduleSource.ReadDir(m.Path)
+		if err != nil {
+			return nil, nil, false
 		}
-		if c.projectRoot != "" {
-			candidates = append(candidates,
-				filepath.Join(c.projectRoot, "noxy_libs", suffix, suffix+".nx"),
-				filepath.Join(c.projectRoot, "noxy_libs", suffix),
-			)
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir {
+				if _, _, loadable := c.loadModuleDeclarations(module+"."+entry.Name, state); loadable {
+					names = append(names, entry.Name)
+				}
+				continue
+			}
+			if !strings.HasSuffix(entry.Name, ".nx") {
+				continue
+			}
+			name := strings.TrimSuffix(entry.Name, ".nx")
+			if _, _, loadable := c.loadModuleDeclarations(module+"."+name, state); !loadable {
+				return nil, nil, false
+			}
+			names = append(names, name)
 		}
-		candidates = append(candidates,
-			filepath.Join(root, "noxy_libs", suffix, suffix+".nx"),
-			filepath.Join(root, "noxy_libs", suffix),
-			filepath.Join(root, "stdlib", suffix),
-			filepath.Join(root, suffix),
-			filepath.Join("noxy_libs", suffix, suffix+".nx"),
-			filepath.Join("noxy_libs", suffix),
-			filepath.Join("stdlib", suffix),
-			suffix,
-		)
+		return nil, names, true
 	}
-	addSuffix(pathName + ".nx")
-	addSuffix(pathName)
-	return candidates
+	return nil, nil, false
 }
 
 func (c *Compiler) parseModuleDeclarationsFile(path string, state *moduleDiscoveryState) (*ast.Program, []string, bool) {
-	content, err := os.ReadFile(path)
+	content, err := c.moduleSource.ReadFile(path)
 	if err != nil {
 		return nil, nil, false
 	}
@@ -931,6 +876,7 @@ func (c *Compiler) parseModuleDeclarations(content []byte, fileName string, stat
 	}
 	validator := NewWithStateAndRoot(make(map[string]ast.NoxyType), make(map[string]*ast.StructStatement), fileName, c.moduleRoot)
 	validator.moduleDiscovery = state
+	validator.moduleSource = c.moduleSource
 	if _, _, err := validator.Compile(program); err != nil {
 		return nil, nil, false
 	}
