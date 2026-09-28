@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 func normalizeReturnType(t ast.NoxyType) ast.NoxyType {

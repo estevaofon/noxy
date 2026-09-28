@@ -3,10 +3,10 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/compiler"
-	"github.com/estevaofon/noxy/internal/lexer"
-	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/compiler"
+	"github.com/noxylang/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/parser"
 )
 
 func compileVMSourceForBench(b *testing.B, source string) *chunk.Chunk {

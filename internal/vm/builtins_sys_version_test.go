@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
-	"github.com/estevaofon/noxy/internal/version"
+	"github.com/noxylang/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/version"
 )
 
 func TestSysVersionNativeReportsBuildVersion(t *testing.T) {

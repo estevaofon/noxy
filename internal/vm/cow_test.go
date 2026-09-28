@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // shareByOwners estabelece a precondição "compartilhado" pelo mecanismo de

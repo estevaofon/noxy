@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/estevaofon/noxy/internal/modsrc"
-	"github.com/estevaofon/noxy/internal/stdlib"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/modsrc"
+	"github.com/noxylang/noxy/internal/stdlib"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 type controlledDeadlineConn struct {

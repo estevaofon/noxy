@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/lexer"
-	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/parser"
 )
 
 // Issue #126 item 2: `m.f(...)` e `m.x` pelo namespace carregam o tipo

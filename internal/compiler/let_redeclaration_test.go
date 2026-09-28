@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 const redeclaredText = "redeclared in this scope"

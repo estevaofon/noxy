@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Chamada tipada in-module: caminho que a Task 3 acelera. O resultado não

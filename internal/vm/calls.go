@@ -1,8 +1,8 @@
 package vm
 
 import (
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func (vm *VM) callValue(callee value.Value, argCount int, c *chunk.Chunk, ip int) (bool, error) {

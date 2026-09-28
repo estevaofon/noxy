@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/lexer"
-	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/noxylang/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/parser"
 )
 
 // Issue #105 item 2: `try expr` propaga a falha de um Result<T>.

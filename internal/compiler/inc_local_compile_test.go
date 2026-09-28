@@ -3,7 +3,7 @@ package compiler
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/chunk"
 )
 
 // TestIncLocalIntFuses prova, por bytecode, que `i = i + 1` sobre um local int

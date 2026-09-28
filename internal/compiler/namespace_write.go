@@ -3,9 +3,9 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Issue #133 item 1: `m.x = v` pelo namespace. Precedente: Python, Go

@@ -1,6 +1,6 @@
 package compiler
 
-import "github.com/estevaofon/noxy/internal/ast"
+import "github.com/noxylang/noxy/internal/ast"
 
 // Tipo de retorno estatico dos builtins CENTRAIS (os que existem sem `use`:
 // registrados pela VM em defineNatives, sem wrapper tipado na stdlib). Ate a

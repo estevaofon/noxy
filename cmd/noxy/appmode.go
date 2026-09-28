@@ -8,9 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/estevaofon/noxy/internal/bundle"
-	"github.com/estevaofon/noxy/internal/modsrc"
-	"github.com/estevaofon/noxy/internal/vm"
+	"github.com/noxylang/noxy/internal/bundle"
+	"github.com/noxylang/noxy/internal/modsrc"
+	"github.com/noxylang/noxy/internal/vm"
 )
 
 // appModeExitCode roda o programa embutido e devolve (exit code, true).

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func setTestMap(mapping *value.ObjMap, key interface{}, item value.Value) {
@@ -356,10 +356,10 @@ func (loader *architectureImporter) Import(importPath string) (*types.Package, e
 	if loaded := loader.packages[importPath]; loaded != nil {
 		return loaded, nil
 	}
-	if strings.HasPrefix(importPath, "github.com/estevaofon/noxy/") && !loader.loading[importPath] {
+	if strings.HasPrefix(importPath, "github.com/noxylang/noxy/") && !loader.loading[importPath] {
 		loader.loading[importPath] = true
 		defer delete(loader.loading, importPath)
-		directory := filepath.Join(loader.moduleRoot, filepath.FromSlash(strings.TrimPrefix(importPath, "github.com/estevaofon/noxy/")))
+		directory := filepath.Join(loader.moduleRoot, filepath.FromSlash(strings.TrimPrefix(importPath, "github.com/noxylang/noxy/")))
 		sources, err := readArchitectureSources(directory)
 		if err == nil && len(sources) != 0 {
 			checked := checkArchitecturePackage(importPath, sources, loader, true)
@@ -661,7 +661,7 @@ func typeCheckProductionPackages(t *testing.T) []*architecturePackage {
 		if err != nil {
 			t.Fatal(err)
 		}
-		packagePath := "github.com/estevaofon/noxy"
+		packagePath := "github.com/noxylang/noxy"
 		if relativeDirectory != "." {
 			packagePath += "/" + filepath.ToSlash(relativeDirectory)
 		}
@@ -887,7 +887,7 @@ func runtimeNamedType(typ types.Type, checked *architecturePackage, name string)
 	if object == nil || object.Name() != name {
 		return false
 	}
-	return object.Pkg() == checked.pkg || object.Pkg() != nil && object.Pkg().Path() == "github.com/estevaofon/noxy/internal/value"
+	return object.Pkg() == checked.pkg || object.Pkg() != nil && object.Pkg().Path() == "github.com/noxylang/noxy/internal/value"
 }
 
 func (checked *architecturePackage) runtimeSelectorIsField(selector *ast.SelectorExpr, ownerType, fieldName string) bool {
@@ -1131,7 +1131,7 @@ func TestUnwindArchitectureCentralizesTerminalFrameTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checked := typeCheckArchitecturePackage(t, "github.com/estevaofon/noxy/internal/vm", sources)
+	checked := typeCheckArchitecturePackage(t, "github.com/noxylang/noxy/internal/vm", sources)
 	for _, match := range checked.unwindTerminalMutationMatches("unwind.go") {
 		t.Errorf("terminal frame teardown must remain in unwind.go: %s", match)
 	}
@@ -1233,7 +1233,7 @@ func TestUnwindArchitectureMatcherUsesExactSyntax(t *testing.T) {
 		{
 			name: "stack clearing loop",
 			source: `package vm
-				import "github.com/estevaofon/noxy/internal/value"
+				import "github.com/noxylang/noxy/internal/value"
 				type CallFrame struct { StackBase int }
 				type VM struct { stack []value.Value }
 				func teardown(vm *VM, frame *CallFrame, top int) {

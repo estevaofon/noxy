@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // print/iprint/eprint escrevem `Value.String()` de cada argumento unido por

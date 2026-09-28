@@ -10,7 +10,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // instantiateForTarget e o hook central do §3: quando name nomeia um template

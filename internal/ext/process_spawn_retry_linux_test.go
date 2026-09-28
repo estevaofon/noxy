@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // O caminho de repeticao de verdade: uma guarda que o kernel recusa antes

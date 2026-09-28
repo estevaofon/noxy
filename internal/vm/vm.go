@@ -3,11 +3,11 @@ package vm
 import (
 	"bufio"
 	"fmt"
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/ext"
-	"github.com/estevaofon/noxy/internal/modsrc"
-	"github.com/estevaofon/noxy/internal/pkgmanager"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/ext"
+	"github.com/noxylang/noxy/internal/modsrc"
+	"github.com/noxylang/noxy/internal/pkgmanager"
+	"github.com/noxylang/noxy/internal/value"
 	"os"
 	"sync"
 )

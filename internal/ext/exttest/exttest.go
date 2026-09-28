@@ -39,7 +39,7 @@ func isUnsupportedToolchainOutput(output string) bool {
 // repoRoot sobe a partir do diretorio do pacote em teste (o cwd de todo
 // "go test") ate o go.mod deste modulo. Nao usa runtime.Caller: com
 // GOFLAGS=-trimpath (configuracao de maquina) o caminho gravado no binario
-// e relativo ao modulo ("github.com/estevaofon/noxy/...") e o chdir do go build dos guests
+// e relativo ao modulo ("github.com/noxylang/noxy/...") e o chdir do go build dos guests
 // falhava.
 func repoRoot(tb testing.TB) string {
 	tb.Helper()
@@ -50,13 +50,13 @@ func repoRoot(tb testing.TB) string {
 	for {
 		if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
 			first := strings.TrimSpace(strings.SplitN(string(data), "\n", 2)[0])
-			if first == "module github.com/estevaofon/noxy" {
+			if first == "module github.com/noxylang/noxy" {
 				return dir
 			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			tb.Fatal("exttest: go.mod of module github.com/estevaofon/noxy not found above the test directory")
+			tb.Fatal("exttest: go.mod of module github.com/noxylang/noxy not found above the test directory")
 		}
 		dir = parent
 	}

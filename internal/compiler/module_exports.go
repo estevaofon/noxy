@@ -2,11 +2,11 @@ package compiler
 
 import (
 	"fmt"
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/lexer"
-	"github.com/estevaofon/noxy/internal/modsrc"
-	"github.com/estevaofon/noxy/internal/parser"
-	"github.com/estevaofon/noxy/internal/pkgmanager"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/modsrc"
+	"github.com/noxylang/noxy/internal/parser"
+	"github.com/noxylang/noxy/internal/pkgmanager"
 	"maps"
 	"strings"
 )

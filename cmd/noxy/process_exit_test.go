@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/estevaofon/noxy/internal/ext/exttest"
+	"github.com/noxylang/noxy/internal/ext/exttest"
 )
 
 // sys_exit chama os.Exit direto: o unico jeito de provar que fecha as

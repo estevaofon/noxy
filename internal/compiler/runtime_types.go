@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func (c *Compiler) runtimeTypeInfo(t ast.NoxyType) *value.RuntimeTypeInfo {

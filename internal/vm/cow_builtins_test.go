@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // newMarkingVM registra um native test_mark_shared que retém o composto

@@ -3,7 +3,7 @@ package ast
 import (
 	"bytes"
 	"fmt"
-	"github.com/estevaofon/noxy/internal/token"
+	"github.com/noxylang/noxy/internal/token"
 	"strings"
 )
 

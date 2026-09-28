@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/estevaofon/noxy/internal/ext"
+	"github.com/noxylang/noxy/internal/ext"
 )
 
 // Costuras trocadas pelos testes (servidor httptest, repositorio local).

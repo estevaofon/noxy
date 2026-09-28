@@ -9,7 +9,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func expectReportedString(t *testing.T, got value.Value, want string, msg string) {

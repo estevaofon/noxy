@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Issue #121: nenhuma destas natives devolve null por argumento invalido.

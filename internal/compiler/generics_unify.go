@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // conflictError e o erro estruturado que unify devolve quando um parametro de

@@ -2,8 +2,8 @@ package vm
 
 import (
 	"fmt"
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 	"reflect"
 	"unicode/utf8"
 )

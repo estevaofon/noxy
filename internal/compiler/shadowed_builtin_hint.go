@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // Achado 4 do Noxy-Editor: `use strings select *` liga strings.contains ao
