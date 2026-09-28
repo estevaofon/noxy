@@ -16,9 +16,10 @@
   | `git clone https://github.com/estevaofon/noxy.git` | `git clone https://github.com/noxylang/noxy.git` |
 
   Migração: extensões por processo trocam o import e o `require` do SDK
-  para `github.com/noxylang/noxy/sdk/noxyplugin` quando houver tag do SDK
-  no caminho novo; até lá, `sdk/noxyplugin/v0.1.0` e as tags `v0.26.0` e
-  anteriores seguem resolvendo pelo caminho antigo (o GitHub redireciona
+  para `github.com/noxylang/noxy/sdk/noxyplugin v0.1.1` (primeira tag do
+  SDK no caminho novo; o código é o da v0.1.0); quem não migrar segue
+  funcionando, porque `sdk/noxyplugin/v0.1.0` e as tags `v0.26.0` e
+  anteriores resolvem pelo caminho antigo (o GitHub redireciona
   `estevaofon/noxy`). Clones existentes: `git remote set-url origin
   https://github.com/noxylang/noxy.git`. Pacotes Noxy de terceiros
   (`github.com/estevaofon/noxy_dynamodb`, `quicksort`, `noxy_terminal`)
