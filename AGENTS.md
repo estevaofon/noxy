@@ -1,7 +1,7 @@
 # AGENTS.md — Guia para agentes de IA no Noxy VM
 
 Máquina virtual de bytecode para a linguagem Noxy, em Go (módulo `github.com/noxylang/noxy`,
-Go 1.25). Versão corrente: `v0.26.0` (`internal/version/version.go`).
+Go 1.25). Versão corrente: `v0.26.1` (`internal/version/version.go`).
 
 **Fonte da verdade da linguagem: `docs/NOXY_LANGUAGE_SPEC.md`.** Regra de
 linguagem vem da spec ou de teste no binário — nunca de um exemplo. Este
@@ -190,4 +190,4 @@ hashes de todos em `noxy.sum`. Ver `docs/EXTENSIONS.md` e
 
 ---
 
-**Versão**: 1.4 (Noxy VM 0.26.0) — atualizado em 2026-09-26
+**Versão**: 1.5 (Noxy VM 0.26.1) — atualizado em 2026-09-27

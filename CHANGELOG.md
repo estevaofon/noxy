@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.26.1] - 2026-09-27
 
 ### Changed (BREAKING)
 - **Repositório e módulo Go vão para a organização `noxylang`**: o
