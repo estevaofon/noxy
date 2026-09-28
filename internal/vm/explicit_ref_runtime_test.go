@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // print/to_str/f-string recebem o ref como valor e mostram a referencia

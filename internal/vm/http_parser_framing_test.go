@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func captureParserInt(t *testing.T, body string) int64 {

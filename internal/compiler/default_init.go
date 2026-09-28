@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // typeWithoutDefault responde qual (sub)tipo impede `let nome: tipo` sem

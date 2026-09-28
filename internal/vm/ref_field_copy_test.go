@@ -5,7 +5,7 @@ import (
 
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Contrato da spec §2.2 regra 6 / §4.3 / §5 Self-Reference (issue #92): uma

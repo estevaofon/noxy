@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 var opNamePattern = regexp.MustCompile(`\bOP_[A-Z_]+\b`)

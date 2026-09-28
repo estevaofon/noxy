@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/chunk"
 )
 
 // SourceLocation identifies a Noxy source position associated with a runtime error.

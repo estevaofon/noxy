@@ -5,7 +5,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/estevaofon/noxy/internal/vm"
+	"github.com/noxylang/noxy/internal/vm"
 )
 
 // installExitSignalHandler faz Ctrl+C / SIGTERM no noxy passarem pela

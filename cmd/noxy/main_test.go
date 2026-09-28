@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/lineedit"
+	"github.com/noxylang/noxy/internal/lineedit"
 )
 
 func captureStdout(t *testing.T, run func()) string {

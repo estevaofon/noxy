@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // sysCatCommand returns a Noxy exec_output command string that dumps the

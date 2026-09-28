@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // Narrowing de nulidade (spec §2.4, issue #105 item 1) — modelo Kotlin/Dart.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ext/exttest"
+	"github.com/noxylang/noxy/internal/ext/exttest"
 )
 
 // writeProject grava os arquivos (chaves com "/") num diretorio novo.

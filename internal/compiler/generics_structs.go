@@ -11,7 +11,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // structInstanceKey guarda a tupla de tipos que gerou uma instancia de struct.

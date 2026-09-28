@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Frame raiz: LocalBase = 1, slot local 0 = stack[1]. Os testes deste arquivo

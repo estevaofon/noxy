@@ -2,7 +2,7 @@ package vm
 
 import (
 	"fmt"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func (vm *VM) appendItemCompatible(target *value.ObjRef, item value.Value) bool {

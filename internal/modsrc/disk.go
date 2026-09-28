@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/stdlib"
+	"github.com/noxylang/noxy/internal/stdlib"
 )
 
 // DiskSource resolve na ordem que a VM e o compilador sempre usaram (spec

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Os fast paths de OP_RETURN e OP_CALL_STATIC (issue #66, item 3) so podem

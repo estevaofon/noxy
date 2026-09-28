@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/lexer"
 )
 
 // Spec §2.4 (issue #105): `T?` e o unico sufixo de nulidade; e o pos-fixo

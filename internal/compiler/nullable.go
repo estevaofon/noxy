@@ -3,7 +3,7 @@ package compiler
 import (
 	"fmt"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 // Helpers de nulidade (spec §2.4, issue #105 item 1). `T?` e ast.NullableType;

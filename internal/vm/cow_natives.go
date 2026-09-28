@@ -1,6 +1,6 @@
 package vm
 
-import "github.com/estevaofon/noxy/internal/value"
+import "github.com/noxylang/noxy/internal/value"
 
 // stampReadonlyArgs estampa o flag CoW de native só-leitura no registro,
 // para o hot path de chamada não pagar lookup de mapa por nome.

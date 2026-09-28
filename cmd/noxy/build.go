@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/build"
+	"github.com/noxylang/noxy/internal/build"
 )
 
 const buildUsage = `Usage: noxy build <entry.nx> [-o <output>] [--include <path>]... [--list]

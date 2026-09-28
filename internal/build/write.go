@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/bundle"
+	"github.com/noxylang/noxy/internal/bundle"
 )
 
 const darwinWarning = "warning: macOS output is experimental and was not validated on this platform (see docs/BUILD.md)"

@@ -229,7 +229,7 @@ package main
 import (
     "context"
 
-    "github.com/estevaofon/noxy/sdk/noxyplugin"
+    "github.com/noxylang/noxy/sdk/noxyplugin"
 )
 
 func main() {

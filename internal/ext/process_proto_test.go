@@ -3,7 +3,7 @@ package ext
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func TestHelloBodyCarriesExportsInOrder(t *testing.T) {

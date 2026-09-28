@@ -2,7 +2,7 @@ package chunk
 
 import (
 	"fmt"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 	"sync"
 	"sync/atomic"
 )

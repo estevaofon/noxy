@@ -1,7 +1,7 @@
 package lexer
 
 import (
-	"github.com/estevaofon/noxy/internal/token"
+	"github.com/noxylang/noxy/internal/token"
 	"testing"
 )
 

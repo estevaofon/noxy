@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // Sondas e reproducoes da issue #55: contêineres criados por natives passam

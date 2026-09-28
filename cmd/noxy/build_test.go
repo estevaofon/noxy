@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/bundle"
-	"github.com/estevaofon/noxy/internal/ext/exttest"
+	"github.com/noxylang/noxy/internal/bundle"
+	"github.com/noxylang/noxy/internal/ext/exttest"
 )
 
 func exeSuffix() string {

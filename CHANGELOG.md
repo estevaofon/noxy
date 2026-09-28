@@ -1,5 +1,29 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed (BREAKING)
+- **Repositório e módulo Go vão para a organização `noxylang`**: o
+  repositório passa a ser `github.com/noxylang/noxy` e o caminho do módulo
+  acompanha (`go.mod`, `sdk/noxyplugin/go.mod`, imports internos, testes que
+  leem o nome do módulo, README, site, `docs/EXTENSIONS.md`, AGENTS.md).
+  Programas Noxy não mudam; muda quem instala ou importa pelo Go.
+
+  | Antes | Agora |
+  |---|---|
+  | `go install github.com/estevaofon/noxy/cmd/noxy@latest` | `go install github.com/noxylang/noxy/cmd/noxy@latest` |
+  | `import "github.com/estevaofon/noxy/sdk/noxyplugin"` | `import "github.com/noxylang/noxy/sdk/noxyplugin"` |
+  | `git clone https://github.com/estevaofon/noxy.git` | `git clone https://github.com/noxylang/noxy.git` |
+
+  Migração: extensões por processo trocam o import e o `require` do SDK
+  para `github.com/noxylang/noxy/sdk/noxyplugin` quando houver tag do SDK
+  no caminho novo; até lá, `sdk/noxyplugin/v0.1.0` e as tags `v0.26.0` e
+  anteriores seguem resolvendo pelo caminho antigo (o GitHub redireciona
+  `estevaofon/noxy`). Clones existentes: `git remote set-url origin
+  https://github.com/noxylang/noxy.git`. Pacotes Noxy de terceiros
+  (`github.com/estevaofon/noxy_dynamodb`, `quicksort`, `noxy_terminal`)
+  não mudam.
+
 ## [0.26.0] - 2026-09-26
 
 Achados do Noxy-Editor (um editor completo escrito em Noxy;

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // markProbeReadonly estampa ReadonlyArgs=true no native de sonda registrado

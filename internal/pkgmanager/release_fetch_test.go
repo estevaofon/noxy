@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ext"
+	"github.com/noxylang/noxy/internal/ext"
 )
 
 const fetchManifest = `

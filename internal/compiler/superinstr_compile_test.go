@@ -3,8 +3,8 @@ package compiler
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // containsOpcodeTree e containsOpcode sobre a funcao E toda funcao constante

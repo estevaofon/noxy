@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // A struct defined in the importing module with a field typed as a struct

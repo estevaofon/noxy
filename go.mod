@@ -1,4 +1,4 @@
-module github.com/estevaofon/noxy
+module github.com/noxylang/noxy
 
 go 1.25.0
 

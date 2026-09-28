@@ -2,8 +2,8 @@ package compiler
 
 import (
 	"fmt"
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/chunk"
 )
 
 func builtinType(name string) ast.NoxyType {

@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/console"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/console"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func (vm *VM) defineIOBuiltins() {

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func testDateTimeDefinition() value.Value {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/chunk"
 )
 
 // TestFloatArithmeticOpcodesEmitted fixa, por bytecode, que operandos

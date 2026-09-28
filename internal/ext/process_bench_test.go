@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ext/exttest"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/ext/exttest"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // benchGuest sobe o guest fora da medicao (o start e da primeira chamada).
