@@ -1,7 +1,7 @@
 package compiler
 
 import (
-	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/chunk"
 	"strings"
 	"testing"
 )

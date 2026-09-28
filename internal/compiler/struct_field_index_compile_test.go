@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/chunk"
+	"github.com/noxylang/noxy/internal/chunk"
 )
 
 // Campo de struct por índice em compilação (issue #96). Quando o tipo

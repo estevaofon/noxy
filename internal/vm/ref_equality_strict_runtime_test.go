@@ -11,7 +11,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func requireBoolResults(t *testing.T, src string, want []bool) {

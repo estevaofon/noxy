@@ -6,7 +6,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 func expectInt(t *testing.T, got value.Value, want int64, msg string) {

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/ast"
 )
 
 func TestArithmeticOperandMismatchIsCompileError(t *testing.T) {

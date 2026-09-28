@@ -17,16 +17,16 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/bundle"
-	"github.com/estevaofon/noxy/internal/compiler"
-	"github.com/estevaofon/noxy/internal/ext"
-	"github.com/estevaofon/noxy/internal/lexer"
-	"github.com/estevaofon/noxy/internal/modsrc"
-	"github.com/estevaofon/noxy/internal/parser"
-	"github.com/estevaofon/noxy/internal/pkgmanager"
-	"github.com/estevaofon/noxy/internal/version"
-	"github.com/estevaofon/noxy/internal/vm"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/bundle"
+	"github.com/noxylang/noxy/internal/compiler"
+	"github.com/noxylang/noxy/internal/ext"
+	"github.com/noxylang/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/modsrc"
+	"github.com/noxylang/noxy/internal/parser"
+	"github.com/noxylang/noxy/internal/pkgmanager"
+	"github.com/noxylang/noxy/internal/version"
+	"github.com/noxylang/noxy/internal/vm"
 )
 
 type Options struct {

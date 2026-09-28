@@ -1,3 +1,3 @@
-module github.com/estevaofon/noxy/sdk/noxyplugin
+module github.com/noxylang/noxy/sdk/noxyplugin
 
 go 1.25

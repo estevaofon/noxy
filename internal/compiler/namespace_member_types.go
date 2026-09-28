@@ -1,6 +1,6 @@
 package compiler
 
-import "github.com/estevaofon/noxy/internal/ast"
+import "github.com/noxylang/noxy/internal/ast"
 
 // namespaceMemberType devolve o tipo estatico de `alias.member` quando alias
 // e um `use m [as alias]` (forma de namespace) nao sombreado por local ou

@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ast"
-	"github.com/estevaofon/noxy/internal/lexer"
-	"github.com/estevaofon/noxy/internal/parser"
+	"github.com/noxylang/noxy/internal/ast"
+	"github.com/noxylang/noxy/internal/lexer"
+	"github.com/noxylang/noxy/internal/parser"
 )
 
 // Issue #61 item 3: o aviso "rebinding ref parameter" saia em STDOUT via

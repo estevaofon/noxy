@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/ext/exttest"
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/ext/exttest"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // benchManifest espelha o literal de testManifest (Task 4), mas com

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/estevaofon/noxy/internal/version"
+	"github.com/noxylang/noxy/internal/version"
 )
 
 type closureInput struct {

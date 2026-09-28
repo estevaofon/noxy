@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 //go:embed testdata/rustguest/rustguest.wasm

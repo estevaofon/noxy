@@ -3,7 +3,7 @@ package vm
 import (
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/value"
+	"github.com/noxylang/noxy/internal/value"
 )
 
 // traceVMSource roda o programa coletando os inteiros passados a test_trace(),

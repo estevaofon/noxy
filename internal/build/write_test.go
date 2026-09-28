@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/estevaofon/noxy/internal/bundle"
+	"github.com/noxylang/noxy/internal/bundle"
 )
 
 func fakeRuntime(t *testing.T) string {
